@@ -44,6 +44,8 @@
     }
   },
   "devDependencies": {
-    "vitest": "5.0.0"
+    "@flowkit/storage-memory": "workspace:*",
+    "vitest": "5.0.0",
+    "zod": "^4"
   }
 }
