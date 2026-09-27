@@ -83,7 +83,8 @@ export type ScopeVisitor = (
   info: { disabled: boolean; ancestors: readonly Step[] },
 ) => boolean | undefined;
 
-function triggerEntry(doc: WorkflowDoc, idx: ManifestIndex): ScopeEntry {
+/** @internal The `trigger` scope entry of a doc. */
+export function triggerEntry(doc: WorkflowDoc, idx: ManifestIndex): ScopeEntry {
   const t = idx.triggers.get(doc.trigger.type);
   return {
     refBase: "trigger",

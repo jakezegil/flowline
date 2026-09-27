@@ -1,10 +1,39 @@
 import { describe, expect, test } from "vitest";
+import { z } from "zod";
 import { docWith, fixtureDoc, manifest, step } from "../test/fixtures";
+import { defineNode, definePlugin, defineTrigger } from "./define";
+import { createRegistry } from "./registry";
 import { removeStep } from "./tree";
-import type { Step, WorkflowDoc } from "./types";
+import type { JSONSchema, Manifest, NodeManifest, Step, WorkflowDoc } from "./types";
 import { hasErrors, type Issue, validateWorkflow } from "./validate";
 
 const issue = (partial: Partial<Issue>) => expect.objectContaining(partial);
+const tupleNode = defineNode({
+  type: "x.tuple",
+  name: "Tuple",
+  input: z.object({ pair: z.tuple([z.string(), z.number()]) }),
+  run: () => ({}),
+});
+const dedupeTrigger = defineTrigger({
+  type: "x.dedupe",
+  name: "Dedupe",
+  kind: "event",
+  event: "order",
+  config: z.object({ dedupeKey: z.string().optional() }),
+  payload: z.object({ orderId: z.string(), meta: z.object({ a: z.string() }) }),
+});
+/** The fixture manifest plus extra node/trigger definitions under plugin "x". */
+function extend(
+  nodes: Parameters<typeof definePlugin>[0]["nodes"] = [],
+  triggers: Parameters<typeof definePlugin>[0]["triggers"] = [],
+): Manifest {
+  const extra = createRegistry([definePlugin({ id: "x", name: "X", nodes, triggers })]).manifest();
+  return {
+    plugins: [...manifest.plugins, ...extra.plugins],
+    nodes: [...manifest.nodes, ...extra.nodes],
+    triggers: [...manifest.triggers, ...extra.triggers],
+  };
+}
 const codes = (issues: Issue[]) => issues.map((i) => i.code);
 
 /** fixtureDoc() with the email step's config merged with `config`. */
@@ -326,7 +355,7 @@ describe("validateWorkflow", () => {
     expect(hasErrors(issues)).toBe(false);
   });
 
-  test("trigger config: literals validated, refs rejected", () => {
+  test("trigger config: literals validated; only trigger-rooted refs allowed", () => {
     const bad = docWith([step("u", "test.untyped")], {
       type: "crm.contactCreated",
       config: { source: "fax" },
@@ -336,13 +365,124 @@ describe("validateWorkflow", () => {
     ]);
     const ref = docWith([step("u", "test.untyped")], {
       type: "crm.contactCreated",
-      config: { source: { $ref: "trigger.source" } },
+      config: { source: { $ref: "steps.u.x" } },
     });
     const issues = validateWorkflow(ref, manifest);
     expect(issues).toEqual([
       issue({ code: "config.invalid", field: "trigger.source", severity: "error" }),
     ]);
     expect(issues[0]!.stepId).toBeUndefined();
+  });
+
+  test("trigger config refs rooted at trigger. resolve against the payload", () => {
+    const m = extend([], [dedupeTrigger]);
+    const doc = (dedupeKey: Step["config"][string]) =>
+      docWith([step("u", "test.untyped")], { type: "x.dedupe", config: { dedupeKey } });
+    expect(validateWorkflow(doc({ $ref: "trigger.orderId" }), m)).toEqual([]);
+    expect(validateWorkflow(doc({ $tpl: "order-{{ trigger.orderId }}" }), m)).toEqual([]);
+    expect(validateWorkflow(doc({ $ref: "trigger.nope" }), m)).toEqual([
+      issue({ code: "ref.unresolved", field: "trigger.dedupeKey", severity: "error" }),
+    ]);
+    expect(validateWorkflow(doc({ $ref: "trigger.meta" }), m)).toEqual([
+      issue({ code: "ref.typeMismatch", field: "trigger.dedupeKey", severity: "warning" }),
+    ]);
+    for (const bad of [{ $ref: "loop.index" }, { $tpl: "{{ run.id }}" }, { $ref: "steps.u.id" }]) {
+      expect(validateWorkflow(doc(bad), m)).toEqual([
+        issue({ code: "config.invalid", field: "trigger.dedupeKey", severity: "error" }),
+      ]);
+    }
+  });
+
+  test("tuples: extra items and wrong item types are config.invalid, never a crash", () => {
+    const m = extend([tupleNode]);
+    const doc = (pair: Step["config"][string]) => docWith([step("t", "x.tuple", { pair })]);
+    expect(validateWorkflow(doc(["a", 1]), m)).toEqual([]);
+    expect(validateWorkflow(doc(["a", 1, "extra"]), m)).toEqual([
+      issue({ code: "config.invalid", field: "pair", severity: "error" }),
+    ]);
+    expect(validateWorkflow(doc(["a", "b"]), m)).toEqual([
+      issue({ code: "config.invalid", field: "pair[1]" }),
+    ]);
+  });
+
+  test("never throws on unexpected schema shapes: internal failures become warnings", () => {
+    const weird: JSONSchema = { type: "string" };
+    Object.defineProperty(weird, "minLength", {
+      enumerable: true,
+      get() {
+        throw new Error("boom");
+      },
+    });
+    const node: NodeManifest = {
+      type: "x.weird",
+      plugin: "x",
+      name: "Weird",
+      input: {
+        type: "object",
+        properties: { a: weird, b: { type: "string" }, c: false, d: true, e: { items: 5 } },
+      },
+      output: { kind: "schema", schema: {} },
+      branches: { kind: "none" },
+    };
+    const m = { ...manifest, nodes: [...manifest.nodes, node] };
+    const doc = docWith([step("w", "x.weird", { a: "x", b: 1, c: "y", d: "z", e: [1] })]);
+    let issues: Issue[] = [];
+    expect(() => {
+      issues = validateWorkflow(doc, m);
+    }).not.toThrow();
+    expect(issues).toEqual([
+      issue({
+        code: "config.invalid",
+        stepId: "w",
+        field: "a",
+        severity: "warning",
+        message: expect.stringContaining("Could not validate field"),
+      }),
+      issue({ code: "config.invalid", field: "b", severity: "error" }),
+      issue({ code: "config.invalid", field: "c", severity: "error" }),
+    ]);
+  });
+
+  test("nested $defs inside a field schema are resolved against the input root", () => {
+    const node: NodeManifest = {
+      type: "x.defs",
+      plugin: "x",
+      name: "Defs",
+      input: {
+        type: "object",
+        properties: { addr: { $ref: "#/$defs/Addr" } },
+        $defs: {
+          Addr: { type: "object", properties: { city: { $ref: "#/$defs/Num" } } },
+          Num: { type: "number" },
+        },
+      },
+      output: { kind: "schema", schema: {} },
+      branches: { kind: "none" },
+    };
+    const m = { ...manifest, nodes: [...manifest.nodes, node] };
+    const doc = docWith([
+      step("load", "crm.loadContact", { contactId: "c1" }),
+      step("d", "x.defs", { addr: { $ref: "steps.load.address" } }),
+    ]);
+    const issues = validateWorkflow(doc, m);
+    expect(issues).toEqual([issue({ code: "ref.typeMismatch", field: "addr" })]);
+    expect(issues[0]!.message).toBe(
+      '"addr" expects { city } but steps.load.address is { city, zip }',
+    );
+    // literal nested values too
+    const lit = docWith([step("d", "x.defs", { addr: { city: "Paris" } })]);
+    expect(validateWorkflow(lit, m)).toEqual([
+      issue({ code: "config.invalid", field: "addr.city" }),
+    ]);
+  });
+
+  test("a typo'd path into a disabled step is still ref.unresolved (error)", () => {
+    const doc = fixtureDoc();
+    doc.steps[0]!.disabled = true;
+    doc.steps[1]!.config.to = { $ref: "steps.load.emial" };
+    expect(validateWorkflow(doc, manifest)).toContainEqual(
+      issue({ code: "ref.unresolved", stepId: "email", field: "to", severity: "error" }),
+    );
   });
 
   test("subflows: unknown, recursive, typed output and input mapping", () => {

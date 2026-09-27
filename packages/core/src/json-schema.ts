@@ -81,11 +81,14 @@ export function isAnySchema(schema: unknown): boolean {
 
 const MAX_REF_DEPTH = 32;
 
-function asSchema(v: unknown): JSONSchema {
-  if (v === true || v === undefined) return {};
+/**
+ * @internal Normalizes a raw subschema: `true`/missing/garbage → `{}` (any, lenient), `false` →
+ * `{ not: {} }` (nothing matches, e.g. `items: false` after a Zod tuple).
+ */
+export function asSchema(v: unknown): JSONSchema {
+  if (v === false) return { not: {} };
   if (typeof v === "object" && v !== null && !Array.isArray(v)) return v as JSONSchema;
-  // `false` (or garbage): nothing matches. Represent as `{ not: {} }`.
-  return { not: {} };
+  return {};
 }
 
 function decodePointer(token: string): string {
@@ -94,7 +97,7 @@ function decodePointer(token: string): string {
 
 /** Follows local `$ref`s (`#`, `#/$defs/X`, `#/definitions/X`) against `root`. Unresolvable → `{}`. */
 function deref(root: JSONSchema, schema: JSONSchema): JSONSchema {
-  let cur = schema;
+  let cur = asSchema(schema);
   for (let depth = 0; typeof cur.$ref === "string"; depth++) {
     if (depth >= MAX_REF_DEPTH) return {};
     const ref = cur.$ref as string;
@@ -117,8 +120,8 @@ function deref(root: JSONSchema, schema: JSONSchema): JSONSchema {
   return cur;
 }
 
-/** Makes a subschema self-contained by carrying the root's `$defs`/`definitions` along. */
-function carryDefs(root: JSONSchema, sub: JSONSchema): JSONSchema {
+/** @internal Makes a subschema self-contained by carrying the root's `$defs`/`definitions` along. */
+export function carryDefs(root: JSONSchema, sub: JSONSchema): JSONSchema {
   if (sub === root) return sub;
   const defs = root.$defs;
   const definitions = root.definitions;
@@ -235,9 +238,11 @@ export function schemaAtPath(
   return carryDefs(schema, cur);
 }
 
-type Kind = "string" | "number" | "integer" | "boolean" | "object" | "array" | "null";
+/** @internal JSON Schema value kinds (`integer` for whole numbers). */
+export type Kind = "string" | "number" | "integer" | "boolean" | "object" | "array" | "null";
 
-function valueKind(v: unknown): Kind {
+/** @internal The JSON Schema kind of a JSON value. */
+export function valueKind(v: unknown): Kind {
   if (v === null) return "null";
   if (Array.isArray(v)) return "array";
   if (typeof v === "number") return Number.isInteger(v) ? "integer" : "number";

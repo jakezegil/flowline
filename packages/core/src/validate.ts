@@ -1,18 +1,23 @@
 import {
+  asSchema,
   branchesFor,
+  carryDefs,
   configValueAt,
   derefSchema,
   describeType,
   isAnySchema,
   isAssignable,
+  type Kind,
   schemaTypes,
   schemaUnionMembers,
+  valueKind,
 } from "./json-schema";
 import { isRef, isTpl, parseRefPath, parseTemplate, type RefPath } from "./refs";
 import {
   indexManifest,
   resolveRefSchema,
   type ScopeEntry,
+  triggerEntry,
   type ValidationContext,
   walkScope,
 } from "./scope";
@@ -60,8 +65,6 @@ const STEP_ID = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** Severity of each code outside disabled steps (inside them everything is a warning). */
 const WARNING_CODES = new Set<IssueCode>(["ref.typeMismatch", "branch.missing", "doc.empty"]);
 
-type Kind = "string" | "number" | "integer" | "boolean" | "object" | "array" | "null";
-
 const KIND_WORDS: Record<Kind, string> = {
   string: "text",
   number: "a number",
@@ -88,8 +91,8 @@ interface Reporter {
   stepId: string | undefined;
   /** Everything inside a disabled step reports warnings. */
   disabled: boolean;
-  /** `false` in trigger config, which may only hold literals. */
-  allowRefs: boolean;
+  /** `"trigger"` in trigger config: only refs into the incoming payload are allowed there. */
+  refRoots: "any" | "trigger";
   visible: readonly ScopeEntry[];
   /** The step being validated plus its ancestors, for out-of-scope explanations. */
   current: Step | undefined;
@@ -175,6 +178,15 @@ function checkRef(r: Reporter, raw: string, target: JSONSchema | undefined, f: F
     report(r, "ref.syntax", `"${f.label}" has an invalid reference "${ref}"`, f.path);
     return;
   }
+  if (r.refRoots === "trigger" && path.root !== "trigger") {
+    report(
+      r,
+      "config.invalid",
+      `"${f.label}" can only reference the trigger's payload in trigger settings`,
+      f.path,
+    );
+    return;
+  }
   const res = resolveRefSchema(path, r.visible);
   if (!res.ok && res.reason === "notVisible") {
     if (path.root === "loop") {
@@ -204,16 +216,6 @@ function checkRef(r: Reporter, raw: string, target: JSONSchema | undefined, f: F
     }
     return;
   }
-  const entry = res.entry;
-  if (entry?.disabled && entry.kind === "step") {
-    report(
-      r,
-      "ref.typeMismatch",
-      `"${f.label}" references step "${entry.stepId}", which is disabled (its output will be empty)`,
-      f.path,
-    );
-    return;
-  }
   if (!res.ok) {
     const segments = path.root === "loop" ? path.segments.slice(1) : path.segments;
     const where =
@@ -226,6 +228,16 @@ function checkRef(r: Reporter, raw: string, target: JSONSchema | undefined, f: F
       r,
       "ref.unresolved",
       `"${f.label}" references field "${formatSegments(segments)}", which doesn't exist on ${where}`,
+      f.path,
+    );
+    return;
+  }
+  const entry = res.entry;
+  if (entry?.disabled && entry.kind === "step") {
+    report(
+      r,
+      "ref.typeMismatch",
+      `"${f.label}" references step "${entry.stepId}", which is disabled (its output will be empty)`,
       f.path,
     );
     return;
@@ -259,13 +271,6 @@ function compilePattern(pattern: string): RegExp | null {
 }
 
 const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/i;
-
-function valueKind(v: unknown): Kind {
-  if (v === null) return "null";
-  if (Array.isArray(v)) return "array";
-  if (typeof v === "number") return Number.isInteger(v) ? "integer" : "number";
-  return typeof v as Kind;
-}
 
 function kindAllowed(kind: Kind, allowed: string[]): boolean {
   if (allowed.includes(kind)) return true;
@@ -348,17 +353,13 @@ function checkValue(r: Reporter, value: unknown, schema: JSONSchema, f: FieldCtx
   const meta = uiMeta(schema) ?? uiMeta(s);
 
   if (isRef(value) || isTpl(value)) {
-    if (!r.allowRefs) {
-      report(r, "config.invalid", `"${f.label}" can't use references in trigger settings`, f.path);
-      return;
-    }
     if (meta?.literalOnly) {
       report(r, "config.invalid", `"${f.label}" doesn't accept references`, f.path);
       return;
     }
   }
   if (isRef(value)) {
-    checkRef(r, value.$ref, isAnySchema(s) ? undefined : s, f);
+    checkRef(r, value.$ref, isAnySchema(s) ? undefined : carryDefs(f.root, s), f);
     return;
   }
   if (meta?.refOnly) {
@@ -374,17 +375,21 @@ function checkValue(r: Reporter, value: unknown, schema: JSONSchema, f: FieldCtx
     for (const part of parseTemplate(value.$tpl)) {
       if ("ref" in part) checkRef(r, part.ref, undefined, f);
     }
-    if (!isAssignable({ type: "string" }, s)) {
+    if (!isAssignable({ type: "string" }, carryDefs(f.root, s))) {
       report(
         r,
         "ref.typeMismatch",
-        `"${f.label}" expects ${describeType(s)} but a template always produces text`,
+        `"${f.label}" expects ${describeType(carryDefs(f.root, s))} but a template always produces text`,
         f.path,
       );
     }
     return;
   }
 
+  if (s.not !== undefined && isAnySchema(s.not)) {
+    report(r, "config.invalid", `"${f.label}" is not allowed here`, f.path);
+    return;
+  }
   if (isAnySchema(s)) {
     // Nothing to check, but nested refs must still resolve.
     walkNested(r, value, f);
@@ -409,7 +414,12 @@ function checkValue(r: Reporter, value: unknown, schema: JSONSchema, f: FieldCtx
     if (best && (errorCount(best) === 0 || isContainer)) {
       r.issues.push(...best.issues);
     } else {
-      report(r, "config.invalid", `"${f.label}" must be ${describeType(s)}`, f.path);
+      report(
+        r,
+        "config.invalid",
+        `"${f.label}" must be ${describeType(carryDefs(f.root, s))}`,
+        f.path,
+      );
     }
     return;
   }
@@ -430,9 +440,15 @@ function checkValue(r: Reporter, value: unknown, schema: JSONSchema, f: FieldCtx
     if (typeof s.maxItems === "number" && value.length > s.maxItems) {
       report(r, "config.invalid", `"${f.label}" must have at most ${s.maxItems} items`, f.path);
     }
-    const prefix = Array.isArray(s.prefixItems) ? (s.prefixItems as JSONSchema[]) : [];
+    const prefix: unknown[] = Array.isArray(s.prefixItems) ? s.prefixItems : [];
+    const closed = s.items === false;
+    const maxCovers = typeof s.maxItems === "number" && s.maxItems <= prefix.length;
+    if (closed && value.length > prefix.length && !maxCovers) {
+      report(r, "config.invalid", `"${f.label}" must have at most ${prefix.length} items`, f.path);
+    }
     value.forEach((item, i) => {
-      const itemSchema = prefix[i] ?? (s.items as JSONSchema | undefined) ?? {};
+      if (closed && i >= prefix.length) return;
+      const itemSchema = asSchema(i < prefix.length ? prefix[i] : s.items);
       checkValue(r, item, itemSchema, {
         root: f.root,
         path: `${f.path}[${i}]`,
@@ -470,6 +486,31 @@ function walkNested(r: Reporter, value: unknown, f: FieldCtx): void {
  * Checks an object value against an object schema: required keys, each declared property, and
  * extra keys against `additionalProperties`. `overrides` replaces the schema of individual keys.
  */
+/**
+ * Runs a check, turning an unexpected exception (e.g. from an odd schema shape) into a
+ * warning-level `config.invalid` issue so validation never crashes the editor or publish gate.
+ */
+function guarded(
+  r: Reporter,
+  f: { path: string; label: string } | undefined,
+  fn: () => void,
+): void {
+  try {
+    fn();
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    r.issues.push({
+      code: "config.invalid",
+      severity: "warning",
+      message: f
+        ? `Could not validate field "${f.label}": ${reason}`
+        : `Could not validate this step: ${reason}`,
+      ...(r.stepId !== undefined ? { stepId: r.stepId } : {}),
+      ...(f ? { field: f.path } : {}),
+    });
+  }
+}
+
 function checkObject(
   r: Reporter,
   obj: Record<string, unknown>,
@@ -478,9 +519,14 @@ function checkObject(
   prefix: string,
   overrides: Record<string, JSONSchema> = {},
 ): void {
-  const props = (schema.properties ?? {}) as Record<string, JSONSchema>;
+  const rawProps = schema.properties;
+  const props = (typeof rawProps === "object" && rawProps !== null ? rawProps : {}) as Record<
+    string,
+    unknown
+  >;
   const required = new Set(Array.isArray(schema.required) ? (schema.required as string[]) : []);
-  for (const [key, declared] of Object.entries(props)) {
+  for (const [key, rawDeclared] of Object.entries(props)) {
+    const declared = asSchema(rawDeclared);
     const override = overrides[key];
     const propSchema = override ?? declared;
     const propRoot = override ?? root;
@@ -497,7 +543,7 @@ function checkObject(
       }
       if (value === undefined) continue;
     }
-    checkValue(r, value, propSchema, f);
+    guarded(r, f, () => checkValue(r, value, propSchema, f));
   }
   for (const key of required) {
     if (!Object.hasOwn(props, key) && isEmptyValue(obj[key], root, {})) {
@@ -512,12 +558,7 @@ function checkObject(
       report(r, "config.invalid", `"${key}" is not a known field`, f.path);
       continue;
     }
-    checkValue(
-      r,
-      value,
-      typeof extra === "object" && extra !== null ? (extra as JSONSchema) : {},
-      f,
-    );
+    guarded(r, f, () => checkValue(r, value, asSchema(extra), f));
   }
 }
 
@@ -635,7 +676,7 @@ export function validateWorkflow(
     issues,
     stepId: undefined,
     disabled: false,
-    allowRefs: true,
+    refRoots: "any",
     visible: [],
     current: undefined,
     ancestors: [],
@@ -649,7 +690,7 @@ export function validateWorkflow(
     report(base, "trigger.unknown", `Unknown trigger type "${doc.trigger.type}"`);
   } else {
     checkObject(
-      { ...base, allowRefs: false },
+      { ...base, refRoots: "trigger", visible: [triggerEntry(doc, idx)] },
       doc.trigger.config,
       derefSchema(trigger.config, trigger.config),
       trigger.config,
@@ -683,14 +724,15 @@ export function validateWorkflow(
       report(r, "node.unknown", `Unknown step type "${step.type}"`);
       return undefined;
     }
-    checkStep(r, doc, step, m, ctx);
+    guarded(r, undefined, () => checkStep(r, doc, step, m, ctx));
     return undefined;
   });
 
   if (doc.output) {
     const r: Reporter = { ...base, visible: end };
     for (const [key, value] of Object.entries(doc.output)) {
-      checkValue(r, value, {}, { root: {}, path: `output.${key}`, label: key });
+      const f: FieldCtx = { root: {}, path: `output.${key}`, label: key };
+      guarded(r, f, () => checkValue(r, value, {}, f));
     }
   }
   return issues;
