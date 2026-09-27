@@ -1,2 +1,54 @@
 /** Package version. */
 export const VERSION = "0.1.0";
+
+export {
+  type BranchSignal,
+  branch,
+  type CallbackHandle,
+  defineNode,
+  definePlugin,
+  defineTrigger,
+  FLOWKIT_SIGNAL,
+  FlowkitDefinitionError,
+  type FlowkitServices,
+  invokeSubflow,
+  isSignal,
+  type Logger,
+  type NodeContext,
+  type NodeDefinition,
+  type NodeResult,
+  type PluginDefinition,
+  type ResumeInfo,
+  type RetryPolicy,
+  type Signal,
+  type StopSignal,
+  type SubflowSignal,
+  type SuspendSignal,
+  stop,
+  suspend,
+  type TransformRuntime,
+  type TriggerDefinition,
+} from "./define";
+export { fieldsToJsonSchema } from "./json-schema";
+export { createRegistry, type Registry } from "./registry";
+export type {
+  BranchSpec,
+  FieldDecl,
+  FieldType,
+  JSONSchema,
+  Literal,
+  Manifest,
+  NodeManifest,
+  OutputSpec,
+  PluginManifest,
+  RefExpr,
+  Step,
+  TplExpr,
+  TriggerConfig,
+  TriggerKind,
+  TriggerManifest,
+  UiMeta,
+  ValueExpr,
+  WorkflowDoc,
+} from "./types";
+export { fields, secret, sensitive, UI_META_KEY, ui } from "./ui";
