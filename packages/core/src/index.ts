@@ -30,7 +30,36 @@ export {
   type TriggerDefinition,
 } from "./define";
 export { fieldsToJsonSchema } from "./json-schema";
+export {
+  collectRefs,
+  FlowkitRefError,
+  formatRefPath,
+  isRef,
+  isTpl,
+  parseRefPath,
+  parseTemplate,
+  type RefPath,
+  type RefRoot,
+  type ResolveScope,
+  renderTemplate,
+  resolveValue,
+  type TemplatePart,
+} from "./refs";
 export { createRegistry, type Registry } from "./registry";
+export {
+  allStepIds,
+  duplicateStep,
+  FlowkitTreeError,
+  type FoundStep,
+  findStep,
+  generateStepId,
+  insertStep,
+  moveStep,
+  removeStep,
+  type StepLocation,
+  updateStep,
+  walkSteps,
+} from "./tree";
 export type {
   BranchSpec,
   FieldDecl,
