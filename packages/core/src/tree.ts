@@ -1,3 +1,4 @@
+import { RESERVED_STEP_IDS } from "./ids";
 import { formatRefPath, isRef, isTpl, parseRefPath, parseTemplate } from "./refs";
 import type { Step, ValueExpr, WorkflowDoc } from "./types";
 
@@ -195,7 +196,7 @@ function sanitizeBase(nodeType: string): string {
 }
 
 function nextAvailableId(taken: Set<string>, base: string): string {
-  if (!taken.has(base)) return base;
+  if (!taken.has(base) && !RESERVED_STEP_IDS.has(base)) return base;
   let n = 2;
   while (taken.has(`${base}_${n}`)) n++;
   return `${base}_${n}`;

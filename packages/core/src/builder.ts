@@ -1,9 +1,9 @@
 import type { z } from "zod";
 import { FlowkitDefinitionError, type NodeDefinition, type TriggerDefinition } from "./define";
+import { isValidStepId, RESERVED_STEP_IDS, STEP_ID_PATTERN } from "./ids";
 import { parseRefPath, parseTemplate } from "./refs";
 import type { RefExpr, Step, TplExpr, ValueExpr, WorkflowDoc } from "./types";
 
-const STEP_ID = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const WORKFLOW_ID = /^[a-z0-9][a-z0-9-_]*$/;
 
 /**
@@ -141,9 +141,9 @@ class StepsBuilderImpl implements StepsBuilder {
     config: ConfigOf<N>,
     branches?: Record<string, (b: StepsBuilder) => StepsBuilder>,
   ): this {
-    if (typeof id !== "string" || !STEP_ID.test(id)) {
+    if (!isValidStepId(id)) {
       throw new FlowkitDefinitionError(
-        `Invalid step id "${id}": must match ${STEP_ID} (letters, digits, underscores; not starting with a digit)`,
+        `Invalid step id "${id}": must match ${STEP_ID_PATTERN} (letters, digits, underscores; not starting with a digit) and not be one of ${[...RESERVED_STEP_IDS].join(", ")}`,
       );
     }
     if (this.usedIds.has(id)) {

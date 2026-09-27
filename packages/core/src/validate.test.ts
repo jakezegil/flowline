@@ -349,6 +349,19 @@ describe("validateWorkflow", () => {
     ]);
   });
 
+  test("reserved object-property step IDs are invalid", () => {
+    const doc = docWith([
+      step("__proto__", "test.untyped"),
+      step("constructor", "test.untyped"),
+      step("prototype", "test.untyped"),
+    ]);
+    expect(validateWorkflow(doc, manifest)).toEqual([
+      issue({ code: "step.invalidId", stepId: "__proto__", severity: "error" }),
+      issue({ code: "step.invalidId", stepId: "constructor", severity: "error" }),
+      issue({ code: "step.invalidId", stepId: "prototype", severity: "error" }),
+    ]);
+  });
+
   test("empty doc is a warning", () => {
     const issues = validateWorkflow(docWith([]), manifest);
     expect(issues).toEqual([issue({ code: "doc.empty", severity: "warning" })]);

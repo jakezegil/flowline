@@ -1,5 +1,6 @@
 import type { JournalEntry, RunEventType, WorkflowDoc } from "@flowkit/core";
 import { describe, expect, it } from "vitest";
+import { FlowkitStorageError } from "../errors";
 import type { Lease, NewRun, NewRunEvent, StorageAdapter } from "../storage";
 
 /** What a conformance factory returns: a fresh, empty adapter and an optional cleanup. */
@@ -38,6 +39,19 @@ function ev(runId: string, type: RunEventType, at = 1, tenantId = T1): NewRunEve
 
 function done(output: unknown, at = 1): JournalEntry {
   return { status: "done", output, at, startedAt: at, attempts: 1 };
+}
+
+/** A parent run waiting on step `call` for child `childRunId`. */
+function waitingParent(childRunId: string, overrides: Partial<NewRun> = {}): NewRun {
+  return newRun("parent", {
+    status: "waiting",
+    currentStep: "call",
+    waitReason: "subflow",
+    journal: {
+      call: { status: "suspended", pending: { childRunId }, at: 1, startedAt: 1, attempts: 1 },
+    },
+    ...overrides,
+  });
 }
 
 async function claimOrFail(storage: StorageAdapter, now: number, workerId = "w1"): Promise<Lease> {
@@ -88,6 +102,16 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect((await s.getLatestVersion(T1, "a"))?.version).toBe(2);
         expect(await s.getLatestVersion(T1, "missing")).toBeNull();
         expect(await s.getPublishedVersion(T1, "a")).toBeNull();
+      });
+
+      test("concurrent saves of one workflow get distinct versions", async (s) => {
+        const saved = await Promise.all(
+          Array.from({ length: 10 }, (_, i) => s.saveWorkflowVersion(T1, doc("a"), `u${i}`, i)),
+        );
+        expect(saved.map((v) => v.version).sort((x, y) => x - y)).toEqual(
+          Array.from({ length: 10 }, (_, i) => i + 1),
+        );
+        expect((await s.getLatestVersion(T1, "a"))?.version).toBe(10);
       });
 
       test("versions are immutable", async (s) => {
@@ -225,7 +249,9 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
       expect(await s.getRun(T2, "r1")).toBeNull();
       expect(await s.listRuns(T2, {})).toEqual([]);
       expect(await s.listEvents(T2, "r1")).toEqual([]);
-      expect(await s.updateRunUnleased(T2, "r1", { status: "cancelled" }, [], 4)).toBe(false);
+      expect(
+        await s.updateRunUnleased(T2, "r1", { status: ["queued"] }, { status: "cancelled" }, [], 4),
+      ).toBe(false);
       expect((await s.getRun(T1, "r1"))?.status).toBe("queued");
 
       // Same workflow id in another tenant is an independent version sequence.
@@ -273,6 +299,33 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect(second).toEqual(first);
         expect(await s.getRun(T1, "r1")).toEqual(first);
         expect(await s.listEvents(T1, "r1")).toHaveLength(1);
+      });
+
+      test("createRun with an id that exists in another tenant throws FlowkitStorageError", async (s) => {
+        const original = await s.createRun(newRun("r1"), [ev("r1", "run.started")], 100);
+        await expect(
+          s.createRun(newRun("r1", { tenantId: T2 }), [ev("r1", "run.started", 1, T2)], 200),
+        ).rejects.toThrow(FlowkitStorageError);
+        expect(await s.getRun(T2, "r1")).toBeNull();
+        expect(await s.getRun(T1, "r1")).toEqual(original);
+        expect(await s.listEvents(T2, "r1")).toEqual([]);
+        expect(await s.listEvents(T1, "r1")).toHaveLength(1);
+      });
+
+      test("concurrent createRun with one id creates one run and one set of events", async (s) => {
+        const runs = await Promise.all(
+          Array.from({ length: 10 }, (_, i) =>
+            s.createRun(
+              newRun("r1", { trigger: i }),
+              [ev("r1", "run.started"), ev("r1", "step.started")],
+              100 + i,
+            ),
+          ),
+        );
+        const stored = await s.getRun(T1, "r1");
+        for (const r of runs) expect(r).toEqual(stored);
+        expect((await s.listEvents(T1, "r1")).map((e) => e.seq)).toEqual([1, 2]);
+        expect(await s.listRuns(T1, {})).toHaveLength(1);
       });
 
       test("returned runs are isolated from storage", async (s) => {
@@ -371,6 +424,12 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect(tokens.size).toBe(5);
         // Unexpired leases are not claimable.
         expect(await s.claimRun({ workerId: "late", leaseMs: 10_000, now: 5_000 })).toBeNull();
+      });
+
+      test("a running run without leaseUntil counts as expired and is claimable", async (s) => {
+        await s.createRun(newRun("r1", { status: "running" }), [], 0);
+        const lease = await claimOrFail(s, 10);
+        expect(lease.run).toMatchObject({ id: "r1", leaseOwner: "w1", leaseUntil: 1010 });
       });
 
       test("claimRun prefers the oldest wakeAt/updatedAt so overdue timers are not starved", async (s) => {
@@ -525,17 +584,53 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect((await claimOrFail(s, 500)).run.id).toBe("r1");
       });
 
+      test("commit writing a non-running status clears the lease even without release", async (s) => {
+        await s.createRun(newRun("r1"), [], 0);
+        await s.createRun(newRun("r2"), [], 1);
+        const l1 = await claimOrFail(s, 10);
+        const l2 = await claimOrFail(s, 10);
+        expect(await s.commit(l1, { status: "completed" }, [], 20)).toBe(true);
+        expect(
+          await s.commit(l2, { status: "waiting", wakeAt: 100, waitReason: "timer" }, [], 20),
+        ).toBe(true);
+        for (const id of ["r1", "r2"]) {
+          const run = await s.getRun(T1, id);
+          expect(run?.leaseOwner).toBeUndefined();
+          expect(run?.leaseUntil).toBeUndefined();
+        }
+        expect(await s.commit(l1, { output: 1 }, [], 30)).toBe(false);
+        expect(await s.renewLease(l2, 100, 30)).toBe(false);
+        // Explicitly writing "running" keeps the lease.
+        const l3 = await claimOrFail(s, 100);
+        expect(l3.run.id).toBe("r2");
+        expect(await s.commit(l3, { status: "running" }, [], 110)).toBe(true);
+        expect((await s.getRun(T1, "r2"))?.leaseOwner).toBe("w1");
+        expect(await s.commit(l3, { output: 2 }, [], 120)).toBe(true);
+      });
+
+      test("commit stores journal keys that are special object properties as plain keys", async (s) => {
+        await s.createRun(newRun("r1"), [], 0);
+        const lease = await claimOrFail(s, 10);
+        const journal = JSON.parse(
+          `{"__proto__": ${JSON.stringify(done("p"))}, "constructor": ${JSON.stringify(done("c"))}}`,
+        ) as Record<string, JournalEntry>;
+        expect(await s.commit(lease, { journal }, [], 20)).toBe(true);
+        const run = await s.getRun(T1, "r1");
+        const stored = run?.journal ?? {};
+        expect(Object.keys(stored).sort()).toEqual(["__proto__", "constructor"]);
+        expect(Object.getOwnPropertyDescriptor(stored, "__proto__")?.value).toEqual(done("p"));
+        expect(Object.getOwnPropertyDescriptor(stored, "constructor")?.value).toEqual(done("c"));
+        expect(
+          Object.getPrototypeOf(stored) === null ||
+            Object.getPrototypeOf(stored) === Object.prototype,
+        ).toBe(true);
+        const del = JSON.parse(`{"__proto__": null}`) as Record<string, JournalEntry | null>;
+        expect(await s.commit(lease, { journal: del }, [], 30)).toBe(true);
+        expect(Object.keys((await s.getRun(T1, "r1"))?.journal ?? {})).toEqual(["constructor"]);
+      });
+
       test("commit with wakeParent resumes the parent atomically", async (s) => {
-        await s.createRun(
-          newRun("parent", {
-            status: "waiting",
-            currentStep: "call",
-            waitReason: "subflow",
-            wakeAt: 99_999,
-          }),
-          [],
-          0,
-        );
+        await s.createRun(waitingParent("child", { wakeAt: 99_999 }), [], 0);
         await s.createRun(
           newRun("child", { parent: { runId: "parent", stepPath: "call" } }),
           [],
@@ -549,7 +644,7 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
           {
             status: "completed",
             release: true,
-            wakeParent: { runId: "parent", stepPath: "call", resume },
+            wakeParent: { runId: "parent", stepPath: "call", childRunId: "child", resume },
           },
           [ev("child", "run.completed"), ev("parent", "run.resumed")],
           20,
@@ -564,7 +659,7 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
       });
 
       test("commit with wakeParent leaves a parent on another step untouched", async (s) => {
-        await s.createRun(newRun("parent", { status: "waiting", currentStep: "other" }), [], 0);
+        await s.createRun(waitingParent("child", { currentStep: "other" }), [], 0);
         await s.createRun(newRun("child"), [], 1);
         const before = await s.getRun(T1, "parent");
         const lease = await claimOrFail(s, 10);
@@ -573,7 +668,12 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
           {
             status: "completed",
             release: true,
-            wakeParent: { runId: "parent", stepPath: "call", resume: { kind: "timer" } },
+            wakeParent: {
+              runId: "parent",
+              stepPath: "call",
+              childRunId: "child",
+              resume: { kind: "timer" },
+            },
           },
           [],
           20,
@@ -583,8 +683,80 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect((await s.getRun(T1, "child"))?.status).toBe("completed");
       });
 
+      test("commit with wakeParent from a stale child leaves the parent untouched", async (s) => {
+        // The parent step has since retried and now waits on a different child.
+        await s.createRun(waitingParent("child-2"), [], 0);
+        await s.createRun(newRun("child-1"), [], 1);
+        const before = await s.getRun(T1, "parent");
+        const lease = await claimOrFail(s, 10);
+        expect(lease.run.id).toBe("child-1");
+        const ok = await s.commit(
+          lease,
+          {
+            status: "completed",
+            release: true,
+            wakeParent: {
+              runId: "parent",
+              stepPath: "call",
+              childRunId: "child-1",
+              resume: { kind: "subflow", output: 1 },
+            },
+          },
+          [],
+          20,
+        );
+        expect(ok).toBe(true);
+        expect(await s.getRun(T1, "parent")).toEqual(before);
+      });
+
+      test("commit with wakeParent requires the parent step to be journaled as suspended", async (s) => {
+        await s.createRun(
+          newRun("parent", {
+            status: "waiting",
+            currentStep: "call",
+            waitReason: "subflow",
+            journal: { call: done(1) },
+          }),
+          [],
+          0,
+        );
+        await s.createRun(newRun("child"), [], 1);
+        const before = await s.getRun(T1, "parent");
+        const lease = await claimOrFail(s, 10);
+        const wakeParent = {
+          runId: "parent",
+          stepPath: "call",
+          childRunId: "child",
+          resume: { kind: "timer" as const },
+        };
+        expect(await s.commit(lease, { status: "completed", wakeParent }, [], 20)).toBe(true);
+        expect(await s.getRun(T1, "parent")).toEqual(before);
+      });
+
+      test("commit with wakeParent naming a missing parent still succeeds", async (s) => {
+        await s.createRun(newRun("child"), [], 1);
+        const lease = await claimOrFail(s, 10);
+        const ok = await s.commit(
+          lease,
+          {
+            status: "completed",
+            wakeParent: {
+              runId: "ghost",
+              stepPath: "call",
+              childRunId: "child",
+              resume: { kind: "timer" },
+            },
+          },
+          [],
+          20,
+        );
+        expect(ok).toBe(true);
+        expect((await s.getRun(T1, "child"))?.status).toBe("completed");
+        expect(await s.getRunById("ghost")).toBeNull();
+      });
+
       test("commit with a stale lease does not wake the parent", async (s) => {
-        await s.createRun(newRun("parent", { status: "waiting", currentStep: "call" }), [], 0);
+        await s.createRun(waitingParent("child"), [], 0);
         await s.createRun(newRun("child"), [], 1);
         const stale = await claimOrFail(s, 10, "w1");
         await claimOrFail(s, 2000, "w2");
@@ -594,7 +766,12 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
           {
             status: "completed",
             release: true,
-            wakeParent: { runId: "parent", stepPath: "call", resume: { kind: "timer" } },
+            wakeParent: {
+              runId: "parent",
+              stepPath: "call",
+              childRunId: "child",
+              resume: { kind: "timer" },
+            },
           },
           [ev("parent", "run.resumed")],
           2001,
@@ -614,8 +791,8 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         });
         const ok = await s.commit(
           lease,
-          { status: "waiting", currentStep: "call", waitReason: "subflow", createChild: child },
-          [ev("parent", "run.suspended"), ev(child.id, "run.started")],
+          { currentStep: "call", createChild: child },
+          [ev("parent", "step.started"), ev(child.id, "run.started")],
           20,
         );
         expect(ok).toBe(true);
@@ -625,16 +802,42 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
           [1, "run.started"],
         ]);
 
-        // Same child id again: no duplicate, existing child untouched, commit still succeeds.
+        // Same child id again: no duplicate run, no duplicate child events, commit still succeeds
+        // and the leased run's own patch and events still apply.
         const again = await s.commit(
           lease,
-          { createChild: { ...child, trigger: "different" } },
-          [],
+          { createChild: { ...child, trigger: "different" }, attempt: 2 },
+          [ev("parent", "step.retrying"), ev(child.id, "run.started")],
           30,
         );
         expect(again).toBe(true);
         expect(await s.getRun(T1, child.id)).toEqual(stored);
+        expect(await s.listEvents(T1, child.id)).toHaveLength(1);
+        expect((await s.getRun(T1, "parent"))?.attempt).toBe(2);
+        expect((await s.listEvents(T1, "parent")).map((e) => e.type)).toEqual([
+          "step.started",
+          "step.retrying",
+        ]);
         expect((await s.listRuns(T1, { workflowId: "sub" })).map((r) => r.id)).toEqual([child.id]);
+      });
+
+      test("commit with createChild whose id exists in another tenant rejects and writes nothing", async (s) => {
+        await s.createRun(newRun("taken", { tenantId: T2, status: "completed" }), [], 0);
+        await s.createRun(newRun("parent"), [], 1);
+        const lease = await claimOrFail(s, 10);
+        expect(lease.run.id).toBe("parent");
+        const before = await s.getRun(T1, "parent");
+        await expect(
+          s.commit(
+            lease,
+            { currentStep: "call", createChild: newRun("taken") },
+            [ev("parent", "step.started")],
+            20,
+          ),
+        ).rejects.toThrow(FlowkitStorageError);
+        expect(await s.getRun(T1, "parent")).toEqual(before);
+        expect(await s.listEvents(T1, "parent")).toEqual([]);
+        expect(await s.getRun(T1, "taken")).toBeNull();
       });
     });
 
@@ -662,6 +865,25 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect(await s.getRun(T1, "r1")).toEqual(run);
         expect(await s.resumeByToken("tok-1", resume, 501)).toBeNull();
         expect(await s.resumeByToken("unknown", resume, 501)).toBeNull();
+      });
+
+      test("concurrent resumeByToken calls with one token: exactly one succeeds", async (s) => {
+        await s.createRun(
+          newRun("r1", {
+            status: "waiting",
+            waitReason: "callback",
+            callbackToken: "tok-1",
+            callbackExpiresAt: 1000,
+          }),
+          [],
+          0,
+        );
+        const results = await Promise.all(
+          Array.from({ length: 10 }, (_, i) =>
+            s.resumeByToken("tok-1", { kind: "callback", body: i }, 10),
+          ),
+        );
+        expect(results.filter((r) => r !== null)).toHaveLength(1);
       });
 
       test("resumeByToken rejects an expired token", async (s) => {
@@ -702,6 +924,14 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect(await s.getRun(T1, "r1")).toMatchObject({ status: "queued", resume, updatedAt: 20 });
         expect(await s.resumeRun("r1", "call", resume, 30)).toBe(false);
       });
+
+      test("concurrent resumeRun calls: exactly one succeeds", async (s) => {
+        await s.createRun(newRun("r1", { status: "waiting", currentStep: "call" }), [], 0);
+        const results = await Promise.all(
+          Array.from({ length: 10 }, () => s.resumeRun("r1", "call", { kind: "timer" }, 10)),
+        );
+        expect(results.filter(Boolean)).toHaveLength(1);
+      });
     });
 
     describe("updateRunUnleased", () => {
@@ -714,6 +944,7 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         const ok = await s.updateRunUnleased(
           T1,
           "r1",
+          { status: ["waiting", "queued"] },
           { status: "cancelled", wakeAt: null, journal: { a: null } },
           [ev("r1", "run.cancelled")],
           50,
@@ -726,9 +957,38 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
           [1, "run.started"],
           [2, "run.cancelled"],
         ]);
-        expect(await s.updateRunUnleased(T1, "missing", { status: "cancelled" }, [], 60)).toBe(
-          false,
-        );
+        expect(
+          await s.updateRunUnleased(
+            T1,
+            "missing",
+            { status: ["queued"] },
+            { status: "cancelled" },
+            [],
+            60,
+          ),
+        ).toBe(false);
+      });
+
+      test("refuses a run whose status changed since the caller read it", async (s) => {
+        await s.createRun(newRun("r1", { status: "waiting", wakeAt: 100 }), [], 0);
+        const read = await s.getRun(T1, "r1");
+        expect(read?.status).toBe("waiting");
+        // Meanwhile a worker claims it and completes it.
+        const lease = await claimOrFail(s, 100);
+        expect(await s.commit(lease, { status: "completed", release: true }, [], 110)).toBe(true);
+        const before = await s.getRun(T1, "r1");
+        expect(
+          await s.updateRunUnleased(
+            T1,
+            "r1",
+            { status: ["waiting", "queued"] },
+            { status: "cancelled" },
+            [ev("r1", "run.cancelled")],
+            120,
+          ),
+        ).toBe(false);
+        expect(await s.getRun(T1, "r1")).toEqual(before);
+        expect(await s.listEvents(T1, "r1")).toEqual([]);
       });
 
       test("refuses a run with an unexpired lease", async (s) => {
@@ -739,6 +999,7 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
           await s.updateRunUnleased(
             T1,
             "r1",
+            { status: ["running"] },
             { status: "cancelled" },
             [ev("r1", "run.cancelled")],
             1010,
@@ -752,7 +1013,16 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
       test("clears an expired lease so its token can no longer commit", async (s) => {
         await s.createRun(newRun("r1"), [], 0);
         const lease = await claimOrFail(s, 10); // until 1010
-        expect(await s.updateRunUnleased(T1, "r1", { status: "cancelled" }, [], 1011)).toBe(true);
+        expect(
+          await s.updateRunUnleased(
+            T1,
+            "r1",
+            { status: ["running"] },
+            { status: "cancelled" },
+            [],
+            1011,
+          ),
+        ).toBe(true);
         const run = await s.getRun(T1, "r1");
         expect(run?.status).toBe("cancelled");
         expect(run?.leaseOwner).toBeUndefined();
@@ -762,14 +1032,18 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
       });
 
       test("supports wakeParent (cancelling a child)", async (s) => {
-        await s.createRun(newRun("parent", { status: "waiting", currentStep: "call" }), [], 0);
+        await s.createRun(waitingParent("child"), [], 0);
         await s.createRun(newRun("child", { status: "waiting", wakeAt: 99 }), [], 0);
         const resume = { kind: "subflowFailed" as const, error: { message: "cancelled" } };
         expect(
           await s.updateRunUnleased(
             T1,
             "child",
-            { status: "cancelled", wakeParent: { runId: "parent", stepPath: "call", resume } },
+            { status: ["waiting"] },
+            {
+              status: "cancelled",
+              wakeParent: { runId: "parent", stepPath: "call", childRunId: "child", resume },
+            },
             [],
             10,
           ),

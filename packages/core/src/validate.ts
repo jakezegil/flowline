@@ -1,3 +1,4 @@
+import { isValidStepId } from "./ids";
 import {
   asSchema,
   branchesFor,
@@ -59,8 +60,6 @@ export interface Issue {
    */
   field?: string;
 }
-
-const STEP_ID = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Severity of each code outside disabled steps (inside them everything is a warning). */
 const WARNING_CODES = new Set<IssueCode>(["ref.typeMismatch", "branch.missing", "doc.empty"]);
@@ -710,11 +709,11 @@ export function validateWorkflow(
     };
     if (seen.has(step.id)) {
       report(r, "step.duplicateId", `Step ID "${step.id}" is used more than once`);
-    } else if (!STEP_ID.test(step.id)) {
+    } else if (!isValidStepId(step.id)) {
       report(
         r,
         "step.invalidId",
-        `Step ID "${step.id}" must start with a letter or underscore and contain only letters, digits and underscores`,
+        `Step ID "${step.id}" must start with a letter or underscore and contain only letters, digits and underscores, and must not be __proto__, constructor or prototype`,
       );
     }
     seen.add(step.id);

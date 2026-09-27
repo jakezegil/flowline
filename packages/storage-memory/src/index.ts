@@ -12,14 +12,15 @@ import type {
   WorkflowSummary,
   WorkflowVersion,
 } from "@flowkit/core";
-import type {
-  Lease,
-  NewRun,
-  NewRunEvent,
-  Run,
-  RunPatch,
-  StorageAdapter,
-  WorkflowAuditEntry,
+import {
+  FlowkitStorageError,
+  type Lease,
+  type NewRun,
+  type NewRunEvent,
+  type Run,
+  type RunPatch,
+  type StorageAdapter,
+  type WorkflowAuditEntry,
 } from "@flowkit/engine";
 
 /** Package version. */
@@ -51,8 +52,16 @@ function applyPatch(stored: StoredRun, patch: RunPatch, now: number): void {
   if (patch.status !== undefined) run.status = patch.status;
   if (patch.journal) {
     for (const [key, entry] of Object.entries(patch.journal)) {
+      // Own-property writes: keys like `__proto__` must stay plain data keys.
       if (entry === null) delete run.journal[key];
-      else run.journal[key] = clone(entry);
+      else {
+        Object.defineProperty(run.journal, key, {
+          value: clone(entry),
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
+      }
     }
   }
   if (patch.attempt !== undefined) run.attempt = patch.attempt;
@@ -64,7 +73,10 @@ function applyPatch(stored: StoredRun, patch: RunPatch, now: number): void {
   setOpt(run, "resume", patch.resume);
   if (patch.output !== undefined) run.output = clone(patch.output);
   setOpt(run, "error", patch.error);
-  if (patch.release) clearLease(stored);
+  // Only a running run can hold a lease.
+  if (patch.release || (patch.status !== undefined && patch.status !== "running")) {
+    clearLease(stored);
+  }
   run.updatedAt = now;
 }
 
@@ -128,21 +140,53 @@ export function createMemoryStorage(): StorageAdapter {
     }
   };
 
-  /** Insert the child and wake the parent; both are no-ops when their preconditions fail. */
-  const applyRelated = (patch: RunPatch, now: number): void => {
-    if (patch.createChild && !runs.has(patch.createChild.id)) {
-      runs.set(patch.createChild.id, newStoredRun(patch.createChild, now));
+  /**
+   * Validate `patch.createChild` without writing. Returns whether the child must be inserted
+   * (`false` when it already exists in the same tenant).
+   *
+   * @throws {FlowkitStorageError} if the child id belongs to another tenant.
+   */
+  const checkChild = (patch: RunPatch): boolean => {
+    const child = patch.createChild;
+    if (!child) return false;
+    const existing = runs.get(child.id);
+    if (!existing) return true;
+    if (existing.run.tenantId !== child.tenantId) {
+      throw new FlowkitStorageError(`Run id "${child.id}" already belongs to another tenant`);
     }
-    if (patch.wakeParent) {
-      const parent = runs.get(patch.wakeParent.runId);
+    return false;
+  };
+
+  /**
+   * The shared tail of `commit` and `updateRunUnleased`, run after all checks passed: insert the
+   * child, wake the parent (no-op unless its preconditions hold) and append the events — skipping
+   * the child's events when the child already existed.
+   */
+  const applyRelated = (
+    patch: RunPatch,
+    insertChild: boolean,
+    newEvents: NewRunEvent[],
+    now: number,
+  ): void => {
+    const child = patch.createChild;
+    if (child && insertChild) runs.set(child.id, newStoredRun(child, now));
+    const wake = patch.wakeParent;
+    if (wake) {
+      const parent = runs.get(wake.runId)?.run;
+      const entry =
+        parent && Object.hasOwn(parent.journal, wake.stepPath)
+          ? parent.journal[wake.stepPath]
+          : undefined;
       if (
-        parent &&
-        parent.run.status === "waiting" &&
-        parent.run.currentStep === patch.wakeParent.stepPath
+        parent?.status === "waiting" &&
+        parent.currentStep === wake.stepPath &&
+        entry?.status === "suspended" &&
+        entry.pending?.childRunId === wake.childRunId
       ) {
-        resumeTransition(parent.run, patch.wakeParent.resume, now);
+        resumeTransition(parent, wake.resume, now);
       }
     }
+    append(child && !insertChild ? newEvents.filter((e) => e.runId !== child.id) : newEvents);
   };
 
   const isClaimable = (run: Run, now: number): boolean => {
@@ -238,7 +282,12 @@ export function createMemoryStorage(): StorageAdapter {
 
     async createRun(run, newEvents, now) {
       const existing = runs.get(run.id);
-      if (existing) return clone(existing.run);
+      if (existing) {
+        if (existing.run.tenantId !== run.tenantId) {
+          throw new FlowkitStorageError(`Run id "${run.id}" already belongs to another tenant`);
+        }
+        return clone(existing.run);
+      }
       const stored = newStoredRun(run, now);
       runs.set(run.id, stored);
       append(newEvents);
@@ -309,9 +358,9 @@ export function createMemoryStorage(): StorageAdapter {
     async commit(lease, patch, newEvents, now) {
       const stored = runs.get(lease.run.id);
       if (!stored || stored.token === undefined || stored.token !== lease.token) return false;
+      const insertChild = checkChild(patch);
       applyPatch(stored, patch, now);
-      applyRelated(patch, now);
-      append(newEvents);
+      applyRelated(patch, insertChild, newEvents, now);
       return true;
     },
 
@@ -334,14 +383,15 @@ export function createMemoryStorage(): StorageAdapter {
       return true;
     },
 
-    async updateRunUnleased(tenantId, runId, patch, newEvents, now) {
+    async updateRunUnleased(tenantId, runId, expect, patch, newEvents, now) {
       const stored = runs.get(runId);
       if (!stored || stored.run.tenantId !== tenantId) return false;
+      if (!expect.status.includes(stored.run.status)) return false;
       if (stored.run.leaseUntil !== undefined && stored.run.leaseUntil >= now) return false;
+      const insertChild = checkChild(patch);
       applyPatch(stored, patch, now);
       clearLease(stored);
-      applyRelated(patch, now);
-      append(newEvents);
+      applyRelated(patch, insertChild, newEvents, now);
       return true;
     },
 

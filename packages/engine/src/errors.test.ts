@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FatalError, RetryableError } from "./errors";
+import { FatalError, FlowkitStorageError, RetryableError } from "./errors";
 
 describe("errors", () => {
   it("RetryableError is an Error with its name", () => {
@@ -16,5 +16,11 @@ describe("errors", () => {
     expect(e.code).toBe("E_BAD");
     expect(e.cause).toBe(cause);
     expect(new FatalError("x").code).toBeUndefined();
+  });
+
+  it("FlowkitStorageError is an Error with its name", () => {
+    const e = new FlowkitStorageError("conflict");
+    expect(e).toBeInstanceOf(Error);
+    expect(e.name).toBe("FlowkitStorageError");
   });
 });

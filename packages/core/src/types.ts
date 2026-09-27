@@ -21,7 +21,7 @@ export type ValueExpr = Literal | RefExpr | TplExpr | ValueExpr[] | { [k: string
 
 /** One step of a workflow: an instance of a node type with its config. */
 export interface Step {
-  /** Stable ID, unique within the doc and used in references. Matches `/^[A-Za-z_][A-Za-z0-9_]*$/`. */
+  /** Stable ID, unique within the doc and used in references. Matches `/^[A-Za-z_][A-Za-z0-9_]*$/` and is not `__proto__`, `constructor` or `prototype`. */
   id: string;
   /** Node type, e.g. `"crm.loadContact"`. */
   type: string;

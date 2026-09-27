@@ -224,6 +224,13 @@ describe("generateStepId", () => {
     expect(generateStepId(doc, "crm.load-contact!")).toBe("load_contact_");
     expect(generateStepId(doc, "9lives")).toBe("_9lives");
   });
+
+  test("never generates reserved object-property ids", () => {
+    const doc = frozenClone(baseDoc());
+    expect(generateStepId(doc, "x.constructor")).toBe("constructor_2");
+    expect(generateStepId(doc, "__proto__")).toBe("__proto___2");
+    expect(generateStepId(doc, "prototype")).toBe("prototype_2");
+  });
 });
 
 describe("duplicateStep", () => {

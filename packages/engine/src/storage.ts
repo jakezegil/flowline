@@ -96,11 +96,17 @@ export interface Lease {
 /**
  * A partial update of a run. Omitted (`undefined`) fields are left unchanged; `null` clears an
  * optional field.
+ *
+ * Writing any `status` other than `"running"` also clears the lease (`leaseOwner`, `leaseUntil`
+ * and the lease token), exactly as if `release: true` were set: only a running run can be leased.
  */
 export interface RunPatch {
   /** New status. */
   status?: RunStatus;
-  /** Merged into the journal by key; a `null` value deletes that key. */
+  /**
+   * Merged into the journal by key; a `null` value deletes that key. Keys are plain data: keys such
+   * as `__proto__` or `constructor` must be stored and returned as ordinary own keys.
+   */
   journal?: Record<string, JournalEntry | null>;
   /** New attempt number. */
   attempt?: number;
@@ -120,19 +126,31 @@ export interface RunPatch {
   output?: unknown;
   /** New error; `null` clears. */
   error?: RunError | null;
-  /** Clear the lease (`leaseOwner`, `leaseUntil` and the lease token) in the same write. */
+  /**
+   * Clear the lease (`leaseOwner`, `leaseUntil` and the lease token) in the same write. Implied
+   * whenever `status` is set to anything other than `"running"`.
+   */
   release?: boolean;
   /**
-   * Wake a parent run in the SAME atomic write. Applied only when the parent exists, has status
-   * `waiting` and `currentStep === stepPath`; it then becomes `queued` with `resume` set,
-   * `wakeAt`/`callbackToken`/`callbackExpiresAt` cleared (`waitReason` is kept). Otherwise the
-   * parent is left untouched and the write still succeeds.
+   * Wake a parent run in the SAME atomic write. Applied only when ALL of these hold:
+   * - the parent run `runId` exists,
+   * - its status is `waiting`,
+   * - its `currentStep === stepPath`,
+   * - `journal[stepPath].status === "suspended"` with `journal[stepPath].pending.childRunId ===
+   *   childRunId` (so a stale child of an earlier attempt can never wake a newer one).
+   *
+   * The parent then becomes `queued` with `resume` set and `wakeAt`/`callbackToken`/
+   * `callbackExpiresAt` cleared (`waitReason` is kept). Otherwise — including when the parent does
+   * not exist — the parent is left untouched and the write still succeeds.
    */
-  wakeParent?: { runId: string; stepPath: string; resume: ResumeInfo };
+  wakeParent?: { runId: string; stepPath: string; childRunId: string; resume: ResumeInfo };
   /**
-   * Insert a child run in the SAME atomic write (`createdAt`/`updatedAt` = `now`). Idempotent on
-   * the child's `id`: when a run with that id already exists, nothing is inserted and the write
-   * still succeeds.
+   * Insert a child run in the SAME atomic write (`createdAt`/`updatedAt` = `now`; lease fields are
+   * ignored). Idempotent on the child's `id`: when a run with that id already exists in the same
+   * tenant, nothing is inserted, the accompanying events whose `runId` is the child's id are NOT
+   * appended (they were appended when the child was created), and the write still succeeds with the
+   * rest of the patch and events. When the id exists in ANOTHER tenant the whole write is rejected
+   * with a `FlowkitStorageError` and nothing changes.
    */
   createChild?: NewRun;
 }
@@ -231,8 +249,11 @@ export interface StorageAdapter {
    * Insert a run with `createdAt = updatedAt = now` and append `events` (seq 1, 2, ...) in one
    * atomic write. Lease fields on the input are ignored (a new run is never leased).
    *
-   * Idempotent: if a run with `run.id` already exists (in any tenant), returns the existing run
-   * unchanged and appends nothing.
+   * Idempotent: if a run with `run.id` already exists in the same tenant, returns the existing run
+   * unchanged and appends nothing (also under concurrency: of concurrent calls with one id, exactly
+   * one inserts and appends its events).
+   *
+   * @throws {FlowkitStorageError} (rejects, writing nothing) if the id belongs to another tenant.
    */
   createRun(run: NewRun, events: NewRunEvent[], now: number): Promise<Run>;
 
@@ -256,7 +277,8 @@ export interface StorageAdapter {
    *
    * Eligible: `status === "queued"`; or `status === "waiting"` with `wakeAt <= now` (a waiting run
    * without `wakeAt` is never claimable); or `status === "running"` whose lease expired
-   * (`leaseUntil < now`, or no `leaseUntil`). Among eligible runs, the one with the smallest
+   * (`leaseUntil < now`, or `leaseUntil` unset — e.g. a run created as `running`; SQL adapters must
+   * treat a NULL `lease_until` as expired). Among eligible runs, the one with the smallest
    * `wakeAt ?? updatedAt` is chosen (ties: `createdAt`, then `id`, ascending), so overdue timers are
    * not starved by newer queued runs.
    *
@@ -282,9 +304,13 @@ export interface StorageAdapter {
    * `lease.token` is no longer the run's current token. A token stays current until the run is
    * released, reclaimed, or modified by `updateRunUnleased`; mere expiry does not invalidate it.
    *
-   * On success `updatedAt = now`; without `patch.release` the lease is kept (same token), with it
-   * `leaseOwner`, `leaseUntil` and the token are cleared. Events may belong to any run (e.g. the
-   * child's `run.started`) and get per-run `seq` numbers.
+   * On success `updatedAt = now`. The lease is kept (same token) unless `patch.release` is set or
+   * `patch.status` is anything other than `"running"`; then `leaseOwner`, `leaseUntil` and the token
+   * are cleared. Events may belong to any run (e.g. the child's `run.started`) and get per-run `seq`
+   * numbers.
+   *
+   * @throws {FlowkitStorageError} (rejects, writing nothing) if `patch.createChild.id` belongs to a
+   * run of another tenant.
    */
   commit(lease: Lease, patch: RunPatch, events: NewRunEvent[], now: number): Promise<boolean>;
 
@@ -292,13 +318,15 @@ export interface StorageAdapter {
    * Resume the `waiting` run whose `callbackToken === token`, provided the token has not expired
    * (`callbackExpiresAt` unset or `> now`). The run becomes `queued` with `resume` set and
    * `callbackToken`, `callbackExpiresAt` and `wakeAt` cleared (`waitReason` kept), so the token
-   * is single use. Returns the updated run, or `null` (no write) when no run matches.
+   * is single use: of concurrent calls with the same token, exactly one returns the run. Returns
+   * the updated run, or `null` (no write) when no run matches.
    */
   resumeByToken(token: string, resume: ResumeInfo, now: number): Promise<Run | null>;
 
   /**
    * Resume run `runId` if it is `waiting` with `currentStep === expectCurrentStep`, with the same
-   * transition as {@link StorageAdapter.resumeByToken}. Returns whether it was resumed.
+   * transition as {@link StorageAdapter.resumeByToken}. Returns whether it was resumed; of
+   * concurrent calls, exactly one returns `true`.
    */
   resumeRun(
     runId: string,
@@ -308,17 +336,24 @@ export interface StorageAdapter {
   ): Promise<boolean>;
 
   /**
-   * Apply `patch` (including `createChild` and `wakeParent`) and append `events` atomically to a
-   * run that is NOT currently leased — i.e. it has no lease, or `leaseUntil < now`. Used for
-   * cancel/retry of runs no worker is executing. Any stale lease is cleared (invalidating its
-   * token), whether or not `patch.release` is set.
+   * Compare-and-set update for a run no worker is executing (cancel, retry). Applies `patch`
+   * (including `createChild` and `wakeParent`, with the same semantics as in `commit`) and appends
+   * `events` in ONE atomic write, provided that — checked inside that same write:
+   * - the run exists in the tenant,
+   * - its current status is one of `expect.status` (so a run that completed after the caller read
+   *   it is not overwritten), and
+   * - it is NOT currently leased: no lease, or `leaseUntil < now`.
    *
-   * Returns `false` (no write) if the run does not exist in the tenant or holds an unexpired lease
-   * (`leaseUntil >= now`).
+   * Any stale lease is cleared (invalidating its token), whether or not `patch.release` is set.
+   * Returns `false` and writes nothing when a precondition fails.
+   *
+   * @throws {FlowkitStorageError} (rejects, writing nothing) if `patch.createChild.id` belongs to a
+   * run of another tenant.
    */
   updateRunUnleased(
     tenantId: string,
     runId: string,
+    expect: { status: RunStatus[] },
     patch: RunPatch,
     events: NewRunEvent[],
     now: number,
