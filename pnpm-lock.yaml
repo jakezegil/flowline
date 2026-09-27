@@ -33,7 +33,15 @@ importers:
         specifier: ^4
         version: 4.6.5
 
-  packages/engine: {}
+  packages/engine:
+    dependencies:
+      '@flowkit/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      vitest:
+        specifier: 5.0.0
+        version: 5.0.0(@types/node@22.20.2)(jsdom@30.0.1)(vite@8.3.1(@types/node@22.20.2)(esbuild@0.27.7))
 
   packages/nodes-builtin: {}
 
@@ -43,7 +51,18 @@ importers:
         specifier: 30.0.1
         version: 30.0.1
 
-  packages/storage-memory: {}
+  packages/storage-memory:
+    dependencies:
+      '@flowkit/core':
+        specifier: workspace:*
+        version: link:../core
+      '@flowkit/engine':
+        specifier: workspace:*
+        version: link:../engine
+    devDependencies:
+      vitest:
+        specifier: 5.0.0
+        version: 5.0.0(@types/node@22.20.2)(jsdom@30.0.1)(vite@8.3.1(@types/node@22.20.2)(esbuild@0.27.7))
 
   packages/storage-postgres: {}
 

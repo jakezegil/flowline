@@ -23,5 +23,12 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsup"
+  },
+  "dependencies": {
+    "@flowkit/engine": "workspace:*",
+    "@flowkit/core": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "5.0.0"
   }
 }
