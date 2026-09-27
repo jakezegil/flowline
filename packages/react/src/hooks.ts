@@ -20,6 +20,9 @@ import {
 } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
+
+export { useShallow };
+
 import type { EditorActions, EditorState, EditorStore, TestState } from "./store/editor-store";
 
 /**
@@ -47,7 +50,17 @@ export function useEditorStoreApi(): EditorStore {
 
 /**
  * Subscribes to a slice of the editor state; re-renders only when the selected value changes
- * (`Object.is`). Select primitives or stable references, or derive with `useMemo`.
+ * (`Object.is`).
+ *
+ * **Warning:** the selector must return a stable value. Returning a new object or array on every
+ * call (`s => ({ a: s.a, b: s.b })`, `s => s.issues.filter(...)`) re-renders on every store
+ * change and can loop forever. Select primitives or existing references, wrap object selectors in
+ * {@link useShallow}, or derive with `useMemo`:
+ *
+ * @example
+ * const doc = useEditorStore((s) => s.doc);
+ * const { dirty, canUndo } = useEditorStore(useShallow((s) => ({ dirty: s.dirty, canUndo: s.canUndo })));
+ * const errors = useMemo(() => issues.filter((i) => i.severity === "error"), [issues]);
  */
 export function useEditorStore<T>(selector: (s: EditorState & EditorActions) => T): T {
   return useStore(useEditorStoreApi(), selector);
@@ -74,29 +87,76 @@ function stepIndex(doc: WorkflowDoc): Map<string, Step> {
   return idx;
 }
 
+const NO_ISSUES: Issue[] = [];
+const issueIndexes = new WeakMap<Issue[], Map<string, Issue[]>>();
+const lastIssueIndexes = new WeakMap<EditorStore, Map<string, Issue[]>>();
+
+function sameIssues(a: Issue[], b: Issue[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((x, i) => {
+      const y = b[i] as Issue;
+      return (
+        x.code === y.code &&
+        x.field === y.field &&
+        x.message === y.message &&
+        x.severity === y.severity
+      );
+    })
+  );
+}
+
+/**
+ * Issues of `issues` grouped by step ID, built once per issues array. A step's group reuses the
+ * array from the store's previous grouping when its contents are equal, so edits to one step
+ * don't change the issue arrays (and re-render the cards) of the others.
+ */
+function issuesByStep(store: EditorStore, issues: Issue[]): Map<string, Issue[]> {
+  let idx = issueIndexes.get(issues);
+  if (!idx) {
+    const prev = lastIssueIndexes.get(store);
+    const grouped = new Map<string, Issue[]>();
+    for (const issue of issues) {
+      if (issue.stepId === undefined) continue;
+      const list = grouped.get(issue.stepId);
+      if (list) list.push(issue);
+      else grouped.set(issue.stepId, [issue]);
+    }
+    for (const [id, list] of grouped) {
+      const old = prev?.get(id);
+      if (old && sameIssues(old, list)) grouped.set(id, old);
+    }
+    issueIndexes.set(issues, grouped);
+    idx = grouped;
+  }
+  lastIssueIndexes.set(store, idx);
+  return idx;
+}
+
 /**
  * A step with its node manifest (`undefined` for unknown node types), its validation issues and
  * test state, or `undefined` if no step has this ID. The result is referentially stable until
- * one of those changes.
+ * one of those changes, so edits to other steps don't re-render this step's consumers.
  */
 export function useStep(
   id: string,
 ):
   | { step: Step; manifest: NodeManifest | undefined; issues: Issue[]; testState?: TestState }
   | undefined {
-  const step = useEditorStore((s) => stepIndex(s.doc).get(id));
-  const nodes = useEditorStore((s) => s.manifest.nodes);
-  const allIssues = useEditorStore((s) => s.issues);
-  const testState = useEditorStore((s) => s.testState[id]);
+  const store = useEditorStoreApi();
+  const step = useStore(store, (s) => stepIndex(s.doc).get(id));
+  const nodes = useStore(store, (s) => s.manifest.nodes);
+  const issues = useStore(store, (s) => issuesByStep(store, s.issues).get(id) ?? NO_ISSUES);
+  const testState = useStore(store, (s) => s.testState[id]);
   return useMemo(() => {
     if (!step) return undefined;
     return {
       step,
       manifest: nodes.find((n) => n.type === step.type),
-      issues: allIssues.filter((i) => i.stepId === id),
+      issues,
       ...(testState ? { testState } : {}),
     };
-  }, [id, step, nodes, allIssues, testState]);
+  }, [step, nodes, issues, testState]);
 }
 
 /** The current selection (a step ID, `"__trigger"`, or `null`) and a setter. */

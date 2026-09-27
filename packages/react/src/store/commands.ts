@@ -10,7 +10,6 @@ import {
   duplicateStep,
   FlowkitTreeError,
   findStep,
-  insertStep,
   type JSONSchema,
   type NodeManifest,
   type Step,
@@ -67,9 +66,12 @@ export function createStep(id: string, m: NodeManifest): Step {
 
 /**
  * Changes the type of step `id` to `m`, keeping its ID (so downstream references stay attached)
- * and `disabled` flag; config resets to `m`'s defaults and the name override is dropped. Children
- * in branches `m` also declares stay put; children of dropped branches move to `m`'s first branch,
- * or, if `m` doesn't branch, right after the step, so nothing is deleted.
+ * and `disabled` flag; config resets to `m`'s defaults and the name override is dropped.
+ *
+ * Children never silently change meaning: branches `m` also declares keep their steps, and
+ * non-empty branches `m` doesn't declare are kept as undeclared leftovers (the same policy as
+ * {@link syncBranches}). The canvas still shows them and the validator flags them
+ * (`branch.unknown`), which blocks publishing until the user moves or deletes those steps.
  *
  * @throws {FlowkitTreeError} If `id` doesn't exist.
  */
@@ -77,28 +79,17 @@ export function replaceStepType(doc: WorkflowDoc, id: string, m: NodeManifest): 
   const found = findStep(doc, id);
   if (!found) throw new FlowkitTreeError(`Step "${id}" not found`);
   const old = found.step;
-  const fresh = createStep(id, m);
-  const kept: Record<string, Step[]> = {};
-  const orphans: Step[] = [];
-  for (const [branch, list] of Object.entries(old.branches ?? {})) {
-    if (fresh.branches && branch in fresh.branches) kept[branch] = list;
-    else orphans.push(...list);
-  }
-  const replaced: Step = { ...fresh, ...(old.disabled ? { disabled: true } : {}) };
-  const firstBranch = fresh.branches ? Object.keys(fresh.branches)[0] : undefined;
-  if (fresh.branches) {
-    replaced.branches = { ...fresh.branches, ...kept };
-    if (firstBranch !== undefined && orphans.length > 0) {
-      replaced.branches[firstBranch] = [...(replaced.branches[firstBranch] ?? []), ...orphans];
-    }
-  }
-  let next = updateStep(doc, id, () => replaced);
-  if (firstBranch === undefined) {
-    orphans.forEach((orphan, i) => {
-      next = insertStep(next, { ...found.location, index: found.location.index + 1 + i }, orphan);
-    });
-  }
-  return next;
+  const replaced = syncBranches(
+    {
+      id,
+      type: m.type,
+      config: defaultConfig(m.input),
+      ...(old.disabled ? { disabled: true } : {}),
+      ...(old.branches ? { branches: old.branches } : {}),
+    },
+    m,
+  );
+  return updateStep(doc, id, () => replaced);
 }
 
 /**

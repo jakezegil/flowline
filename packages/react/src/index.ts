@@ -10,6 +10,7 @@ export {
   useIssues,
   useRun,
   useSelection,
+  useShallow,
   useStep,
   useWorkflow,
 } from "./hooks";
@@ -29,6 +30,7 @@ export {
   type EditorActions,
   type EditorState,
   type EditorStore,
+  type InsertOptions,
   type TestState,
   TRIGGER_KEY,
 } from "./store/editor-store";

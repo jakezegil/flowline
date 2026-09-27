@@ -158,6 +158,19 @@ describe("undo / redo", () => {
     expect(s().canUndo).toBe(false);
   });
 
+  test("a coalesced burst is capped at 2000ms from its first edit", () => {
+    const store = storeFor();
+    const s = store.getState;
+    for (let i = 1; i <= 6; i++) {
+      s().setConfig("email", "subject", `v${i}`); // t = 0, 400, ..., 2000
+      vi.advanceTimersByTime(400);
+    }
+    s().undo();
+    expect(findStep(s().doc, "email")?.step.config.subject).toBe("v5");
+    s().undo();
+    expect(findStep(s().doc, "email")?.step.config.subject).toBe("Hi");
+  });
+
   test("setConfig on a different key or step does not coalesce", () => {
     const store = storeFor();
     const s = store.getState;
@@ -347,33 +360,130 @@ describe("test state and samples", () => {
     spy.mockRestore();
   });
 
-  test("removing a step drops its sample and test state", () => {
+  test("delete then undo keeps the sample and test state", () => {
     const store = storeFor();
     store.getState().setSample("email", { messageId: "m" });
     store.getState().removeStep("email");
-    expect(store.getState().samples.email).toBeUndefined();
-    expect(store.getState().testState.email).toBeUndefined();
+    store.getState().undo();
+    expect(store.getState().samples.email).toEqual({ messageId: "m" });
+    expect(store.getState().testState.email).toBe("tested");
+  });
+
+  test("a new step reusing a removed step's id starts without its sample", () => {
+    const store = storeFor(
+      docWith([step("sendEmail", "crm.sendEmail", { to: "a", subject: "b" })]),
+    );
+    store.getState().setSample("sendEmail", { messageId: "old" });
+    store.getState().removeStep("sendEmail");
+    const id = store.getState().insertStep({ parentId: null, index: 0 }, "crm.sendEmail");
+    expect(id).toBe("sendEmail");
+    expect(store.getState().samples.sendEmail).toBeUndefined();
+    expect(store.getState().testState.sendEmail).toBeUndefined();
+    expect(localStorage.getItem("flowkit:samples:welcome")).not.toContain("old");
+  });
+
+  test("pasted and duplicated subtrees start without samples under their new ids", () => {
+    const store = storeFor(branchyDoc());
+    store.getState().setSample("condition", { stale: true });
+    store.getState().setSample("sendEmail", { stale: true });
+    store.getState().duplicateStep("cond"); // → condition { if: [sendEmail] }
+    expect(store.getState().samples).toEqual({});
+    store.getState().setSample("condition_2", { stale: true });
+    store.getState().copy("cond");
+    expect(store.getState().paste({ parentId: null, index: 0 })).toBe("condition_2");
+    expect(store.getState().samples).toEqual({});
+  });
+
+  test("loading samples prunes entries of steps that no longer exist", () => {
+    localStorage.setItem(
+      "flowkit:samples:welcome",
+      JSON.stringify({
+        samples: { load: 1, gone: 2, __trigger: 3 },
+        testState: { load: "tested", gone: "tested" },
+      }),
+    );
+    const store = storeFor();
+    expect(store.getState().samples).toEqual({ load: 1, __trigger: 3 });
+    expect(store.getState().testState).toEqual({ load: "tested" });
+    store.getState().setSample("email", {});
+    store.getState().replaceDoc(docWith([step("email", "crm.sendEmail")]));
+    expect(store.getState().samples).toEqual({ email: {}, __trigger: 3 });
+  });
+});
+
+describe("SSR", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  test("without window the store starts empty until hydrateLocal()", () => {
+    localStorage.setItem(
+      "flowkit:samples:welcome",
+      JSON.stringify({ samples: { load: 1 }, testState: { load: "tested" } }),
+    );
+    vi.stubGlobal("window", undefined);
+    const store = storeFor();
+    expect(store.getState().samples).toEqual({});
+    vi.unstubAllGlobals();
+    store.getState().hydrateLocal();
+    expect(store.getState().samples).toEqual({ load: 1 });
+    expect(store.getState().testState).toEqual({ load: "tested" });
+  });
+});
+
+describe("select option", () => {
+  test("insertStep, duplicateStep and paste can leave the selection alone", () => {
+    const store = storeFor();
+    store.getState().select("load");
+    store.getState().insertStep({ parentId: null, index: 0 }, "crm.sendEmail", { select: false });
+    store.getState().duplicateStep("email", { select: false });
+    store.getState().copy("email");
+    store.getState().paste({ parentId: null, index: 0 }, { select: false });
+    expect(store.getState().selection).toBe("load");
+    expect(store.getState().doc.steps).toHaveLength(5);
   });
 });
 
 describe("replaceStep", () => {
-  test("keeps id and matching branches, re-homes children of dropped branches", () => {
+  test("condition → forEach keeps id; non-empty dropped branches stay as flagged leftovers", () => {
     const store = storeFor(branchyDoc());
     store.getState().setSample("cond", { matched: true });
     store.getState().replaceStep("cond", "logic.forEach");
     const found = findStep(store.getState().doc, "cond")!.step;
     expect(found.type).toBe("logic.forEach");
     expect(found.config).toEqual({});
-    expect(found.branches).toEqual({ body: [expect.objectContaining({ id: "email" })] });
-    expect(store.getState().testState.cond).toBeUndefined();
-    expect(store.getState().samples.cond).toBeUndefined();
+    // "if" held a step, so it is kept (after the declared "body"); empty "else" is dropped.
+    expect(found.branches).toEqual({ body: [], if: [expect.objectContaining({ id: "email" })] });
+    expect(store.getState().issues).toContainEqual(
+      expect.objectContaining({ code: "branch.unknown", stepId: "cond", severity: "error" }),
+    );
+    // Undo restores the condition and its sample is still there.
+    store.getState().undo();
+    expect(findStep(store.getState().doc, "cond")!.step.type).toBe("logic.condition");
+    expect(store.getState().samples.cond).toEqual({ matched: true });
   });
 
-  test("replacing a branching step with a plain one moves children after it", () => {
+  test("condition → leaf keeps the children in place as flagged leftover branches", () => {
     const store = storeFor(branchyDoc());
     store.getState().replaceStep("cond", "crm.sendEmail");
-    expect(store.getState().doc.steps.map((s) => s.id)).toEqual(["load", "cond", "email", "each"]);
-    expect(findStep(store.getState().doc, "cond")!.step.branches).toBeUndefined();
+    expect(store.getState().doc.steps.map((s) => s.id)).toEqual(["load", "cond", "each"]);
+    const cond = findStep(store.getState().doc, "cond")!.step;
+    expect(cond.branches).toEqual({ if: [expect.objectContaining({ id: "email" })] });
+    expect(findStep(store.getState().doc, "email")!.location).toEqual({
+      parentId: "cond",
+      branch: "if",
+      index: 0,
+    });
+    expect(store.getState().issues).toContainEqual(
+      expect.objectContaining({ code: "branch.unknown", stepId: "cond", severity: "error" }),
+    );
+  });
+
+  test("replacing with the same type is a no-op", () => {
+    const store = storeFor();
+    store.getState().setConfig("load", "contactId", "c1");
+    const doc = store.getState().doc;
+    store.getState().replaceStep("load", "crm.loadContact");
+    expect(store.getState().doc).toBe(doc);
+    expect(findStep(doc, "load")!.step.config.contactId).toBe("c1");
   });
 });
 

@@ -15,6 +15,7 @@ import {
   type ValueExpr,
   validateWorkflow,
   type WorkflowDoc,
+  walkSteps,
 } from "@flowkit/core";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import {
@@ -51,6 +52,8 @@ export interface EditorState {
    * Sample output per step ID ({@link TRIGGER_KEY} → trigger payload sample), used by the data
    * picker and step tests. Editor-local only: persisted to `localStorage` under
    * `flowkit:samples:<workflowId>` and never written into the workflow doc (it may contain PII).
+   * Entries of removed steps are kept while the editor is open (so undo brings them back) and
+   * pruned when samples are next loaded.
    */
   samples: Record<string, unknown>;
   /** Per step ID ({@link TRIGGER_KEY} for the trigger): tested, or edited since its last test. */
@@ -78,26 +81,27 @@ export interface EditorState {
 export interface EditorActions {
   /**
    * Inserts a new step of `nodeType` at `loc`, with config defaults from the node's input schema
-   * and an empty list per declared branch, and selects it.
+   * and an empty list per declared branch. Selects it unless `opts.select` is `false`.
    * @returns The new step's generated ID, e.g. `"sendEmail"` or `"sendEmail_2"`.
    */
-  insertStep(loc: StepLocation, nodeType: string): string;
+  insertStep(loc: StepLocation, nodeType: string, opts?: InsertOptions): string;
   /**
    * Changes a step's node type, keeping its ID. Config resets to the new type's defaults; child
-   * steps are kept (see `replaceStepType`). Clears the step's sample and test state.
+   * steps stay in their branches, and branches the new type doesn't declare are kept (and
+   * flagged by the validator) rather than dropped or merged. Same type: no-op.
    */
   replaceStep(id: string, nodeType: string): void;
   /**
-   * Deletes a step and its subtree, with their samples and test state. Clears the selection if it
-   * was inside the removed subtree.
+   * Deletes a step and its subtree. Clears the selection if it was inside the removed subtree.
+   * Samples and test state are kept, so undo restores them.
    */
   removeStep(id: string): void;
   /**
    * Duplicates a step (and subtree) right after itself with fresh IDs, rewriting references
-   * inside the copy, and selects the copy.
+   * inside the copy. Selects the copy unless `opts.select` is `false`.
    * @returns The copy's ID.
    */
-  duplicateStep(id: string): string;
+  duplicateStep(id: string, opts?: InsertOptions): string;
   /** Moves a step (and subtree) to `to`, whose index counts positions after the step's removal. */
   moveStep(id: string, to: StepLocation): void;
   /** Sets a step's display name; blank clears the override. Bursts of renames coalesce. */
@@ -120,12 +124,19 @@ export interface EditorActions {
   /** Copies a step (with its subtree) to the editor clipboard. Unknown IDs are ignored. */
   copy(id: string): void;
   /**
-   * Inserts a fresh-ID copy of the clipboard at `loc` and selects it.
+   * Inserts a fresh-ID copy of the clipboard at `loc`. Selects it unless `opts.select` is `false`.
    * @returns The pasted step's ID, or `null` when the clipboard is empty.
    */
-  paste(loc: StepLocation): string | null;
+  paste(loc: StepLocation, opts?: InsertOptions): string | null;
   /** Stores a step's (or the trigger's) sample output and marks it tested. Not in history. */
   setSample(id: string, output: unknown): void;
+  /**
+   * Loads samples and test state for the current workflow from `localStorage`, pruned to steps
+   * that exist. The store does this itself when created in a browser; when created where there is
+   * no `window` (SSR) it starts empty, and the provider (`<WorkflowEditor>` / `<WorkflowCanvas>`)
+   * calls `hydrateLocal()` in an effect after mounting.
+   */
+  hydrateLocal(): void;
   /** Reverts the last doc change. */
   undo(): void;
   /** Re-applies the last undone change. */
@@ -136,9 +147,16 @@ export interface EditorActions {
   markPublished(version: number): void;
   /**
    * Replaces the doc wholesale as a new clean baseline (e.g. once loaded from the server): clears
-   * history and selection, and loads that workflow's samples if its ID differs.
+   * history and selection, loads that workflow's samples if its ID differs, and drops samples and
+   * test state of steps the new doc doesn't contain.
    */
   replaceDoc(doc: WorkflowDoc): void;
+}
+
+/** Options of commands that add a step. */
+export interface InsertOptions {
+  /** Select the new step (default `true`). */
+  select?: boolean;
 }
 
 /** A vanilla Zustand store holding the editor state and commands. */
@@ -159,7 +177,23 @@ function storage(): Storage | undefined {
   }
 }
 
-function loadLocal(workflowId: string): LocalData {
+/** Samples and test state of `doc` from storage, keeping only the trigger and existing steps. */
+function loadLocal(doc: WorkflowDoc): LocalData {
+  const data = readLocal(doc.id);
+  return { samples: pruneTo(doc, data.samples), testState: pruneTo(doc, data.testState) };
+}
+
+/** `record` without keys that are neither {@link TRIGGER_KEY} nor a step of `doc`. */
+function pruneTo<T>(doc: WorkflowDoc, record: Record<string, T>): Record<string, T> {
+  const ids = new Set<string>([TRIGGER_KEY]);
+  walkSteps(doc, (step) => ids.add(step.id));
+  return without(
+    record,
+    Object.keys(record).filter((k) => !ids.has(k)),
+  );
+}
+
+function readLocal(workflowId: string): LocalData {
   const empty: LocalData = { samples: {}, testState: {} };
   try {
     const raw = storage()?.getItem(storageKey(workflowId));
@@ -199,8 +233,9 @@ function without<T>(record: Record<string, T>, ids: readonly string[]): Record<s
 
 /**
  * Creates the headless editor store for one workflow. Validation runs synchronously against
- * `manifest` (and `ctx`) after every change; samples and test state are loaded from
- * `localStorage` for `doc.id`.
+ * `manifest` (and `ctx`) after every change. In a browser, samples and test state are loaded from
+ * `localStorage` for `doc.id`; without `window` (SSR) they start empty until
+ * {@link EditorActions.hydrateLocal} is called.
  *
  * @example
  * const store = createEditorStore({ doc, manifest });
@@ -217,7 +252,8 @@ export function createEditorStore(init: {
   const ctx = init.ctx ?? {};
   let history: History<WorkflowDoc> = emptyHistory();
   let savedDoc = init.doc;
-  const local = loadLocal(init.doc.id);
+  const local: LocalData =
+    typeof window === "undefined" ? { samples: {}, testState: {} } : loadLocal(init.doc);
 
   const nodeManifest = (type: string): NodeManifest => {
     const m = manifest.nodes.find((n) => n.type === type);
@@ -269,8 +305,14 @@ export function createEditorStore(init: {
       set({ ...derived(result.value), ...(keep ? {} : { selection: null }) });
     };
 
-    const insertNew = (loc: StepLocation, step: Step): string => {
-      commit(coreInsertStep(get().doc, loc, step), { selection: step.id });
+    /** Commits `next`, which adds `step`: resets local data left over under its IDs, selects it. */
+    const commitNew = (next: WorkflowDoc, step: Step, opts: InsertOptions | undefined): string => {
+      const ids = subtreeIds(step);
+      const { samples, testState } = get();
+      commit(next, {
+        ...setLocal({ samples: without(samples, ids), testState: without(testState, ids) }),
+        ...(opts?.select === false ? {} : { selection: step.id }),
+      });
       return step.id;
     };
 
@@ -285,35 +327,29 @@ export function createEditorStore(init: {
       publishedVersion: null,
       clipboard: null,
 
-      insertStep(loc, nodeType) {
-        const m = nodeManifest(nodeType);
-        return insertNew(loc, createStep(generateStepId(get().doc, nodeType), m));
+      insertStep(loc, nodeType, opts) {
+        const step = createStep(generateStepId(get().doc, nodeType), nodeManifest(nodeType));
+        return commitNew(coreInsertStep(get().doc, loc, step), step, opts);
       },
 
       replaceStep(id, nodeType) {
-        const next = replaceStepType(get().doc, id, nodeManifest(nodeType));
-        const { samples, testState } = get();
-        commit(
-          next,
-          setLocal({ samples: without(samples, [id]), testState: without(testState, [id]) }),
-        );
+        const m = nodeManifest(nodeType);
+        const found = findStep(get().doc, id);
+        if (found?.step.type === nodeType) return;
+        commit(replaceStepType(get().doc, id, m));
       },
 
       removeStep(id) {
         const found = findStep(get().doc, id);
         const next = coreRemoveStep(get().doc, id);
         const ids = found ? subtreeIds(found.step) : [id];
-        const { samples, testState, selection } = get();
-        commit(next, {
-          ...setLocal({ samples: without(samples, ids), testState: without(testState, ids) }),
-          ...(selection !== null && ids.includes(selection) ? { selection: null } : {}),
-        });
+        const { selection } = get();
+        commit(next, selection !== null && ids.includes(selection) ? { selection: null } : {});
       },
 
-      duplicateStep(id) {
+      duplicateStep(id, opts) {
         const { doc, newId } = coreDuplicateStep(get().doc, id);
-        commit(doc, { selection: newId });
-        return newId;
+        return commitNew(doc, findStep(doc, newId)?.step as Step, opts);
       },
 
       moveStep(id, to) {
@@ -358,15 +394,9 @@ export function createEditorStore(init: {
       setTrigger(type) {
         const t = manifest.triggers.find((x) => x.type === type);
         if (!t) throw new Error(`Unknown trigger type "${type}"`);
-        const { doc, samples, testState } = get();
+        const { doc } = get();
         if (doc.trigger.type === type) return;
-        commit(
-          { ...doc, trigger: { type, config: defaultConfig(t.config) } },
-          setLocal({
-            samples: without(samples, [TRIGGER_KEY]),
-            testState: without(testState, [TRIGGER_KEY]),
-          }),
-        );
+        commit({ ...doc, trigger: { type, config: defaultConfig(t.config) } });
       },
 
       setTriggerConfig(key, value) {
@@ -391,10 +421,11 @@ export function createEditorStore(init: {
         if (found) set({ clipboard: found.step });
       },
 
-      paste(loc) {
+      paste(loc, opts) {
         const { clipboard, doc } = get();
         if (!clipboard) return null;
-        return insertNew(loc, cloneWithFreshIds(doc, clipboard));
+        const copy = cloneWithFreshIds(doc, clipboard);
+        return commitNew(coreInsertStep(doc, loc, copy), copy, opts);
       },
 
       setSample(id, output) {
@@ -405,6 +436,10 @@ export function createEditorStore(init: {
             testState: { ...testState, [id]: "tested" },
           }),
         );
+      },
+
+      hydrateLocal() {
+        set(loadLocal(get().doc));
       },
 
       undo() {
@@ -425,14 +460,14 @@ export function createEditorStore(init: {
       },
 
       replaceDoc(doc) {
-        const prevId = get().doc.id;
+        const { doc: prev, samples, testState } = get();
         history = emptyHistory();
         savedDoc = doc;
-        set({
-          ...derived(doc),
-          selection: null,
-          ...(doc.id !== prevId ? loadLocal(doc.id) : {}),
-        });
+        const local =
+          doc.id !== prev.id
+            ? loadLocal(doc)
+            : { samples: pruneTo(doc, samples), testState: pruneTo(doc, testState) };
+        set({ ...derived(doc), ...local, selection: null });
       },
     };
   });

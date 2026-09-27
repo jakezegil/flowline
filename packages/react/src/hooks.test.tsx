@@ -47,6 +47,21 @@ describe("editor hooks", () => {
     expect(result.current).toBeUndefined();
   });
 
+  test("useStep(B) stays referentially equal when step A is edited", () => {
+    const { result } = renderHook(() => useStep("email"), { wrapper });
+    const first = result.current;
+    act(() => store.getState().setConfig("load", "contactId", "c1"));
+    act(() => store.getState().renameStep("load", "Fetch"));
+    expect(result.current).toBe(first);
+    // Its own issues change identity only when their contents change.
+    act(() => store.getState().setConfig("email", "to", undefined));
+    const withIssue = result.current;
+    expect(withIssue).not.toBe(first);
+    expect(withIssue?.issues.map((i) => i.code)).toEqual(["config.required"]);
+    act(() => store.getState().setConfig("load", "contactId", "c2"));
+    expect(result.current).toBe(withIssue);
+  });
+
   test("useWorkflow, useSelection and useIssues track the store", () => {
     const { result } = renderHook(
       () => ({ wf: useWorkflow(), sel: useSelection(), issues: useIssues() }),
