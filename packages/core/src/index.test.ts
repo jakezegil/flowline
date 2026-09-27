@@ -6,3 +6,18 @@ describe("VERSION", () => {
     expect(VERSION).toBe("0.1.0");
   });
 });
+
+describe("package entry points", () => {
+  it("exports the builder from the main entry", async () => {
+    const core = await import("./index");
+    expect(typeof core.workflow).toBe("function");
+    expect(typeof core.ref).toBe("function");
+    expect(typeof core.tpl).toBe("function");
+  });
+
+  it("exposes the client at @flowkit/core/client", async () => {
+    const client = await import("@flowkit/core/client");
+    expect(typeof client.createClient).toBe("function");
+    expect(typeof client.FlowkitHttpError).toBe("function");
+  });
+});

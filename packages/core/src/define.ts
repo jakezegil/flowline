@@ -1,7 +1,10 @@
 import type { z } from "zod";
 import type { BranchSpec, OutputSpec, TriggerKind } from "./types";
 
-/** Thrown when a node, trigger, plugin or registry definition is invalid. */
+/**
+ * Thrown when a node, trigger, plugin or registry definition is invalid, or when the code-first
+ * `workflow()` builder is misused (invalid or duplicate IDs, missing trigger).
+ */
 export class FlowkitDefinitionError extends Error {
   /** Error name, for `instanceof`-free checks across package copies. */
   override readonly name = "FlowkitDefinitionError";

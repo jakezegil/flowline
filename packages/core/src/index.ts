@@ -1,6 +1,37 @@
 /** Package version. */
 export const VERSION = "0.1.0";
 
+export type {
+  ApiErrorBody,
+  JournalEntry,
+  PublishRequest,
+  RunDetail,
+  RunError,
+  RunEvent,
+  RunEventType,
+  RunOrigin,
+  RunStartedResponse,
+  RunStatus,
+  RunSummary,
+  RunWorkflowRequest,
+  SubflowInfo,
+  TestStepRequest,
+  TestStepResponse,
+  WorkflowDetail,
+  WorkflowSummary,
+  WorkflowVersion,
+} from "./api-types";
+export {
+  type ConfigOf,
+  type DeepExpr,
+  ref,
+  type StepsBuilder,
+  type TriggerConfigOf,
+  tpl,
+  type WorkflowBuilder,
+  workflow,
+} from "./builder";
+export type { ClientOptions, FlowkitClient } from "./client";
 export {
   type BranchSignal,
   branch,
