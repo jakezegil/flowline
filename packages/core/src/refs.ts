@@ -212,9 +212,8 @@ export function resolveValue(expr: ValueExpr, scope: ResolveScope): unknown {
   if (isRef(expr)) return resolveRefPath(parseRefPath(expr.$ref), scope);
   if (isTpl(expr)) return renderTemplate(expr.$tpl, scope);
   if (expr !== null && typeof expr === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(expr)) out[k] = resolveValue(v, scope);
-    return out;
+    // `Object.fromEntries` defines own properties, so a `__proto__` key stays plain data.
+    return Object.fromEntries(Object.entries(expr).map(([k, v]) => [k, resolveValue(v, scope)]));
   }
   return expr;
 }

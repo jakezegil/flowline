@@ -114,6 +114,15 @@ const scope: ResolveScope = {
 };
 
 describe("resolveValue", () => {
+  test("keeps a nested __proto__ key as plain own data", () => {
+    const expr = JSON.parse('{"outer": {"__proto__": {"x": 1}}}');
+    const out = resolveValue(expr, scope) as { outer: Record<string, unknown> };
+    expect(Object.hasOwn(out.outer, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(out.outer)).toBe(Object.prototype);
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect((out.outer as { x?: unknown }).x).toBeUndefined();
+  });
+
   test("resolves literals as-is", () => {
     expect(resolveValue("hi", scope)).toBe("hi");
     expect(resolveValue(42, scope)).toBe(42);

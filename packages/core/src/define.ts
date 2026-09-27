@@ -83,13 +83,22 @@ export interface NodeContext {
   stepPath: string;
   /** 1-based attempt number. */
   attempt: number;
-  /** Stable across retries of the same step execution; pass it to external APIs. */
+  /**
+   * Stable across retries of the same step execution; pass it to external APIs. Execution is
+   * at-least-once: after a timeout or a lost worker the step runs again (possibly while the earlier
+   * attempt is still running), and this key lets the external system deduplicate.
+   */
   idempotencyKey: string;
   /** Host services (see {@link FlowkitServices}). */
   services: FlowkitServices;
   /** Run-scoped logger. */
   logger: Logger;
-  /** Aborted when the step times out or the run is cancelled. */
+  /**
+   * Aborted when the step times out, the worker loses its lease, or the run is cancelled. The
+   * engine does not kill the handler: after a timeout a retry may start while this attempt is still
+   * running, so handlers must honour the signal (pass it to `fetch`, stop work) and use
+   * {@link NodeContext.idempotencyKey} for side effects.
+   */
   signal: AbortSignal;
   /** Current time in epoch ms, from the engine's injectable clock. */
   now(): number;

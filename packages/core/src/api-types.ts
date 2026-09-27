@@ -101,6 +101,8 @@ export type JournalEntry =
       results: unknown[];
       at: number;
       startedAt: number;
+      /** Attempts the loop handler took to produce its items; copied to the final `done` entry. */
+      attempts: number;
       input?: unknown;
     }
   | {

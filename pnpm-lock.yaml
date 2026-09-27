@@ -39,9 +39,15 @@ importers:
         specifier: workspace:*
         version: link:../core
     devDependencies:
+      '@flowkit/storage-memory':
+        specifier: workspace:*
+        version: link:../storage-memory
       vitest:
         specifier: 5.0.0
         version: 5.0.0(@types/node@22.20.2)(jsdom@30.0.1)(vite@8.3.1(@types/node@22.20.2)(esbuild@0.27.7))
+      zod:
+        specifier: ^4
+        version: 4.6.5
 
   packages/nodes-builtin: {}
 
