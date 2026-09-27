@@ -29,7 +29,17 @@ export {
   type TransformRuntime,
   type TriggerDefinition,
 } from "./define";
-export { fieldsToJsonSchema } from "./json-schema";
+export {
+  branchesFor,
+  configValueAt,
+  describeType,
+  fieldsToJsonSchema,
+  isAnySchema,
+  isAssignable,
+  outputSchemaFor,
+  payloadSchemaFor,
+  schemaAtPath,
+} from "./json-schema";
 export {
   collectRefs,
   FlowkitRefError,
@@ -46,6 +56,7 @@ export {
   type TemplatePart,
 } from "./refs";
 export { createRegistry, type Registry } from "./registry";
+export { availableScope, type ScopeEntry, type ValidationContext } from "./scope";
 export {
   allStepIds,
   duplicateStep,
@@ -81,3 +92,4 @@ export type {
   WorkflowDoc,
 } from "./types";
 export { fields, secret, sensitive, UI_META_KEY, ui } from "./ui";
+export { hasErrors, type Issue, type IssueCode, validateWorkflow } from "./validate";
