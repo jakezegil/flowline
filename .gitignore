@@ -6,3 +6,10 @@ coverage/
 test-results/
 playwright-report/
 .DS_Store
+*.log
+.env
+.env.*
+!.env.example
+.vscode/*
+!.vscode/extensions.json
+.idea/
