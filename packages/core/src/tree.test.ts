@@ -229,6 +229,7 @@ describe("generateStepId", () => {
     const doc = frozenClone(baseDoc());
     expect(generateStepId(doc, "x.constructor")).toBe("constructor_2");
     expect(generateStepId(doc, "__proto__")).toBe("__proto___2");
+    expect(generateStepId(doc, "__trigger")).toBe("__trigger_2");
     expect(generateStepId(doc, "prototype")).toBe("prototype_2");
   });
 });

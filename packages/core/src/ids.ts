@@ -8,13 +8,15 @@
 export const STEP_ID_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
- * IDs that match the grammar but are rejected because they collide with special object
- * properties when used as keys (journals, scopes).
+ * IDs that match the grammar but are rejected: `__proto__`, `constructor` and `prototype`
+ * collide with special object properties when used as keys (journals, scopes), and `__trigger`
+ * is the editor's key for the trigger (selection, samples).
  */
 export const RESERVED_STEP_IDS: ReadonlySet<string> = new Set([
   "__proto__",
   "constructor",
   "prototype",
+  "__trigger",
 ]);
 
 /** Whether `id` is a valid step ID: matches {@link STEP_ID_PATTERN} and is not reserved. */

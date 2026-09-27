@@ -1,4 +1,4 @@
-import { isValidStepId } from "./ids";
+import { isValidStepId, RESERVED_STEP_IDS } from "./ids";
 import {
   asSchema,
   branchesFor,
@@ -713,7 +713,7 @@ export function validateWorkflow(
       report(
         r,
         "step.invalidId",
-        `Step ID "${step.id}" must start with a letter or underscore and contain only letters, digits and underscores, and must not be __proto__, constructor or prototype`,
+        `Step ID "${step.id}" must start with a letter or underscore and contain only letters, digits and underscores, and must not be one of ${[...RESERVED_STEP_IDS].join(", ")}`,
       );
     }
     seen.add(step.id);

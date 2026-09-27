@@ -1,0 +1,83 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`layoutTree > condition with an empty else: columns centered under the card, placeholder, join 1`] = `
+{
+  "edges": [
+    "add trigger -> step:cond [root/#0]",
+    "branch step:cond -> step:email "If" [cond/if#0]",
+    "branch step:cond -> ph:cond:else "Else" [cond/else#0]",
+    "join step:email -> join:cond [cond/if#1]",
+    "join ph:cond:else -> join:cond",
+    "add join:cond -> step:after [root/#1]",
+    "add step:after -> end [root/#2]",
+  ],
+  "nodes": [
+    "trigger trigger @-130,0 260x72",
+    "step:cond step @-130,128 260x72",
+    "step:email step @-284,280 260x72",
+    "ph:cond:else placeholder @24,280 260x44",
+    "join:cond join @-6,408 12x12",
+    "step:after step @-130,476 260x72",
+    "end end @-6,604 12x12",
+  ],
+  "size": [
+    568,
+    616,
+  ],
+}
+`;
+
+exports[`layoutTree > linear: a centered column with + edges between every pair 1`] = `
+{
+  "edges": [
+    "add trigger -> step:load [root/#0]",
+    "add step:load -> step:email [root/#1]",
+    "add step:email -> end [root/#2]",
+  ],
+  "nodes": [
+    "trigger trigger @-130,0 260x72",
+    "step:load step @-130,128 260x72",
+    "step:email step @-130,256 260x72",
+    "end end @-6,384 12x12",
+  ],
+  "size": [
+    260,
+    396,
+  ],
+}
+`;
+
+exports[`layoutTree > nested switch in a loop: body column with gutter and a loop-return edge 1`] = `
+{
+  "edges": [
+    "add trigger -> step:each [root/#0]",
+    "branch step:each -> step:sw "Body" [each/body#0]",
+    "branch step:sw -> step:m1 "A" [sw/a#0]",
+    "add step:m1 -> step:m2 [sw/a#1]",
+    "branch step:sw -> ph:sw:b "B" [sw/b#0]",
+    "branch step:sw -> ph:sw:default "Default" [sw/default#0]",
+    "join step:m2 -> join:sw [sw/a#2]",
+    "join ph:sw:b -> join:sw",
+    "join ph:sw:default -> join:sw",
+    "join join:sw -> join:each [each/body#1]",
+    "loopReturn join:each -> step:each",
+    "add join:each -> end [root/#1]",
+  ],
+  "nodes": [
+    "trigger trigger @-130,0 260x72",
+    "step:each step @-130,128 260x72",
+    "step:sw step @-130,280 260x72",
+    "step:m1 step @-438,432 260x72",
+    "step:m2 step @-438,560 260x72",
+    "ph:sw:b placeholder @-130,432 260x44",
+    "ph:sw:default placeholder @178,432 260x44",
+    "join:sw join @-6,688 12x12",
+    "join:each join @-6,756 12x12",
+    "end end @-6,824 12x12",
+  ],
+  "size": [
+    924,
+    836,
+  ],
+}
+`;

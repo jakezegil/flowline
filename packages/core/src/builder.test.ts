@@ -176,7 +176,7 @@ describe("workflow builder", () => {
 
   test("rejects reserved object-property step ids", () => {
     const b = workflow("wf").trigger(dealUpdated);
-    for (const id of ["__proto__", "constructor", "prototype"]) {
+    for (const id of ["__proto__", "constructor", "prototype", "__trigger"]) {
       expect(() => b.step(id, delay, { duration: "1s" })).toThrow(
         new RegExp(`Invalid step id "${id}"`),
       );

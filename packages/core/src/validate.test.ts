@@ -354,11 +354,13 @@ describe("validateWorkflow", () => {
       step("__proto__", "test.untyped"),
       step("constructor", "test.untyped"),
       step("prototype", "test.untyped"),
+      step("__trigger", "test.untyped"),
     ]);
     expect(validateWorkflow(doc, manifest)).toEqual([
       issue({ code: "step.invalidId", stepId: "__proto__", severity: "error" }),
       issue({ code: "step.invalidId", stepId: "constructor", severity: "error" }),
       issue({ code: "step.invalidId", stepId: "prototype", severity: "error" }),
+      issue({ code: "step.invalidId", stepId: "__trigger", severity: "error" }),
     ]);
   });
 
