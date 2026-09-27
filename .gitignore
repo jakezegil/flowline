@@ -13,3 +13,6 @@ playwright-report/
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# agent worktrees
+.claude/worktrees/
