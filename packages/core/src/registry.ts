@@ -107,10 +107,13 @@ function pluginManifest(p: PluginDefinition): PluginManifest {
 
 // biome-ignore lint/suspicious/noExplicitAny: definitions of any input/output types
 function nodeManifest(plugin: string, def: NodeDefinition<any, any>): NodeManifest {
-  const output: OutputSpec = (def.dynamicOutput && structuredClone(def.dynamicOutput)) ?? {
-    kind: "schema",
-    schema: toSchema(def.output ?? z.object({}), "output", def.type, "output"),
-  };
+  // No declared output ⇒ `{}` (any JSON). Never substitute `z.object({})`: it would strip keys.
+  const output: OutputSpec = def.dynamicOutput
+    ? structuredClone(def.dynamicOutput)
+    : {
+        kind: "schema",
+        schema: def.output ? toSchema(def.output, "output", def.type, "output") : {},
+      };
   return compact({
     type: def.type,
     plugin,

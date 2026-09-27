@@ -1,4 +1,4 @@
-import { z } from "zod";
+import type { z } from "zod";
 import type { BranchSpec, OutputSpec, TriggerKind } from "./types";
 
 /** Thrown when a node, trigger, plugin or registry definition is invalid. */
@@ -220,16 +220,21 @@ export interface RetryPolicy {
   initialMs: number;
 }
 
-/** What a handler may return (or resolve to): its output or a control-flow signal. */
-export type NodeResult<O> = O | Signal;
+/**
+ * What a handler may return (or resolve to): its output, a {@link branch} signal carrying its
+ * output, or another control-flow signal.
+ */
+export type NodeResult<O> = O | BranchSignal<O> | SuspendSignal | StopSignal | SubflowSignal;
 
 /**
  * A node type: config schema, output shape and handler.
  *
  * @typeParam I - Zod object schema of the step's config (resolved and validated before `run`).
- * @typeParam O - The handler's output type.
+ * @typeParam O - The step's output type after validation (what downstream references see).
+ * @typeParam R - What the handler returns: the output schema's input type (`z.input`), since the
+ * return value is parsed with `output` (so fields with `.default()` may be omitted).
  */
-export interface NodeDefinition<I extends z.ZodObject = z.ZodObject, O = unknown> {
+export interface NodeDefinition<I extends z.ZodObject = z.ZodObject, O = unknown, R = O> {
   /** Globally unique, namespaced by plugin ID, e.g. `"crm.loadContact"`. */
   type: string;
   /** Display name. */
@@ -244,8 +249,12 @@ export interface NodeDefinition<I extends z.ZodObject = z.ZodObject, O = unknown
   summary?: string;
   /** Config schema. Use {@link ui} to add editor hints. */
   input: I;
-  /** Output schema; the handler's return value is validated against it. Defaults to `z.object({})`. */
-  output?: z.ZodType<O>;
+  /**
+   * Output schema; the handler's return value is parsed with it. Declare `output` to get typed
+   * references and validation. Without it (and without `dynamicOutput`) the output is untyped
+   * (any JSON) and returned values are stored as-is.
+   */
+  output?: z.ZodType<O, R>;
   /** Output shape derived from config instead of a static schema. Mutually exclusive with `output`. */
   dynamicOutput?: Exclude<OutputSpec, { kind: "schema" }>;
   /** How the node branches. Defaults to `{ kind: "none" }`. */
@@ -255,7 +264,7 @@ export interface NodeDefinition<I extends z.ZodObject = z.ZodObject, O = unknown
   /** Handler wall-clock limit in ms, enforced via `ctx.signal`. Default `300_000`. */
   timeoutMs?: number;
   /** The handler. Receives validated input; returns output or a signal. */
-  run(args: { input: z.infer<I>; ctx: NodeContext }): Promise<NodeResult<O>> | NodeResult<O>;
+  run(args: { input: z.infer<I>; ctx: NodeContext }): Promise<NodeResult<R>> | NodeResult<R>;
 }
 
 const NAMESPACED_TYPE = /^[^.]+\.[^.].*$/;
@@ -270,7 +279,8 @@ function assertNamespaced(kind: string, type: string): void {
 
 /**
  * Define a node type. Input types flow from `input` into `run`; when `output` is given, `run`'s
- * return value is checked against it.
+ * return value (including a {@link branch} output) is checked against the output schema's input
+ * type. Declare `output` to get typed references and validation.
  *
  * @throws {@link FlowkitDefinitionError} if `type` has no namespace or both `output` and
  * `dynamicOutput` are given.
@@ -287,24 +297,21 @@ function assertNamespaced(kind: string, type: string): void {
  * });
  * ```
  */
-export function defineNode<I extends z.ZodObject, O = unknown>(
-  def: Omit<NodeDefinition<I, O>, "run"> & {
-    // `NoInfer`: O comes from `output` only, so `run`'s return is checked against it
-    // rather than widening O to whatever `run` returns.
+export function defineNode<I extends z.ZodObject, O = unknown, R = O>(
+  def: Omit<NodeDefinition<I, O, R>, "run"> & {
+    // `NoInfer`: O and R come from `output` only, so `run`'s return is checked against it
+    // rather than widening them to whatever `run` returns.
     run(args: {
       input: z.infer<I>;
       ctx: NodeContext;
-    }): Promise<NodeResult<NoInfer<O>>> | NodeResult<NoInfer<O>>;
+    }): Promise<NodeResult<NoInfer<R>>> | NodeResult<NoInfer<R>>;
   },
-): NodeDefinition<I, O> {
+): NodeDefinition<I, O, R> {
   assertNamespaced("Node", def.type);
   if (def.output !== undefined && def.dynamicOutput !== undefined) {
     throw new FlowkitDefinitionError(
       `Node "${def.type}" declares both output and dynamicOutput; use one`,
     );
-  }
-  if (def.output === undefined && def.dynamicOutput === undefined) {
-    return { ...def, output: z.object({}) as unknown as z.ZodType<O> };
   }
   return def;
 }

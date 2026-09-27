@@ -155,10 +155,8 @@ test("defaults for output, payload, dynamic specs and branches", () => {
     }),
   ]).manifest();
   expect(m.nodes[0]!.branches).toEqual(cond.branches);
-  expect(m.nodes[0]!.output).toEqual({
-    kind: "schema",
-    schema: expect.objectContaining({ type: "object", properties: {} }),
-  });
+  // no declared output: any value (empty schema), never a stripping `z.object({})`
+  expect(m.nodes[0]!.output).toEqual({ kind: "schema", schema: {} });
   expect(m.nodes[1]!.output).toEqual({ kind: "fields", configPath: "fields" });
   expect(props(m.nodes[1]!.input).fields!["x-flowkit"]).toEqual({ widget: "fields" });
   expect(m.triggers[0]!.payload).toEqual({ kind: "webhook", configPath: "fields" });
@@ -172,6 +170,7 @@ test("defaults for output, payload, dynamic specs and branches", () => {
 });
 
 describe("ui metadata survives JSON Schema conversion", () => {
+  const shared = ui(z.string(), { label: "Same" });
   const node = defineNode({
     type: "t.n",
     name: "N",
@@ -185,7 +184,8 @@ describe("ui metadata survives JSON Schema conversion", () => {
       nested: z.object({ inner: ui(z.number(), { widget: "slider" }) }),
       list: z.array(z.object({ q: ui(z.string(), { multiline: true }) })),
       token: secret(),
-      reusedA: ui(z.string(), { label: "Same" }),
+      reusedA: shared,
+      reusedB: shared.optional(),
     }),
     run: () => ({}),
   });
@@ -202,6 +202,7 @@ describe("ui metadata survives JSON Schema conversion", () => {
     ["described", { label: "D" }],
     ["token", { secret: true, widget: "secret" }],
     ["reusedA", { label: "Same" }],
+    ["reusedB", { label: "Same" }],
   ])("%s", (key, meta) => {
     expect(p[key]!["x-flowkit"]).toEqual(meta);
   });

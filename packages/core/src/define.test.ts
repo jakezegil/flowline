@@ -10,6 +10,7 @@ import {
   invokeSubflow,
   isSignal,
   type NodeContext,
+  type NodeDefinition,
   type Signal,
   stop,
   suspend,
@@ -58,7 +59,7 @@ describe("defineNode", () => {
       run: () => ({ id: "a" }),
     });
     expectTypeOf(missing.output).toEqualTypeOf<
-      z.ZodType<{ id: string; email: string }> | undefined
+      z.ZodType<{ id: string; email: string }, { id: string; email: string }> | undefined
     >();
     defineNode({
       type: "crm.y",
@@ -67,6 +68,49 @@ describe("defineNode", () => {
       output: z.object({ id: z.string() }),
       run: async () => branch("if", { id: "a" }),
     });
+    defineNode({
+      type: "crm.w",
+      name: "W",
+      input: z.object({}),
+      output: z.object({ id: z.string() }),
+      // @ts-expect-error — branch output `id` must be a string
+      run: () => branch("if", { id: 1 }),
+    });
+    defineNode({
+      type: "crm.v",
+      name: "V",
+      input: z.object({}),
+      output: z.object({ id: z.string() }),
+      // @ts-expect-error — branch output is missing `id`
+      run: async () => branch("else", {}),
+    });
+  });
+
+  test("run returns the output schema's input type (defaults may be omitted)", () => {
+    const input = z.object({});
+    const node = defineNode({
+      type: "crm.d",
+      name: "D",
+      input,
+      output: z.object({ id: z.string(), tags: z.array(z.string()).default([]) }),
+      run: () => ({ id: "a" }),
+    });
+    // O is the parsed (output) type, used for typed references downstream
+    expectTypeOf(node).toEqualTypeOf<
+      NodeDefinition<
+        typeof input,
+        { id: string; tags: string[] },
+        { id: string; tags?: string[] | undefined }
+      >
+    >();
+    defineNode({
+      type: "crm.e",
+      name: "E",
+      input: z.object({}),
+      output: z.object({ id: z.string(), tags: z.array(z.string()).default([]) }),
+      // @ts-expect-error — `tags` may be omitted but must be a string[] when given
+      run: () => ({ id: "a", tags: [1] }),
+    });
   });
 
   test("accepts strict and loose object schemas", () => {
@@ -74,10 +118,15 @@ describe("defineNode", () => {
     defineNode({ type: "a.c", name: "C", input: z.looseObject({ a: z.string() }), run: () => 1 });
   });
 
-  test("defaults output to an empty object schema", () => {
-    const node = defineNode({ type: "a.b", name: "B", input: z.object({}), run: () => ({}) });
-    expect(node.output).toBeInstanceOf(z.ZodObject);
-    expect(z.toJSONSchema(node.output!)).toMatchObject({ type: "object", properties: {} });
+  test("without output, stores no output schema and run may return anything", () => {
+    const node = defineNode({
+      type: "a.b",
+      name: "B",
+      input: z.object({}),
+      run: () => ({ anything: 1 }),
+    });
+    expect(node.output).toBeUndefined();
+    expect("output" in node).toBe(false);
   });
 
   test("keeps dynamicOutput without adding a static output", () => {
