@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing.ts",
+      "default": "./src/testing.ts"
     }
   },
   "publishConfig": {
@@ -14,6 +18,10 @@
       ".": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing.d.ts",
+        "default": "./dist/testing.js"
       }
     }
   },
@@ -23,5 +31,15 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsup"
+  },
+  "dependencies": {
+    "@flowkit/core": "workspace:*",
+    "@flowkit/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@types/pg": "8.23.1",
+    "pg": "8.23.0",
+    "vitest": "5.0.0"
   }
 }
