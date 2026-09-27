@@ -98,7 +98,12 @@ function getList(
   return found.step.branches?.[branch];
 }
 
-/** Rebuilds `doc` with the step list at `(parentId, branch)` replaced by `newList`. */
+/**
+ * Rebuilds `doc` with the step list at `(parentId, branch)` replaced by `newList`. Path-copying:
+ * only the steps and lists on the path from the root to that list are copied; every other step
+ * and branch list keeps its identity, so consumers can skip unchanged subtrees by reference.
+ * The parent is the first pre-order match, like {@link findStep}.
+ */
 function replaceList(
   doc: WorkflowDoc,
   parentId: string | null,
@@ -108,22 +113,32 @@ function replaceList(
   if (parentId === null) {
     return { ...doc, steps: newList };
   }
-  function recur(steps: Step[]): Step[] {
-    return steps.map((step) => {
+  /** `steps` with the parent's list replaced, or `undefined` if the parent isn't under it. */
+  function recur(steps: Step[]): Step[] | undefined {
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i] as Step;
+      let replaced: Step | undefined;
       if (step.id === parentId) {
-        return { ...step, branches: { ...step.branches, [branch as string]: newList } };
-      }
-      if (step.branches) {
-        const branches: Record<string, Step[]> = {};
+        replaced = { ...step, branches: { ...step.branches, [branch as string]: newList } };
+      } else if (step.branches) {
         for (const [branchKey, branchSteps] of Object.entries(step.branches)) {
-          branches[branchKey] = recur(branchSteps);
+          const list = recur(branchSteps);
+          if (list) {
+            replaced = { ...step, branches: { ...step.branches, [branchKey]: list } };
+            break;
+          }
         }
-        return { ...step, branches };
       }
-      return step;
-    });
+      if (replaced) {
+        const copy = steps.slice();
+        copy[i] = replaced;
+        return copy;
+      }
+    }
+    return undefined;
   }
-  return { ...doc, steps: recur(doc.steps) };
+  const steps = recur(doc.steps);
+  return steps ? { ...doc, steps } : doc;
 }
 
 /**

@@ -276,3 +276,57 @@ describe("duplicateStep", () => {
     expect(() => duplicateStep(doc, "nope")).toThrow(FlowkitTreeError);
   });
 });
+
+describe("structural sharing", () => {
+  function twoBlocksDoc(): WorkflowDoc {
+    const leaf = (id: string): Step => ({ id, type: "crm.sendEmail", config: {} });
+    return frozenClone({
+      id: "wf-share",
+      name: "Sharing",
+      trigger: { type: "crm.dealUpdated", config: {} },
+      steps: [
+        {
+          id: "outer",
+          type: "logic.condition",
+          config: {},
+          branches: {
+            if: [
+              { id: "left", type: "logic.condition", config: {}, branches: { if: [leaf("a")] } },
+              { id: "right", type: "logic.condition", config: {}, branches: { if: [leaf("b")] } },
+            ],
+            else: [leaf("c")],
+          },
+        },
+        { id: "sibling", type: "logic.condition", config: {}, branches: { if: [leaf("d")] } },
+      ],
+    });
+  }
+
+  test("editing a nested step keeps untouched steps and branches referentially equal", () => {
+    const doc = twoBlocksDoc();
+    const next = updateStep(doc, "a", (s) => ({ ...s, name: "Renamed" }));
+    const before = (id: string) => findStep(doc, id)?.step;
+    const after = (id: string) => findStep(next, id)?.step;
+    expect(after("a")?.name).toBe("Renamed");
+    // Untouched branching steps, anywhere in the tree, are the same objects.
+    expect(after("right")).toBe(before("right"));
+    expect(after("sibling")).toBe(before("sibling"));
+    expect(after("c")).toBe(before("c"));
+    expect(after("outer")?.branches?.else).toBe(before("outer")?.branches?.else);
+    // Only the path to the edit is copied.
+    expect(after("left")).not.toBe(before("left"));
+    expect(after("outer")).not.toBe(before("outer"));
+    expect(Object.keys(after("outer")?.branches ?? {})).toEqual(["if", "else"]);
+  });
+
+  test("insert and remove share every step they don't change", () => {
+    const doc = twoBlocksDoc();
+    const step: Step = { id: "new", type: "crm.sendEmail", config: {} };
+    const inserted = insertStep(doc, { parentId: "right", branch: "if", index: 1 }, step);
+    expect(findStep(inserted, "left")?.step).toBe(findStep(doc, "left")?.step);
+    expect(findStep(inserted, "sibling")?.step).toBe(findStep(doc, "sibling")?.step);
+    const removed = removeStep(inserted, "new");
+    expect(findStep(removed, "left")?.step).toBe(findStep(doc, "left")?.step);
+    expect(findStep(removed, "right")?.step).toEqual(findStep(doc, "right")?.step);
+  });
+});
