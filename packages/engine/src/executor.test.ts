@@ -7,6 +7,7 @@ import {
   type NodeContext,
   type RunEvent,
   type Step,
+  secret,
   sensitive,
   stop,
   suspend,
@@ -92,7 +93,17 @@ const registry = createRegistry([
         name: "For each",
         input: z.object({ items: z.array(z.unknown()) }),
         branches: { kind: "loop", itemsField: "items", branch: "body" },
-        run: ({ input }) => ({ items: input.items }),
+        run: ({ input, ctx }) => {
+          const b = behaviours[ctx.stepId];
+          if (b) return b(ctx, input) as never;
+          return { items: input.items };
+        },
+      }),
+      defineNode({
+        type: "test.numeric",
+        name: "Numeric",
+        input: z.object({ n: z.number() }),
+        run: ({ input }) => ({ n: input.n }),
       }),
       defineNode({
         type: "test.stop",
@@ -113,9 +124,24 @@ const registry = createRegistry([
       defineNode({
         type: "test.secretive",
         name: "Secretive",
-        input: z.object({ apiKey: sensitive(z.string()), name: z.string() }),
+        input: z.object({
+          apiKey: sensitive(z.string()),
+          vault: secret().optional(),
+          name: z.string(),
+        }),
         output: z.object({ token: sensitive(z.string()), ok: z.boolean() }),
         run: () => ({ token: "tok-123", ok: true }),
+      }),
+      defineNode({
+        type: "test.slowRetry",
+        name: "Slow with retries",
+        input: z.object({}),
+        timeoutMs: 20,
+        retry: { max: 3, backoff: undefined },
+        run: ({ ctx }) =>
+          new Promise((resolve) => {
+            ctx.signal.addEventListener("abort", () => resolve({ aborted: true }));
+          }),
       }),
       defineNode({
         type: "test.slow",
@@ -723,25 +749,67 @@ describe("executor: errors and retries", () => {
 });
 
 describe("executor: redaction", () => {
-  it("masks sensitive input and output fields in the journal and events, then applies redact", async () => {
+  it("masks secret fields in the journal and secret + sensitive fields in events, then applies redact", async () => {
     const id = await startRun(
-      wf([step("s", "test.secretive", { apiKey: "hunter2", name: "visible" })]),
+      wf([step("s", "test.secretive", { apiKey: "hunter2", vault: "prod-key", name: "visible" })]),
     );
     await makeEngine({
       redact: (e) => (e.type === "step.completed" ? { ...e, data: { scrubbed: true } } : e),
     }).drain();
     const run = await getRun(id);
+    // Journal: only `secret` fields are masked; `sensitive` values stay usable downstream.
     expect(run.journal.s).toMatchObject({
-      input: { apiKey: "[redacted]", name: "visible" },
-      output: { token: "[redacted]", ok: true },
+      input: { apiKey: "hunter2", vault: "[redacted]", name: "visible" },
+      output: { token: "tok-123", ok: true },
     });
     const evs = await events(id);
     expect(evs.find((e) => e.type === "step.started")?.data).toEqual({
-      input: { apiKey: "[redacted]", name: "visible" },
+      input: { apiKey: "[redacted]", vault: "[redacted]", name: "visible" },
     });
     expect(evs.find((e) => e.type === "step.completed")?.data).toEqual({ scrubbed: true });
-    expect(JSON.stringify({ run, evs })).not.toContain("hunter2");
-    expect(JSON.stringify({ run, evs })).not.toContain("tok-123");
+    expect(JSON.stringify(evs)).not.toContain("hunter2");
+    expect(JSON.stringify(evs)).not.toContain("tok-123");
+    expect(JSON.stringify({ run, evs })).not.toContain("prod-key");
+  });
+
+  it("lets a later step reference a sensitive output while its event stays masked", async () => {
+    const id = await startRun(
+      wf([
+        step("s", "test.secretive", { apiKey: "k", name: "n" }),
+        step("use", "test.echo", { value: { $ref: "steps.s.token" } }),
+      ]),
+    );
+    await makeEngine().drain();
+    const run = await getRun(id);
+    expect(run.journal.use).toMatchObject({ status: "done", output: { value: "tok-123" } });
+    const completed = (await events(id)).find(
+      (e) => e.type === "step.completed" && e.stepPath === "s",
+    );
+    expect(completed?.data).toMatchObject({ output: { token: "[redacted]", ok: true } });
+  });
+
+  it("masks sensitive body outputs in a loop's step.completed event", async () => {
+    const id = await startRun(
+      wf([
+        step(
+          "each",
+          "test.forEach",
+          { items: [1] },
+          { branches: { body: [step("s", "test.secretive", { apiKey: "k", name: "n" })] } },
+        ),
+      ]),
+    );
+    await makeEngine().drain();
+    const run = await getRun(id);
+    expect(run.journal.each).toMatchObject({
+      output: { count: 1, results: [{ token: "tok-123", ok: true }] },
+    });
+    const completed = (await events(id)).find(
+      (e) => e.type === "step.completed" && e.stepPath === "each",
+    );
+    expect(completed?.data).toMatchObject({
+      output: { count: 1, results: [{ token: "[redacted]", ok: true }] },
+    });
   });
 
   it("reports every persisted event to onEvent", async () => {
@@ -765,8 +833,8 @@ describe("executor: durability", () => {
       clock: clock.now,
       leaseMs,
       __testHooks: {
-        beforeCommit: (_runId, stepPath) => {
-          if (crash && stepPath === "s2") {
+        beforeCommit: (_runId, stepPath, phase) => {
+          if (crash && stepPath === "s2" && phase === "result") {
             crash = false;
             throw new Error("simulated crash");
           }
@@ -790,6 +858,8 @@ describe("executor: durability", () => {
     const forS2 = evs.filter((e) => e.stepPath === "s2").map((e) => e.type);
     expect(forS2).toEqual(["step.started", "step.started", "step.completed"]);
     expect(evs.filter((e) => e.type === "run.completed")).toHaveLength(1);
+    // The lost attempt counts: the re-run is attempt 2.
+    expect(run.journal.s2).toMatchObject({ attempts: 2 });
   });
 
   it("stops silently when its lease was taken over before commit", async () => {
@@ -844,5 +914,252 @@ describe("executor: durability", () => {
     expect(run.leaseOwner).toBe("thief");
     expect(run.journal).toEqual({});
     expect((await events(id)).map((e) => e.type)).toEqual(["run.started", "step.started"]);
+  });
+});
+
+describe("executor: lost workers and lease renewal", () => {
+  const leaseMs = 30_000;
+
+  /** An executor whose `result` commits throw for matching paths, simulating a worker crash. */
+  function crashingExecutor(failPath: (path: string) => boolean) {
+    return createExecutor({
+      registry,
+      storage,
+      clock: clock.now,
+      leaseMs,
+      __testHooks: {
+        beforeCommit: (_runId, stepPath, phase) => {
+          if (phase === "result" && failPath(stepPath)) throw new Error("simulated crash");
+        },
+      },
+    });
+  }
+
+  async function crashOnce(ex: ReturnType<typeof createExecutor>) {
+    const lease = await storage.claimRun({ workerId: "crashy", leaseMs, now: clock.now() });
+    expect(lease).not.toBe(null);
+    await expect(ex.executeClaim(lease!, "crashy")).rejects.toThrow("simulated crash");
+    clock.advance(leaseMs + 1);
+  }
+
+  it("fails a step whose handler keeps killing the worker once retries are used up", async () => {
+    const id = await startRun(wf([step("a", "test.echo"), step("b", "test.echo")]));
+    const ex = crashingExecutor((p) => p === "a");
+    for (let i = 0; i < 3; i++) await crashOnce(ex);
+    expect(calls.a).toBe(3);
+
+    const engine = makeEngine({ leaseMs });
+    expect(await engine.runOnce()).toBe(true);
+    const run = await getRun(id);
+    expect(run.status).toBe("failed");
+    expect(run.error).toMatchObject({
+      message: "worker lost during step (3 attempts)",
+      stepPath: "a",
+    });
+    expect(run.journal.a).toMatchObject({ status: "failed", attempts: 3 });
+    expect(calls.a).toBe(3);
+    expect(calls.b).toBeUndefined();
+    expect(await engine.drain()).toBe(0);
+  });
+
+  it("resumes a crashed forEach at the interrupted iteration", async () => {
+    const id = await startRun(
+      wf([
+        step(
+          "each",
+          "test.forEach",
+          { items: ["a", "b", "c"] },
+          { branches: { body: [step("x", "test.echo", { value: { $ref: "loop.item" } })] } },
+        ),
+      ]),
+    );
+    let crash = true;
+    const ex = crashingExecutor((p) => {
+      if (crash && p === "each/body[1]/x") {
+        crash = false;
+        return true;
+      }
+      return false;
+    });
+    await crashOnce(ex);
+    await makeEngine({ leaseMs }).drain();
+    const run = await getRun(id);
+    expect(run.status).toBe("completed");
+    expect(calls).toEqual({ "each/body[0]/x": 1, "each/body[1]/x": 2, "each/body[2]/x": 1 });
+    expect(run.journal.each).toMatchObject({
+      output: { count: 3, results: [{ value: "a" }, { value: "b" }, { value: "c" }] },
+    });
+  });
+
+  it("renews the lease while a long handler runs so no other worker can claim the run", async () => {
+    const shortLease = 60;
+    let claimedMeanwhile: unknown = "not tried";
+    behaviours.a = async () => {
+      await new Promise((r) => setTimeout(r, 100));
+      claimedMeanwhile = await storage.claimRun({
+        workerId: "other",
+        leaseMs: shortLease,
+        now: Date.now(),
+      });
+      await new Promise((r) => setTimeout(r, 100));
+      return { ok: true };
+    };
+    const id = await startRun(wf([step("a", "test.echo")]));
+    // Real clock: without renewal the lease (60ms) would have expired by the 100ms claim attempt.
+    await createEngine({ registry, storage, leaseMs: shortLease }).runOnce("w1");
+    expect(claimedMeanwhile).toBe(null);
+    expect((await getRun(id)).status).toBe("completed");
+    expect(calls.a).toBe(1);
+  });
+
+  it("keeps the claim when lease renewal throws transiently", async () => {
+    let failures = 0;
+    const flaky: StorageAdapter = {
+      ...storage,
+      renewLease: async (lease, ms, now) => {
+        if (failures < 2) {
+          failures++;
+          throw new Error("db hiccup");
+        }
+        return storage.renewLease(lease, ms, now);
+      },
+    };
+    const warnings: string[] = [];
+    const logger = { debug() {}, info() {}, warn: (m: string) => warnings.push(m), error() {} };
+    behaviours.a = async () => {
+      await new Promise((r) => setTimeout(r, 150));
+      return { ok: true };
+    };
+    const id = await startRun(wf([step("a", "test.echo")]));
+    await createEngine({ registry, storage: flaky, leaseMs: 40, logger }).runOnce("w1");
+    expect((await getRun(id)).status).toBe("completed");
+    expect(warnings).toEqual(["lease renewal failed", "lease renewal failed"]);
+  });
+
+  it("abandons the claim after three consecutive renewal errors", async () => {
+    const broken: StorageAdapter = {
+      ...storage,
+      renewLease: async () => {
+        throw new Error("db down");
+      },
+    };
+    let signal: AbortSignal | undefined;
+    behaviours.a = (ctx) =>
+      new Promise((resolve) => {
+        signal = ctx.signal;
+        ctx.signal.addEventListener("abort", () => resolve({ aborted: true }));
+      });
+    const id = await startRun(wf([step("a", "test.echo")]));
+    await createEngine({ registry, storage: broken, leaseMs: 40 }).runOnce("w1");
+    expect(signal?.aborted).toBe(true);
+    const run = await getRun(id);
+    expect(run.status).toBe("running");
+    expect(run.journal).toEqual({});
+  });
+});
+
+describe("executor: retry details", () => {
+  it("moves a timed-out step with retries left to waiting (retry), keeping default backoff", async () => {
+    const id = await startRun(wf([step("slow", "test.slowRetry")]));
+    const t0 = clock.t;
+    await makeEngine().drain();
+    const run = await getRun(id);
+    expect(run).toMatchObject({ status: "waiting", waitReason: "retry", attempt: 2 });
+    // `retry.backoff: undefined` must not erase the exponential default.
+    expect(run.wakeAt).toBe(t0 + 1000);
+    const retrying = (await events(id)).find((e) => e.type === "step.retrying");
+    expect(retrying?.data).toEqual({ attempt: 1, delayMs: 1000, error: "timed out" });
+  });
+
+  it("keeps run.resume across a retry and clears it once the step settles", async () => {
+    const seen: unknown[] = [];
+    behaviours.a = (ctx) => {
+      seen.push(ctx.resume);
+      if (ctx.attempt === 1) throw new Error("transient");
+      return { ok: true };
+    };
+    const v = await storage.saveWorkflowVersion(TENANT, wf([step("a", "test.echo")]), "u", clock.t);
+    const resume = { kind: "callback" as const, body: { approved: true } };
+    await storage.createRun(
+      {
+        id: "resumed",
+        tenantId: TENANT,
+        workflowId: "wf",
+        version: v.version,
+        status: "queued",
+        trigger: {},
+        journal: {},
+        attempt: 1,
+        startedBy: { kind: "manual" },
+        resume,
+      },
+      [],
+      clock.t,
+    );
+    const engine = makeEngine();
+    await engine.drain();
+    expect((await getRun("resumed")).resume).toEqual(resume);
+    clock.advance(1000);
+    await engine.drain();
+    const run = await getRun("resumed");
+    expect(run.status).toBe("completed");
+    expect(seen).toEqual([resume, resume]);
+    expect(run.resume).toBeUndefined();
+  });
+
+  it("carries the loop handler's attempts into the loop's done entry", async () => {
+    behaviours.each = (ctx, input) => {
+      if (ctx.attempt === 1) throw new Error("transient");
+      return { items: (input as { items: unknown[] }).items };
+    };
+    const id = await startRun(
+      wf([
+        step(
+          "each",
+          "test.forEach",
+          { items: [1] },
+          { branches: { body: [step("x", "test.echo")] } },
+        ),
+      ]),
+    );
+    const engine = makeEngine();
+    await engine.drain();
+    clock.advance(1000);
+    await engine.drain();
+    const run = await getRun(id);
+    expect(run.status).toBe("completed");
+    expect(run.journal.each).toMatchObject({ status: "done", attempts: 2 });
+  });
+});
+
+describe("executor: messages and branch output", () => {
+  it("accepts branch(id) without output even when the node declares an output schema", async () => {
+    behaviours.cond = () => branch("if");
+    const id = await startRun(
+      wf([
+        step(
+          "cond",
+          "test.ifElse",
+          { cond: true },
+          { branches: { if: [step("x", "test.echo", { value: { $ref: "steps.cond" } })] } },
+        ),
+      ]),
+    );
+    await makeEngine().drain();
+    const run = await getRun(id);
+    expect(run.status).toBe("completed");
+    expect(run.journal.cond).toMatchObject({ status: "done", branch: "if" });
+    expect(run.journal["cond/if/x"]).toMatchObject({ output: { value: {} } });
+  });
+
+  it("names the first ref of a failing template as the source", async () => {
+    const id = await startRun(
+      wf([step("n", "test.numeric", { n: { $tpl: "{{trigger.count}} of {{trigger.total}}" } })]),
+      { count: 2, total: 3 },
+    );
+    await makeEngine().drain();
+    const message = (await getRun(id)).error?.message;
+    expect(message).toContain('Step "n": field "n" ');
+    expect(message).toContain('(from template "trigger.count")');
   });
 });

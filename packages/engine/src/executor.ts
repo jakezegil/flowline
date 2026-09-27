@@ -6,8 +6,10 @@
  */
 import {
   branchesFor,
+  collectRefs,
   isRef,
   isSignal,
+  isTpl,
   type JournalEntry,
   type NodeDefinition,
   type NodeManifest,
@@ -23,7 +25,7 @@ import type { z } from "zod";
 import { createNodeContext, sha256Hex } from "./context";
 import type { EngineOptions } from "./engine";
 import { RetryableError } from "./errors";
-import { buildScope, entryAt, type NextAction, nextAction } from "./interpreter";
+import { buildScope, childSteps, entryAt, type NextAction, nextAction } from "./interpreter";
 import { redactBySchema } from "./redact";
 import type { Lease, NewRunEvent, RunPatch } from "./storage";
 
@@ -32,6 +34,8 @@ const DEFAULT_STEPS_PER_CLAIM = 100;
 const DEFAULT_TIMEOUT_MS = 300_000;
 const DEFAULT_RETRY: RetryPolicy = { max: 3, backoff: "exponential", initialMs: 1000 };
 const MAX_BACKOFF_MS = 3_600_000;
+/** Consecutive `renewLease` rejections tolerated before the claim is abandoned. */
+const MAX_RENEWAL_ERRORS = 3;
 
 /** @internal Advances claimed runs. Shared by the engine and crash-injection tests. */
 export interface Executor {
@@ -65,6 +69,15 @@ function backoffMs(policy: RetryPolicy, attempt: number): number {
   return Math.min(delay, MAX_BACKOFF_MS);
 }
 
+/** The node's retry policy, field by field over the defaults (an explicit `undefined` keeps the default). */
+function retryPolicy(node: AnyNode): RetryPolicy {
+  return {
+    max: node.retry?.max ?? DEFAULT_RETRY.max,
+    backoff: node.retry?.backoff ?? DEFAULT_RETRY.backoff,
+    initialMs: node.retry?.initialMs ?? DEFAULT_RETRY.initialMs,
+  };
+}
+
 function isFatal(err: unknown): boolean {
   return err instanceof Error && err.name === "FatalError";
 }
@@ -92,14 +105,22 @@ function exprAt(config: Record<string, ValueExpr>, path: PropertyKey[]): ValueEx
   return cur as ValueExpr | undefined;
 }
 
-/** `Step "<label>": field "<key>" <zod message> (from <ref path | 'literal'>)`. */
+/**
+ * `Step "<label>": field "<key>" <zod message> (from <source>)`, where the source is the ref path,
+ * `template "<first ref path>"`, or `literal`.
+ */
 function inputErrorMessage(label: string, config: Record<string, ValueExpr>, error: z.ZodError) {
   const issue = error.issues[0];
   if (!issue) return `Step "${label}": invalid input`;
   if (issue.path.length === 0) return `Step "${label}": ${issue.message}`;
   const field = issue.path.map(String).join(".");
   const expr = exprAt(config, issue.path);
-  const source = isRef(expr) ? expr.$ref : "literal";
+  const firstTplRef = isTpl(expr) ? collectRefs(expr)[0] : undefined;
+  const source = isRef(expr)
+    ? expr.$ref
+    : firstTplRef !== undefined
+      ? `template "${firstTplRef}"`
+      : "literal";
   return `Step "${label}": field "${field}" ${issue.message} (from ${source})`;
 }
 
@@ -162,8 +183,13 @@ export function createExecutor(opts: EngineOptions): Executor {
     };
 
     /** Commit under the lease; `false` means the lease was lost and processing must stop. */
-    const commit = async (patch: RunPatch, events: NewRunEvent[], stepPath: string) => {
-      await hooks?.beforeCommit?.(run.id, stepPath);
+    const commit = async (
+      patch: RunPatch,
+      events: NewRunEvent[],
+      stepPath: string,
+      phase: "start" | "result" = "result",
+    ) => {
+      await hooks?.beforeCommit?.(run.id, stepPath, phase);
       const full = clearWakeAt && patch.wakeAt === undefined ? { ...patch, wakeAt: null } : patch;
       const ok = await storage.commit(lease, full, events, clock());
       if (ok) {
@@ -214,6 +240,22 @@ export function createExecutor(opts: EngineOptions): Executor {
     }
     const doc = version.doc;
 
+    // A step that was marked in flight (`currentStep` set by the start commit, no wait reason) but
+    // never settled: the previous worker died or lost its lease while running it. That attempt
+    // counts against the step's retry budget, so a handler that crashes its worker is not re-run
+    // forever.
+    const current = run.currentStep;
+    const currentEntry = current === undefined ? undefined : entryAt(journal, current);
+    let lostInFlight =
+      current !== undefined &&
+      run.waitReason === undefined &&
+      currentEntry?.status !== "done" &&
+      currentEntry?.status !== "branched" &&
+      currentEntry?.status !== "looping" &&
+      currentEntry?.status !== "skipped"
+        ? current
+        : undefined;
+
     const renewIfDue = async (): Promise<boolean> => {
       if (clock() < leaseUntil - leaseMs / 2) return true;
       const ok = await storage.renewLease(lease, leaseMs, clock());
@@ -232,14 +274,29 @@ export function createExecutor(opts: EngineOptions): Executor {
     ): Promise<unknown> => {
       const controller = new AbortController();
       const timeoutMs = node.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+      // The handler is not killed at the timeout: it may keep running while the retry starts, which
+      // is why handlers must honour `ctx.signal` and pass `ctx.idempotencyKey` downstream.
       const timer = setTimeout(() => controller.abort(new RetryableError("timed out")), timeoutMs);
+      let renewalErrors = 0;
       const renewal = setInterval(() => {
         storage.renewLease(lease, leaseMs, clock()).then(
           (ok) => {
+            renewalErrors = 0;
             if (ok) leaseUntil = clock() + leaseMs;
             else controller.abort(new LeaseLostError("lease lost"));
           },
-          () => controller.abort(new LeaseLostError("lease renewal failed")),
+          (err: unknown) => {
+            // A transient storage error: keep the claim and try again on the next tick.
+            renewalErrors++;
+            opts.logger?.warn("lease renewal failed", {
+              runId: run.id,
+              attempt: renewalErrors,
+              error: errorMessage(err),
+            });
+            if (renewalErrors >= MAX_RENEWAL_ERRORS) {
+              controller.abort(new LeaseLostError("lease renewal failed repeatedly"));
+            }
+          },
         );
       }, leaseMs / 2);
       const aborted = new Promise<never>((_, reject) => {
@@ -298,6 +355,21 @@ export function createExecutor(opts: EngineOptions): Executor {
       const manifest = nodeManifest(step.type);
       if (!node || !manifest) return fatal(`Step "${label}": unknown node type "${step.type}"`);
 
+      if (lostInFlight === path) {
+        lostInFlight = undefined;
+        if (attempt >= retryPolicy(node).max) {
+          const error: RunError = {
+            message: `worker lost during step (${attempt} attempts)`,
+            stepPath: path,
+          };
+          return failRun(error, {
+            path,
+            entry: { status: "failed", error, at: clock(), startedAt, attempts: attempt },
+          });
+        }
+        attempt++;
+      }
+
       const scope = buildScope(doc, journal, path, run.trigger, run.id);
       let resolved: Record<string, unknown>;
       try {
@@ -313,16 +385,26 @@ export function createExecutor(opts: EngineOptions): Executor {
       if (!parsed.success) {
         return fatal(
           inputErrorMessage(label, step.config, parsed.error),
-          redactBySchema(resolved, manifest.input),
+          redactBySchema(resolved, manifest.input, { mask: "secret" }),
         );
       }
       const input: unknown = parsed.data;
-      const shownInput = redactBySchema(input, manifest.input);
+      // Journal copies mask only secrets; event copies also mask sensitive values.
+      const shownInput = redactBySchema(input, manifest.input, { mask: "secret" });
+      const eventInput = redactBySchema(input, manifest.input, { mask: "all" });
+      const outSchema = outputSchema(manifest);
+      const eventOutput = (v: unknown) => redactBySchema(v, outSchema, { mask: "all" });
 
       if (!(await renewIfDue())) return "stop";
-      const started = [event("step.started", path, { input: shownInput })];
-      await storage.appendEvents(started);
-      publish(started);
+      // Mark the step in flight (lease-guarded) so a worker that later finds it unsettled knows an
+      // attempt was lost.
+      const startOk = await commit(
+        { currentStep: path, waitReason: null, attempt },
+        [event("step.started", path, { input: eventInput })],
+        path,
+        "start",
+      );
+      if (!startOk) return "stop";
 
       let result: unknown;
       try {
@@ -332,7 +414,7 @@ export function createExecutor(opts: EngineOptions): Executor {
         const message = errorMessage(err);
         const code = errorCode(err);
         if (isFatal(err)) return fatal(message, shownInput, code);
-        const policy: RetryPolicy = { ...DEFAULT_RETRY, ...node.retry };
+        const policy = retryPolicy(node);
         if (attempt < policy.max) {
           const delayMs = backoffMs(policy, attempt);
           await commit(
@@ -396,7 +478,7 @@ export function createExecutor(opts: EngineOptions): Executor {
             { status: "done", output, attempts: attempt, ...base },
             { ...settled, status: "completed", output: runOutput },
             [
-              event("step.completed", path, { input: shownInput, output }),
+              event("step.completed", path, { input: eventInput, output }),
               event("run.stopped", path, runOutput),
             ],
           );
@@ -409,14 +491,25 @@ export function createExecutor(opts: EngineOptions): Executor {
           if (!allowed.includes(result.branch)) {
             return fatal(`Step "${label}": returned unknown branch "${result.branch}"`, shownInput);
           }
-          const checked = await validateOutput(result.output);
-          if (!checked.ok) return fatal(checked.message, shownInput);
-          const output = redactBySchema(checked.value, outputSchema(manifest));
+          // `branch(id)` without output is always valid: the output schema is not applied.
+          let raw: unknown;
+          if (result.output !== undefined) {
+            const checked = await validateOutput(result.output);
+            if (!checked.ok) return fatal(checked.message, shownInput);
+            raw = checked.value;
+          }
+          const output = redactBySchema(raw, outSchema, { mask: "secret" });
           const ok = await commitEntry(
             path,
             { status: "branched", branch: result.branch, output, attempts: attempt, ...base },
             settled,
-            [event("step.completed", path, { input: shownInput, output, branch: result.branch })],
+            [
+              event("step.completed", path, {
+                input: eventInput,
+                output: eventOutput(raw),
+                branch: result.branch,
+              }),
+            ],
           );
           if (ok) settle();
           return ok ? "continue" : "stop";
@@ -440,7 +533,15 @@ export function createExecutor(opts: EngineOptions): Executor {
         const { at, input: loopInput } = base;
         const ok = await commitEntry(
           path,
-          { status: "looping", items: copy, results: [], at, startedAt, input: loopInput },
+          {
+            status: "looping",
+            items: copy,
+            results: [],
+            at,
+            startedAt,
+            attempts: attempt,
+            input: loopInput,
+          },
           settled,
           [],
         );
@@ -450,12 +551,12 @@ export function createExecutor(opts: EngineOptions): Executor {
 
       const checked = await validateOutput(result);
       if (!checked.ok) return fatal(checked.message, shownInput);
-      const output = redactBySchema(checked.value, outputSchema(manifest));
+      const output = redactBySchema(checked.value, outSchema, { mask: "secret" });
       const ok = await commitEntry(
         path,
         { status: "done", output, attempts: attempt, ...base },
         settled,
-        [event("step.completed", path, { input: shownInput, output })],
+        [event("step.completed", path, { input: eventInput, output: eventOutput(checked.value) })],
       );
       if (ok) settle();
       return ok ? "continue" : "stop";
@@ -469,19 +570,45 @@ export function createExecutor(opts: EngineOptions): Executor {
         const { status: _status, ...rest } = e;
         entry = { ...rest, status: "done", at: clock() };
       } else if (e?.status === "looping") {
-        const results = e.items.map((_, i) => {
-          const body =
-            step.branches && Object.hasOwn(step.branches, "body") ? (step.branches.body ?? []) : [];
+        const body = childSteps(step, "body");
+        // Each iteration's result is the output of its last finished body step, masked for the
+        // event by that step's own output schema.
+        const results: unknown[] = [];
+        const eventResults: unknown[] = [];
+        for (let i = 0; i < e.items.length; i++) {
+          let result: unknown = null;
+          let shown: unknown = null;
           for (let k = body.length - 1; k >= 0; k--) {
-            const inner = entryAt(journal, `${path}/body[${i}]/${body[k]?.id}`);
-            if (inner?.status === "done") return inner.output ?? null;
+            const inner = body[k];
+            const innerEntry = inner && entryAt(journal, `${path}/body[${i}]/${inner.id}`);
+            if (inner && innerEntry?.status === "done") {
+              result = innerEntry.output ?? null;
+              const m = nodeManifest(inner.type);
+              shown = m ? redactBySchema(result, outputSchema(m), { mask: "all" }) : result;
+              break;
+            }
           }
-          return null;
-        });
-        const output = { count: e.items.length, results };
-        entry = { status: "done", output, at: clock(), startedAt: e.startedAt, attempts: 1 };
+          results.push(result);
+          eventResults.push(shown);
+        }
+        const count = e.items.length;
+        const output = { count, results };
+        entry = {
+          status: "done",
+          output,
+          at: clock(),
+          startedAt: e.startedAt,
+          attempts: e.attempts ?? 1,
+        };
         if (e.input !== undefined) entry.input = e.input;
-        events.push(event("step.completed", path, { input: e.input, output }));
+        const m = nodeManifest(step.type);
+        const eventInput = m ? redactBySchema(e.input, m.input, { mask: "all" }) : e.input;
+        events.push(
+          event("step.completed", path, {
+            input: eventInput,
+            output: { count, results: eventResults },
+          }),
+        );
       } else {
         return "stop";
       }
@@ -513,7 +640,8 @@ export function createExecutor(opts: EngineOptions): Executor {
       }
       await commit(
         patch,
-        [event("run.completed", undefined, output === undefined ? undefined : { output })],
+        // The output mapping may carry sensitive step values, so the event does not copy it.
+        [event("run.completed")],
         "",
       );
     };

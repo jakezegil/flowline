@@ -132,6 +132,7 @@ describe("nextAction", () => {
       results: [],
       at: 1,
       startedAt: 1,
+      attempts: 1,
     };
     expect(nextAction(d, { each: looping }, registry)).toMatchObject({
       type: "exec",
@@ -161,6 +162,7 @@ describe("nextAction", () => {
       results: [],
       at: 1,
       startedAt: 1,
+      attempts: 1,
     };
     expect(nextAction(d, { each: looping }, registry)).toMatchObject({ type: "completeBlock" });
   });
@@ -200,7 +202,14 @@ describe("buildScope", () => {
         attempts: 1,
       },
       "cond/if/inner": done("in"),
-      "cond/if/each": { status: "looping", items: [10, 20], results: [], at: 1, startedAt: 1 },
+      "cond/if/each": {
+        status: "looping",
+        items: [10, 20],
+        results: [],
+        at: 1,
+        startedAt: 1,
+        attempts: 1,
+      },
       "cond/if/each/body[0]/x": done("x0"),
       "cond/if/each/body[0]/y": done("y0"),
       "cond/if/each/body[1]/x": done("x1"),

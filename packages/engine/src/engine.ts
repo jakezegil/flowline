@@ -51,8 +51,12 @@ export interface EngineOptions {
    * time.
    */
   __testHooks?: {
-    /** Called before every run commit; throwing simulates a crash before the write. */
-    beforeCommit?(runId: string, stepPath: string): void | Promise<void>;
+    /**
+     * Called before every run commit; throwing simulates a crash before the write. `phase` is
+     * `"start"` for the commit that marks a step in flight (before its handler runs) and
+     * `"result"` for every other commit. `stepPath` is `""` for run-level commits.
+     */
+    beforeCommit?(runId: string, stepPath: string, phase: "start" | "result"): void | Promise<void>;
   };
 }
 

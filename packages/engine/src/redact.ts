@@ -14,9 +14,17 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function isMasked(schema: JSONSchema): boolean {
+/**
+ * Which fields to mask: `"secret"` masks only `secret` fields (what the journal stores, so
+ * downstream references still see `sensitive` values); `"all"` also masks `sensitive` fields (what
+ * events carry).
+ */
+export type MaskMode = "secret" | "all";
+
+function isMasked(schema: JSONSchema, mode: MaskMode): boolean {
   const meta = schema[UI_META_KEY];
-  return isObject(meta) && (meta.secret === true || meta.sensitive === true);
+  if (!isObject(meta)) return false;
+  return meta.secret === true || (mode === "all" && meta.sensitive === true);
 }
 
 /** Follows a local `#/$defs/...` or `#/definitions/...` reference against `root`. */
@@ -37,16 +45,22 @@ function deref(root: JSONSchema, schema: JSONSchema): JSONSchema {
   return cur;
 }
 
-function redactAt(value: unknown, raw: unknown, root: JSONSchema, depth: number): unknown {
+function redactAt(
+  value: unknown,
+  raw: unknown,
+  root: JSONSchema,
+  mode: MaskMode,
+  depth: number,
+): unknown {
   if (!isObject(raw) || depth > MAX_DEPTH) return value;
   const schema = deref(root, raw);
-  if (isMasked(schema)) return value === undefined ? value : REDACTED;
+  if (isMasked(schema, mode)) return value === undefined ? value : REDACTED;
 
   let out = value;
   for (const key of ["anyOf", "oneOf", "allOf"] as const) {
     const members = schema[key];
     if (Array.isArray(members)) {
-      for (const m of members) out = redactAt(out, m, root, depth + 1);
+      for (const m of members) out = redactAt(out, m, root, mode, depth + 1);
     }
   }
 
@@ -54,7 +68,9 @@ function redactAt(value: unknown, raw: unknown, root: JSONSchema, depth: number)
     const items = schema.items;
     const prefix = Array.isArray(schema.prefixItems) ? schema.prefixItems : [];
     if (!isObject(items) && prefix.length === 0) return out;
-    return out.map((v, i) => redactAt(v, i < prefix.length ? prefix[i] : items, root, depth + 1));
+    return out.map((v, i) =>
+      redactAt(v, i < prefix.length ? prefix[i] : items, root, mode, depth + 1),
+    );
   }
 
   if (isObject(out)) {
@@ -63,7 +79,7 @@ function redactAt(value: unknown, raw: unknown, root: JSONSchema, depth: number)
     let copy: Record<string, unknown> | undefined;
     for (const [k, v] of Object.entries(out)) {
       const sub = Object.hasOwn(props, k) ? props[k] : extra;
-      const next = redactAt(v, sub, root, depth + 1);
+      const next = redactAt(v, sub, root, mode, depth + 1);
       if (next !== v) {
         copy ??= { ...out };
         Object.defineProperty(copy, k, {
@@ -80,14 +96,19 @@ function redactAt(value: unknown, raw: unknown, root: JSONSchema, depth: number)
 }
 
 /**
- * Replace every value whose JSON Schema carries `"x-flowkit": { secret: true }` or
- * `{ sensitive: true }` with {@link REDACTED}. Follows object properties, record values
+ * Replace every value whose JSON Schema carries `"x-flowkit": { secret: true }` (and, with
+ * `mask: "all"`, `{ sensitive: true }`) with {@link REDACTED}. Follows object properties, record values
  * (`additionalProperties`), array items, unions and local `$ref`s. Returns `value` itself when
  * nothing is masked; never mutates it.
  *
  * @param value The value to mask (a step's input or output).
  * @param schema The JSON Schema describing `value`.
+ * @param opts `mask`: which fields to mask (see {@link MaskMode}).
  */
-export function redactBySchema(value: unknown, schema: JSONSchema): unknown {
-  return redactAt(value, schema, schema, 0);
+export function redactBySchema(
+  value: unknown,
+  schema: JSONSchema,
+  opts: { mask: MaskMode },
+): unknown {
+  return redactAt(value, schema, schema, opts.mask, 0);
 }
