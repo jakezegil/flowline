@@ -22,7 +22,7 @@ export interface PGliteLike {
  */
 export function pgliteQueryable(
   db: PGliteLike,
-): Queryable & { connect(): Promise<Queryable & { release(): void }> } {
+): Queryable & { connect(): Promise<Queryable & { release(err?: Error | boolean): void }> } {
   let tail: Promise<void> = Promise.resolve();
   /** Wait for exclusive access; resolves to the function that gives it up. */
   const acquire = (): Promise<() => void> => {
@@ -49,7 +49,8 @@ export function pgliteQueryable(
       let done = false;
       return {
         query: <T>(sql: string, params?: unknown[]) => db.query<T>(sql, params),
-        release() {
+        // The argument (pg's "destroy this connection") is ignored: PGlite has one connection.
+        release(_err?: Error | boolean) {
           if (done) return;
           done = true;
           release();

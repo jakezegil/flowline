@@ -18,18 +18,45 @@ export function quoteSchema(schema: string): string {
   return `"${schema}"`;
 }
 
+/** One versioned schema migration: its statements run once, in order, and are then recorded. */
+export interface Migration {
+  /** Version number; migrations apply in ascending order. */
+  version: number;
+  /** The DDL statements, one per entry. */
+  statements: string[];
+}
+
 /**
- * The DDL creating every table and index in `schema` (already quoted), one statement per entry.
- * Every statement is `IF NOT EXISTS`, so running them again is a no-op.
+ * Statements that create the schema and the `schema_migrations` bookkeeping table in `s`
+ * (already quoted). Idempotent; they run before any versioned migration.
  */
-export function schemaStatements(s: string): string[] {
+export function bootstrapStatements(s: string): string[] {
   return [
     `CREATE SCHEMA IF NOT EXISTS ${s}`,
+    `CREATE TABLE IF NOT EXISTS ${s}.schema_migrations (
+      version integer PRIMARY KEY,
+      applied_at timestamptz NOT NULL DEFAULT now()
+    )`,
+  ];
+}
+
+/**
+ * Every versioned migration for schema `s` (already quoted), in ascending version order.
+ * Statements are also `IF NOT EXISTS`, so re-running one on a partially migrated database is safe.
+ */
+export function migrations(s: string): Migration[] {
+  return [{ version: 1, statements: v1(s) }];
+}
+
+/** v1: the initial tables and indexes. */
+function v1(s: string): string[] {
+  return [
     `CREATE TABLE IF NOT EXISTS ${s}.workflow_versions (
       tenant_id text NOT NULL,
       workflow_id text NOT NULL,
       version integer NOT NULL,
-      doc jsonb NOT NULL,
+      -- json, not jsonb: keeps the document's object key order exactly as saved.
+      doc json NOT NULL,
       trigger_type text NOT NULL,
       created_by text NOT NULL,
       created_at bigint NOT NULL,

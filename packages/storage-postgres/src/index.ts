@@ -24,7 +24,7 @@ import {
 import { type PoolLike, type Queryable, withTransaction } from "./migrate";
 import { quoteSchema } from "./schema";
 
-export { migrate, type PoolLike, type Queryable } from "./migrate";
+export { migrate, type PoolClientLike, type PoolLike, type Queryable } from "./migrate";
 
 /** Package version. */
 export const VERSION = "0.1.0";
@@ -36,7 +36,7 @@ export interface PgStorageOptions {
    * methods (everything that writes more than one statement); single-statement methods work
    * without it.
    */
-  pool: Queryable & { connect?(): Promise<Queryable & { release(): void }> };
+  pool: Queryable & { connect?(): Promise<Queryable & { release(err?: Error | boolean): void }> };
   /** Postgres schema holding the tables (created by {@link migrate}). Default `"flowkit"`. */
   schema?: string;
 }
@@ -159,15 +159,55 @@ function toVersion(row: Row): WorkflowVersion {
 }
 
 /**
+ * SQLSTATEs Postgres raises for strings it cannot store: `22P05` (untranslatable character, e.g.
+ * `\u0000` inside `jsonb`) and `22021` (invalid byte sequence, e.g. a NUL byte in `text`).
+ */
+const UNSTORABLE_STRING_CODES = new Set(["22P05", "22021"]);
+
+/** Turn Postgres's "unstorable string" errors into a {@link FlowkitStorageError}. */
+function translateError(err: unknown): unknown {
+  const code = (err as { code?: unknown } | null)?.code;
+  if (typeof code !== "string" || !UNSTORABLE_STRING_CODES.has(code)) return err;
+  const detail = err instanceof Error ? err.message : String(err);
+  return new FlowkitStorageError(
+    `Postgres cannot store this value: strings containing NUL (\\u0000) or invalid UTF-8 are not supported (SQLSTATE ${code}: ${detail})`,
+    { cause: err },
+  );
+}
+
+/** Wrap `pool` (and the clients it hands out) so every query error goes through translateError. */
+function withErrorTranslation(pool: PoolLike): PoolLike {
+  const wrap =
+    (q: Queryable): Queryable["query"] =>
+    async (sql, params) => {
+      try {
+        return await q.query(sql, params);
+      } catch (err) {
+        throw translateError(err);
+      }
+    };
+  const connect = pool.connect?.bind(pool);
+  return {
+    query: wrap(pool),
+    connect: connect
+      ? async () => {
+          const client = await connect();
+          return { query: wrap(client), release: (err) => client.release(err) };
+        }
+      : undefined,
+  };
+}
+
+/**
  * `SET` assignments for the run's own fields of `patch` (not `createChild`/`wakeParent`), plus
  * `updated_at`. Lease clearing is left to the caller.
  */
 function patchAssignments(patch: RunPatch, now: number, p: Params): string[] {
   const sets: string[] = [];
   /** `undefined` keeps the column, `null` clears it, anything else sets it. */
-  const opt = (column: string, value: unknown, toParam: (v: unknown) => unknown = (v) => v) => {
+  const opt = (column: string, value: unknown) => {
     if (value === undefined) return;
-    sets.push(`${column} = ${value === null ? "NULL" : p.add(toParam(value))}`);
+    sets.push(`${column} = ${value === null ? "NULL" : p.add(value)}`);
   };
   const optJson = (column: string, value: unknown) => {
     if (value === undefined) return;
@@ -211,10 +251,10 @@ function patchAssignments(patch: RunPatch, now: number, p: Params): string[] {
  * @throws {Error} if `opts.schema` is not a plain identifier.
  */
 export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
-  const { pool } = opts;
+  const pool = withErrorTranslation(opts.pool);
   const schemaName = opts.schema ?? "flowkit";
   const s = quoteSchema(schemaName);
-  const tx = <T>(fn: (q: Queryable) => Promise<T>) => withTransaction(pool as PoolLike, fn);
+  const tx = <T>(fn: (q: Queryable) => Promise<T>) => withTransaction(pool, fn);
 
   /** Insert `run` unless its id exists; returns the inserted row, or `undefined` on conflict. */
   const insertRun = async (q: Queryable, run: NewRun, now: number): Promise<Row | undefined> => {
@@ -370,7 +410,7 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
         const inserted = await q.query(
           `INSERT INTO ${s}.workflow_versions
              (tenant_id, workflow_id, version, doc, trigger_type, created_by, created_at)
-           VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7) RETURNING *`,
+           VALUES ($1, $2, $3, $4::json, $5, $6, $7) RETURNING *`,
           [tenantId, doc.id, version, json(doc), doc.trigger.type, actor, now],
         );
         return toVersion(inserted.rows[0] as Row);

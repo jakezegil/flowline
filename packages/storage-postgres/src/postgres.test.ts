@@ -1,8 +1,11 @@
 import { PGlite } from "@electric-sql/pglite";
+import type { WorkflowDoc } from "@flowkit/core";
+import { FlowkitStorageError } from "@flowkit/engine";
 import { runStorageConformance } from "@flowkit/engine/testing";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { createPostgresStorage, migrate, type PgStorageOptions } from "./index";
+import { withTransaction } from "./migrate";
 import { pgliteQueryable } from "./testing";
 
 // One PGlite instance per test file; every conformance case gets its own schema, so each starts
@@ -110,6 +113,25 @@ describe("migrate", () => {
     );
     await migrate(litePool, "idem");
     expect((await s.getRun("t", "r1"))?.id).toBe("r1");
+    const { rows } = await litePool.query<{ version: number; applied_at: unknown }>(
+      "SELECT version, applied_at FROM idem.schema_migrations ORDER BY version",
+    );
+    expect(rows.map((r) => r.version)).toEqual([1]);
+    expect(rows[0]?.applied_at).not.toBeNull();
+  });
+
+  it("works on a bare Queryable under a session advisory lock it releases", async () => {
+    const bare = { query: litePool.query.bind(litePool) };
+    await migrate(bare, "bare");
+    await migrate(bare, "bare");
+    const versions = await litePool.query<{ version: number }>(
+      "SELECT version FROM bare.schema_migrations",
+    );
+    expect(versions.rows.map((r) => r.version)).toEqual([1]);
+    const locks = await litePool.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory'",
+    );
+    expect(locks.rows[0]?.n).toBe(0);
   });
 
   it("uses the flowkit schema by default", async () => {
@@ -176,5 +198,107 @@ describe("createPostgresStorage", () => {
     } finally {
       await cleanup();
     }
+  });
+
+  it("round-trips workflow doc object keys in their saved order", async () => {
+    const { storage: s, cleanup } = await freshStorage(litePool, "keyorder");
+    try {
+      const doc: WorkflowDoc = {
+        name: "Key order",
+        id: "ko",
+        trigger: { type: "manual", config: { zeta: 1, alpha: 2 } },
+        steps: [
+          {
+            type: "branch",
+            id: "pick",
+            config: { longerKey: 1, b: 2, a: 3 },
+            branches: { z: [], a: [], middle: [] },
+          },
+        ],
+      };
+      await s.saveWorkflowVersion("t", doc, "u", 1);
+      await s.publishVersion("t", "ko", 1, 2);
+      for (const read of [
+        await s.getWorkflowVersion("t", "ko", 1),
+        await s.getLatestVersion("t", "ko"),
+        await s.getPublishedVersion("t", "ko"),
+        (await s.listPublished({ tenantId: "t" }))[0],
+      ]) {
+        const got = read!.doc;
+        expect(got).toEqual(doc);
+        expect(Object.keys(got)).toEqual(["name", "id", "trigger", "steps"]);
+        expect(Object.keys(got.trigger.config)).toEqual(["zeta", "alpha"]);
+        const step = got.steps[0]!;
+        expect(Object.keys(step)).toEqual(["type", "id", "config", "branches"]);
+        expect(Object.keys(step.config)).toEqual(["longerKey", "b", "a"]);
+        expect(Object.keys(step.branches!)).toEqual(["z", "a", "middle"]);
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("rejects strings containing NUL with a FlowkitStorageError and writes nothing", async () => {
+    const { storage: s, cleanup } = await freshStorage(litePool, "nul");
+    try {
+      const run = {
+        id: "r1",
+        tenantId: "t",
+        workflowId: "wf",
+        version: 1,
+        status: "queued" as const,
+        trigger: { note: "a\u0000b" },
+        journal: {},
+        attempt: 1,
+        startedBy: { kind: "manual" as const },
+      };
+      // NUL inside a jsonb value (SQLSTATE 22P05).
+      await expect(s.createRun(run, [], 1)).rejects.toThrow(FlowkitStorageError);
+      await expect(s.createRun(run, [], 1)).rejects.toThrow(/NUL/);
+      expect(await s.getRun("t", "r1")).toBeNull();
+      // NUL inside a text column (SQLSTATE 22021).
+      await expect(s.recordDedupeKey("t", "k\u0000", 0, 10)).rejects.toThrow(FlowkitStorageError);
+      // Other database errors pass through unchanged.
+      const other = createPostgresStorage({ pool: litePool, schema: "does_not_exist" });
+      const err = await other.getRun("t", "r1").catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(FlowkitStorageError);
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe("withTransaction", () => {
+  it("destroys the client when ROLLBACK fails", async () => {
+    const rollbackError = new Error("connection lost");
+    const released: unknown[][] = [];
+    const client = {
+      async query(sql: string) {
+        if (sql === "ROLLBACK") throw rollbackError;
+        return { rows: [] };
+      },
+      release: (...args: unknown[]) => {
+        released.push(args);
+      },
+    };
+    const pool = { query: client.query, connect: async () => client };
+    const failure = new Error("statement failed");
+    await expect(
+      withTransaction(pool, async () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+    expect(released).toEqual([[rollbackError]]);
+
+    // A successful ROLLBACK returns the client to the pool normally.
+    const healthy = { ...client, query: async () => ({ rows: [] }) };
+    released.length = 0;
+    await expect(
+      withTransaction({ ...pool, connect: async () => healthy }, async () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+    expect(released).toEqual([[]]);
   });
 });
