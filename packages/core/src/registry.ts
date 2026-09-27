@@ -130,10 +130,13 @@ function nodeManifest(plugin: string, def: NodeDefinition<any, any>): NodeManife
 
 // biome-ignore lint/suspicious/noExplicitAny: definitions of any config/payload types
 function triggerManifest(plugin: string, def: TriggerDefinition<any, any>): TriggerManifest {
-  const payload: OutputSpec = (def.dynamicPayload && structuredClone(def.dynamicPayload)) ?? {
-    kind: "schema",
-    schema: toSchema(def.payload ?? z.object({}), "output", def.type, "payload"),
-  };
+  // No declared payload ⇒ `{}` (any JSON). Never substitute `z.object({})`: it would strip keys.
+  const payload: OutputSpec = def.dynamicPayload
+    ? structuredClone(def.dynamicPayload)
+    : {
+        kind: "schema",
+        schema: def.payload ? toSchema(def.payload, "output", def.type, "payload") : {},
+      };
   return compact({
     type: def.type,
     plugin,

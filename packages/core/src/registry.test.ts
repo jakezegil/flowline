@@ -160,10 +160,9 @@ test("defaults for output, payload, dynamic specs and branches", () => {
   expect(m.nodes[1]!.output).toEqual({ kind: "fields", configPath: "fields" });
   expect(props(m.nodes[1]!.input).fields!["x-flowkit"]).toEqual({ widget: "fields" });
   expect(m.triggers[0]!.payload).toEqual({ kind: "webhook", configPath: "fields" });
-  expect(m.triggers[1]!.payload).toEqual({
-    kind: "schema",
-    schema: expect.objectContaining({ type: "object", properties: {} }),
-  });
+  // no declared payload: any value (empty schema), never a stripping `z.object({})`
+  expect(m.triggers[1]!.payload).toEqual({ kind: "schema", schema: {} });
+  expect(manual.payload).toBeUndefined();
   // optional descriptive keys are omitted, not set to undefined
   expect(Object.keys(m.nodes[0]!)).not.toContain("description");
   expect(Object.keys(m.triggers[1]!)).not.toContain("event");

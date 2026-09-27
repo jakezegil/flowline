@@ -337,7 +337,11 @@ export interface TriggerDefinition<C extends z.ZodObject = z.ZodObject, P = unkn
   event?: string;
   /** Config schema. */
   config: C;
-  /** Payload schema. Mutually exclusive with `dynamicPayload`. */
+  /**
+   * Payload schema. Declare `payload` to get typed references and validation. Without it (and
+   * without `dynamicPayload`) the payload is untyped (any JSON) and stored as-is. Mutually
+   * exclusive with `dynamicPayload`.
+   */
   payload?: z.ZodType<P>;
   /** Payload shape derived from config. */
   dynamicPayload?: { kind: "fields" | "webhook"; configPath: string };
