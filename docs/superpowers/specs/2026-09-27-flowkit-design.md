@@ -314,3 +314,9 @@ These supersede earlier sections where they conflict:
 7. Postgres adapter tests run on PGlite; a real server via `FLOWKIT_PG_URL`.
 8. Schedules use dedupe keys (`schedule:<wf>:<fireTs>`) instead of a schedules table.
 9. Webhook URLs are `/hooks/:tenantId/:workflowId/:slug` with the slug auto-generated into the trigger config on first save.
+10. (Plan review) Editor step samples are **editor-local** (localStorage), never saved into workflow versions — they may contain PII. Supersedes §7.4 "saved with the draft".
+11. (Plan review) Callback tokens and resume URLs are never journaled or returned in `RunDetail`; host UIs resume via the authorized `POST /runs/:id/resume`. Webhook `authorization`/`cookie`/signature/`proxy-*` headers are not stored.
+12. (Plan review) Sub-flow child creation and parent wake-up happen inside the same atomic storage commit (`createChild`, `wakeParent`); child run ids are deterministic. Nesting depth cap 8; direct self-calls are a validation error.
+13. (Plan review) Executors renew leases while a handler runs and abort the handler's signal if the lease is lost. Runs carry a `waitReason` so resume/retry semantics never depend on token presence.
+14. (Plan review) SSE live updates poll storage as well as the in-process bus, so API and worker processes may be separate; the client streams via `fetch` so auth headers work.
+15. Extra routes: `POST /runs/:id/cancel`, `POST /runs/:id/resume`, `GET /secrets`, `GET /subflows`.
