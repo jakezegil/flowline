@@ -301,3 +301,16 @@ Vite + React frontend, Hono backend (Node), memory storage by default, `DATABASE
 ## 10. Out of scope for v1 (design leaves room)
 
 Redis adapter; parallel blocks; drag-to-map; OAuth connection management; Temporal/Inngest backend; import/export UI; i18n beyond ARIA labels; references to branch-internal steps after rejoin.
+
+## 11. Refinements made during planning (2026-09-27)
+
+These supersede earlier sections where they conflict:
+1. The validator operates on the JSON **manifest** (`validateWorkflow(doc, manifest, ctx)`) so it runs identically in browser and server.
+2. Node `summary` is a serializable template string (`"Load contact {{contactId}}"`), not a function.
+3. Resumable handlers: a suspended handler is re-invoked on resume with `ctx.resume` (`timer | callback | timeout | subflow | subflowFailed`). `ctx.callback()` is available to any node.
+4. Storage writes during execution go through one atomic `commit(lease, patch, events)`; see the plan for the full `StorageAdapter` interface.
+5. forEach output is `{ count, results }`.
+6. The HTTP client is `@flowkit/core/client`.
+7. Postgres adapter tests run on PGlite; a real server via `FLOWKIT_PG_URL`.
+8. Schedules use dedupe keys (`schedule:<wf>:<fireTs>`) instead of a schedules table.
+9. Webhook URLs are `/hooks/:tenantId/:workflowId/:slug` with the slug auto-generated into the trigger config on first save.
