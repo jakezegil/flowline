@@ -1,6 +1,7 @@
 .superpowers/
 node_modules/
 dist/
+.generated/
 *.tsbuildinfo
 coverage/
 test-results/

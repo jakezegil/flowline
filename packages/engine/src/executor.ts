@@ -8,6 +8,7 @@ import {
   branchesFor,
   type CallbackHandle,
   collectRefs,
+  type FlowkitServices,
   isRef,
   isSignal,
   isTpl,
@@ -190,7 +191,9 @@ export function createExecutor(opts: EngineOptions): Executor {
   const clock = opts.clock ?? Date.now;
   const leaseMs = opts.leaseMs ?? DEFAULT_LEASE_MS;
   const stepsPerClaim = opts.stepsPerClaim ?? DEFAULT_STEPS_PER_CLAIM;
-  const services = opts.services ?? {};
+  // Hosts may augment FlowkitServices with required members; without `services` handlers
+  // still get an empty object.
+  const services = opts.services ?? ({} as FlowkitServices);
   const hooks = opts.__testHooks;
   const http = createGuardedFetch({
     ...opts.http,
