@@ -33,7 +33,8 @@
     "build": "tsup"
   },
   "dependencies": {
-    "@flowkit/core": "workspace:*"
+    "@flowkit/core": "workspace:*",
+    "@flowkit/nodes-builtin": "workspace:*"
   },
   "peerDependencies": {
     "vitest": ">=3"

@@ -30,7 +30,7 @@ import { FatalError, RetryableError } from "./errors";
 import { buildScope, childSteps, entryAt, type NextAction, nextAction } from "./interpreter";
 import { redactBySchema } from "./redact";
 import type { Lease, NewRunEvent, Run, RunPatch } from "./storage";
-import { startSubflow } from "./subflow";
+import { startSubflow, subflowOutputProblem } from "./subflow";
 
 const DEFAULT_LEASE_MS = 30_000;
 const DEFAULT_STEPS_PER_CLAIM = 100;
@@ -545,6 +545,10 @@ export function createExecutor(opts: EngineOptions): Executor {
       }
     };
 
+    /** For a sub-flow run: why its mapped output breaks the declared output fields, if it does. */
+    const childOutputProblem = (output: unknown): string | undefined =>
+      run.parent ? subflowOutputProblem(registry, doc, output) : undefined;
+
     const execStep = async (action: Extract<NextAction, { type: "exec" }>): Promise<Flow> => {
       const { step, path } = action;
       const label = step.name ?? step.id;
@@ -685,7 +689,43 @@ export function createExecutor(opts: EngineOptions): Executor {
       const kind = manifest.branches.kind;
       const base = { at: clock(), startedAt, input: shownInput };
 
+      /** Start iterating a loop node's `body` over `items`. */
+      const startLoop = async (items: unknown): Promise<Flow> => {
+        if (!Array.isArray(items)) {
+          return fatal(`Step "${label}": must return loop(items) with a list`, shownInput);
+        }
+        let copy: unknown[];
+        try {
+          copy = structuredClone(items);
+        } catch {
+          return fatal(`Step "${label}": items must be JSON-serializable`, shownInput);
+        }
+        const { at, input: loopInput } = base;
+        const ok = await commitEntry(
+          path,
+          {
+            status: "looping",
+            items: copy,
+            results: [],
+            at,
+            startedAt,
+            attempts: attempt,
+            input: loopInput,
+          },
+          settled,
+          [],
+        );
+        if (ok) settle();
+        return ok ? "continue" : "stop";
+      };
+
       if (isSignal(result)) {
+        if (result.kind === "loop") {
+          if (kind !== "loop") {
+            return fatal(`Step "${label}": loop() is only for looping nodes`, shownInput);
+          }
+          return startLoop(result.items);
+        }
         if (result.kind === "stop") {
           const output: Record<string, unknown> = { stopped: true };
           const runOutput: Record<string, unknown> = { stoppedAt: path };
@@ -694,10 +734,12 @@ export function createExecutor(opts: EngineOptions): Executor {
             runOutput.reason = result.reason;
           }
           const entry: JournalEntry = { status: "done", output, attempts: attempt, ...base };
-          // A stopped sub-flow hands the parent its mapped output when every value it maps exists;
-          // otherwise the parent step sees a failed sub-flow.
+          // A stopped sub-flow hands the parent its mapped output when every value it maps exists
+          // and matches the declared output fields; otherwise the parent step sees a failed
+          // sub-flow (the stopped run itself still completes).
           const mapped = mapOutput({ ...journal, [path]: entry }, { strict: true });
           const reason = result.reason === undefined ? "" : `: ${result.reason}`;
+          const problem = mapped.ok ? childOutputProblem(mapped.output) : undefined;
           await commitEntry(
             path,
             entry,
@@ -706,9 +748,11 @@ export function createExecutor(opts: EngineOptions): Executor {
               status: "completed",
               output: runOutput,
               ...wakeParent(
-                mapped.ok
-                  ? { kind: "subflow", output: mapped.output }
-                  : { kind: "subflowFailed", error: { message: `Sub-flow stopped${reason}` } },
+                !mapped.ok
+                  ? { kind: "subflowFailed", error: { message: `Sub-flow stopped${reason}` } }
+                  : problem !== undefined
+                    ? { kind: "subflowFailed", error: { message: problem } }
+                    : { kind: "subflow", output: mapped.output },
               ),
             },
             [
@@ -719,8 +763,7 @@ export function createExecutor(opts: EngineOptions): Executor {
           return "stop";
         }
         if (result.kind === "branch") {
-          if (kind === "loop")
-            return fatal(`Step "${label}": must return { items: [...] }`, shownInput);
+          if (kind === "loop") return fatal(`Step "${label}": must return loop(items)`, shownInput);
           const allowed = branchesFor(manifest, step).map((b) => b.id);
           if (!allowed.includes(result.branch)) {
             return fatal(`Step "${label}": returned unknown branch "${result.branch}"`, shownInput);
@@ -842,32 +885,8 @@ export function createExecutor(opts: EngineOptions): Executor {
         return fatal(`Step "${label}": must return branch()`, shownInput);
       }
       if (kind === "loop") {
-        const items = (result as { items?: unknown } | null)?.items;
-        if (!Array.isArray(items))
-          return fatal(`Step "${label}": must return { items: [...] }`, shownInput);
-        let copy: unknown[];
-        try {
-          copy = structuredClone(items);
-        } catch {
-          return fatal(`Step "${label}": items must be JSON-serializable`, shownInput);
-        }
-        const { at, input: loopInput } = base;
-        const ok = await commitEntry(
-          path,
-          {
-            status: "looping",
-            items: copy,
-            results: [],
-            at,
-            startedAt,
-            attempts: attempt,
-            input: loopInput,
-          },
-          settled,
-          [],
-        );
-        if (ok) settle();
-        return ok ? "continue" : "stop";
+        // Back-compat: a plain `{ items }` return works like `loop(items)`.
+        return startLoop((result as { items?: unknown } | null)?.items);
       }
 
       const checked = await validateOutput(result);
@@ -943,6 +962,11 @@ export function createExecutor(opts: EngineOptions): Executor {
         return;
       }
       const { output } = mapped;
+      const problem = childOutputProblem(output);
+      if (problem !== undefined) {
+        await failRun({ message: problem, fatal: true, code: "subflow.output" });
+        return;
+      }
       const patch: RunPatch = {
         status: "completed",
         currentStep: null,

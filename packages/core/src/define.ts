@@ -177,8 +177,26 @@ export interface SubflowSignal {
   readonly input: unknown;
 }
 
+/**
+ * Returned by a looping node (`branches: { kind: "loop" }`) to run its `body` branch once per item.
+ * The step's output is then built by the engine: `{ count, results }`.
+ */
+export interface LoopSignal {
+  /** Signal tag. */
+  readonly [FLOWKIT_SIGNAL]: true;
+  /** Signal kind. */
+  readonly kind: "loop";
+  /** The items to iterate, in order; each is `loop.item` for one run of the body. */
+  readonly items: readonly unknown[];
+}
+
 /** Any control-flow signal a handler can return instead of plain output. */
-export type Signal = BranchSignal<unknown> | SuspendSignal | StopSignal | SubflowSignal;
+export type Signal =
+  | BranchSignal<unknown>
+  | SuspendSignal
+  | StopSignal
+  | SubflowSignal
+  | LoopSignal;
 
 /** Choose branch `id`, producing `output` as the step's output. */
 export function branch<O = undefined>(id: string, output?: O): BranchSignal<O> {
@@ -215,7 +233,23 @@ export function invokeSubflow(opts: { workflowId: string; input: unknown }): Sub
   };
 }
 
-/** Whether `v` is a signal returned by {@link branch}, {@link suspend}, {@link stop} or {@link invokeSubflow}. */
+/**
+ * Iterate `items` with a looping node's `body` branch (see {@link LoopSignal}). Returning
+ * `{ items }` still works for backwards compatibility.
+ *
+ * @example
+ * ```ts
+ * run: ({ input }) => loop(input.contacts)
+ * ```
+ */
+export function loop(items: readonly unknown[]): LoopSignal {
+  return { [FLOWKIT_SIGNAL]: true, kind: "loop", items };
+}
+
+/**
+ * Whether `v` is a signal returned by {@link branch}, {@link suspend}, {@link stop},
+ * {@link invokeSubflow} or {@link loop}.
+ */
 export function isSignal(v: unknown): v is Signal {
   return (
     typeof v === "object" && v !== null && (v as Record<symbol, unknown>)[FLOWKIT_SIGNAL] === true
@@ -236,7 +270,13 @@ export interface RetryPolicy {
  * What a handler may return (or resolve to): its output, a {@link branch} signal carrying its
  * output, or another control-flow signal.
  */
-export type NodeResult<O> = O | BranchSignal<O> | SuspendSignal | StopSignal | SubflowSignal;
+export type NodeResult<O> =
+  | O
+  | BranchSignal<O>
+  | SuspendSignal
+  | StopSignal
+  | SubflowSignal
+  | LoopSignal;
 
 /**
  * A node type: config schema, output shape and handler.

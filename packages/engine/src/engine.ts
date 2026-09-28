@@ -3,20 +3,25 @@
  *
  * @module
  */
-import type {
-  FlowkitServices,
-  Logger,
-  Registry,
-  RunEventType,
-  TransformRuntime,
+import {
+  createRegistry,
+  type FlowkitServices,
+  type Logger,
+  type Registry,
+  type RunEventType,
+  type TransformRuntime,
 } from "@flowkit/core";
+import { builtinPlugin } from "@flowkit/nodes-builtin";
 import { cancelPatch, createExecutor, TERMINAL } from "./executor";
 import { entryAt } from "./interpreter";
 import type { NewRunEvent, Run, RunPatch, StorageAdapter } from "./storage";
 
 /** Options of {@link createEngine}. */
 export interface EngineOptions {
-  /** Plugins, nodes and triggers the engine can run. */
+  /**
+   * Plugins, nodes and triggers the engine can run. The built-in `core` plugin is added unless
+   * `builtins` is `false` or the registry already has a plugin with ID `"core"`.
+   */
   registry: Registry;
   /** Where workflows, runs and events are persisted. */
   storage: StorageAdapter;
@@ -51,7 +56,10 @@ export interface EngineOptions {
   http?: { allowPrivateNetworks?: boolean; allowHosts?: string[] };
   /** Engine and handler logger. */
   logger?: Logger;
-  /** Register the built-in `core.*` plugin. Default `true`. */
+  /**
+   * Register the built-in `core.*` nodes and triggers (`@flowkit/nodes-builtin`) ahead of the
+   * registry's own plugins. Default `true`.
+   */
   builtins?: boolean;
   /**
    * @internal Test-only hooks (crash injection). Not part of the public API; may change at any
@@ -69,7 +77,10 @@ export interface EngineOptions {
 
 /** A running engine instance. */
 export interface Engine {
-  /** The registry the engine executes against. */
+  /**
+   * The registry the engine executes against: the host registry, with the built-in `core` plugin
+   * in front unless disabled. Serve its manifest to the editor.
+   */
   registry: Registry;
   /** The engine's storage adapter. */
   storage: StorageAdapter;
@@ -139,9 +150,16 @@ export interface Engine {
   retryRun(tenantId: string, runId: string): Promise<string>;
 }
 
+/** The host registry with the built-in `core` plugin in front, unless disabled or already there. */
+function withBuiltins({ registry, builtins = true }: EngineOptions): Registry {
+  if (!builtins || registry.plugins.some((p) => p.id === builtinPlugin.id)) return registry;
+  return createRegistry([builtinPlugin, ...registry.plugins]);
+}
+
 /**
  * Create an engine. Execution is at-least-once per step: committed steps never re-run, but a crash
  * while a handler runs re-runs that step (use `ctx.idempotencyKey` towards external systems).
+ * The built-in `core.*` nodes and triggers are available unless `builtins: false`.
  *
  * @example
  * ```ts
@@ -149,7 +167,8 @@ export interface Engine {
  * await engine.drain();
  * ```
  */
-export function createEngine(opts: EngineOptions): Engine {
+export function createEngine(options: EngineOptions): Engine {
+  const opts: EngineOptions = { ...options, registry: withBuiltins(options) };
   const executor = createExecutor(opts);
   const defaultWorkerId = `worker-${globalThis.crypto.randomUUID().slice(0, 8)}`;
 

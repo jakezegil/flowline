@@ -130,6 +130,17 @@ export interface UiMeta {
   refOnly?: boolean;
   /** Field never accepts references (no ref toggle, no pills). */
   literalOnly?: boolean;
+  /**
+   * On an object schema (e.g. a node's whole input): exactly one of these groups of property
+   * names must be set, e.g. `[["duration"], ["until"]]`. A group is set when all its properties
+   * are non-empty. The validator reports `config.required` when none or several are set.
+   */
+  oneOfRequired?: string[][];
+  /**
+   * On an array field: the validator warns with this message (`config.empty`) when the field is a
+   * literal empty list.
+   */
+  warnIfEmpty?: string;
 }
 
 /** Serializable description of a node type, as consumed by the editor and validator. */
@@ -156,7 +167,15 @@ export interface NodeManifest {
   branches: BranchSpec;
 }
 
-/** How a trigger fires. */
+/**
+ * How a trigger fires.
+ *
+ * `subflow` triggers make a workflow callable with `core.callSubflow`. Contract for plugin
+ * sub-flow triggers: the payload is the caller's input, and the declared output is the
+ * {@link FieldDecl} list at config path `"output"` (as in `core.subflow`). When a sub-flow run
+ * finishes, the engine checks its output mapping against those fields and fails the run (and the
+ * calling step) on a mismatch.
+ */
 export type TriggerKind = "event" | "webhook" | "manual" | "schedule" | "subflow";
 
 /** Serializable description of a trigger type. */

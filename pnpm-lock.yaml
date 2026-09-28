@@ -38,6 +38,9 @@ importers:
       '@flowkit/core':
         specifier: workspace:*
         version: link:../core
+      '@flowkit/nodes-builtin':
+        specifier: workspace:*
+        version: link:../nodes-builtin
     devDependencies:
       '@flowkit/storage-memory':
         specifier: workspace:*
@@ -49,7 +52,18 @@ importers:
         specifier: ^4
         version: 4.6.5
 
-  packages/nodes-builtin: {}
+  packages/nodes-builtin:
+    dependencies:
+      '@flowkit/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: ^4
+        version: 4.6.5
+    devDependencies:
+      vitest:
+        specifier: 5.0.0
+        version: 5.0.0(@types/node@22.20.2)(jsdom@30.0.1)(vite@8.3.1(@types/node@22.20.2)(esbuild@0.27.7))
 
   packages/react:
     dependencies:
