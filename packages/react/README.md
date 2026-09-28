@@ -67,5 +67,11 @@ an unlayered `.fk-root { … }` rule. Flowkit defines them on `.fk-root` itself,
 an ancestor has no effect. Dark mode follows `colorMode`, or `prefers-color-scheme` when it is
 `"system"`.
 
+An unlayered `.fk-root { --fk-accent: … }` applies in both colour modes. For dark-only values,
+scope the rule to dark mode: `.fk-root[data-fk-theme="dark"] { … }`, plus
+`@media (prefers-color-scheme: dark) { .fk-root[data-fk-theme="system"] { … } }` if you use
+`colorMode: "system"`. `theme.tokens` also applies in both modes, so pass mode-specific tokens
+from your own colour-mode state if you need them.
+
 When you do override a Flowkit rule, an unlayered rule with any specificity wins. You don't need
 `!important`.
