@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { setupDom } from "../../test/dom";
-import { loopEntry, samples, scope } from "../../test/picker-fixtures";
+import { bigScope, loopEntry, samples, scope } from "../../test/picker-fixtures";
 import { DataPicker } from "./data-picker";
 
 beforeAll(setupDom);
@@ -116,6 +116,31 @@ describe("DataPicker", () => {
     expect(names).toContain("amount");
     expect(names).not.toContain("name");
     expect(names).not.toContain("email");
+  });
+
+  test("search reaches the farthest step of a large scope", async () => {
+    render(<DataPicker scope={bigScope()} samples={{}} onPick={() => {}} />);
+    const search = screen.getByRole("combobox");
+    fireEvent.change(search, { target: { value: "s0.f39" } });
+    expect(rowNames()).toEqual(["Step 0", "f39", "a", "b"]);
+  });
+
+  test("a broad search renders a bounded number of rows and says so", () => {
+    render(<DataPicker scope={bigScope()} samples={{}} onPick={() => {}} />);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "f" } });
+    const rows = screen.getAllByRole("treeitem");
+    expect(rows.length).toBeLessThanOrEqual(200);
+    // Every step and field matches: 60 sections + 60 × 40 × 3 rows.
+    expect(screen.getByRole("status").textContent).toBe(
+      `Showing ${rows.length} of 7260 — refine your search to see more.`,
+    );
+  });
+
+  test("the key help, Shift+Enter included, is available to screen readers", () => {
+    render(<DataPicker scope={scope} samples={samples} onPick={() => {}} />);
+    const search = screen.getByRole("combobox");
+    const hint = document.getElementById(search.getAttribute("aria-describedby") ?? "");
+    expect(hint?.textContent).toMatch(/Shift\+Enter/);
   });
 
   test("an empty scope says where data comes from", () => {

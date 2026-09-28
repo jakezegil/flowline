@@ -98,6 +98,10 @@ export interface FlowkitLabels {
   keyInsert: string;
   keyExpand: string;
   keyInsertWhole: string;
+  /** The picker's keys, for screen readers (the footer hints are visual only). */
+  pickerKeysHint: string;
+  /** Under a search with more matches than the picker shows. */
+  moreMatches(shown: number, total: number): string;
   /** Tooltip label before a sample value. */
   sampleValue: string;
   /** Accessible name of a pill: "Load contact › email (string)". */
@@ -395,6 +399,9 @@ export const defaultLabels: FlowkitLabels = {
   keyInsert: "insert",
   keyExpand: "expand",
   keyInsertWhole: "insert all",
+  pickerKeysHint:
+    "Up and Down arrows move through the data. Enter inserts a value or opens a group; Shift+Enter inserts a whole group. Right and Left arrows open and close groups. Escape returns to the field.",
+  moreMatches: (shown, total) => `Showing ${shown} of ${total} — refine your search to see more.`,
   sampleValue: "Sample",
   refPill: (label, type) => `${label} (${type})`,
   refStale: (label) => `${label}: not available here`,

@@ -44,3 +44,28 @@ export const samples: Record<string, unknown> = {
   load: { email: "ada@example.com", score: 9, tags: ["a"], company: { domain: "x.io" } },
   fetch: { status: 200, body: { total: 3 } },
 };
+
+/**
+ * A large scope: `steps` steps (`s0` nearest the trigger, so it's listed last), each with
+ * `fields` object fields `f0…` holding `a` and `b`.
+ */
+export function bigScope(steps = 60, fields = 40): ScopeEntry[] {
+  const properties: Record<string, object> = {};
+  for (let f = 0; f < fields; f++) {
+    properties[`f${f}`] = {
+      type: "object",
+      properties: { a: { type: "string" }, b: { type: "number" } },
+    };
+  }
+  const out: ScopeEntry[] = [];
+  for (let s = 0; s < steps; s++) {
+    out.push({
+      refBase: `steps.s${s}`,
+      kind: "step",
+      stepId: `s${s}`,
+      label: `Step ${s}`,
+      schema: { type: "object", properties },
+    });
+  }
+  return out;
+}

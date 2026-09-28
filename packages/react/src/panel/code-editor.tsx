@@ -15,7 +15,7 @@ import {
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { javascript, localCompletionSource } from "@codemirror/lang-javascript";
 import { bracketMatching, indentOnInput } from "@codemirror/language";
-import { Annotation, Compartment, EditorState, Facet } from "@codemirror/state";
+import { Annotation, Compartment, EditorState, Facet, Transaction } from "@codemirror/state";
 import {
   EditorView,
   highlightActiveLine,
@@ -206,12 +206,22 @@ export function CodeEditor(props: {
     lastValue.current = value;
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: value },
-      annotations: fromProps.of(true),
+      // Not the user’s edit: undo mustn’t bring back the code it replaced.
+      annotations: [fromProps.of(true), Transaction.addToHistory.of(false)],
     });
   }, [value]);
 
   return (
-    <div className="fk-code" data-readonly={readOnly || undefined}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: stops an Escape the editor used
+    <div
+      className="fk-code"
+      data-readonly={readOnly || undefined}
+      onKeyDown={(e) => {
+        // An Escape the editor used (closing completions) stops here, so it doesn't also close
+        // an enclosing panel; one it didn't use goes on.
+        if (e.key === "Escape" && e.defaultPrevented) e.stopPropagation();
+      }}
+    >
       <div ref={hostRef} className="fk-code__editor" />
       <span id={hintId} className="fk-sr-only">
         {labels.codeEditorHint}

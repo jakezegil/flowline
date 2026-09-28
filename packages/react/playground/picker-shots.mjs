@@ -90,6 +90,44 @@ for (const theme of ["light", "dark"]) {
   await shot(page, `code-complete-${theme}`);
   await page.close();
 
+  // Undo/redo keep pills; pasted `{{ ref }}` becomes one; pills carry icons.
+  const check = await open(theme);
+  const expect = (cond, what) => cond || errors.push(`${theme}: check failed: ${what}`);
+  const pillsIn = (label) =>
+    check.locator(`.cm-content[aria-label="${label}"] .fk-ref-pill`).count();
+  expect(
+    (await check.locator(".fk-ref-pill .fk-ref-pill__icon svg").count()) ===
+      (await check.locator(".fk-ref-pill").count()),
+    "every pill has an icon",
+  );
+  // No pill hover card over the open picker, even with the mouse resting on a pill.
+  await check.locator('.cm-content[aria-label="Subject"] .fk-ref-pill').click();
+  await check.waitForTimeout(700);
+  expect((await check.locator(".fk-ref-card").count()) === 0, "no hover card over the picker");
+  await editor(check, "Subject").click();
+  await check.keyboard.press("End");
+  await check.keyboard.press("ArrowLeft");
+  await check.keyboard.press("Backspace");
+  expect((await pillsIn("Subject")) === 0, "Backspace deletes the pill");
+  await check.keyboard.press("ControlOrMeta+z");
+  expect((await pillsIn("Subject")) === 1, "undo restores the pill");
+  await check.keyboard.press("ControlOrMeta+Shift+z");
+  expect((await pillsIn("Subject")) === 0, "redo deletes it again");
+  await check.keyboard.press("ControlOrMeta+z");
+  await editor(check, "Reply-to").click();
+  await check.evaluate(() => {
+    const data = new DataTransfer();
+    data.setData("text/plain", "Total {{ trigger.amount }}");
+    document
+      .querySelector('.cm-content[aria-label="Reply-to"]')
+      ?.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true }));
+  });
+  expect((await pillsIn("Reply-to")) === 1, "pasted {{ ref }} becomes a pill");
+  await check.keyboard.press("Escape");
+  await check.waitForTimeout(250);
+  await shot(check, `undo-paste-${theme}`);
+  await check.close();
+
   const narrow = await open(theme, { width: 390, height: 844 });
   await editor(narrow, "Subject").click();
   await narrow.waitForTimeout(250);

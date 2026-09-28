@@ -2,13 +2,19 @@
  * CodeMirror support for reference pills: a pill is the text `{{ref}}` in the document, tracked
  * in a state field and drawn as an atomic widget, so the cursor steps over it and Backspace
  * deletes it whole. Pills come from the picker, the `{{` autocomplete, the initial value and
- * pasted `{{ref}}` text.
+ * `{{ref}}` text that is pasted or typed (normalized to `{{ref}}`, whitespace dropped).
+ *
+ * Pill marks are part of undo history: a transaction that deletes pills records effects that
+ * re-add them, so undo and redo bring back pills rather than their bare `{{ref}}` text.
  *
  * @module
  */
 
+import { invertedEffects, isolateHistory } from "@codemirror/commands";
 import {
-  type EditorState,
+  type ChangeDesc,
+  type ChangeSpec,
+  EditorState,
   type Extension,
   Facet,
   RangeSet,
@@ -16,7 +22,6 @@ import {
   RangeValue,
   StateEffect,
   StateField,
-  type Transaction,
 } from "@codemirror/state";
 import {
   Decoration,
@@ -25,9 +30,8 @@ import {
   hoverTooltip,
   WidgetType,
 } from "@codemirror/view";
-import { createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import type { IconComponent } from "../../icons";
+import { fillIcon } from "./icon-markup";
 import { findRefs, type PillInfo, type RefPart } from "./ref-model";
 
 /** Marks a pill's range in the document. */
@@ -43,10 +47,22 @@ class PillMark extends RangeValue {
   }
 }
 
+/** A pill's range and reference. */
+type PillRange = { from: number; to: number; ref: string };
+
+/** A pill range through a change mapping; gone if its text was deleted. */
+function mapRange(p: PillRange, mapping: ChangeDesc): PillRange | undefined {
+  const from = mapping.mapPos(p.from, 1);
+  const to = mapping.mapPos(p.to, -1);
+  return to > from ? { from, to, ref: p.ref } : undefined;
+}
+
 /** Replaces every pill (the whole set, e.g. when the value changes from outside). */
-export const setPills = StateEffect.define<{ from: number; to: number; ref: string }[]>();
-/** Adds one pill over existing `{{ref}}` text. */
-const addPill = StateEffect.define<{ from: number; to: number; ref: string }>();
+export const setPills = StateEffect.define<PillRange[]>({
+  map: (list, mapping) => list.flatMap((p) => mapRange(p, mapping) ?? []),
+});
+/** Adds one pill over existing `{{ref}}` text (positions after the transaction's changes). */
+export const addPill = StateEffect.define<PillRange>({ map: mapRange });
 
 function buildMarks(
   list: readonly { from: number; to: number; ref: string }[],
@@ -57,18 +73,6 @@ function buildMarks(
   return builder.finish();
 }
 
-/** Pills in pasted or dropped text. */
-function pastedPills(tr: Transaction): { from: number; to: number; ref: string }[] {
-  if (!tr.isUserEvent("input.paste") && !tr.isUserEvent("input.drop")) return [];
-  const out: { from: number; to: number; ref: string }[] = [];
-  tr.changes.iterChanges((_fa, _ta, fromB, _tb, inserted) => {
-    for (const [from, to, ref] of findRefs(inserted.toString())) {
-      out.push({ from: fromB + from, to: fromB + to, ref });
-    }
-  });
-  return out;
-}
-
 /** The pill ranges of the document. Configure its start value with {@link pillsFor}. */
 export const pillField = StateField.define<RangeSet<PillMark>>({
   create: () => RangeSet.empty,
@@ -76,19 +80,19 @@ export const pillField = StateField.define<RangeSet<PillMark>>({
     let next = marks.map(tr.changes);
     for (const e of tr.effects) {
       if (e.is(setPills)) next = buildMarks(e.value);
-      else if (e.is(addPill))
+      else if (e.is(addPill)) {
+        const { from, to, ref } = e.value;
+        // Replaces any pill it overlaps (undo can re-add a pill that survived).
         next = next.update({
-          add: [new PillMark(e.value.ref).range(e.value.from, e.value.to)],
+          filter: (f, t) => t <= from || f >= to,
+          filterFrom: from,
+          filterTo: to,
+          add: [new PillMark(ref).range(from, to)],
           sort: true,
         });
+      }
     }
-    const pasted = pastedPills(tr);
-    if (pasted.length)
-      next = next.update({
-        add: pasted.map((p) => new PillMark(p.ref).range(p.from, p.to)),
-        sort: true,
-      });
-    if (tr.docChanged) {
+    if (tr.docChanged || tr.effects.length > 0) {
       // A pill whose text was edited (only possible programmatically) stops being a pill.
       const doc = tr.newDoc;
       next = next.update({
@@ -157,7 +161,6 @@ export const pillResolver = Facet.define<PillResolver, PillResolver | null>({
 });
 
 class PillWidget extends WidgetType {
-  private root: Root | null = null;
   constructor(
     readonly info: PillInfo,
     private readonly resolver: PillResolver,
@@ -185,10 +188,9 @@ class PillWidget extends WidgetType {
     const icon = document.createElement("span");
     icon.className = "fk-ref-pill__icon";
     icon.setAttribute("aria-hidden", "true");
+    // Markup, not a React root: CodeMirror may reuse this DOM without destroying the widget.
+    fillIcon(icon, this.resolver.icon(info.icon));
     el.append(icon);
-    const Icon = this.resolver.icon(info.icon);
-    this.root = createRoot(icon);
-    this.root.render(createElement(Icon, { size: 12 }));
     const head = document.createElement("span");
     head.className = "fk-ref-pill__head";
     head.textContent = info.head;
@@ -203,12 +205,6 @@ class PillWidget extends WidgetType {
       el.append(sep, path);
     }
     return el;
-  }
-  override destroy(): void {
-    const root = this.root;
-    this.root = null;
-    // Unmounting synchronously while React renders warns, so defer it.
-    if (root) queueMicrotask(() => root.unmount());
   }
   override ignoreEvent(): boolean {
     return false;
@@ -242,11 +238,22 @@ const decorationField = StateField.define<DecorationSet>({
   ],
 });
 
+/** Turns pill hover cards off (while a popover sits over the field) or back on. */
+export const setPillHover = StateEffect.define<boolean>();
+
+const pillHoverOn = StateField.define<boolean>({
+  create: () => true,
+  update(on, tr) {
+    for (const e of tr.effects) if (e.is(setPillHover)) on = e.value;
+    return on;
+  },
+});
+
 /** A hover card on a pill: its full path, type, sample value and, if stale, why. */
 const pillHover = hoverTooltip(
   (view, pos) => {
     const resolver = view.state.facet(pillResolver);
-    if (!resolver) return null;
+    if (!resolver || !view.state.field(pillHoverOn)) return null;
     let found: { from: number; to: number; ref: string } | null = null;
     view.state.field(pillField).between(pos, pos, (from, to, m) => {
       if (pos >= from && pos <= to) found = { from, to, ref: m.ref };
@@ -297,9 +304,71 @@ const pillHover = hoverTooltip(
   { hoverTime: 250 },
 );
 
+/** Undo re-adds the pills a transaction deleted (in its start document's positions). */
+const pillHistory = invertedEffects.of((tr) => {
+  if (!tr.docChanged) return [];
+  const out: StateEffect<PillRange>[] = [];
+  const marks = tr.startState.field(pillField, false);
+  marks?.between(0, tr.startState.doc.length, (from, to, m) => {
+    if (tr.changes.touchesRange(from, to)) out.push(addPill.of({ from, to, ref: m.ref }));
+  });
+  return out;
+});
+
+/**
+ * Typed, pasted or dropped `{{ ref }}` text becomes a pill, normalized to `{{ref}}`. Only
+ * references the edit touches convert, so literal text elsewhere stays as it is.
+ */
+const pillInput = EditorState.transactionFilter.of((tr) => {
+  if (!tr.docChanged || !tr.isUserEvent("input") || tr.isUserEvent("input.complete")) return tr;
+  const marks = tr.startState.field(pillField, false)?.map(tr.changes);
+  if (!marks) return tr;
+  const doc = tr.newDoc;
+  const added = tr.effects.flatMap((e) => (e.is(addPill) ? [e.value] : []));
+  const isPill = (from: number, to: number) => {
+    let hit = added.some((p) => p.from < to && p.to > from);
+    marks.between(from, to, (f, t) => {
+      if (f < to && t > from) hit = true;
+    });
+    return hit;
+  };
+  const found = new Map<number, PillRange>();
+  tr.changes.iterChangedRanges((_fa, _ta, fromB, toB) => {
+    if (toB === fromB) return;
+    const start = doc.lineAt(fromB).from;
+    const end = doc.lineAt(toB).to;
+    for (const [f, t, ref] of findRefs(doc.sliceString(start, end))) {
+      const from = start + f;
+      const to = start + t;
+      if (from < toB && to > fromB && !isPill(from, to)) found.set(from, { from, to, ref });
+    }
+  });
+  if (found.size === 0) return tr;
+  const changes: ChangeSpec[] = [];
+  const effects: StateEffect<PillRange>[] = [];
+  let delta = 0;
+  for (const p of [...found.values()].sort((a, b) => a.from - b.from)) {
+    const text = `{{${p.ref}}}`;
+    if (doc.sliceString(p.from, p.to) !== text)
+      changes.push({ from: p.from, to: p.to, insert: text });
+    effects.push(
+      addPill.of({ from: p.from + delta, to: p.from + delta + text.length, ref: p.ref }),
+    );
+    delta += text.length - (p.to - p.from);
+  }
+  return [tr, { changes, effects, sequential: true }];
+});
+
 /** Pill support, starting with the pills of `pills` (from {@link partsToDoc}). */
-export function pillsFor(pills: { from: number; to: number; ref: string }[]): Extension {
-  return [pillField.init(() => buildMarks(pills)), decorationField, pillHover];
+export function pillsFor(pills: PillRange[]): Extension {
+  return [
+    pillField.init(() => buildMarks(pills)),
+    decorationField,
+    pillHoverOn,
+    pillHover,
+    pillHistory,
+    pillInput,
+  ];
 }
 
 /** Inserts a pill for `ref` over `from`–`to` (default: the selection) and puts the cursor after it. */
@@ -317,6 +386,8 @@ export function insertPill(
     effects: addPill.of({ from, to: from + text.length, ref }),
     selection: { anchor: from + text.length },
     userEvent: "input.complete",
+    // Each insert is its own undo step.
+    annotations: isolateHistory.of("full"),
     scrollIntoView: true,
   });
 }

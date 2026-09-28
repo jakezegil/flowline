@@ -13,11 +13,9 @@ import {
 } from "@codemirror/autocomplete";
 import { type Extension, Facet } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
-import { createElement } from "react";
-import { flushSync } from "react-dom";
-import { createRoot } from "react-dom/client";
 import type { IconComponent } from "../../icons";
 import { bestScore } from "./fuzzy";
+import { fillIcon } from "./icon-markup";
 import { insertPill } from "./pills";
 import type { PickerNode } from "./schema-tree";
 
@@ -37,25 +35,6 @@ export interface RefCompletionSource {
 export const refCompletionSource = Facet.define<RefCompletionSource, RefCompletionSource | null>({
   combine: (values) => values[values.length - 1] ?? null,
 });
-
-const markupCache = new WeakMap<IconComponent, string>();
-
-/**
- * An icon's SVG markup, rendered once per icon. Option rows are plain DOM that CodeMirror
- * re-creates freely, so they get a copy instead of a React root each.
- */
-export function iconMarkup(Icon: IconComponent): string {
-  let html = markupCache.get(Icon);
-  if (html === undefined) {
-    const host = document.createElement("div");
-    const root = createRoot(host);
-    flushSync(() => root.render(createElement(Icon, { size: 12 })));
-    html = host.innerHTML;
-    root.unmount();
-    markupCache.set(Icon, html);
-  }
-  return html;
-}
 
 interface RefCompletion extends Completion {
   node: PickerNode;
@@ -126,7 +105,7 @@ export function refAutocomplete(): Extension {
           el.className = "fk-ref-option__icon";
           el.setAttribute("aria-hidden", "true");
           const node = (completion as RefCompletion).node;
-          if (source && node) el.innerHTML = iconMarkup(source.icon(node.entry.icon));
+          if (source && node) fillIcon(el, source.icon(node.entry.icon));
           return el;
         },
       },

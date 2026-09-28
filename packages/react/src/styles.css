@@ -1181,6 +1181,14 @@
     color: var(--fk-text-muted);
     text-align: center;
   }
+  .fk-dp__more {
+    margin: 0;
+    padding: 7px 12px;
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: var(--fk-text-muted);
+    border-top: 1px solid var(--fk-border);
+  }
   .fk-dp__foot {
     display: flex;
     flex: none;

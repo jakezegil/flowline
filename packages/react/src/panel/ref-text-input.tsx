@@ -7,8 +7,21 @@
 
 import { completionStatus } from "@codemirror/autocomplete";
 import { history, historyKeymap, standardKeymap } from "@codemirror/commands";
-import { Annotation, Compartment, EditorState, type Extension, Prec } from "@codemirror/state";
-import { EditorView, keymap, placeholder as placeholderExt, tooltips } from "@codemirror/view";
+import {
+  Annotation,
+  Compartment,
+  EditorState,
+  type Extension,
+  Prec,
+  Transaction,
+} from "@codemirror/state";
+import {
+  closeHoverTooltips,
+  EditorView,
+  keymap,
+  placeholder as placeholderExt,
+  tooltips,
+} from "@codemirror/view";
 import { parseRefPath, type ScopeEntry, type ValueExpr } from "@flowkit/core";
 import * as Popover from "@radix-ui/react-popover";
 import { Braces } from "lucide-react";
@@ -24,15 +37,17 @@ import {
 } from "react";
 import { PortalContainerContext } from "../canvas/canvas-context";
 import { useFlowkitAppearance } from "../provider";
-import { DataPickerView, type PickerExit } from "./data-picker";
+import { DataPickerView, type PickerExit, type PickVia } from "./data-picker";
 import { refInputTheme } from "./picker/editor-theme";
 import {
+  addPill,
   docParts,
   insertPill,
   type PillResolver,
   partsToDoc,
   pillResolver,
   pillsFor,
+  setPillHover,
   setPills,
 } from "./picker/pills";
 import {
@@ -40,7 +55,7 @@ import {
   refAutocomplete,
   refCompletionSource,
 } from "./picker/ref-completion";
-import { partsToValue, pillInfo, valueKey, valueToParts } from "./picker/ref-model";
+import { findRefs, partsToValue, pillInfo, valueKey, valueToParts } from "./picker/ref-model";
 import { flattenTree, formatSample } from "./picker/schema-tree";
 
 /** Marks a transaction that loads a value from props (not a user edit, so not emitted). */
@@ -75,17 +90,27 @@ const singleLine = EditorState.transactionFilter.of((tr) => {
   tr.changes.iterChanges((fromA, toA, _fb, _tb, inserted) => {
     changes.push({ from: fromA, to: toA, insert: inserted.toString().replace(/\r?\n/g, " ") });
   });
+  const userEvent = tr.annotation(Transaction.userEvent);
   return [
     {
       changes,
       ...(tr.selection ? { selection: tr.selection } : {}),
       effects: tr.effects,
-      ...(tr.annotation(external) ? { annotations: external.of(true) } : {}),
+      ...(userEvent !== undefined ? { userEvent } : {}),
+      annotations: [
+        ...(tr.annotation(external) ? [external.of(true)] : []),
+        ...(tr.annotation(Transaction.addToHistory) === false
+          ? [Transaction.addToHistory.of(false)]
+          : []),
+      ],
     },
   ];
 });
 
-/** In a single-pill field only pills go in: typed or pasted text is dropped. */
+/**
+ * In a single-pill field only pills go in: typed text is dropped, and a paste is kept only if
+ * it is exactly one reference (which then replaces the pill).
+ */
 const pillOnly = EditorState.transactionFilter.of((tr) => {
   if (
     !tr.docChanged ||
@@ -95,6 +120,23 @@ const pillOnly = EditorState.transactionFilter.of((tr) => {
   )
     return tr;
   if (tr.isUserEvent("undo") || tr.isUserEvent("redo")) return tr;
+  if (tr.isUserEvent("input.paste") || tr.isUserEvent("input.drop")) {
+    let pasted = "";
+    tr.changes.iterChanges((_fa, _ta, _fb, _tb, inserted) => {
+      pasted += inserted.toString();
+    });
+    const text = pasted.trim();
+    const [only, ...more] = findRefs(text);
+    if (only && more.length === 0 && only[0] === 0 && only[1] === text.length) {
+      const insert = `{{${only[2]}}}`;
+      return {
+        changes: { from: 0, to: tr.startState.doc.length, insert },
+        effects: addPill.of({ from: 0, to: insert.length, ref: only[2] }),
+        selection: { anchor: insert.length },
+        userEvent: "input.complete",
+      };
+    }
+  }
   return [];
 });
 
@@ -220,6 +262,8 @@ export function RefTextInput(props: {
     EditorView.contentAttributes.of({
       "aria-label": ariaLabel,
       "aria-multiline": multiline ? "true" : "false",
+      // Read-only content isn't editable, so it isn't focusable either unless told to be.
+      ...(readOnly ? { tabindex: "0" } : {}),
       ...(withPicker ? { "aria-describedby": hintId, "aria-controls": pickerId } : {}),
     });
   const placeholderText = placeholder ?? (singlePill ? labels.pickValue : "");
@@ -315,7 +359,7 @@ export function RefTextInput(props: {
   // biome-ignore lint/correctness/useExhaustiveDependencies: attrs() reads exactly these
   useEffect(() => {
     viewRef.current?.dispatch({ effects: compartments.current.attrs.reconfigure(attrs()) });
-  }, [ariaLabel, withPicker, hintId, pickerId, multiline]);
+  }, [ariaLabel, withPicker, hintId, pickerId, multiline, readOnly]);
   useEffect(() => {
     viewRef.current?.dispatch({
       effects: [
@@ -344,9 +388,19 @@ export function RefTextInput(props: {
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: doc },
       ...(literalOnly ? {} : { effects: setPills.of(pills) }),
-      annotations: external.of(true),
+      // Not an edit of the user's: undo mustn't bring back the value it replaced.
+      annotations: [external.of(true), Transaction.addToHistory.of(false)],
     });
   }, [value, literalOnly]);
+
+  // A pill's hover card would sit over the picker: none while it's open.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || literalOnly) return;
+    view.dispatch({
+      effects: pickerOpen ? [setPillHover.of(false), closeHoverTooltips] : setPillHover.of(true),
+    });
+  }, [pickerOpen, literalOnly]);
 
   const focusEditor = () => {
     quietFocus.current = true;
@@ -354,16 +408,18 @@ export function RefTextInput(props: {
     quietFocus.current = false;
   };
 
-  const onPick = (ref: string) => {
+  const onPick = (ref: string, _type: string, via: PickVia = "pointer") => {
     const view = viewRef.current;
     if (!view) return;
     if (singlePill) {
       insertPill(view, ref, { from: 0, to: view.state.doc.length });
       setOpen(false);
+      focusEditor();
     } else {
       insertPill(view, ref);
+      // A keyboard pick keeps its place in the tree for the next one.
+      if (via === "pointer") focusEditor();
     }
-    focusEditor();
   };
 
   const onExit = (reason: PickerExit) => {

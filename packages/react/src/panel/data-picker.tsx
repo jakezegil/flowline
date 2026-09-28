@@ -33,12 +33,17 @@ import {
 
 /** Why keyboard focus leaves the picker (see {@link DataPickerView}'s `onExit`). */
 export type PickerExit = "escape" | "tab" | "shiftTab" | "up";
+/** How a row was picked: a keyboard pick keeps focus in the picker for the next one. */
+export type PickVia = "keyboard" | "pointer";
+
+/** Most rows the picker renders at once; a search with more says so. */
+const MAX_ROWS = 200;
 
 /** @internal The picker with the hooks a reference input needs to host it in a popover. */
 export interface DataPickerViewProps {
   scope: ScopeEntry[];
   samples: Record<string, unknown>;
-  onPick(refPath: string, typeLabel: string): void;
+  onPick(refPath: string, typeLabel: string, via?: PickVia): void;
   filterType?: JSONSchema;
   /** Called when a key should move focus back to the input (the picker doesn't move it). */
   onExit?(reason: PickerExit): void;
@@ -70,49 +75,65 @@ function useRows(
   query: string,
   filterType: JSONSchema | undefined,
 ): Row[] {
-  // Rows that fit the filter, or lead to one that does (walked once, bounded).
-  const relevant = useMemo(() => {
-    if (!filterType) return null;
-    const keep = new Set<string>();
-    const flat = flattenTree(scope, samples);
-    const parents = parentMap(flat);
-    for (const node of flat) {
-      if (node.depth > 0 && fitsFilter(node, filterType)) {
-        for (let id: string | undefined = node.id; id; id = parents.get(id)) keep.add(id);
-      }
-    }
-    return keep;
-  }, [scope, samples, filterType]);
+  const tokens = useMemo(() => query.toLowerCase().split(/\s+/).filter(Boolean), [query]);
+  const searching = tokens.length > 0;
+  // Every row of the whole scope, walked once on the first search or filter (not per key).
+  const needFlat = searching || filterType !== undefined;
+  const flat = useMemo(
+    () => (needFlat ? flattenTree(scope, samples) : null),
+    [needFlat, scope, samples],
+  );
+  const parents = useMemo(() => (flat ? parentMap(flat) : null), [flat]);
 
-  const found = useMemo(() => {
-    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-    if (tokens.length === 0) return null;
-    const flat = flattenTree(scope, samples);
-    const parents = parentMap(flat);
-    const keep = new Set<string>();
+  /** Rows matching `keep`, plus every row leading to one. */
+  const withAncestors = (keep: (node: PickerNode) => boolean): Set<string> => {
+    const out = new Set<string>();
+    if (!flat || !parents) return out;
     for (const node of flat) {
-      if (node.depth > 0 && matches(node, tokens)) {
-        for (let id: string | undefined = node.id; id; id = parents.get(id)) keep.add(id);
+      if (node.depth > 0 && keep(node)) {
+        for (let id: string | undefined = node.id; id && !out.has(id); id = parents.get(id))
+          out.add(id);
       }
     }
-    return keep;
-  }, [scope, samples, query]);
+    return out;
+  };
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: withAncestors reads flat and parents
+  const relevant = useMemo(
+    () => (filterType ? withAncestors((n) => fitsFilter(n, filterType)) : null),
+    [flat, parents, filterType],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: withAncestors reads flat and parents
+  const found = useMemo(
+    () => (searching ? withAncestors((n) => matches(n, tokens)) : null),
+    [flat, parents, tokens, searching],
+  );
 
   return useMemo(() => {
+    // Searching: the matches in tree order, every group open (straight from the walk).
+    if (found && flat && parents) {
+      return flat
+        .filter((node) => found.has(node.id) && (!relevant || relevant.has(node.id)))
+        .map((node) => ({
+          node,
+          open: node.expandable,
+          empty: false,
+          pickable: node.insertable && fitsFilter(node, filterType),
+          parent: parents.get(node.id) ?? null,
+        }));
+    }
     const rows: Row[] = [];
     const visit = (node: PickerNode, parent: string | null) => {
       if (relevant && !relevant.has(node.id)) return;
-      if (found && !found.has(node.id)) return;
-      const open = node.expandable && (found ? true : expanded.has(node.id));
+      const open = node.expandable && expanded.has(node.id);
       const kids = open ? childNodes(node, samples) : [];
       const pickable = node.insertable && fitsFilter(node, filterType);
-      const row: Row = { node, open, empty: open && kids.length === 0, pickable, parent };
-      rows.push(row);
+      rows.push({ node, open, empty: open && kids.length === 0, pickable, parent });
       for (const kid of kids) visit(kid, node.id);
     };
     for (const section of sectionNodes(scope, samples)) visit(section, null);
     return rows;
-  }, [scope, samples, expanded, found, relevant, filterType]);
+  }, [scope, samples, expanded, found, flat, parents, relevant, filterType]);
 }
 
 function parentMap(flat: readonly PickerNode[]): Map<string, string> {
@@ -142,10 +163,12 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
   const { labels, resolveIcon } = useFlowkitAppearance();
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => initialExpanded(scope, samples));
-  const rows = useRows(scope, samples, expanded, query, filterType);
+  const allRows = useRows(scope, samples, expanded, query, filterType);
+  const rows = allRows.length > MAX_ROWS ? allRows.slice(0, MAX_ROWS) : allRows;
   const [activeId, setActiveId] = useState<string | null>(null);
   const baseId = useId();
   const treeId = `${baseId}tree`;
+  const keysId = `${baseId}keys`;
   const listRef = useRef<HTMLDivElement>(null);
 
   // New sections (a step added upstream) start expanded.
@@ -180,14 +203,14 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
       return next;
     });
 
-  const pick = (row: Row) => {
-    if (row.pickable) onPick(row.node.ref, row.node.typeLabel);
+  const pick = (row: Row, via: PickVia) => {
+    if (row.pickable) onPick(row.node.ref, row.node.typeLabel, via);
   };
   /** Enter or click: a value inserts; a group opens or closes (while searching, inserts). */
-  const activate = (row: Row) => {
-    if (!row.node.expandable) pick(row);
+  const activate = (row: Row, via: PickVia) => {
+    if (!row.node.expandable) pick(row, via);
     else if (!query) toggle(row.node.id);
-    else if (row.node.depth > 0) pick(row);
+    else if (row.node.depth > 0) pick(row, via);
   };
 
   const move = (to: number) => {
@@ -232,8 +255,8 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
       case "Enter":
         if (!active) return;
         e.preventDefault();
-        if (e.shiftKey) pick(active);
-        else activate(active);
+        if (e.shiftKey) pick(active, "keyboard");
+        else activate(active, "keyboard");
         return;
       case "Escape":
         if (query) {
@@ -269,6 +292,7 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
           aria-controls={treeId}
           aria-autocomplete="list"
           aria-label={labels.searchData}
+          aria-describedby={keysId}
           {...(active ? { "aria-activedescendant": rowDomId(active.node.id) } : {})}
           placeholder={labels.searchData}
           value={query}
@@ -302,14 +326,22 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
               row={row}
               active={row === active}
               onHover={() => setActiveId(row.node.id)}
-              onActivate={() => activate(row)}
-              onInsert={() => pick(row)}
+              onActivate={() => activate(row, "pointer")}
+              onInsert={() => pick(row, "pointer")}
               icon={row.node.depth === 0 ? resolveIcon(row.node.entry.icon) : undefined}
               labels={labels}
             />
           ))}
         </div>
       )}
+      {allRows.length > rows.length && (
+        <p className="fk-dp__more" role="status">
+          {labels.moreMatches(rows.length, allRows.length)}
+        </p>
+      )}
+      <span id={keysId} className="fk-sr-only">
+        {labels.pickerKeysHint}
+      </span>
       <div className="fk-dp__foot" aria-hidden="true">
         <span>
           <kbd>↑</kbd>
@@ -448,5 +480,6 @@ export function DataPicker(props: {
   onPick(refPath: string, typeLabel: string): void;
   filterType?: JSONSchema;
 }): JSX.Element {
-  return <DataPickerView {...props} />;
+  const { onPick } = props;
+  return <DataPickerView {...props} onPick={(ref, type) => onPick(ref, type)} />;
 }

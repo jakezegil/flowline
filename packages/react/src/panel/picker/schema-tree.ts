@@ -22,8 +22,12 @@ const TRIGGER_SAMPLE_KEY = "__trigger";
 
 /** Deepest level the search and autocomplete walk (sections are depth 0). */
 export const MAX_SEARCH_DEPTH = 5;
-/** Most nodes the search and autocomplete walk collects. */
-const MAX_FLAT_NODES = 3000;
+/**
+ * Most nodes the search and autocomplete walk collects per section. A budget per section (not
+ * one for the whole scope) means every step is searched however many come before it; it only
+ * bounds pathological schemas (deep, wide, self-similar).
+ */
+const MAX_SECTION_NODES = 5000;
 
 /** One row of the tree: a scope entry (depth 0) or a value inside one. */
 export interface PickerNode {
@@ -299,20 +303,27 @@ export function fitsFilter(node: PickerNode, filterType: JSONSchema | undefined)
   return isAssignable(node.schema, filterType);
 }
 
-/** Every row down to {@link MAX_SEARCH_DEPTH}, depth-first, for search and autocomplete. */
+/**
+ * Every row of every section down to {@link MAX_SEARCH_DEPTH}, depth-first in picker order, for
+ * search and autocomplete. Callers walk it once per scope and reuse it across keystrokes.
+ */
 export function flattenTree(
   scope: readonly ScopeEntry[],
   samples: Record<string, unknown>,
 ): PickerNode[] {
   const out: PickerNode[] = [];
+  let budget = 0;
   const visit = (node: PickerNode) => {
-    if (out.length >= MAX_FLAT_NODES) return;
+    if (budget-- <= 0) return;
     out.push(node);
     if (node.expandable && node.depth < MAX_SEARCH_DEPTH) {
       for (const child of childNodes(node, samples)) visit(child);
     }
   };
-  for (const section of sectionNodes(scope, samples)) visit(section);
+  for (const section of sectionNodes(scope, samples)) {
+    budget = MAX_SECTION_NODES;
+    visit(section);
+  }
   return out;
 }
 

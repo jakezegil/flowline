@@ -1,6 +1,7 @@
-import { CompletionContext } from "@codemirror/autocomplete";
+import { CompletionContext, currentCompletions } from "@codemirror/autocomplete";
+import { undo } from "@codemirror/commands";
 import type { EditorState } from "@codemirror/state";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { editorView, setupCodeMirrorDom, typeInto } from "../../test/codemirror-dom";
 import { loopEntry, scope } from "../../test/picker-fixtures";
@@ -41,6 +42,12 @@ describe("CodeEditor", () => {
     rerender(<CodeEditor ariaLabel="Code" value="b" onChange={onChange} scope={scope} />);
     expect(editorView("Code").state.doc.toString()).toBe("b");
     expect(onChange).not.toHaveBeenCalled();
+    // …and undo doesn't bring the old code back.
+    act(() => {
+      undo(editorView("Code"));
+    });
+    expect(editorView("Code").state.doc.toString()).toBe("b");
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   test("completes steps, their fields, trigger fields and loop", () => {
@@ -57,6 +64,26 @@ describe("CodeEditor", () => {
     );
     expect(completeAt("loop.")).toEqual(["item", "index"]);
     expect(completeAt("x")).toContain("loop");
+  });
+
+  test("Escape closes completions without reaching an enclosing handler", async () => {
+    const outer = vi.fn();
+    render(
+      // biome-ignore lint/a11y/noStaticElementInteractions: test harness
+      <div onKeyDown={outer}>
+        <CodeEditor ariaLabel="Code" value="" onChange={() => {}} scope={scope} />
+      </div>,
+    );
+    const view = editorView("Code");
+    act(() => typeInto(view, "steps."));
+    await waitFor(() => expect(currentCompletions(view.state).length).toBeGreaterThan(0));
+    const content = document.querySelector(".cm-content") as HTMLElement;
+    fireEvent.keyDown(content, { key: "Escape", keyCode: 27 });
+    expect(currentCompletions(view.state)).toHaveLength(0);
+    expect(outer).not.toHaveBeenCalled();
+    // Nothing left to close: Escape goes on to the enclosing panel.
+    fireEvent.keyDown(content, { key: "Escape", keyCode: 27 });
+    expect(outer).toHaveBeenCalledTimes(1);
   });
 
   test("is labelled for screen readers and can be read-only", () => {

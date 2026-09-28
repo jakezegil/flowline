@@ -1,11 +1,12 @@
 import { acceptCompletion, currentCompletions } from "@codemirror/autocomplete";
-import { deleteCharBackward } from "@codemirror/commands";
+import { deleteCharBackward, redo, undo } from "@codemirror/commands";
 import type { ValueExpr } from "@flowkit/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { editorView, setupCodeMirrorDom, typeInto } from "../../test/codemirror-dom";
-import { samples, scope } from "../../test/picker-fixtures";
+import { bigScope, samples, scope } from "../../test/picker-fixtures";
 import { partsToValue, valueToParts } from "./picker/ref-model";
 import { RefTextInput } from "./ref-text-input";
 
@@ -215,6 +216,197 @@ describe("RefTextInput", () => {
     expect(content.getAttribute("aria-multiline")).toBe("false");
     const hint = document.getElementById(content.getAttribute("aria-describedby") ?? "");
     expect(hint?.textContent).toBe("Type {{ to insert data, or press Down arrow to browse it.");
+  });
+
+  describe("undo and redo keep pills", () => {
+    test("undoing a Backspace over a pill brings the pill back", () => {
+      const { onChange, view } = setup({ value: { $tpl: "Hi {{trigger.name}}!" } });
+      act(() => {
+        view().dispatch({ selection: { anchor: view().state.doc.length - 1 } });
+        deleteCharBackward(view());
+      });
+      expect(onChange).toHaveBeenLastCalledWith("Hi !");
+      act(() => {
+        undo(view());
+      });
+      expect(onChange).toHaveBeenLastCalledWith({ $tpl: "Hi {{trigger.name}}!" });
+      expect(pills()).toHaveLength(1);
+      act(() => {
+        redo(view());
+      });
+      expect(onChange).toHaveBeenLastCalledWith("Hi !");
+      act(() => {
+        undo(view());
+      });
+      expect(onChange).toHaveBeenLastCalledWith({ $tpl: "Hi {{trigger.name}}!" });
+    });
+
+    test("undo and redo of picker inserts keep them pills, one pick per step", async () => {
+      const { onChange, view } = setup();
+      focus();
+      await screen.findByRole("tree");
+      pickRow("name");
+      pickRow("amount");
+      expect(onChange).toHaveBeenLastCalledWith({ $tpl: "{{trigger.name}}{{trigger.amount}}" });
+      act(() => {
+        undo(view());
+      });
+      expect(onChange).toHaveBeenLastCalledWith({ $ref: "trigger.name" });
+      act(() => {
+        redo(view());
+      });
+      expect(onChange).toHaveBeenLastCalledWith({ $tpl: "{{trigger.name}}{{trigger.amount}}" });
+      expect(pills()).toHaveLength(2);
+      act(() => {
+        undo(view());
+        undo(view());
+        redo(view());
+        redo(view());
+      });
+      expect(onChange).toHaveBeenLastCalledWith({ $tpl: "{{trigger.name}}{{trigger.amount}}" });
+      expect(pills()).toHaveLength(2);
+    });
+
+    test("singlePill: undoing a pick restores the previous pill, never raw braces", async () => {
+      const { onChange, view } = setup({ singlePill: true, value: { $ref: "trigger.name" } });
+      focus();
+      await screen.findByRole("tree");
+      pickRow("amount");
+      expect(onChange).toHaveBeenLastCalledWith({ $ref: "trigger.amount" });
+      act(() => {
+        undo(view());
+      });
+      expect(onChange).toHaveBeenLastCalledWith({ $ref: "trigger.name" });
+      expect(pills()).toHaveLength(1);
+      expect(document.querySelector(".cm-content")?.textContent).not.toContain("{{");
+      act(() => {
+        redo(view());
+      });
+      expect(onChange).toHaveBeenLastCalledWith({ $ref: "trigger.amount" });
+      expect(document.querySelector(".cm-content")?.textContent).not.toContain("{{");
+    });
+
+    test("a value loaded from outside isn't undoable", () => {
+      const onChange = vi.fn();
+      const props = { ariaLabel: "Subject", scope, samples, onChange };
+      const { rerender } = render(<RefTextInput {...props} value="step A value" />);
+      rerender(<RefTextInput {...props} value="step B value" />);
+      act(() => {
+        undo(editorView("Subject"));
+      });
+      expect(editorView("Subject").state.doc.toString()).toBe("step B value");
+      expect(onChange).not.toHaveBeenCalled();
+      // Edits before an outside load don't undo into the new value either.
+      act(() => typeInto(editorView("Subject"), "!"));
+      rerender(<RefTextInput {...props} value={{ $ref: "trigger.name" }} />);
+      onChange.mockClear();
+      act(() => {
+        undo(editorView("Subject"));
+      });
+      expect(onChange).not.toHaveBeenCalled();
+      expect(pills()).toHaveLength(1);
+    });
+  });
+
+  test("{{ ref }} with spaces, pasted or typed, becomes a pill", () => {
+    const { onChange, view } = setup();
+    act(() => {
+      view().dispatch({
+        changes: { from: 0, insert: "{{ trigger.amount }}" },
+        userEvent: "input.paste",
+      });
+    });
+    expect(onChange).toHaveBeenLastCalledWith({ $ref: "trigger.amount" });
+    expect(pills()).toHaveLength(1);
+    act(() => {
+      view().dispatch({ selection: { anchor: view().state.doc.length } });
+      typeInto(view(), " of {{ steps.load.email }}");
+    });
+    expect(onChange).toHaveBeenLastCalledWith({
+      $tpl: "{{trigger.amount}} of {{steps.load.email}}",
+    });
+    expect(pills()).toHaveLength(2);
+  });
+
+  test("singlePill: pasting exactly one reference sets it", () => {
+    const { onChange, view } = setup({ singlePill: true, value: { $ref: "trigger.name" } });
+    act(() => {
+      view().dispatch({
+        changes: { from: 0, insert: " {{ trigger.amount }} " },
+        userEvent: "input.paste",
+      });
+    });
+    expect(onChange).toHaveBeenLastCalledWith({ $ref: "trigger.amount" });
+    expect(pills()).toHaveLength(1);
+    onChange.mockClear();
+    act(() => {
+      view().dispatch({ changes: { from: 0, insert: "not a ref" }, userEvent: "input.paste" });
+    });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  test("autocomplete reaches the farthest step of a large scope", async () => {
+    const onChange = vi.fn();
+    render(
+      <RefTextInput
+        ariaLabel="Subject"
+        scope={bigScope()}
+        samples={{}}
+        value={undefined}
+        onChange={onChange}
+      />,
+    );
+    const view = editorView("Subject");
+    act(() => typeInto(view, "{{s0.f39.b"));
+    await waitFor(() => expect(currentCompletions(view.state).length).toBeGreaterThan(0));
+    expect(currentCompletions(view.state)[0]?.label).toBe("Step 0 › f39.b");
+  });
+
+  test("a read-only field is still reachable from the keyboard", () => {
+    setup({ readOnly: true, value: { $ref: "trigger.name" } });
+    const content = document.querySelector(".cm-content") as HTMLElement;
+    expect(content.getAttribute("contenteditable")).toBe("false");
+    expect(content.getAttribute("tabindex")).toBe("0");
+  });
+
+  test("picking from the keyboard keeps focus in the picker for the next pick", async () => {
+    const { onChange } = setup();
+    focus();
+    const search = await screen.findByRole("combobox", { name: "Search data" });
+    search.focus();
+    // Rows: Deal updated, name, amount…
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith({ $ref: "trigger.name" });
+    expect(document.activeElement).toBe(search);
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith({ $tpl: "{{trigger.name}}{{trigger.amount}}" });
+  });
+
+  test("Escape closes the autocomplete without reaching an enclosing handler", async () => {
+    const outer = vi.fn();
+    render(
+      // biome-ignore lint/a11y/noStaticElementInteractions: test harness
+      <div onKeyDown={outer}>
+        <RefTextInput
+          ariaLabel="Subject"
+          scope={scope}
+          samples={samples}
+          value={undefined}
+          onChange={() => {}}
+        />
+      </div>,
+    );
+    const view = editorView("Subject");
+    act(() => typeInto(view, "{{ema"));
+    await waitFor(() => expect(currentCompletions(view.state).length).toBeGreaterThan(0));
+    const content = document.querySelector(".cm-content") as HTMLElement;
+    fireEvent.keyDown(content, { key: "Escape", keyCode: 27 });
+    expect(currentCompletions(view.state)).toHaveLength(0);
+    expect(outer).not.toHaveBeenCalled();
+    // Nothing left to close: Escape goes on to the enclosing panel.
+    fireEvent.keyDown(content, { key: "Escape", keyCode: 27 });
+    expect(outer).toHaveBeenCalledTimes(1);
+    expect(outer.mock.calls[0]?.[0].defaultPrevented).toBe(false);
   });
 
   test("Escape closes the picker without reaching an enclosing handler", async () => {
