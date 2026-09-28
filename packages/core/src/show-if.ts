@@ -5,7 +5,13 @@
  *
  * @module
  */
-import { asSchema, derefSchema, discriminatedMember, isDiscriminatedUnion } from "./json-schema";
+import {
+  asSchema,
+  containsSecret,
+  derefSchema,
+  discriminatedMember,
+  isDiscriminatedUnion,
+} from "./json-schema";
 import { isRef, isTpl } from "./refs";
 import type { JSONSchema, Literal, ShowIf, UiMeta } from "./types";
 
@@ -173,7 +179,8 @@ export function dropHiddenFields(
  *   value);
  * - conditions that form a cycle;
  * - a condition where {@link dropHiddenFields} can't reach it: inside a union without a
- *   discriminator, an `allOf` or a tuple (`prefixItems`).
+ *   discriminator, an `allOf` or a tuple (`prefixItems`);
+ * - a conditional field that is, or contains, a `secret()` field.
  *
  * Empty when all are sound.
  */
@@ -204,6 +211,12 @@ export function showIfProblems(schema: JSONSchema): string[] {
     for (const [key, prop] of Object.entries(props)) {
       const cond = showIfOf(prop, schema);
       if (!cond) continue;
+      if (containsSecret(schema, asSchema(prop))) {
+        // Hiding a secret would silently drop it (e.g. turn off a signature check).
+        problems.push(
+          `"${at(key)}" has showIf but is or contains a secret() field; secrets can't be conditional`,
+        );
+      }
       if (unreachable) {
         problems.push(`"${at(key)}" has showIf inside ${unreachable}, which isn't supported`);
         continue;

@@ -294,6 +294,42 @@ describe("showIf definitions", () => {
     ).toThrow(FlowkitDefinitionError);
   });
 
+  test("a secret() field, or a webhook's signing secret, can't have showIf", () => {
+    const signed = z.boolean().optional();
+    expect(() =>
+      build(z.object({ signed, key: ui(secret(), { showIf: { field: "signed" } }).optional() })),
+    ).toThrow(/"key" has showIf but is or contains a secret\(\) field/);
+    // A hidden object would hide the secret inside it too.
+    expect(() =>
+      build(
+        z.object({
+          signed,
+          auth: ui(z.object({ key: secret() }), { showIf: { field: "signed" } }).optional(),
+        }),
+      ),
+    ).toThrow(FlowkitDefinitionError);
+    const hook = (secretField: z.ZodType) =>
+      createRegistry([
+        definePlugin({
+          id: "x",
+          name: "X",
+          triggers: [
+            defineTrigger({
+              type: "x.hook",
+              name: "Hook",
+              kind: "webhook",
+              config: z.object({ slug: z.string().optional(), signed, secret: secretField }),
+            }),
+          ],
+        }),
+      ]).manifest();
+    // Even a plain string: the engine checks signatures with config `secret`.
+    expect(() => hook(ui(z.string(), { showIf: { field: "signed" } }).optional())).toThrow(
+      /"secret" is the webhook signing secret and can't have showIf/,
+    );
+    expect(() => hook(z.string().optional())).not.toThrow();
+  });
+
   test("showIf is allowed in a discriminated union's members, not in a plain union's", () => {
     const member = (type: string) =>
       z.object({

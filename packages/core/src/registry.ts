@@ -5,7 +5,7 @@ import {
   type PluginDefinition,
   type TriggerDefinition,
 } from "./define";
-import { showIfProblems } from "./show-if";
+import { showIfOf, showIfProblems } from "./show-if";
 import type {
   JSONSchema,
   Manifest,
@@ -31,7 +31,8 @@ export interface Registry {
    * The JSON-serializable manifest of all plugins, nodes and triggers. Computed once and frozen.
    *
    * @throws {@link FlowkitDefinitionError} when a schema can't be converted to JSON Schema, or
-   * has an invalid `showIf` (a required conditional field, an unknown sibling, or a cycle).
+   * has an invalid `showIf` (a required conditional field, an unknown sibling, a cycle, or a
+   * conditional `secret()` field or webhook signing secret).
    */
   manifest(): Manifest;
 }
@@ -153,6 +154,14 @@ function triggerManifest(plugin: string, def: TriggerDefinition<any, any>): Trig
         kind: "schema",
         schema: def.payload ? toSchema(def.payload, "output", def.type, "payload") : {},
       };
+  const config = toSchema(def.config, "input", def.type, "config");
+  // The engine verifies webhook signatures with config `secret`; hiding it would skip the check.
+  const props = config.properties as Record<string, unknown> | undefined;
+  if (def.kind === "webhook" && props?.secret !== undefined && showIfOf(props.secret, config)) {
+    throw new FlowkitDefinitionError(
+      `Invalid showIf in config schema of "${def.type}": "secret" is the webhook signing secret and can't have showIf`,
+    );
+  }
   return compact({
     type: def.type,
     plugin,
@@ -161,7 +170,7 @@ function triggerManifest(plugin: string, def: TriggerDefinition<any, any>): Trig
     icon: def.icon,
     kind: def.kind,
     event: def.event,
-    config: toSchema(def.config, "input", def.type, "config"),
+    config,
     payload,
   });
 }
