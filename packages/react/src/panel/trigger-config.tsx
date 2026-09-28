@@ -128,6 +128,17 @@ function WebhookUrl(): JSX.Element {
   );
 }
 
+/** Longest text an `<option>` shows before truncating (options can't carry rich content). */
+const MAX_OPTION_TEXT = 60;
+
+/** A trigger's option text: its name, plus `event` or `events.join(", ")` when it has one. */
+function triggerOptionText(t: TriggerManifest): string {
+  const events = t.event ?? (t.events && t.events.length > 0 ? t.events.join(", ") : undefined);
+  if (!events) return t.name;
+  const full = `${t.name} — ${events}`;
+  return full.length > MAX_OPTION_TEXT ? `${full.slice(0, MAX_OPTION_TEXT - 1)}…` : full;
+}
+
 /** Trigger type choice, grouped by plugin. */
 function TriggerTypeSelect({ triggers }: { triggers: TriggerManifest[] }): JSX.Element {
   const { labels } = useFlowlineAppearance();
@@ -158,14 +169,14 @@ function TriggerTypeSelect({ triggers }: { triggers: TriggerManifest[] }): JSX.E
           <optgroup key={g.name} label={g.name}>
             {g.items.map((t) => (
               <option key={t.type} value={t.type}>
-                {t.name}
+                {triggerOptionText(t)}
               </option>
             ))}
           </optgroup>
         ))}
         {ungrouped.map((t) => (
           <option key={t.type} value={t.type}>
-            {t.name}
+            {triggerOptionText(t)}
           </option>
         ))}
       </select>
@@ -191,6 +202,12 @@ export function TriggerConfigure(): JSX.Element {
       {m?.description && <p className="fl-cp__desc">{m.description}</p>}
       <IssueNotes issues={loose} />
       {m?.kind === "webhook" && <WebhookUrl />}
+      {m?.kind === "event" && m.events && m.events.length > 0 && (
+        <p className="fl-callout" data-tone="info">
+          <Zap size={15} aria-hidden />
+          <span>{labels.triggerEventsHint(m.events)}</span>
+        </p>
+      )}
       {m?.kind === "event" && m.event && (
         <p className="fl-callout" data-tone="info">
           <Zap size={15} aria-hidden />

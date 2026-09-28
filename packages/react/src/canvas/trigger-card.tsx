@@ -69,7 +69,9 @@ function triggerCaption(
   if (!t) return labels.triggerUnknown(trigger.type);
   switch (t.kind) {
     case "event":
-      return labels.triggerEvent(t.event || undefined);
+      return t.events && t.events.length > 0
+        ? labels.triggerEvents(t.events)
+        : labels.triggerEvent(t.event || undefined);
     case "webhook":
       return labels.triggerWebhook;
     case "manual":

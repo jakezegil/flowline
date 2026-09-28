@@ -32,6 +32,8 @@ export interface FlowlineLabels {
   /** Trigger name when its type isn't in the manifest. */
   triggerUnknown(type: string): string;
   triggerEvent(event: string | undefined): string;
+  /** Multi-event trigger card caption: "When any of: a, b, c" (truncated "+N more" past three). */
+  triggerEvents(events: string[]): string;
   triggerWebhook: string;
   triggerManual: string;
   triggerSchedule(cron: string | undefined): string;
@@ -284,6 +286,8 @@ export interface FlowlineLabels {
   copyUrl: string;
   /** Explains an event trigger. */
   eventTriggerHint(event: string): string;
+  /** Explains a multi-event trigger: lists every event and says the payload is normalized. */
+  triggerEventsHint(events: string[]): string;
   /** Heading of a sub-flow's output mapping (in the trigger panel). */
   outputMapping: string;
   /** Explains the output mapping. */
@@ -545,6 +549,11 @@ export const defaultLabels: FlowlineLabels = {
   triggerNode: (name) => `Trigger: ${name}`,
   triggerUnknown: (type) => `Unknown trigger type ${type}`,
   triggerEvent: (event) => (event ? `When ${event} happens` : "When an event happens"),
+  triggerEvents: (events) => {
+    const shown = events.slice(0, 3);
+    const more = events.length - shown.length;
+    return `When any of: ${shown.join(", ")}${more > 0 ? `, +${more} more` : ""}`;
+  },
   triggerWebhook: "When a webhook is called",
   triggerManual: "When run manually",
   triggerSchedule: (cron) => (cron ? `On schedule ${cron}` : "On a schedule"),
@@ -731,6 +740,8 @@ export const defaultLabels: FlowlineLabels = {
   webhookSaveFirst: "Save the workflow to generate its URL.",
   copyUrl: "Copy URL",
   eventTriggerHint: (event) => `Runs every time the ${event} event happens.`,
+  triggerEventsHint: (events) =>
+    `Runs when any of ${events.join(", ")} happens. Each event's payload is normalized to this trigger's shape.`,
   outputMapping: "Output values",
   outputMappingHint:
     "What this sub-flow returns to the workflow that ran it. Pick each value from the trigger or the top-level steps.",
