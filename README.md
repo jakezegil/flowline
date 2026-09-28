@@ -473,7 +473,9 @@ runStorageConformance("my-storage", async () => {
 The provider accepts `client`, `theme`, `labels`, `icons` and `widgets`.
 
 - **Styles.** Import `@flowkit/react/styles.css`. All the rules sit in `@layer flowkit`, so your own
-  CSS wins without any specificity fights.
+  unlayered CSS wins without any specificity fights. That includes global resets like
+  `button { color: inherit }`, so put those in a layer ordered before `flowkit`
+  (`@layer reset, flowkit;`). See [Styles and cascade layers](packages/react/README.md#styles-and-cascade-layers).
 - **Theme.** Set `theme={{ colorMode: "dark", tokens: { accent: "#0f766e" } }}`, or override the
   `--fk-*` custom properties directly.
 - **Labels.** `labels` overrides any visible or accessible text, for translations or rewording.

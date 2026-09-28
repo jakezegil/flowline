@@ -148,7 +148,13 @@ export const assignOwner = defineNode({
     .object({
       contactId: contactId(),
       strategy: ui(z.enum(["roundRobin", "team"]), { label: "Strategy" }).default("roundRobin"),
-      team: ui(z.enum(TEAMS), { label: "Team" }).describe("Used by the Team strategy.").optional(),
+      team: ui(z.enum(TEAMS), {
+        label: "Team",
+        enumLabels: { smb: "SMB", enterprise: "Enterprise" },
+        showIf: { field: "strategy", equals: "team" },
+      })
+        .describe("Whose reps the Team strategy rotates through.")
+        .optional(),
     })
     .refine((v) => v.strategy !== "team" || v.team !== undefined, {
       message: "Choose a team for the Team strategy",
