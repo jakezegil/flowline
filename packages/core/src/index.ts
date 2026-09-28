@@ -63,6 +63,11 @@ export {
   type TransformRuntime,
   type TriggerDefinition,
 } from "./define";
+export {
+  isPrivateHost,
+  type UnreachableGroup,
+  unreachableSteps,
+} from "./design-checks";
 export { FatalError, type FatalErrorOptions, RetryableError } from "./errors";
 export {
   branchesFor,
@@ -95,7 +100,12 @@ export {
   type TemplatePart,
 } from "./refs";
 export { createRegistry, type Registry } from "./registry";
-export { availableScope, type ScopeEntry, type ValidationContext } from "./scope";
+export {
+  availableScope,
+  describeSubflowOutput,
+  type ScopeEntry,
+  type ValidationContext,
+} from "./scope";
 export {
   dropHiddenFields,
   hiddenFields,

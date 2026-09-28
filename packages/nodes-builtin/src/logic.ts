@@ -18,6 +18,7 @@ export const conditionNode = defineNode({
   description: "Take the If path when the conditions match, and the Else path when they don't.",
   icon: "split",
   category: "Logic",
+  keywords: ["if", "else", "condition", "branch", "filter"],
   summary: "If conditions match",
   input: z.object({
     rules: ui(ConditionRulesSchema, { label: "Conditions", widget: "rules" }).describe(
@@ -55,6 +56,7 @@ export const switchNode = defineNode({
     "Compare a value with each case in order and take the path of the first match, or Default when none match.",
   icon: "route",
   category: "Logic",
+  keywords: ["case", "route", "branch", "match"],
   summary: "Route by {{value}}",
   input: z.object({
     value: ui(z.unknown(), { label: "Value to match" }).describe(
@@ -114,6 +116,7 @@ export const forEachNode = defineNode({
     "Run the steps inside the loop once for every item in a list, one item at a time. Inside, use Loop item and Loop index.",
   icon: "repeat",
   category: "Logic",
+  keywords: ["loop", "iterate", "each", "list"],
   summary: "For each item in {{items}}",
   input: z.object({
     items: ui(z.array(z.unknown()), { label: "List", refOnly: true }).describe(
@@ -136,6 +139,8 @@ export const stopNode = defineNode({
   description: "End the run here as a success. No later steps run.",
   icon: "circle-stop",
   category: "Logic",
+  keywords: ["end", "exit", "halt", "finish"],
+  endsRun: true,
   summary: "Stop the run",
   input: z.object({
     reason: ui(z.string(), {

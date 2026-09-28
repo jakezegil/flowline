@@ -6,6 +6,7 @@
  */
 import {
   availableScope,
+  dropHiddenFields,
   type Issue,
   type JSONSchema,
   payloadSchemaFor,
@@ -311,7 +312,9 @@ export function TriggerSample(): JSX.Element {
   }
   const payload = useMemo(() => {
     if (!m) return {};
-    return availableScope(doc, null, manifest, ctx)[0]?.schema ?? payloadSchemaFor(m, trigger);
+    // Payload declarations hidden by showIf aren't part of the payload (as at run time).
+    const visible = { ...trigger, config: dropHiddenFields(trigger.config, m.config) as typeof trigger.config };
+    return availableScope(doc, null, manifest, ctx)[0]?.schema ?? payloadSchemaFor(m, visible);
   }, [m, doc, manifest, ctx, trigger]);
   const dirty = draft !== stored;
   return (

@@ -55,6 +55,7 @@ export const delayNode = defineNode({
   description: "Pause the run for a while, or until a date and time, then continue.",
   icon: "timer",
   category: "Timing",
+  keywords: ["wait", "sleep", "pause", "timer"],
   summary: "Wait {{duration}}{{until}}",
   // `oneOfRequired` lets the validator report a missing or doubled choice; the refinement below
   // enforces the same rule at runtime.
@@ -179,6 +180,7 @@ export const waitForCallbackNode = defineNode({
     "Pause until another system calls this step's one-time resume URL, or until the timeout passes.",
   icon: "hourglass",
   category: "Timing",
+  keywords: ["webhook", "callback", "resume", "external"],
   summary: "Wait for a callback",
   input: z.object({
     timeout: ui(duration(), { label: "Time out after", placeholder: "7d" })

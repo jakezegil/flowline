@@ -1,3 +1,4 @@
+import { blockedUrlProblem, emailProblem, unreachableSteps } from "./design-checks";
 import { isValidStepId, RESERVED_STEP_IDS } from "./ids";
 import {
   asSchema,
@@ -57,6 +58,9 @@ export type IssueCode =
   | "subflow.recursive"
   | "secret.unknown"
   | "output.unknown"
+  | "config.format"
+  | "network.blocked"
+  | "step.unreachable"
   | "doc.empty";
 
 /** One problem found by {@link validateWorkflow}. */
@@ -83,6 +87,9 @@ const WARNING_CODES = new Set<IssueCode>([
   "doc.empty",
   "config.empty",
   "secret.unknown",
+  "config.format",
+  "network.blocked",
+  "step.unreachable",
 ]);
 
 const KIND_WORDS: Record<Kind, string> = {
@@ -122,6 +129,8 @@ interface Reporter {
   plain?: boolean;
   /** The tenant's secret names ({@link ValidationContext.secrets}), when known. */
   secrets?: ReadonlySet<string>;
+  /** The engine's network policy ({@link ValidationContext.network}). */
+  network?: ValidationContext["network"];
 }
 
 interface DocInfo {
@@ -417,6 +426,7 @@ function checkValue(r: Reporter, value: unknown, schema: JSONSchema, f: FieldCtx
     checkRef(r, value.$ref, isAnySchema(s) ? undefined : carryDefs(f.root, s), f);
     return;
   }
+  designChecks(r, value, s, meta, f);
   if (meta?.refOnly) {
     report(
       r,
@@ -452,6 +462,27 @@ function checkValue(r: Reporter, value: unknown, schema: JSONSchema, f: FieldCtx
     }
   }
   checkLiteralValue(r, value, s, f);
+}
+
+/**
+ * Warnings about values that pass the schema but won't work at run time: an email field that
+ * isn't one address, an outbound URL the engine's network policy blocks.
+ */
+function designChecks(
+  r: Reporter,
+  value: unknown,
+  s: JSONSchema,
+  meta: UiMeta | undefined,
+  f: FieldCtx,
+): void {
+  if (s.format === "email") {
+    const problem = emailProblem(value);
+    if (problem) report(r, "config.format", `"${f.label}" ${problem}`, f.path);
+  }
+  if (meta?.outboundUrl === true) {
+    const problem = blockedUrlProblem(value, r.network);
+    if (problem) report(r, "network.blocked", `"${f.label}" ${problem}`, f.path);
+  }
 }
 
 /** Checks a value that is not a reference or template against its (dereferenced) schema. */
@@ -765,6 +796,14 @@ function checkStep(
   for (const push of subflowIssues) push();
 }
 
+function stepTypeOf(doc: WorkflowDoc, id: string): string | undefined {
+  let type: string | undefined;
+  walkSteps(doc, (step) => {
+    if (type === undefined && step.id === id) type = step.type;
+  });
+  return type;
+}
+
 function docInfo(doc: WorkflowDoc): DocInfo {
   const ids = new Set<string>();
   const order = new Map<string, number>();
@@ -817,6 +856,7 @@ export function validateWorkflow(
     ancestors: [],
     doc: info,
     ...(ctx.secrets ? { secrets: new Set(ctx.secrets) } : {}),
+    ...(ctx.network ? { network: ctx.network } : {}),
   };
 
   if (doc.steps.length === 0) report(base, "doc.empty", "This workflow has no steps");
@@ -863,6 +903,19 @@ export function validateWorkflow(
     guarded(r, undefined, () => checkStep(r, doc, step, m, ctx));
     return undefined;
   });
+
+  for (const group of unreachableSteps(doc, manifest)) {
+    const n = group.stepIds.length;
+    const ender = idx.nodes.get(stepTypeOf(doc, group.endsAt) ?? "");
+    const how = ender?.endsRun
+      ? "the run always ends here"
+      : "every path through this step ends the run";
+    report(
+      { ...base, stepId: group.endsAt },
+      "step.unreachable",
+      `${n === 1 ? "1 step" : `${n} steps`} after this can never run: ${how}`,
+    );
+  }
 
   // Output declarations hidden by showIf don't count, as at run time.
   const declared = trigger

@@ -324,7 +324,10 @@ describe("core.httpRequest", () => {
         ],
       });
       const issuesFor = (auth: unknown) =>
-        validateWorkflow(doc(auth) as never, manifest).filter((i) => i.stepId === "call");
+        // The test server is on loopback, which this engine allows.
+        validateWorkflow(doc(auth) as never, manifest, {
+          network: { allowPrivateNetworks: true },
+        }).filter((i) => i.stepId === "call");
       expect(issuesFor({ type: "bearer", secret: "token" })).toEqual([]);
       expect(issuesFor({ type: "bearer" })).not.toEqual([]);
       expect(issuesFor({ type: "header", secret: "apiKey" })).not.toEqual([]);

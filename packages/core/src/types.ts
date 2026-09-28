@@ -131,6 +131,13 @@ export interface UiMeta {
   /** Field never accepts references (no ref toggle, no pills). */
   literalOnly?: boolean;
   /**
+   * On a string field: the value is a URL the engine requests (through its SSRF-guarded fetch).
+   * The validator warns when its host is literally a private or loopback address (`localhost`,
+   * `10.x`, `127.x`, `::1`, …) the engine's network policy would block, or isn't in its allowed
+   * hosts (see `ValidationContext.network`).
+   */
+  outboundUrl?: boolean;
+  /**
    * On an object schema (e.g. a node's whole input): exactly one of these groups of property
    * names must be set, e.g. `[["duration"], ["until"]]`. A group is set when all its properties
    * are non-empty. The validator reports `config.required` when none or several are set.
@@ -198,6 +205,10 @@ export interface NodeManifest {
   icon?: string;
   /** Step picker category. */
   category?: string;
+  /** Extra step picker search terms, e.g. `["wait", "sleep"]` for a delay. */
+  keywords?: string[];
+  /** The step always ends the run (like Stop): steps after it can never run. */
+  endsRun?: boolean;
   /** Template rendered against config for the step card, e.g. `"Load {{contactId}}"`. */
   summary?: string;
   /** Input-side JSON Schema of the node's config. */

@@ -1,5 +1,14 @@
-import { outputSchemaFor, payloadSchemaFor, schemaAtPath, schemaTypes } from "./json-schema";
+import {
+  isAnySchema,
+  isAssignable,
+  outputSchemaFor,
+  payloadSchemaFor,
+  schemaAtPath,
+  schemaTypes,
+  subflowOutputSchema,
+} from "./json-schema";
 import { isRef, parseRefPath, type RefPath } from "./refs";
+import { dropHiddenFields } from "./show-if";
 import type {
   JSONSchema,
   Manifest,
@@ -18,6 +27,12 @@ export interface ValidationContext {
    * gets a `secret.unknown` warning (it would fail at runtime).
    */
   secrets?: readonly string[];
+  /**
+   * The engine's outbound network policy (its `createEngine({ http })` options), for the
+   * `outboundUrl` warning. Unset means the engine's defaults: private and loopback addresses are
+   * blocked and every public host is allowed.
+   */
+  network?: { allowPrivateNetworks?: boolean; allowHosts?: readonly string[] };
 }
 
 /** One value a step can reference, as offered by the editor's data picker. */
@@ -96,7 +111,13 @@ export function triggerEntry(doc: WorkflowDoc, idx: ManifestIndex): ScopeEntry {
     kind: "trigger",
     label: t?.name ?? "Trigger",
     ...(t?.icon !== undefined ? { icon: t.icon } : {}),
-    schema: t ? payloadSchemaFor(t, doc.trigger) : {},
+    // Declarations hidden by showIf don't exist at run time, so they aren't in scope either.
+    schema: t
+      ? payloadSchemaFor(t, {
+          ...doc.trigger,
+          config: dropHiddenFields(doc.trigger.config, t.config) as typeof doc.trigger.config,
+        })
+      : {},
   };
 }
 
@@ -235,4 +256,54 @@ export function availableScope(
     return true;
   });
   return result ?? end.slice(0, 1);
+}
+
+/** A declared `object` or `array` output field: its shape isn't known from the declaration. */
+function isOpaqueDecl(s: JSONSchema): boolean {
+  if (s.type === "object") return s.properties === undefined;
+  if (s.type === "array") return s.items === undefined;
+  return false;
+}
+
+/**
+ * The output schema a sub-flow's callers see: its declared output fields (as
+ * `subflowOutputSchema`, declarations hidden by `showIf` dropped), with each declared `object` or
+ * `array` field that its `output` mapping fills with one reference refined to the schema of that
+ * reference, so `contact` shows its `id`, `email`, … in callers' data pickers and references into
+ * it are checked. `undefined` for a workflow that isn't a sub-flow.
+ *
+ * @param ctx Sub-flows this sub-flow calls, for references to their outputs.
+ */
+export function describeSubflowOutput(
+  doc: WorkflowDoc,
+  manifest: Manifest,
+  ctx: ValidationContext = {},
+): JSONSchema | undefined {
+  const t = indexManifest(manifest).triggers.get(doc.trigger.type);
+  if (!t) return undefined;
+  const config = dropHiddenFields(doc.trigger.config, t.config) as typeof doc.trigger.config;
+  const declared = subflowOutputSchema(t, { ...doc.trigger, config });
+  const props = declared?.properties as Record<string, JSONSchema> | undefined;
+  if (!declared || !props || !doc.output) return declared;
+  let end: ScopeEntry[] | undefined;
+  const refined: Record<string, JSONSchema> = {};
+  for (const [key, decl] of Object.entries(props)) {
+    refined[key] = decl;
+    const value = Object.hasOwn(doc.output, key) ? doc.output[key] : undefined;
+    if (!isOpaqueDecl(decl) || !isRef(value)) continue;
+    let path: RefPath;
+    try {
+      path = parseRefPath(value.$ref);
+    } catch {
+      continue;
+    }
+    end ??= walkScope(doc, manifest, ctx);
+    const res = resolveRefSchema(path, end);
+    if (!res.ok || isAnySchema(res.schema) || !isAssignable(res.schema, decl)) continue;
+    refined[key] = {
+      ...res.schema,
+      ...(decl.description !== undefined ? { description: decl.description } : {}),
+    };
+  }
+  return { ...declared, properties: refined };
 }

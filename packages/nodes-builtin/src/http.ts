@@ -138,10 +138,17 @@ export const httpRequest = defineNode({
   description: "Call an external HTTP API.",
   icon: "globe",
   category: "Integrations",
+  keywords: ["api", "fetch", "rest", "url", "webhook"],
   summary: "{{method}} {{url}}",
   input: z.object({
-    method: ui(z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]), { label: "Method" }),
-    url: ui(z.string(), { label: "URL", placeholder: "https://api.example.com/items" }),
+    method: ui(z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]), { label: "Method" }).default(
+      "GET",
+    ),
+    url: ui(z.string(), {
+      label: "URL",
+      placeholder: "https://api.example.com/items",
+      outboundUrl: true,
+    }),
     headers: sensitive(ui(stringRecord(), { label: "Headers" }))
       .describe("Don't put credentials here; use Authentication.")
       .optional(),
