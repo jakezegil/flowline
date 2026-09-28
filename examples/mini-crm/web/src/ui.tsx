@@ -218,13 +218,22 @@ const RUN_TONES: Record<string, Tone> = {
   cancelled: "neutral",
 };
 
+const RUN_LABELS: Record<string, string> = {
+  queued: "Queued",
+  running: "Running",
+  waiting: "Waiting",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
 /** A run status as a badge, linking to the run. */
 export function RunBadge(props: { runId: string; status: string; label?: string }): JSX.Element {
   const live = props.status === "running" || props.status === "queued";
   return (
     <Link to={`/runs/${props.runId}`} className="badge-link" title="Open run">
       <Badge tone={RUN_TONES[props.status] ?? "neutral"} dot live={live}>
-        {props.label ?? props.status}
+        {props.label ?? RUN_LABELS[props.status] ?? props.status}
       </Badge>
     </Link>
   );

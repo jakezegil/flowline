@@ -53,7 +53,7 @@ describe("crm.userSelect", () => {
     const { onChange } = renderWidget({ value: "u_ben" });
     const select = await screen.findByLabelText("Owner");
     await screen.findByText("Sales rep, SMB team");
-    const groups = [...select.querySelectorAll("optgroup")].map((g) => g.label);
+    const groups = Array.from(select.querySelectorAll("optgroup")).map((g) => g.label);
     expect(groups).toEqual(["Enterprise team", "SMB team"]);
 
     await userEvent.selectOptions(select, "");

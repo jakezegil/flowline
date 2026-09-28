@@ -7,7 +7,7 @@
  */
 import type { WorkflowSummary } from "@flowkit/core/client";
 import { ArrowUpRight, Dices, LoaderCircle, Send, Webhook } from "lucide-react";
-import { type JSX, useEffect, useMemo, useState } from "react";
+import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { api, flowkit, invalidate, useQuery } from "../api";
 import { Badge, CopyButton, EmptyState, ErrorState, PageHeader } from "../ui";
@@ -63,6 +63,13 @@ export function WebhookTesterPage(): JSX.Element {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState<Sent | null>(null);
   const [netError, setNetError] = useState<string | null>(null);
+  const responseRef = useRef<HTMLElement>(null);
+
+  // In the one-column layout the response sits below the fold: bring it into view.
+  useEffect(() => {
+    if (sent || netError)
+      responseRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [sent, netError]);
 
   useEffect(() => {
     if (!workflowId && hooks[0]) setWorkflowId(hooks[0][0]);
@@ -295,7 +302,12 @@ export function WebhookTesterPage(): JSX.Element {
             </div>
           </section>
 
-          <section className="card tester__response" aria-labelledby="res-title" aria-live="polite">
+          <section
+            ref={responseRef}
+            className="card tester__response"
+            aria-labelledby="res-title"
+            aria-live="polite"
+          >
             <h2 id="res-title" className="card__title">
               Response
             </h2>

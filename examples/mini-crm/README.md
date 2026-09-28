@@ -4,10 +4,63 @@ An example CRM that embeds Flowkit. It defines its own `crm` plugin (nodes and t
 data), ships demo workflows built in code, and serves both its own REST API and the Flowkit engine
 from one Hono app.
 
+## Quick start
+
+```sh
+pnpm install
+pnpm --filter @flowkit/example-mini-crm dev
+```
+
+`dev` runs the server on `http://localhost:8787` (reloading on change) and the web app on
+`http://localhost:5173`. Vite proxies `/api` and `/flowkit` to the server. Open the web app.
+
+A two-minute tour:
+
+1. **Webhook tester**: send the prefilled enterprise lead. The response links to its run.
+2. **Runs**: the run waits at "Request approval". Approve it from the bar above the canvas, or
+   from **Approvals**.
+3. **Outbox**: the lead's new owner got "Enterprise lead approved".
+4. **Deals**: set "Navy Labs expansion" to Won. The row shows the follow-up run it started, which
+   emails the customer after a one-minute delay.
+5. **Workflows**: open any workflow in the editor, or create one with **New workflow**.
+
+**Reset demo data**, at the bottom of the sidebar, cancels unfinished runs and restores the seed
+data.
+
+## Web app
+
+`web/` is a React app (Vite, React Router 7) that embeds `@flowkit/react` in CRM pages:
+
+| Page | What it shows |
+| --- | --- |
+| Contacts | Contacts table. "New contact" reports `contact.created` |
+| Deals | Pipeline summary and deals table. The stage select PATCHes the deal (`deal.updated`), and each row links to the latest run a change started |
+| Workflows | Every workflow with its trigger and published version. "New workflow" picks a name and a trigger, then opens the editor |
+| Workflow editor | `<WorkflowEditor>`, full-bleed, with a breadcrumb in `headerLeft` |
+| Runs | `<RunList>` beside `<RunViewer>`. `/runs/:id` deep links a run, and `?workflow=` filters the list |
+| Approvals | Pending and decided approvals, with Approve and Reject |
+| Outbox | Sent emails with a reading pane |
+| Webhook tester | POSTs a JSON body to a webhook workflow, optionally with `X-Request-Id`, and links to the run |
+
+How it wires Flowkit (`web/src/app.tsx`):
+
+- One `<FlowkitProvider client={createClient({ baseUrl: "/flowkit" })}>` wraps the app.
+- `widgets={{ "crm.userSelect": UserSelect }}` renders the plugin's user ID fields (owner,
+  approver) as a user picker (`web/src/widgets/user-select.tsx`). `/dev/widgets` shows it in
+  every state.
+- `icons` supplies the manifest's icons that Flowkit doesn't bundle.
+- `theme={{ colorMode }}` follows the CRM's light, dark or system setting. The CRM's own colors
+  (`web/src/styles.css`) use the same values as Flowkit's `--fk-*` tokens, so no token overrides
+  are needed.
+
+`MINI_CRM_API` points the proxy at another server (default `http://localhost:8787`), and
+`WEB_PORT` changes the web port. `pnpm --filter @flowkit/example-mini-crm build` builds the app
+into `web/dist`.
+
 ## Server
 
 ```sh
-pnpm --filter @flowkit/example-mini-crm start   # or `dev` to reload on change
+pnpm --filter @flowkit/example-mini-crm start   # server only; `dev:server` reloads on change
 ```
 
 The server listens on `http://localhost:8787` and runs a background worker (`concurrency: 2`,
