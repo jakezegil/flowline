@@ -237,6 +237,57 @@ async function panelShots() {
   if (!inPanel || !closed || back !== "step:loadContact")
     errors.push("keyboard focus check failed");
   await kb.close();
+
+  // References inside the panel: pills, the picker on focus, `{{` autocomplete, and Esc layering
+  // (the first Esc closes the picker or autocomplete, the next closes the panel).
+  for (const theme of ["light", "dark"]) {
+    const rp = await open(`page=editor&wf=deal-won&theme=${theme}`, wide, theme);
+    await selectNode(rp, "welcomeEmea");
+    const pills = await rp.locator(".fk-cp .fk-ref-pill").count();
+    const editor = rp.locator(".fk-cp .fk-ref__editor .cm-content").first();
+    await editor.click();
+    await rp.waitForTimeout(300);
+    const pickerOnFocus = await rp.locator(".fk-ref-popover").isVisible();
+    await shot(rp, `panel-picker-${theme}`);
+    await rp.keyboard.press("Escape");
+    await rp.waitForTimeout(200);
+    const pickerClosed = (await rp.locator(".fk-ref-popover").count()) === 0;
+    const panelKept1 = (await rp.locator(".fk-cp").count()) === 1;
+    await rp.keyboard.press("End");
+    await rp.keyboard.type(" {{ema");
+    await rp.waitForTimeout(300);
+    const completions = await rp.locator(".cm-tooltip-autocomplete").isVisible();
+    await shot(rp, `panel-autocomplete-${theme}`);
+    await rp.keyboard.press("Escape");
+    await rp.waitForTimeout(200);
+    const acClosed = (await rp.locator(".cm-tooltip-autocomplete").count()) === 0;
+    const panelKept2 = (await rp.locator(".fk-cp").count()) === 1;
+    await rp.keyboard.press("Escape");
+    await rp.waitForTimeout(250);
+    const panelClosed = (await rp.locator(".fk-cp").count()) === 0;
+    const result = {
+      pills,
+      pickerOnFocus,
+      pickerClosed,
+      panelKept1,
+      completions,
+      acClosed,
+      panelKept2,
+      panelClosed,
+    };
+    console.log(`refs (${theme}): ${JSON.stringify(result)}`);
+    const ok =
+      pills > 0 &&
+      pickerOnFocus &&
+      pickerClosed &&
+      panelKept1 &&
+      completions &&
+      acClosed &&
+      panelKept2 &&
+      panelClosed;
+    if (!ok) errors.push(`reference check failed (${theme})`);
+    await rp.close();
+  }
 }
 if (process.argv.includes("--panel")) {
   await panelShots();
