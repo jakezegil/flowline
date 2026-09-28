@@ -1,12 +1,14 @@
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defaultClientConditions, defineConfig } from "vite";
 
 /** Where the CRM server listens; `/api` and `/flowkit` are proxied to it. */
 const target = process.env.MINI_CRM_API ?? "http://localhost:8787";
 
 /** The mini CRM web app: `pnpm --filter @flowkit/example-mini-crm dev`. */
 export default defineConfig({
+  // Run workspace packages from `src` (see /source-conditions.ts).
+  resolve: { conditions: ["flowkit-source", ...defaultClientConditions] },
   root: fileURLToPath(new URL(".", import.meta.url)),
   plugins: [react()],
   server: {

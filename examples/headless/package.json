@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Flowkit without a UI: define a plugin, build a workflow in code, run it in memory.",
   "scripts": {
-    "start": "tsx src/main.ts",
+    "start": "tsx --conditions=flowkit-source src/main.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

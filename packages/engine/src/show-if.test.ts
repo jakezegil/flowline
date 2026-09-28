@@ -84,7 +84,7 @@ describe("showIf at run time", () => {
     });
     expect(hidden.run.status).toBe("completed");
     expect(hidden.run.journal.s).toMatchObject({ output: { auth: { type: "key", mode: "a" } } });
-    expect(hidden.run.journal.s?.output).not.toHaveProperty("auth.extra");
+    expect(hidden.run.journal.s).not.toHaveProperty("output.auth.extra");
 
     const shown = await runWorkflowInMemory(authDoc({ type: "basic", mode: "b", extra: "long" }), {
       plugins: [authPlugin],

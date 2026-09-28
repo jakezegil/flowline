@@ -13,6 +13,14 @@ export function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+/**
+ * @internal Why a step whose config references into a `secret()` field is refused: secret names
+ * are literal-only, so run data can never choose which secret is resolved.
+ */
+export function secretRefMessage(label: string, path: string): string {
+  return `Step "${label}": field "${path}" holds a secret name and can't use a reference`;
+}
+
 /** @internal The message of an error, or the thrown value as a string. */
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

@@ -25,6 +25,7 @@ export {
   type ConfigOf,
   type DeepExpr,
   ref,
+  type StepConfig,
   type StepsBuilder,
   type TriggerConfigOf,
   tpl,
@@ -74,7 +75,9 @@ export {
   outputSchemaFor,
   payloadSchemaFor,
   schemaAtPath,
+  secretExprPath,
   subflowOutputFields,
+  subflowOutputSchema,
 } from "./json-schema";
 export {
   collectRefs,

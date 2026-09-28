@@ -284,7 +284,9 @@ describe("ConfigPanel for the trigger", () => {
     const { store } = setup({ doc, select: TRIGGER_KEY, manifest: withBuiltinTriggers });
     expect(screen.getByText("Output values")).toBeTruthy();
     expect(screen.getByText('"email" is required')).toBeTruthy();
-    expect(screen.getByText(/Not a declared output field/)).toBeTruthy();
+    // An undeclared key is said once: the validator's issue replaces the help line.
+    expect(screen.getAllByText(/isn't a declared output field/)).toHaveLength(1);
+    expect(screen.queryByText(/Not a declared output field/)).toBeNull();
     // Each output says its declared type.
     const helps = Array.from(
       document.querySelectorAll(".fk-output .fk-f__help"),
@@ -302,7 +304,10 @@ describe("ConfigPanel for the trigger", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "score" }), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("switch", { name: "vip" }));
     expect(store.getState().doc.output).toMatchObject({ score: 5, vip: true });
-    expect(store.getState().issues.filter((i) => i.field?.startsWith("output."))).toEqual([]);
+    // Only the undeclared key is left.
+    expect(store.getState().issues.filter((i) => i.field?.startsWith("output."))).toMatchObject([
+      { code: "output.unknown", field: "output.stale" },
+    ]);
     // Objects take a reference (or JSON), drawn from the end-of-workflow scope.
     expect(editorView("contact")).toBeTruthy();
 

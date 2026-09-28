@@ -82,8 +82,14 @@ function normalizeHost(hostname: string): string {
   return h;
 }
 
+/** Says how to allow the host, since `allowHosts` restricts hosts and never unblocks one. */
+const BLOCKED_HINT =
+  "(to reach private or local hosts, e.g. a mock API, set createEngine({ http: { allowPrivateNetworks: true } }); allowHosts only restricts)";
+
 function blocked(host: string): FatalError {
-  return new FatalError(`blocked private network address: ${host}`, { code: "SSRF_BLOCKED" });
+  return new FatalError(`blocked private network address: ${host} ${BLOCKED_HINT}`, {
+    code: "SSRF_BLOCKED",
+  });
 }
 
 /** Validates `url` against the policy and returns the addresses the connection may use. */

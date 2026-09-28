@@ -199,7 +199,7 @@ describe("ui metadata survives JSON Schema conversion", () => {
     ["nullableOptional", { label: "NO" }],
     ["wrappedOuter", { label: "Outer" }],
     ["described", { label: "D" }],
-    ["token", { secret: true, widget: "secret" }],
+    ["token", { secret: true, widget: "secret", literalOnly: true }],
     ["reusedA", { label: "Same" }],
     ["reusedB", { label: "Same" }],
   ])("%s", (key, meta) => {

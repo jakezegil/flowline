@@ -647,6 +647,7 @@
                     "x-flowkit": {
                       "secret": true,
                       "widget": "secret",
+                      "literalOnly": true,
                       "label": "Secret"
                     }
                   }
@@ -666,6 +667,7 @@
                     "x-flowkit": {
                       "secret": true,
                       "widget": "secret",
+                      "literalOnly": true,
                       "label": "Secret"
                     },
                     "description": "The secret holds \"user:password\"."
@@ -686,6 +688,7 @@
                     "x-flowkit": {
                       "secret": true,
                       "widget": "secret",
+                      "literalOnly": true,
                       "label": "Secret"
                     }
                   },
@@ -898,6 +901,7 @@
             "x-flowkit": {
               "secret": true,
               "widget": "secret",
+              "literalOnly": true,
               "label": "Signing secret"
             },
             "description": "Verify the X-Flowkit-Signature header (HMAC-SHA256 of the body) with this secret."

@@ -5,12 +5,14 @@
   "license": "MIT",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "flowkit-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./client": {
-      "types": "./src/client.ts",
-      "default": "./src/client.ts"
+      "flowkit-source": "./src/client.ts",
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
     }
   },
   "publishConfig": {
@@ -32,7 +34,10 @@
     "typecheck": "tsc --noEmit",
     "build": "tsup"
   },
-  "dependencies": {
+  "peerDependencies": {
     "zod": "^4"
+  },
+  "devDependencies": {
+    "zod": "4.6.5"
   }
 }

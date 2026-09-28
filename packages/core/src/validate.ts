@@ -4,16 +4,16 @@ import {
   branchesFor,
   carryDefs,
   configValueAt,
+  containsSecret,
   derefSchema,
   describeType,
   discriminatedMember,
-  fieldsToJsonSchema,
   isAnySchema,
   isAssignable,
   type Kind,
   schemaTypes,
   schemaUnionMembers,
-  subflowOutputFields,
+  subflowOutputSchema,
   valueKind,
 } from "./json-schema";
 import { isRef, isTpl, parseRefPath, parseTemplate, type RefPath } from "./refs";
@@ -25,9 +25,17 @@ import {
   type ValidationContext,
   walkScope,
 } from "./scope";
-import { hiddenFields } from "./show-if";
+import { dropHiddenFields, hiddenFields } from "./show-if";
 import { walkSteps } from "./tree";
-import type { JSONSchema, Manifest, NodeManifest, Step, UiMeta, WorkflowDoc } from "./types";
+import type {
+  JSONSchema,
+  Manifest,
+  NodeManifest,
+  Step,
+  UiMeta,
+  ValueExpr,
+  WorkflowDoc,
+} from "./types";
 import { UI_META_KEY } from "./ui";
 
 /** Machine-readable kind of a validation {@link Issue}. */
@@ -47,6 +55,8 @@ export type IssueCode =
   | "branch.missing"
   | "subflow.unknown"
   | "subflow.recursive"
+  | "secret.unknown"
+  | "output.unknown"
   | "doc.empty";
 
 /** One problem found by {@link validateWorkflow}. */
@@ -72,6 +82,7 @@ const WARNING_CODES = new Set<IssueCode>([
   "branch.missing",
   "doc.empty",
   "config.empty",
+  "secret.unknown",
 ]);
 
 const KIND_WORDS: Record<Kind, string> = {
@@ -109,6 +120,8 @@ interface Reporter {
   doc: DocInfo;
   /** Plain JSON ({@link checkJson}): `$ref`/`$tpl` objects are ordinary data, not expressions. */
   plain?: boolean;
+  /** The tenant's secret names ({@link ValidationContext.secrets}), when known. */
+  secrets?: ReadonlySet<string>;
 }
 
 interface DocInfo {
@@ -223,7 +236,7 @@ function checkRef(r: Reporter, raw: string, target: JSONSchema | undefined, f: F
       report(
         r,
         "ref.unresolved",
-        `"${f.label}" references step "${stepId}" which no longer exists`,
+        `"${f.label}" references step "${stepId}", which isn't in this workflow`,
         f.path,
       );
     } else {
@@ -377,8 +390,26 @@ function checkValue(r: Reporter, value: unknown, schema: JSONSchema, f: FieldCtx
     return;
   }
   if (isRef(value) || isTpl(value)) {
+    if (meta?.secret === true) {
+      report(
+        r,
+        "config.invalid",
+        `"${f.label}" is a secret, so it takes a secret's name and can't use a reference`,
+        f.path,
+      );
+      return;
+    }
     if (meta?.literalOnly) {
       report(r, "config.invalid", `"${f.label}" doesn't accept references`, f.path);
+      return;
+    }
+    if (containsSecret(f.root, s)) {
+      report(
+        r,
+        "config.invalid",
+        `"${f.label}" contains a secret field, so it can't be a reference; set its fields instead`,
+        f.path,
+      );
       return;
     }
   }
@@ -410,6 +441,16 @@ function checkValue(r: Reporter, value: unknown, schema: JSONSchema, f: FieldCtx
     return;
   }
 
+  if (meta?.secret === true && typeof value === "string" && value !== "" && r.secrets) {
+    if (!r.secrets.has(value)) {
+      report(
+        r,
+        "secret.unknown",
+        `"${f.label}" names secret "${value}", which isn't configured. Choose a configured secret; never paste a secret's value here`,
+        f.path,
+      );
+    }
+  }
   checkLiteralValue(r, value, s, f);
 }
 
@@ -746,9 +787,14 @@ function docInfo(doc: WorkflowDoc): DocInfo {
  * `$tpl`) parses, resolves to a visible step/field ({@link availableScope} rule) and has an
  * assignable type (mismatches are warnings); branch keys match declared branches; sub-flow
  * calls target a known (`ctx.subflows`), non-recursive workflow with a valid input mapping; the
- * doc's `output` mapping resolves in end-of-doc scope and, for a sub-flow, provides every required
- * declared output field with an assignable value. Fields hidden by `x-flowkit.showIf` are
- * skipped. Trigger config may hold only literals.
+ * doc's `output` mapping resolves in end-of-doc scope and, for a sub-flow, maps exactly its
+ * declared output fields. Fields hidden by `x-flowkit.showIf` are skipped. Trigger config
+ * may hold only literals.
+ *
+ * References into field-declared shapes (manual and sub-flow trigger inputs, a webhook body with
+ * declared fields, a called sub-flow's output) must name a declared field. `secret()` fields are
+ * literal-only: a reference or template in one, or standing for a value that contains one, is an
+ * error. With `ctx.secrets`, a secret name that isn't configured is a warning.
  *
  * Steps that are disabled (or inside a disabled block) are still validated, with every issue
  * downgraded to a warning; references to a disabled step are warned about.
@@ -770,6 +816,7 @@ export function validateWorkflow(
     current: undefined,
     ancestors: [],
     doc: info,
+    ...(ctx.secrets ? { secrets: new Set(ctx.secrets) } : {}),
   };
 
   if (doc.steps.length === 0) report(base, "doc.empty", "This workflow has no steps");
@@ -817,11 +864,15 @@ export function validateWorkflow(
     return undefined;
   });
 
-  const declared = subflowOutputFields(trigger, doc.trigger);
+  // Output declarations hidden by showIf don't count, as at run time.
+  const declared = trigger
+    ? subflowOutputSchema(trigger, {
+        ...doc.trigger,
+        config: dropHiddenFields(doc.trigger.config, trigger.config) as typeof doc.trigger.config,
+      })
+    : undefined;
   if (declared) {
-    // A sub-flow's mapping must provide its declared outputs, with assignable types.
-    const schema = fieldsToJsonSchema(declared);
-    checkObject({ ...base, visible: end }, doc.output ?? {}, schema, schema, "output");
+    checkDeclaredOutput({ ...base, visible: end }, doc.output ?? {}, declared);
   } else if (doc.output) {
     const r: Reporter = { ...base, visible: end };
     for (const [key, value] of Object.entries(doc.output)) {
@@ -830,6 +881,34 @@ export function validateWorkflow(
     }
   }
   return issues;
+}
+
+/**
+ * A sub-flow's `output` mapping against its declared output fields: every key must be declared,
+ * required fields must be mapped, and mapped values must fit the declared types.
+ */
+function checkDeclaredOutput(
+  r: Reporter,
+  output: Record<string, ValueExpr>,
+  declared: JSONSchema,
+): void {
+  const props = (declared.properties ?? {}) as Record<string, unknown>;
+  const names = Object.keys(props);
+  for (const key of Object.keys(output)) {
+    if (Object.hasOwn(props, key)) continue;
+    const hint =
+      names.length === 0
+        ? "no output fields are declared"
+        : `declared: ${names.map((n) => `"${n}"`).join(", ")}`;
+    report(
+      r,
+      "output.unknown",
+      `Output "${key}" isn't a declared output field of this sub-flow (${hint})`,
+      `output.${key}`,
+    );
+  }
+  const known = Object.fromEntries(Object.entries(output).filter(([k]) => Object.hasOwn(props, k)));
+  guarded(r, undefined, () => checkObject(r, known, declared, declared, "output"));
 }
 
 /**

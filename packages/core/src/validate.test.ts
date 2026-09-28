@@ -2,10 +2,11 @@ import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { docWith, fixtureDoc, manifest, step } from "../test/fixtures";
 import { defineNode, definePlugin, defineTrigger } from "./define";
+import { fieldsToJsonSchema } from "./json-schema";
 import { createRegistry } from "./registry";
 import { removeStep } from "./tree";
 import type { JSONSchema, Manifest, NodeManifest, Step, WorkflowDoc } from "./types";
-import { UI_META_KEY, ui } from "./ui";
+import { fields, secret, UI_META_KEY, ui } from "./ui";
 import { checkJson, hasErrors, type Issue, validateWorkflow } from "./validate";
 
 const issue = (partial: Partial<Issue>) => expect.objectContaining(partial);
@@ -57,7 +58,7 @@ describe("validateWorkflow", () => {
       issue({ code: "ref.unresolved", stepId: "email", field: "to", severity: "error" }),
     );
     expect(issues.find((i) => i.field === "to")?.message).toBe(
-      '"To" references step "load" which no longer exists',
+      '"To" references step "load", which isn\'t in this workflow',
     );
     // refs inside templates too
     expect(issues).toContainEqual(
@@ -897,5 +898,187 @@ describe("checkJson", () => {
     const schema: JSONSchema = { type: "object", properties: { $ref: { type: "number" } } };
     expect(checkJson({ $ref: "steps.a" }, schema)).toEqual(['"$ref" must be a number']);
     expect(checkJson({ $tpl: "{{x}}" }, { type: "object" })).toEqual([]);
+  });
+});
+
+describe("field-declared shapes are closed", () => {
+  const subflowTrigger = defineTrigger({
+    type: "x.subflow",
+    name: "Sub-flow",
+    kind: "subflow",
+    config: z.object({ input: fields(), output: fields() }),
+    dynamicPayload: { kind: "fields", configPath: "input" },
+  });
+  const m = extend([], [subflowTrigger]);
+  const echo = (to: Step["config"][string]) =>
+    step("email", "crm.sendEmail", { to, subject: "s", body: "b" });
+  const decl = [{ name: "dealId", type: "string" as const, required: true }];
+
+  test("a manual trigger's input fields", () => {
+    const manual = { type: "test.manual", config: { fields: decl } };
+    expect(validateWorkflow(docWith([echo({ $ref: "trigger.dealId" })], manual), m)).toEqual([]);
+    const issues = validateWorkflow(docWith([echo({ $ref: "trigger.dealID" })], manual), m);
+    expect(issues).toEqual([
+      issue({ code: "ref.unresolved", stepId: "email", field: "to", severity: "error" }),
+    ]);
+    expect(issues[0]?.message).toBe(
+      '"To" references field "dealID", which doesn\'t exist on the trigger',
+    );
+    // Templates are checked the same way.
+    expect(
+      codes(validateWorkflow(docWith([echo({ $tpl: "{{trigger.dealID}}" })], manual), m)),
+    ).toEqual(["ref.unresolved"]);
+  });
+
+  test("a webhook body is closed only when fields are declared", () => {
+    const declared = { type: "test.hook", config: { fields: decl } };
+    expect(validateWorkflow(docWith([echo({ $ref: "trigger.body.dealId" })], declared), m)).toEqual(
+      [],
+    );
+    expect(
+      codes(validateWorkflow(docWith([echo({ $ref: "trigger.body.dealID" })], declared), m)),
+    ).toEqual(["ref.unresolved"]);
+    const open = { type: "test.hook", config: { fields: [] } };
+    expect(validateWorkflow(docWith([echo({ $ref: "trigger.body.any.thing" })], open), m)).toEqual(
+      [],
+    );
+  });
+
+  test("a sub-flow's input fields", () => {
+    const trigger = { type: "x.subflow", config: { input: decl, output: [] } };
+    expect(validateWorkflow(docWith([echo({ $ref: "trigger.dealId" })], trigger), m)).toEqual([]);
+    expect(
+      codes(validateWorkflow(docWith([echo({ $ref: "trigger.dealNme" })], trigger), m)),
+    ).toEqual(["ref.unresolved"]);
+  });
+
+  test("a called sub-flow's declared output and input mapping", () => {
+    const closed = fieldsToJsonSchema([{ name: "messageId", type: "string" }], { closed: true });
+    const input = fieldsToJsonSchema(decl, { closed: true });
+    const ctx = { subflows: { notify: { name: "Notify", input, output: closed } } };
+    const doc = (to: string, mapping: Step["config"][string] = { dealId: "d1" }) =>
+      docWith([
+        step("n", "test.sub", { workflowId: "notify", input: mapping }),
+        echo({ $ref: to }),
+      ]);
+    expect(validateWorkflow(doc("steps.n.messageId"), manifest, ctx)).toEqual([]);
+    expect(codes(validateWorkflow(doc("steps.n.msgId"), manifest, ctx))).toEqual([
+      "ref.unresolved",
+    ]);
+    expect(
+      validateWorkflow(doc("steps.n.messageId", { dealId: "d1", dealNme: "x" }), manifest, ctx),
+    ).toEqual([issue({ code: "config.invalid", stepId: "n", field: "input.dealNme" })]);
+  });
+
+  test("a sub-flow's output mapping must match its declared output fields", () => {
+    const trigger = {
+      type: "x.subflow",
+      config: { input: decl, output: [{ name: "messageId", type: "string", required: true }] },
+    };
+    const doc = (output: WorkflowDoc["output"]) => {
+      const d = docWith([step("load", "crm.loadContact", { contactId: "c1" })], trigger);
+      if (output) d.output = output;
+      return d;
+    };
+    expect(validateWorkflow(doc({ messageId: { $ref: "steps.load.id" } }), m)).toEqual([]);
+    const typo = validateWorkflow(doc({ messageID: { $ref: "steps.load.id" } }), m);
+    expect(typo).toEqual([
+      issue({ code: "output.unknown", field: "output.messageID", severity: "error" }),
+      issue({ code: "config.required", field: "output.messageId", severity: "error" }),
+    ]);
+    expect(typo[0]?.message).toBe(
+      'Output "messageID" isn\'t a declared output field of this sub-flow (declared: "messageId")',
+    );
+    expect(codes(validateWorkflow(doc(undefined), m))).toEqual(["config.required"]);
+    // Refs in the mapping still resolve against the end-of-doc scope.
+    expect(codes(validateWorkflow(doc({ messageId: { $ref: "steps.load.nope" } }), m))).toEqual([
+      "ref.unresolved",
+    ]);
+  });
+});
+
+describe("secret fields are literal-only", () => {
+  const post = defineNode({
+    type: "x.post",
+    name: "Post",
+    input: z.object({
+      token: ui(secret(), { label: "Token" }),
+      auth: z
+        .discriminatedUnion("type", [
+          z.object({ type: z.literal("none") }),
+          z.object({ type: z.literal("bearer"), secret: secret() }),
+        ])
+        .optional(),
+    }),
+    run: () => ({}),
+  });
+  const signed = defineTrigger({
+    type: "x.signed",
+    name: "Signed",
+    kind: "webhook",
+    config: z.object({ fields: fields(), secret: secret().optional() }),
+    dynamicPayload: { kind: "webhook", configPath: "fields" },
+  });
+  const m = extend([post], [signed]);
+  const doc = (config: Step["config"], trigger?: WorkflowDoc["trigger"]) =>
+    docWith(
+      [step("post", "x.post", config)],
+      trigger ?? { type: "x.signed", config: { fields: [] } },
+    );
+
+  test("a literal secret name is fine", () => {
+    expect(validateWorkflow(doc({ token: "CHAT_TOKEN" }), m)).toEqual([]);
+  });
+
+  test("a reference or template in a secret field is an error", () => {
+    const issues = validateWorkflow(doc({ token: { $ref: "trigger.body.which" } }), m);
+    expect(issues).toEqual([
+      issue({ code: "config.invalid", stepId: "post", field: "token", severity: "error" }),
+    ]);
+    expect(issues[0]?.message).toBe(
+      "\"Token\" is a secret, so it takes a secret's name and can't use a reference",
+    );
+    expect(codes(validateWorkflow(doc({ token: { $tpl: "K_{{trigger.body.x}}" } }), m))).toEqual([
+      "config.invalid",
+    ]);
+  });
+
+  test("a nested secret field, or a reference standing for a value containing one", () => {
+    const nested = doc({
+      token: "T",
+      auth: { type: "bearer", secret: { $ref: "trigger.body.s" } },
+    });
+    expect(validateWorkflow(nested, m)).toEqual([
+      issue({ code: "config.invalid", field: "auth.secret", severity: "error" }),
+    ]);
+    const whole = validateWorkflow(doc({ token: "T", auth: { $ref: "trigger.body.auth" } }), m);
+    expect(whole).toEqual([issue({ code: "config.invalid", field: "auth", severity: "error" })]);
+    expect(whole[0]?.message).toContain("contains a secret field");
+  });
+
+  test("a trigger's secret setting can't reference the payload", () => {
+    const trigger = {
+      type: "x.signed",
+      config: { fields: [], secret: { $ref: "trigger.body.s" } },
+    };
+    expect(validateWorkflow(doc({ token: "T" }, trigger), m)).toEqual([
+      issue({ code: "config.invalid", field: "trigger.secret", severity: "error" }),
+    ]);
+  });
+
+  test("with ctx.secrets, an unconfigured secret name is a warning", () => {
+    const ctx = { secrets: ["CHAT_TOKEN"] };
+    expect(validateWorkflow(doc({ token: "CHAT_TOKEN" }), m, ctx)).toEqual([]);
+    const issues = validateWorkflow(doc({ token: "sk_live_123" }), m, ctx);
+    expect(issues).toEqual([
+      issue({ code: "secret.unknown", field: "token", severity: "warning" }),
+    ]);
+    expect(issues[0]?.message).toContain('names secret "sk_live_123", which isn\'t configured');
+    const trigger = { type: "x.signed", config: { fields: [], secret: "NOPE" } };
+    expect(codes(validateWorkflow(doc({ token: "CHAT_TOKEN" }, trigger), m, ctx))).toEqual([
+      "secret.unknown",
+    ]);
+    // Without the list nothing can be checked.
+    expect(validateWorkflow(doc({ token: "sk_live_123" }), m)).toEqual([]);
   });
 });

@@ -5,11 +5,8 @@
  * @module
  */
 import {
-  configValueAt,
   dropHiddenFields,
-  type FieldDecl,
   type FlowkitServices,
-  fieldsToJsonSchema,
   hasErrors,
   type Issue,
   isSignal,
@@ -20,6 +17,8 @@ import {
   resolveValue,
   type Step,
   type SubflowInfo,
+  secretExprPath,
+  subflowOutputSchema,
   type TestStepRequest,
   type TestStepResponse,
   type ValidationContext,
@@ -40,7 +39,7 @@ import {
 import { createGuardedFetch, type GuardedFetch } from "./http";
 import { redactBySchema } from "./redact";
 import { type Run, stoppedAtOf } from "./storage";
-import { DEFAULT_BASE_PATH, errorMessage, isPlainObject } from "./util";
+import { DEFAULT_BASE_PATH, errorMessage, isPlainObject, secretRefMessage } from "./util";
 
 const WORKFLOW_ID = /^[a-z0-9][a-z0-9-_]*$/;
 const SLUG = /^[A-Za-z0-9_-]{22,128}$/;
@@ -84,6 +83,19 @@ export function docShapeProblem(doc: unknown): string | undefined {
   return stepsProblem(doc.steps, "steps");
 }
 
+/**
+ * @internal The message of a rejected publish, naming the first error so that a failing test or
+ * startup log says what is wrong: `Workflow "x" has errors: step "email": "To" is required (+2 more)`.
+ */
+export function errorSummary(workflowId: string, issues: readonly Issue[]): string {
+  const errors = issues.filter((i) => i.severity === "error");
+  const first = errors[0];
+  if (!first) return `Workflow "${workflowId}" has errors`;
+  const where = first.stepId !== undefined ? `step "${first.stepId}": ` : "";
+  const more = errors.length > 1 ? ` (+${errors.length - 1} more)` : "";
+  return `Workflow "${workflowId}" has errors: ${where}${first.message}${more}`;
+}
+
 /** A fresh webhook slug: 24 random base64url characters (144 bits). */
 function newSlug(): string {
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(18));
@@ -123,19 +135,33 @@ export function createWorkflows(core: EngineCore): Workflows {
     for (const v of await storage.listPublished({ tenantId })) {
       const t = triggers.get(v.doc.trigger.type);
       if (t?.kind !== "subflow") continue;
-      const config = dropHiddenFields(
-        v.doc.trigger.config,
-        t.config,
-      ) as typeof v.doc.trigger.config;
-      const decls = configValueAt(config, "output");
+      // Declarations hidden by showIf don't exist for callers.
+      const config = dropHiddenFields(v.doc.trigger.config, t.config);
+      const trigger = { ...v.doc.trigger, config: config as typeof v.doc.trigger.config };
       out.push({
         id: v.workflowId,
         name: v.doc.name,
-        input: payloadSchemaFor(t, { ...v.doc.trigger, config }),
-        output: Array.isArray(decls) ? fieldsToJsonSchema(decls as FieldDecl[]) : {},
+        input: payloadSchemaFor(t, trigger),
+        output: subflowOutputSchema(t, trigger) ?? {},
       });
     }
     return out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  };
+
+  /** The tenant's secret names for the validator; none when `secrets.list` is absent or fails. */
+  const secretNames = async (tenantId: string): Promise<{ secrets?: string[] }> => {
+    const store = core.opts.secrets;
+    if (!store?.list) return {};
+    try {
+      const names = await store.list(tenantId);
+      return Array.isArray(names) ? { secrets: names } : {};
+    } catch (err) {
+      core.logger?.warn("secrets.list failed; secret names are not checked", {
+        tenantId,
+        error: errorMessage(err),
+      });
+      return {};
+    }
   };
 
   const validate = async (tenantId: string, doc: WorkflowDoc): Promise<Issue[]> => {
@@ -143,7 +169,10 @@ export function createWorkflows(core: EngineCore): Workflows {
     for (const s of await listSubflows(tenantId)) {
       subflows[s.id] = { name: s.name, input: s.input, output: s.output };
     }
-    return validateWorkflow(doc, registry.manifest(), { subflows });
+    return validateWorkflow(doc, registry.manifest(), {
+      subflows,
+      ...(await secretNames(tenantId)),
+    });
   };
 
   /** The run as shown to the editor: no lease or callback state, sensitive values masked. */
@@ -235,7 +264,7 @@ export function createWorkflows(core: EngineCore): Workflows {
         throw new EngineNotFoundError(`Workflow "${workflowId}" version ${version} not found`);
       const issues = await validate(tenantId, v.doc);
       if (hasErrors(issues)) {
-        throw new FlowkitValidationError(`Workflow "${workflowId}" has errors`, issues);
+        throw new FlowkitValidationError(errorSummary(workflowId, issues), issues);
       }
       const now = clock();
       await storage.publishVersion(tenantId, workflowId, version, now);
@@ -278,6 +307,8 @@ export function createWorkflows(core: EngineCore): Workflows {
         steps: isPlainObject(req.samples) ? { ...req.samples } : {},
         run: { id: runId },
       };
+      const secretRef = secretExprPath(step.config ?? {}, manifest.input);
+      if (secretRef !== undefined) return fail(secretRefMessage(label, secretRef));
       let resolved: Record<string, unknown>;
       try {
         resolved = structuredClone(

@@ -77,7 +77,8 @@ export interface EngineOptions {
   /**
    * Network policy of `ctx.http.fetch`: non-public addresses are blocked unless
    * `allowPrivateNetworks`; `allowHosts` (exact, case-insensitive hostnames) restricts the hosts
-   * that may be requested; response bodies over `maxResponseBytes` (default 10 MB) fail.
+   * that may be requested, and never unblocks a private one (a local mock API needs
+   * `allowPrivateNetworks: true`); response bodies over `maxResponseBytes` (default 10 MB) fail.
    */
   http?: { allowPrivateNetworks?: boolean; allowHosts?: string[]; maxResponseBytes?: number };
   /** Engine and handler logger. */
@@ -209,8 +210,11 @@ export interface Engine {
   retryRun(tenantId: string, runId: string): Promise<string>;
 
   /**
-   * The HTTP API (see `@flowkit/core`'s `api-types` for the routes) under `basePath`. Mount it on
-   * any `fetch`-style server, e.g. `app.all("/flowkit/*", (c) => engine.handler(c.req.raw))`.
+   * The HTTP API under `basePath`. Mount it on any `fetch`-style server, e.g.
+   * `app.all("/flowkit/*", (c) => engine.handler(c.req.raw))`. Every route has a method on
+   * `createClient()` from `@flowkit/core/client` (see `FlowkitClient`), and the request and
+   * response bodies are types exported from `@flowkit/core` (`WorkflowDetail`, `RunDetail`,
+   * `TestStepRequest`, `ApiErrorBody`, …).
    * Editor routes require `authorize` (without it every request acts as tenant `"default"`, with a
    * logged warning); webhooks and callback resumes are authenticated by slug/signature and token.
    */

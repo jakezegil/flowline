@@ -137,34 +137,38 @@ export function SubflowOutput(): JSX.Element {
             samples={samples}
           />
         )}
-        {extra.map((key) => (
-          <FieldShell
-            key={key}
-            label={key}
-            description={labels.outputUndeclared}
-            issues={issuesOf(issues, key)}
-            aside={
-              <button
-                type="button"
-                className="fk-icon-btn"
-                aria-label={labels.removeOutput(key)}
-                title={labels.removeOutput(key)}
-                onClick={() => setOutput(key, undefined)}
-              >
-                <X size={14} aria-hidden />
-              </button>
-            }
-          >
-            <RefTextInput
-              value={output[key]}
-              onChange={(v) => setOutput(key, v)}
-              scope={scope}
-              samples={samples}
-              invalidRefs={invalidRefs}
-              ariaLabel={labels.outputValue(key)}
-            />
-          </FieldShell>
-        ))}
+        {extra.map((key) => {
+          const keyIssues = issuesOf(issues, key);
+          return (
+            <FieldShell
+              key={key}
+              label={key}
+              // The validator's `output.unknown` issue says it already; don't say it twice.
+              description={keyIssues.length > 0 ? undefined : labels.outputUndeclared}
+              issues={keyIssues}
+              aside={
+                <button
+                  type="button"
+                  className="fk-icon-btn"
+                  aria-label={labels.removeOutput(key)}
+                  title={labels.removeOutput(key)}
+                  onClick={() => setOutput(key, undefined)}
+                >
+                  <X size={14} aria-hidden />
+                </button>
+              }
+            >
+              <RefTextInput
+                value={output[key]}
+                onChange={(v) => setOutput(key, v)}
+                scope={scope}
+                samples={samples}
+                invalidRefs={invalidRefs}
+                ariaLabel={labels.outputValue(key)}
+              />
+            </FieldShell>
+          );
+        })}
       </div>
     </FieldShell>
   );

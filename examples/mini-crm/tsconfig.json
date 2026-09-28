@@ -1,7 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node", "vite/client"]
+    "types": ["node", "vite/client"],
+    "allowImportingTsExtensions": true
   },
   "include": ["server/src", "web/src", "web/vite.config.ts", "vitest.config.ts", "e2e"]
 }
