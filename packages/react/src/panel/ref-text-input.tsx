@@ -25,7 +25,7 @@ import {
   placeholder as placeholderExt,
   tooltips,
 } from "@codemirror/view";
-import { parseRefPath, type ScopeEntry, type ValueExpr } from "@flowkit/core";
+import { type JSONSchema, parseRefPath, type ScopeEntry, type ValueExpr } from "@flowkit/core";
 import * as Popover from "@radix-ui/react-popover";
 import { Variable } from "lucide-react";
 import {
@@ -62,7 +62,7 @@ import {
   refCompletionSource,
 } from "./picker/ref-completion";
 import { findRefs, partsToValue, pillInfo, valueKey, valueToParts } from "./picker/ref-model";
-import { flattenTree, formatSample } from "./picker/schema-tree";
+import { flattenTree, formatSample, pickFilterFor } from "./picker/schema-tree";
 
 /** Room the docked picker needs to the left of the panel: its width and a gap. */
 const DOCK_ROOM = 356;
@@ -206,6 +206,9 @@ const jsonTheme = EditorView.theme({
  * - `json`: the content is JSON (any value), with pills standing for `{ $ref }` values and
  *   strings holding pills for `{ $tpl }` values. Text that isn't valid JSON isn't emitted;
  *   `onJsonError` hears whether the content currently parses.
+ * - `schema`: the field's schema. Text, number and yes/no fields offer only single values in the
+ *   picker (a list or object row opens instead of inserting); list and object fields offer values
+ *   of their type; JSON and any-typed fields offer everything.
  */
 export function RefTextInput(props: {
   value: ValueExpr | undefined;
@@ -221,6 +224,7 @@ export function RefTextInput(props: {
   readOnly?: boolean;
   json?: boolean;
   onJsonError?(invalid: boolean): void;
+  schema?: JSONSchema;
 }): JSX.Element {
   const {
     value,
@@ -235,6 +239,10 @@ export function RefTextInput(props: {
     readOnly = false,
     json = false,
   } = props;
+  const filterType = useMemo(
+    () => (json ? undefined : pickFilterFor(props.schema)),
+    [json, props.schema],
+  );
   const onJsonErrorRef = useRef(props.onJsonError);
   onJsonErrorRef.current = props.onJsonError;
   const { labels, resolveIcon } = useFlowkitAppearance();
@@ -519,6 +527,7 @@ export function RefTextInput(props: {
       onPick={onPick}
       onExit={onExit}
       searchRef={searchRef}
+      {...(filterType ? { filterType } : {})}
     />
   );
 

@@ -75,6 +75,7 @@ function RefInput({ p }: { p: FieldProps }): JSX.Element {
       ariaLabel={p.label}
       singlePill
       readOnly={env.readOnly}
+      schema={p.schema}
     />
   );
 }
@@ -140,6 +141,7 @@ export function StringField(p: FieldProps): JSX.Element {
         singlePill={meta.refOnly === true}
         literalOnly={meta.literalOnly === true}
         readOnly={env.readOnly}
+        schema={p.schema}
       />
     </FieldShell>
   );

@@ -1,6 +1,6 @@
 import { acceptCompletion, currentCompletions } from "@codemirror/autocomplete";
 import { deleteCharBackward, redo, undo } from "@codemirror/commands";
-import type { ValueExpr } from "@flowkit/core";
+import type { ScopeEntry, ValueExpr } from "@flowkit/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -453,6 +453,88 @@ describe("RefTextInput", () => {
     );
     const browse = screen.getByRole("button", { name: "Browse data", hidden: true });
     expect(browse.querySelector("svg")?.getAttribute("class")).toContain("lucide-variable");
+  });
+
+  describe("I1: the field's type decides what a click inserts", () => {
+    const dealScope: ScopeEntry[] = [
+      {
+        refBase: "trigger",
+        kind: "trigger",
+        label: "Deal won",
+        schema: {
+          type: "object",
+          properties: {
+            deal: {
+              type: "object",
+              properties: { title: { type: "string" }, amount: { type: "number" } },
+            },
+            tags: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+      { refBase: "steps.fetch", kind: "step", stepId: "fetch", label: "Fetch", schema: {} },
+    ];
+    const dealSamples = {
+      __trigger: { deal: { title: "Big", amount: 5 }, tags: ["a"] },
+      fetch: { body: { total: 3 }, status: 200 },
+    };
+    const row = (name: string) =>
+      screen.getAllByRole("treeitem").find((r) => r.textContent?.startsWith(name));
+
+    test("a text field: clicking deal opens it instead of inserting it", async () => {
+      const { onChange } = setup({
+        scope: dealScope,
+        samples: dealSamples,
+        schema: { type: "string" },
+      });
+      focus();
+      await screen.findByRole("tree");
+      pickRow("deal");
+      expect(onChange).not.toHaveBeenCalled();
+      expect(row("deal")?.getAttribute("aria-expanded")).toBe("true");
+      // An any-typed row whose sample is an object opens too.
+      pickRow("body");
+      expect(onChange).not.toHaveBeenCalled();
+      pickRow("title");
+      expect(onChange).toHaveBeenLastCalledWith({ $ref: "trigger.deal.title" });
+    });
+
+    test("a number field takes a text or number leaf but not a list", async () => {
+      const { onChange } = setup({
+        scope: dealScope,
+        samples: dealSamples,
+        schema: { type: "number" },
+      });
+      focus();
+      await screen.findByRole("tree");
+      pickRow("tags");
+      expect(onChange).not.toHaveBeenCalled();
+      pickRow("status");
+      expect(onChange).toHaveBeenLastCalledWith({ $ref: "steps.fetch.status" });
+    });
+
+    test("a JSON (any-typed) field inserts deal whole", async () => {
+      const { onChange } = setup({ scope: dealScope, samples: dealSamples, schema: {} });
+      focus();
+      await screen.findByRole("tree");
+      pickRow("deal");
+      expect(onChange).toHaveBeenLastCalledWith({ $ref: "trigger.deal" });
+    });
+
+    test("a list field inserts a list, and a text sample doesn't pass for one", async () => {
+      const { onChange } = setup({
+        scope: dealScope,
+        samples: dealSamples,
+        schema: { type: "array", items: { type: "string" } },
+        singlePill: true,
+      });
+      focus();
+      await screen.findByRole("tree");
+      // Only rows that are (or lead to) a list are offered.
+      expect(row("status")).toBeUndefined();
+      pickRow("tags");
+      expect(onChange).toHaveBeenLastCalledWith({ $ref: "trigger.tags" });
+    });
   });
 
   describe("placement (H1): the picker never covers the next field", () => {

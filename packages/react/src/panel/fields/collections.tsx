@@ -226,6 +226,7 @@ export function ArrayField(p: FieldProps): JSX.Element {
           ariaLabel={p.label}
           singlePill
           readOnly={env.readOnly}
+          schema={p.schema}
         />
       ) : (
         <>
@@ -395,6 +396,7 @@ export function MapField(p: FieldProps): JSX.Element {
           ariaLabel={p.label}
           singlePill
           readOnly={env.readOnly}
+          schema={p.schema}
         />
       ) : (
         <>
@@ -431,6 +433,7 @@ export function MapField(p: FieldProps): JSX.Element {
                           placeholder={labels.mapValue}
                           ariaLabel={`${p.label}: ${r.key || labels.mapValue}`}
                           readOnly={env.readOnly}
+                          schema={valueSchema}
                         />
                       ) : (
                         <Field
