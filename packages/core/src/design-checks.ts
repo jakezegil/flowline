@@ -6,6 +6,7 @@
  * @module
  */
 import { branchesFor, configValueAt } from "./json-schema";
+import { isPrivateHost, normalizeHost } from "./net";
 import { parseTemplate } from "./refs";
 import type { ValidationContext } from "./scope";
 import type { Manifest, NodeManifest, Step, WorkflowDoc } from "./types";
@@ -42,53 +43,18 @@ export function emailProblem(value: unknown): string | undefined {
 }
 
 /**
- * The host of a URL whose scheme and host are written out literally, lower-cased and without
- * IPv6 brackets. With `complete: false` (the text before a template's first reference) the host
+ * The host of a URL whose scheme and host are written out literally, normalized like the
+ * runtime's ({@link normalizeHost}: `URL`'s form, lower-cased, without IPv6 brackets or a
+ * trailing dot). With `complete: false` (the text before a template's first reference) the host
  * must be followed by `/`, `:`, `?` or `#`, since a reference right after it could extend it.
  */
 export function literalUrlHost(text: string, complete = true): string | undefined {
   const m = /^\s*[a-z][a-z0-9+.-]*:\/\/(?:[^@/?#\s]*@)?(\[[^\]]*\]|[^/?#:[\]\s]+)(.?)/i.exec(text);
   if (!m) return undefined;
-  const host = (m[1] ?? "").toLowerCase();
   const next = m[2] ?? "";
   if (!complete && next === "") return undefined;
-  return host.startsWith("[") ? host.slice(1, -1) : host;
-}
-
-function ipv4(host: string): number[] | undefined {
-  const parts = host.split(".");
-  if (parts.length !== 4 || !parts.every((p) => /^\d{1,3}$/.test(p))) return undefined;
-  const nums = parts.map(Number);
-  return nums.every((n) => n <= 255) ? nums : undefined;
-}
-
-/**
- * Whether a host, as written, is loopback, private, link-local or otherwise not public:
- * `localhost` (and `*.localhost`), `0.0.0.0`, `10/8`, `100.64/10`, `127/8`, `169.254/16`,
- * `172.16/12`, `192.168/16`, `::`, `::1`, `fc00::/7`, `fe80::/10` and IPv4-mapped forms of these.
- * Names that only resolve to private addresses can't be known without DNS and count as public.
- */
-export function isPrivateHost(host: string): boolean {
-  const h = host.toLowerCase().replace(/\.$/, "");
-  if (h === "localhost" || h.endsWith(".localhost")) return true;
-  const v4 = ipv4(h);
-  if (v4) {
-    const [a = 0, b = 0] = v4;
-    return (
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168)
-    );
-  }
-  if (!h.includes(":")) return false;
-  if (h === "::" || h === "::1") return true;
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(h);
-  if (mapped?.[1]) return isPrivateHost(mapped[1]);
-  return /^f[cd]/.test(h) || /^fe[89ab]/.test(h);
+  const host = normalizeHost(m[1] ?? "");
+  return host === "" ? undefined : host;
 }
 
 /**
@@ -114,7 +80,7 @@ export function blockedUrlProblem(
     return `points to ${host}, a private or loopback address. The engine blocks these to protect your network, so the request will fail when the workflow runs. Use a public address, or allow private networks in the engine's settings`;
   }
   const allow = network?.allowHosts;
-  if (allow && !allow.some((a) => a.toLowerCase() === host)) {
+  if (allow && !allow.some((a) => normalizeHost(a) === host)) {
     return `points to ${host}, which isn't one of the hosts the engine may call, so the request will fail when the workflow runs`;
   }
   return undefined;

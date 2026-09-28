@@ -64,7 +64,6 @@ export {
   type TriggerDefinition,
 } from "./define";
 export {
-  isPrivateHost,
   type UnreachableGroup,
   unreachableSteps,
 } from "./design-checks";
@@ -84,6 +83,7 @@ export {
   subflowOutputFields,
   subflowOutputSchema,
 } from "./json-schema";
+export { isPrivateAddress, isPrivateHost, normalizeHost } from "./net";
 export {
   collectRefs,
   FlowkitRefError,

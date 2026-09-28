@@ -12,8 +12,7 @@
  */
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP, type LookupFunction } from "node:net";
-import type { Logger } from "@flowkit/core";
-import { isPrivateAddress } from "@flowkit/nodes-builtin/ssrf";
+import { isPrivateAddress, type Logger, normalizeHost } from "@flowkit/core";
 import { Agent, fetch as undiciFetch } from "undici";
 import { FatalError, RetryableError } from "./errors";
 
@@ -74,13 +73,6 @@ const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 const DEFAULT_TIMEOUT_MS = 300_000;
 
 const systemResolver: Resolver = async (hostname) => dnsLookup(hostname, { all: true });
-
-function normalizeHost(hostname: string): string {
-  let h = hostname.toLowerCase();
-  if (h.startsWith("[") && h.endsWith("]")) h = h.slice(1, -1);
-  if (h.endsWith(".")) h = h.slice(0, -1);
-  return h;
-}
 
 /** Says how to allow the host, since `allowHosts` restricts hosts and never unblocks one. */
 const BLOCKED_HINT =

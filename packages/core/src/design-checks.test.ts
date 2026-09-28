@@ -1,13 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { branch, defineNode, definePlugin, defineTrigger, stop } from "./define";
-import {
-  blockedUrlProblem,
-  emailProblem,
-  isPrivateHost,
-  literalUrlHost,
-  unreachableSteps,
-} from "./design-checks";
+import { blockedUrlProblem, emailProblem, literalUrlHost, unreachableSteps } from "./design-checks";
+import { isPrivateHost } from "./net";
 import { createRegistry } from "./registry";
 import { availableScope, describeSubflowOutput } from "./scope";
 import type { Step, WorkflowDoc } from "./types";
@@ -171,8 +166,46 @@ describe("outbound URLs", () => {
       "::ffff:127.0.0.1",
     ])
       expect(isPrivateHost(h), h).toBe(true);
-    for (const h of ["example.com", "8.8.8.8", "172.32.0.1", "2001:db8::1"])
+    for (const h of ["example.com", "8.8.8.8", "172.32.0.1", "2606:4700:4700::1111"])
       expect(isPrivateHost(h), h).toBe(false);
+  });
+
+  test("I3: judged like the runtime guard, in every form URL accepts", () => {
+    for (const url of [
+      "http://127.1/",
+      "http://2130706433/",
+      "http://0x7f.0.0.1/",
+      "http://[::ffff:7f00:1]/",
+      "http://[0:0:0:0:0:0:0:1]/",
+      "http://198.18.0.1/",
+      "http://224.0.0.1/",
+      "http://240.0.0.1/",
+      "http://192.0.0.8/",
+      "http://[64:ff9b::7f00:1]/",
+      "http://[2002:7f00:1::]/",
+      "http://LOCALHOST./",
+    ])
+      expect(blockedUrlProblem(url, undefined), url).toContain("private or loopback");
+    for (const url of [
+      "https://api.github.com/x",
+      "https://fdic.gov/",
+      "https://fe80.example/",
+      "https://[2606:4700:4700::1111]/",
+    ])
+      expect(blockedUrlProblem(url, undefined), url).toBeUndefined();
+    expect(literalUrlHost("http://2130706433/")).toBe("127.0.0.1");
+    expect(literalUrlHost("http://[0:0:0:0:0:0:0:1]/")).toBe("::1");
+  });
+
+  test("I3: allowHosts matches a trailing dot and international names like the runtime", () => {
+    const network = { allowHosts: ["Example.com", "bücher.example"] };
+    expect(blockedUrlProblem("https://example.com./x", network)).toBeUndefined();
+    expect(blockedUrlProblem("https://EXAMPLE.com/x", network)).toBeUndefined();
+    expect(blockedUrlProblem("https://bücher.example/", network)).toBeUndefined();
+    expect(blockedUrlProblem("https://xn--bcher-kva.example/", network)).toBeUndefined();
+    expect(blockedUrlProblem("https://other.example/", network)).toContain(
+      "isn't one of the hosts",
+    );
   });
 
   test("M17: a literal localhost URL warns, including in a template; policy can allow it", () => {
