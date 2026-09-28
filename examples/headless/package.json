@@ -3,16 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Flowkit without a UI: define a plugin, build a workflow in code, run it in memory.",
+  "description": "Flowline without a UI: define a plugin, build a workflow in code, run it in memory.",
   "scripts": {
-    "start": "tsx --conditions=flowkit-source src/main.ts",
+    "start": "tsx --conditions=flowline-source src/main.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@flowkit/core": "workspace:*",
-    "@flowkit/engine": "workspace:*",
-    "@flowkit/nodes-builtin": "workspace:*",
-    "@flowkit/storage-memory": "workspace:*",
+    "@flowline/core": "workspace:*",
+    "@flowline/engine": "workspace:*",
+    "@flowline/nodes-builtin": "workspace:*",
+    "@flowline/storage-memory": "workspace:*",
     "zod": "^4"
   },
   "devDependencies": {

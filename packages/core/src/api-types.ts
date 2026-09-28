@@ -1,6 +1,6 @@
 /**
  * HTTP request/response DTOs shared by the engine's HTTP handler and the client
- * (`@flowkit/core/client`). All timestamps are epoch milliseconds.
+ * (`@flowline/core/client`). All timestamps are epoch milliseconds.
  *
  * Routes (relative to the handler's base path):
  * - `GET  /manifest` → `Manifest`
@@ -31,7 +31,7 @@
  * - `POST /hooks/:tenantId/:workflowId/:slug` body = JSON → 202 {@link RunStartedResponse}
  *   (200 `{ runId, deduped: true }` for a repeated dedupe header or trigger `dedupeKey`; 200
  *   `{ skipped: true }` when the trigger's `filter` returns `false`; 404 for an unknown slug, 401
- *   for a bad `X-Flowkit-Signature`, 400 `{ issues }` for a body not matching the declared
+ *   for a bad `X-Flowline-Signature`, 400 `{ issues }` for a body not matching the declared
  *   fields). The signature has no timestamp, so a captured delivery can be replayed: set a
  *   dedupe header (e.g. the sender's delivery id) alongside a signing secret.
  * - `POST /resume/:token` body = callback body → 202 (410 `{ error: "gone" }`; 409

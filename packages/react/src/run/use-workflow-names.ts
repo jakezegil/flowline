@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useFlowkit } from "../provider";
+import { useFlowline } from "../provider";
 
 /** How long loaded names are trusted before the next `ids` change reloads them (renames). */
 export const WORKFLOW_NAMES_MAX_AGE_MS = 60_000;
@@ -16,7 +16,7 @@ export function useWorkflowNames(
   enabled: boolean,
   maxAgeMs = WORKFLOW_NAMES_MAX_AGE_MS,
 ): Map<string, string> {
-  const { client } = useFlowkit();
+  const { client } = useFlowline();
   const [names, setNames] = useState<Map<string, string>>(() => new Map());
   /** IDs a load was started for: one that stays unknown doesn't trigger another load. */
   const asked = useRef(new Set<string>());

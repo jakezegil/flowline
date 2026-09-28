@@ -5,8 +5,8 @@
  *
  * @module
  */
-import type { RunSummary } from "@flowkit/core";
-import type { FlowkitClient } from "@flowkit/core/client";
+import type { RunSummary } from "@flowline/core";
+import type { FlowlineClient } from "@flowline/core/client";
 
 /** The fields of a run a status change carries. */
 export type RunChange = Pick<
@@ -29,9 +29,9 @@ interface Bus {
   seen: Map<string, { key: string; status: RunChange["status"] }>;
 }
 
-const buses = new WeakMap<FlowkitClient, Bus>();
+const buses = new WeakMap<FlowlineClient, Bus>();
 
-function busOf(client: FlowkitClient): Bus {
+function busOf(client: FlowlineClient): Bus {
   let bus = buses.get(client);
   if (!bus) {
     bus = { listeners: new Set(), seen: new Map() };
@@ -49,7 +49,7 @@ const keyOf = (run: RunChange) => `${run.status}|${run.stoppedAt ?? ""}`;
  * @internal
  */
 export function publishRunChange(
-  client: FlowkitClient,
+  client: FlowlineClient,
   run: RunChange,
   opts: { onlyIfKnown?: boolean } = {},
 ): void {
@@ -65,7 +65,7 @@ export function publishRunChange(
 }
 
 /** Subscribe to `client`'s run status changes; returns the unsubscribe function. @internal */
-export function subscribeRunChanges(client: FlowkitClient, listener: Listener): () => void {
+export function subscribeRunChanges(client: FlowlineClient, listener: Listener): () => void {
   const bus = busOf(client);
   bus.listeners.add(listener);
   return () => bus.listeners.delete(listener);

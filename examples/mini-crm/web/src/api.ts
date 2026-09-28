@@ -1,10 +1,10 @@
 /**
- * The web app's data layer: typed calls to the CRM's `/api/*` routes, the Flowkit client for
- * `/flowkit/*`, and two small hooks (`useQuery`, `useUsers`) the pages share.
+ * The web app's data layer: typed calls to the CRM's `/api/*` routes, the Flowline client for
+ * `/flowline/*`, and two small hooks (`useQuery`, `useUsers`) the pages share.
  *
  * @module
  */
-import { createClient, type RunSummary } from "@flowkit/core/client";
+import { createClient, type RunSummary } from "@flowline/core/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   Approval,
@@ -21,8 +21,8 @@ export type { Approval, Contact, Deal, DealStage, NewContact, OutboxMessage, Use
 /** Deal pipeline stages, in order (mirrors the server's `DEAL_STAGES`). */
 export const DEAL_STAGES: readonly DealStage[] = ["lead", "qualified", "proposal", "won", "lost"];
 
-/** The Flowkit editor API, served by the same server under `/flowkit`. */
-export const flowkit = createClient({ baseUrl: "/flowkit" });
+/** The Flowline editor API, served by the same server under `/flowline`. */
+export const flowline = createClient({ baseUrl: "/flowline" });
 
 /** A failed `/api` request: `message` is the server's `{ error }` text. */
 export class ApiError extends Error {
@@ -219,7 +219,7 @@ export function useUsers(): { users: User[] | undefined; error: string | undefin
 
 /** Looks up a workflow's name by ID (the ID itself until the list loads, or if it is unknown). */
 export function useWorkflowName(): (id: string) => string {
-  const { data } = useQuery("workflows", () => flowkit.listWorkflows());
+  const { data } = useQuery("workflows", () => flowline.listWorkflows());
   return useCallback((id: string) => data?.find((w) => w.id === id)?.name ?? id, [data]);
 }
 
@@ -233,10 +233,10 @@ export async function runsStartedBy(
   since: number,
   match: (trigger: unknown) => boolean,
 ): Promise<RunSummary[]> {
-  const recent = await flowkit.listRuns({ limit: 25 });
+  const recent = await flowline.listRuns({ limit: 25 });
   const candidates = recent.filter(
     (r) => r.startedBy.kind === "event" && r.startedBy.event === event && r.createdAt >= since,
   );
-  const details = await Promise.all(candidates.map((r) => flowkit.getRun(r.id)));
+  const details = await Promise.all(candidates.map((r) => flowline.getRun(r.id)));
   return details.filter((d) => match(d.run.trigger)).map((d) => d.run);
 }

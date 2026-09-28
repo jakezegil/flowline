@@ -1,4 +1,4 @@
-import { branchesFor, type Manifest, type WorkflowDoc } from "@flowkit/core";
+import { branchesFor, type Manifest, type WorkflowDoc } from "@flowline/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import {
   type AriaLabelConfig,
@@ -18,10 +18,10 @@ import {
 import { Maximize, Minus, Plus } from "lucide-react";
 import { type JSX, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EditorContext, stepIndex, useEditorStore } from "../hooks";
-import type { FlowkitLabels } from "../labels";
+import type { FlowlineLabels } from "../labels";
 import { LOOP_GUTTER } from "../layout/constants";
 import { type LayoutEdge, type LayoutNode, layoutTree } from "../layout/layout-tree";
-import { useFlowkitAppearance } from "../provider";
+import { useFlowlineAppearance } from "../provider";
 import { type EditorStore, TRIGGER_KEY } from "../store/editor-store";
 import { themeStyle } from "../theme";
 import { AddPlaceholder } from "./add-placeholder";
@@ -59,7 +59,7 @@ const MAX_ZOOM = 1.5;
 
 const EMPTY_DATA = {};
 
-function ariaLabels(labels: FlowkitLabels, readOnly: boolean): Partial<AriaLabelConfig> {
+function ariaLabels(labels: FlowlineLabels, readOnly: boolean): Partial<AriaLabelConfig> {
   const help = readOnly ? labels.canvasHelpReadOnly : labels.canvasHelp;
   return {
     "node.a11yDescription.default": help,
@@ -212,7 +212,7 @@ function Controls({ onFit }: { onFit(): void }) {
   const rf = useReactFlow();
   const labels = useLabels();
   return (
-    <Panel position="bottom-left" className="fk-controls" aria-label={labels.controls}>
+    <Panel position="bottom-left" className="fl-controls" aria-label={labels.controls}>
       <button
         type="button"
         aria-label={labels.zoomOut}
@@ -404,7 +404,7 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
         if (event) ui.getState().closePicker();
       }}
     >
-      <Background variant={BackgroundVariant.Dots} gap={20} size={1.25} color="var(--fk-dot)" />
+      <Background variant={BackgroundVariant.Dots} gap={20} size={1.25} color="var(--fl-dot)" />
       <Controls onFit={() => fitTop(200, true)} />
     </ReactFlow>
   );
@@ -416,7 +416,7 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
  * Cards are fixed-size and laid out deterministically; positions animate on change.
  *
  * Works on its own (it provides the editor store to everything inside) or under a
- * `<FlowkitProvider>`, whose theme and icons it uses.
+ * `<FlowlineProvider>`, whose theme and icons it uses.
  *
  * @example
  * const store = createEditorStore({ doc, manifest });
@@ -432,7 +432,7 @@ export function WorkflowCanvas(props: {
   onStepClick?(id: string): void;
 }): JSX.Element {
   const { store, readOnly = false, overlay, onStepClick } = props;
-  const { theme, labels, onNotify } = useFlowkitAppearance();
+  const { theme, labels, onNotify } = useFlowlineAppearance();
   const [ui] = useState(() =>
     createCanvasUiStore({ readOnly, overlay, labels, ...(onNotify ? { notify: onNotify } : {}) }),
   );
@@ -469,8 +469,8 @@ export function WorkflowCanvas(props: {
               {/* biome-ignore lint/a11y/noStaticElementInteractions: keyboard shortcuts for the canvas region; its nodes and buttons are the focusable controls. */}
               <div
                 ref={rootRef}
-                className="fk-root fk-canvas"
-                data-fk-theme={colorMode}
+                className="fl-root fl-canvas"
+                data-fl-theme={colorMode}
                 data-readonly={readOnly || undefined}
                 style={style}
                 tabIndex={-1}
@@ -496,7 +496,7 @@ export function WorkflowCanvas(props: {
                 </ReactFlowProvider>
                 <StepPicker />
                 <Toasts />
-                <div ref={setPortal} className="fk-portal" />
+                <div ref={setPortal} className="fl-portal" />
               </div>
             </Tooltip.Provider>
           </PortalContainerContext.Provider>

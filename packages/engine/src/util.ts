@@ -6,7 +6,7 @@
  */
 
 /** @internal Path the HTTP handler is mounted under unless `basePath` says otherwise. */
-export const DEFAULT_BASE_PATH = "/flowkit";
+export const DEFAULT_BASE_PATH = "/flowline";
 
 /** @internal Whether `v` is a non-null, non-array object. */
 export function isPlainObject(v: unknown): v is Record<string, unknown> {

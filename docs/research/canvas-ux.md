@@ -1,6 +1,6 @@
 # Canvas UX research (2026-09-27)
 
-Research into best-in-class workflow-builder UX to inform `@flowkit/react`. Closest analogue: **Activepieces** (React + @xyflow/react + tree model). Use it for *patterns*, do not copy code (parts of its repo are commercially licensed).
+Research into best-in-class workflow-builder UX to inform `@flowline/react`. Closest analogue: **Activepieces** (React + @xyflow/react + tree model). Use it for *patterns*, do not copy code (parts of its repo are commercially licensed).
 
 ## Layout & structure
 - **Custom recursive tree layout, not dagre/elk.** Activepieces builds a sub-graph per step/router/loop, offsets and merges them, with fixed constants (card 232×60, vertical gap 60, horizontal branch gap 80, extra vertical offsets for loops/routers). Dedicated edge types: router-start, router-end (rejoin), loop-start, loop-return. "+" buttons are rendered *on edges*; an empty branch renders a big "add" placeholder node.
@@ -43,7 +43,7 @@ Research into best-in-class workflow-builder UX to inform `@flowkit/react`. Clos
 - In a tree, arrow keys should navigate tree order, not nudge positions.
 
 ## Theming for embedding
-- Import `@xyflow/react/dist/base.css` (structural) not `style.css`; expose own `--fk-*` tokens mapped onto `--xy-*`; `colorMode` prop (https://reactflow.dev/learn/customization/theming).
+- Import `@xyflow/react/dist/base.css` (structural) not `style.css`; expose own `--fl-*` tokens mapped onto `--xy-*`; `colorMode` prop (https://reactflow.dev/learn/customization/theming).
 - Wrap styles in a CSS `@layer` so host styles win. Headless store/layout/picker logic + default styled skin.
 
 ## Top patterns (ranked)

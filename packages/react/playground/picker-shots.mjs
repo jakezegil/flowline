@@ -29,7 +29,7 @@ async function open(theme, viewport = { width: 1000, height: 1100 }) {
     if (m.type() === "error" || m.type() === "warning") errors.push(`${theme}: ${m.text()}`);
   });
   await page.goto(`${base}?page=picker&theme=${theme}`);
-  await page.waitForSelector(".fk-ref-pill");
+  await page.waitForSelector(".fl-ref-pill");
   await page.waitForTimeout(300);
   return page;
 }
@@ -72,7 +72,7 @@ for (const theme of ["light", "dark"]) {
   await page.keyboard.press("Escape");
 
   // Stale pill hover card.
-  await page.locator('.cm-content[aria-label="Note"] .fk-ref-pill--stale').hover();
+  await page.locator('.cm-content[aria-label="Note"] .fl-ref-pill--stale').hover();
   await page.waitForTimeout(600);
   await shot(page, `stale-pill-${theme}`);
 
@@ -94,16 +94,16 @@ for (const theme of ["light", "dark"]) {
   const check = await open(theme);
   const expect = (cond, what) => cond || errors.push(`${theme}: check failed: ${what}`);
   const pillsIn = (label) =>
-    check.locator(`.cm-content[aria-label="${label}"] .fk-ref-pill`).count();
+    check.locator(`.cm-content[aria-label="${label}"] .fl-ref-pill`).count();
   expect(
-    (await check.locator(".fk-ref-pill .fk-ref-pill__icon svg").count()) ===
-      (await check.locator(".fk-ref-pill").count()),
+    (await check.locator(".fl-ref-pill .fl-ref-pill__icon svg").count()) ===
+      (await check.locator(".fl-ref-pill").count()),
     "every pill has an icon",
   );
   // No pill hover card over the open picker, even with the mouse resting on a pill.
-  await check.locator('.cm-content[aria-label="Subject"] .fk-ref-pill').click();
+  await check.locator('.cm-content[aria-label="Subject"] .fl-ref-pill').click();
   await check.waitForTimeout(700);
-  expect((await check.locator(".fk-ref-card").count()) === 0, "no hover card over the picker");
+  expect((await check.locator(".fl-ref-card").count()) === 0, "no hover card over the picker");
   await editor(check, "Subject").click();
   await check.keyboard.press("End");
   await check.keyboard.press("ArrowLeft");

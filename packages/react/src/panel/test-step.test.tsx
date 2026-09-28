@@ -1,10 +1,10 @@
-import type { WorkflowDoc } from "@flowkit/core";
+import type { WorkflowDoc } from "@flowline/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { mockClient, setupDom } from "../../test/dom";
 import { docWith, manifest, step } from "../../test/fixtures";
 import { EditorContext } from "../hooks";
-import { FlowkitProvider } from "../provider";
+import { FlowlineProvider } from "../provider";
 import { createEditorStore, TRIGGER_KEY } from "../store/editor-store";
 import { TestStep } from "./test-step";
 
@@ -21,11 +21,11 @@ const doc = (): WorkflowDoc =>
 function setup(stepId: string, client = mockClient(), d = doc()) {
   const store = createEditorStore({ doc: d, manifest });
   render(
-    <FlowkitProvider client={client}>
+    <FlowlineProvider client={client}>
       <EditorContext.Provider value={store}>
         <TestStep stepId={stepId} />
       </EditorContext.Provider>
-    </FlowkitProvider>,
+    </FlowlineProvider>,
   );
   return { store, client };
 }

@@ -1,7 +1,7 @@
 /**
  * The engine's HTTP handler, `(Request) => Promise<Response>`, mounted under a base path (default
- * `/flowkit`). Route shapes are documented in `@flowkit/core`'s `api-types` and consumed by
- * `@flowkit/core/client`.
+ * `/flowline`). Route shapes are documented in `@flowline/core`'s `api-types` and consumed by
+ * `@flowline/core/client`.
  *
  * Editor routes are authenticated with `EngineOptions.authorize`; `POST /hooks/...` is
  * authenticated by the workflow's webhook slug (and optional HMAC signature), `POST /resume/:token`
@@ -9,12 +9,12 @@
  *
  * @module
  */
-import type { ApiErrorBody, RunStatus, TestStepRequest, WorkflowDoc } from "@flowkit/core";
+import type { ApiErrorBody, RunStatus, TestStepRequest, WorkflowDoc } from "@flowline/core";
 import type { Engine, EngineCore } from "./engine";
 import {
   EngineConflictError,
   EngineNotFoundError,
-  FlowkitValidationError,
+  FlowlineValidationError,
   ResumeHostHandledError,
   ResumeUnverifiableError,
   WorkflowExistsError,
@@ -115,7 +115,7 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
       if (!warnedOpen) {
         warnedOpen = true;
         (core.logger ?? console).warn(
-          'flowkit: no authorize() configured; editor API requests run as tenant "default" without authentication',
+          'flowline: no authorize() configured; editor API requests run as tenant "default" without authentication',
         );
       }
       return { tenantId: "default", userId: "anonymous" };
@@ -252,7 +252,7 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
         try {
           await engine.publish(tenantId, id, version, userId);
         } catch (err) {
-          if (err instanceof FlowkitValidationError) {
+          if (err instanceof FlowlineValidationError) {
             throw new HttpError(422, err.message, { issues: err.issues });
           }
           // The version vanished between the check above and the publish.
@@ -417,10 +417,10 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
       return await editorRoute(req, url, method, seg, user);
     } catch (err) {
       if (err instanceof HttpError) return json(err.status, { error: err.message, ...err.extra });
-      if (err instanceof FlowkitValidationError) {
+      if (err instanceof FlowlineValidationError) {
         return json(400, { error: err.message, issues: err.issues });
       }
-      (core.logger ?? console).error("flowkit handler error", {
+      (core.logger ?? console).error("flowline handler error", {
         error: err instanceof Error ? err.message : String(err),
       });
       return json(500, { error: "Internal error" });

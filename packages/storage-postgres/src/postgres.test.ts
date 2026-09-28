@@ -1,7 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
-import type { WorkflowDoc } from "@flowkit/core";
-import { FlowkitStorageError } from "@flowkit/engine";
-import { runStorageConformance } from "@flowkit/engine/conformance";
+import type { WorkflowDoc } from "@flowline/core";
+import { FlowlineStorageError } from "@flowline/engine";
+import { runStorageConformance } from "@flowline/engine/conformance";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { createPostgresStorage, migrate, type PgStorageOptions } from "./index";
@@ -32,18 +32,18 @@ afterAll(async () => {
 
 runStorageConformance("postgres (pglite)", () => freshStorage(litePool, "conf"));
 
-const pgUrl = process.env.FLOWKIT_PG_URL;
+const pgUrl = process.env.FLOWLINE_PG_URL;
 if (pgUrl) {
   const pool = new pg.Pool({ connectionString: pgUrl, max: 10 });
   afterAll(async () => {
     await pool.end();
   });
   runStorageConformance("postgres (server)", () =>
-    freshStorage(pool, `flowkit_test_${process.pid}`),
+    freshStorage(pool, `flowline_test_${process.pid}`),
   );
 
   it("server: parallel workers claim each run exactly once (SKIP LOCKED)", async () => {
-    const { storage: s, cleanup } = await freshStorage(pool, `flowkit_stress_${process.pid}`);
+    const { storage: s, cleanup } = await freshStorage(pool, `flowline_stress_${process.pid}`);
     try {
       const ids = Array.from({ length: 40 }, (_, i) => `r${i}`);
       for (const id of ids) {
@@ -134,12 +134,12 @@ describe("migrate", () => {
     expect(locks.rows[0]?.n).toBe(0);
   });
 
-  it("uses the flowkit schema by default", async () => {
+  it("uses the flowline schema by default", async () => {
     await migrate(litePool);
     const s = createPostgresStorage({ pool: litePool });
     expect(await s.recordDedupeKey("t", "k", 0, 10)).toBe(true);
     const { rows } = await litePool.query<{ n: number }>(
-      "SELECT count(*)::int AS n FROM flowkit.dedupe_keys",
+      "SELECT count(*)::int AS n FROM flowline.dedupe_keys",
     );
     expect(rows[0]?.n).toBe(1);
   });
@@ -256,7 +256,7 @@ describe("createPostgresStorage", () => {
     }
   });
 
-  it("rejects strings containing NUL with a FlowkitStorageError and writes nothing", async () => {
+  it("rejects strings containing NUL with a FlowlineStorageError and writes nothing", async () => {
     const { storage: s, cleanup } = await freshStorage(litePool, "nul");
     try {
       const run = {
@@ -271,16 +271,16 @@ describe("createPostgresStorage", () => {
         startedBy: { kind: "manual" as const },
       };
       // NUL inside a jsonb value (SQLSTATE 22P05).
-      await expect(s.createRun(run, [], 1)).rejects.toThrow(FlowkitStorageError);
+      await expect(s.createRun(run, [], 1)).rejects.toThrow(FlowlineStorageError);
       await expect(s.createRun(run, [], 1)).rejects.toThrow(/NUL/);
       expect(await s.getRun("t", "r1")).toBeNull();
       // NUL inside a text column (SQLSTATE 22021).
-      await expect(s.recordDedupeKey("t", "k\u0000", 0, 10)).rejects.toThrow(FlowkitStorageError);
+      await expect(s.recordDedupeKey("t", "k\u0000", 0, 10)).rejects.toThrow(FlowlineStorageError);
       // Other database errors pass through unchanged.
       const other = createPostgresStorage({ pool: litePool, schema: "does_not_exist" });
       const err = await other.getRun("t", "r1").catch((e: unknown) => e);
       expect(err).toBeInstanceOf(Error);
-      expect(err).not.toBeInstanceOf(FlowkitStorageError);
+      expect(err).not.toBeInstanceOf(FlowlineStorageError);
     } finally {
       await cleanup();
     }

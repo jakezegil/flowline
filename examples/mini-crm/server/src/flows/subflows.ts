@@ -4,14 +4,14 @@
  *
  * @module
  */
-import { ref, type WorkflowDoc, workflow } from "@flowkit/core";
+import { ref, type WorkflowDoc, workflow } from "@flowline/core";
 import {
   and,
   callSubflowNode,
   conditionNode,
   isFalse,
   subflowTrigger,
-} from "@flowkit/nodes-builtin";
+} from "@flowline/nodes-builtin";
 import { createContact, findContactByEmail } from "../plugin";
 import { withStepNames } from "./names";
 

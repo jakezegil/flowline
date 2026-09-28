@@ -5,9 +5,9 @@ import type { Manifest, Step, ValueExpr, WorkflowDoc } from "./types";
 import { UI_META_KEY } from "./ui";
 
 /** Thrown when a tree operation targets a step, branch, or index that doesn't exist. */
-export class FlowkitTreeError extends Error {
+export class FlowlineTreeError extends Error {
   /** Error name, for `instanceof`-free checks across package copies. */
-  override readonly name = "FlowkitTreeError";
+  override readonly name = "FlowlineTreeError";
 }
 
 /** Where a step sits in the tree: which list it's in, and its position within it. */
@@ -144,32 +144,32 @@ function replaceList(
 }
 
 /**
- * Inserts `step` at `loc`, immutably. Throws {@link FlowkitTreeError} if the location's parent or
+ * Inserts `step` at `loc`, immutably. Throws {@link FlowlineTreeError} if the location's parent or
  * branch doesn't exist, the index is out of `[0, length]` range, or `step.id` is already used.
  */
 export function insertStep(doc: WorkflowDoc, loc: StepLocation, step: Step): WorkflowDoc {
   if (allStepIds(doc).has(step.id)) {
-    throw new FlowkitTreeError(`Step id "${step.id}" already exists in the workflow`);
+    throw new FlowlineTreeError(`Step id "${step.id}" already exists in the workflow`);
   }
   const list = getList(doc, loc.parentId, loc.branch);
   if (!list) {
-    throw new FlowkitTreeError(
+    throw new FlowlineTreeError(
       `Cannot insert into parent "${loc.parentId ?? "<root>"}" branch "${loc.branch ?? ""}": not found`,
     );
   }
   if (loc.index < 0 || loc.index > list.length) {
-    throw new FlowkitTreeError(`Insert index ${loc.index} out of range [0, ${list.length}]`);
+    throw new FlowlineTreeError(`Insert index ${loc.index} out of range [0, ${list.length}]`);
   }
   const newList = [...list.slice(0, loc.index), step, ...list.slice(loc.index)];
   return replaceList(doc, loc.parentId, loc.branch, newList);
 }
 
-/** Removes the step with `id`, immutably. Throws {@link FlowkitTreeError} if not found. */
+/** Removes the step with `id`, immutably. Throws {@link FlowlineTreeError} if not found. */
 export function removeStep(doc: WorkflowDoc, id: string): WorkflowDoc {
   const found = findStep(doc, id);
-  if (!found) throw new FlowkitTreeError(`Step "${id}" not found`);
+  if (!found) throw new FlowlineTreeError(`Step "${id}" not found`);
   const list = getList(doc, found.location.parentId, found.location.branch);
-  if (!list) throw new FlowkitTreeError(`Step "${id}" not found`);
+  if (!list) throw new FlowlineTreeError(`Step "${id}" not found`);
   const newList = list.filter((_, i) => i !== found.location.index);
   return replaceList(doc, found.location.parentId, found.location.branch, newList);
 }
@@ -178,12 +178,12 @@ export function removeStep(doc: WorkflowDoc, id: string): WorkflowDoc {
  * Moves the step with `id` to location `to`, immutably. `to.index` is interpreted against the
  * destination list *after* the step has been removed from its original location.
  *
- * @throws {FlowkitTreeError} If `id` doesn't exist, or `to` names a parent within the moved
+ * @throws {FlowlineTreeError} If `id` doesn't exist, or `to` names a parent within the moved
  *   step's own subtree (including the step itself).
  */
 export function moveStep(doc: WorkflowDoc, id: string, to: StepLocation): WorkflowDoc {
   const found = findStep(doc, id);
-  if (!found) throw new FlowkitTreeError(`Step "${id}" not found`);
+  if (!found) throw new FlowlineTreeError(`Step "${id}" not found`);
   const removed = removeStep(doc, id);
   return insertStep(removed, to, found.step);
 }
@@ -191,13 +191,13 @@ export function moveStep(doc: WorkflowDoc, id: string, to: StepLocation): Workfl
 /** Replaces the step with `id` with `fn(step)`, immutably. Throws if `id` doesn't exist. */
 export function updateStep(doc: WorkflowDoc, id: string, fn: (s: Step) => Step): WorkflowDoc {
   const found = findStep(doc, id);
-  if (!found) throw new FlowkitTreeError(`Step "${id}" not found`);
+  if (!found) throw new FlowlineTreeError(`Step "${id}" not found`);
   const newStep = fn(found.step);
   if (newStep.id !== id && allStepIds(doc).has(newStep.id)) {
-    throw new FlowkitTreeError(`Step id "${newStep.id}" already exists in the workflow`);
+    throw new FlowlineTreeError(`Step id "${newStep.id}" already exists in the workflow`);
   }
   const list = getList(doc, found.location.parentId, found.location.branch);
-  if (!list) throw new FlowkitTreeError(`Step "${id}" not found`);
+  if (!list) throw new FlowlineTreeError(`Step "${id}" not found`);
   const newList = list.map((s, i) => (i === found.location.index ? newStep : s));
   return replaceList(doc, found.location.parentId, found.location.branch, newList);
 }
@@ -357,7 +357,7 @@ export function codeBlocksRename(doc: WorkflowDoc, id: string, manifest?: Manife
  * nothing says which strings are code. Code that reads `steps` dynamically can't be
  * rewritten; check {@link codeBlocksRename} first. Returns `doc` itself when the IDs are equal.
  *
- * @throws {FlowkitTreeError} If `id` doesn't exist, or `newId` is taken or not a valid step ID.
+ * @throws {FlowlineTreeError} If `id` doesn't exist, or `newId` is taken or not a valid step ID.
  */
 export function renameStepId(
   doc: WorkflowDoc,
@@ -366,9 +366,9 @@ export function renameStepId(
   manifest?: Manifest,
 ): WorkflowDoc {
   if (id === newId) return doc;
-  if (!findStep(doc, id)) throw new FlowkitTreeError(`Step "${id}" not found`);
+  if (!findStep(doc, id)) throw new FlowlineTreeError(`Step "${id}" not found`);
   if (allStepIds(doc).has(newId) || !isValidStepId(newId))
-    throw new FlowkitTreeError(`Step ID "${newId}" is taken or invalid`);
+    throw new FlowlineTreeError(`Step ID "${newId}" is taken or invalid`);
   const idMap = new Map([[id, newId]]);
   const rename = (step: Step): Step => {
     const config = rewriteRefs(step.config, idMap) as Record<string, ValueExpr>;
@@ -399,11 +399,11 @@ export function renameStepId(
  * {@link generateStepId}'s sanitization), and any `$ref`/`$tpl` inside the copy that pointed at a
  * step within the copied subtree is rewritten to point at that step's new ID.
  *
- * @throws {FlowkitTreeError} If `id` doesn't exist.
+ * @throws {FlowlineTreeError} If `id` doesn't exist.
  */
 export function duplicateStep(doc: WorkflowDoc, id: string): { doc: WorkflowDoc; newId: string } {
   const found = findStep(doc, id);
-  if (!found) throw new FlowkitTreeError(`Step "${id}" not found`);
+  if (!found) throw new FlowlineTreeError(`Step "${id}" not found`);
 
   const idMap = new Map<string, string>();
   const taken = allStepIds(doc);

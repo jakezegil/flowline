@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { RunSummary } from "@flowkit/core/client";
+import type { RunSummary } from "@flowline/core/client";
 import { Handshake } from "lucide-react";
 import { type JSX, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
@@ -14,7 +14,7 @@ import {
   DEAL_STAGES,
   type Deal,
   type DealStage,
-  flowkit,
+  flowline,
   invalidate,
   runsStartedBy,
   useQuery,
@@ -54,11 +54,11 @@ function useDealRuns() {
   const [runs, setRuns] = useState<Record<string, RunSummary>>({});
 
   const load = useCallback(async () => {
-    const recent = await flowkit.listRuns({ limit: 50 });
+    const recent = await flowline.listRuns({ limit: 50 });
     const fromDeals = recent
       .filter((r) => r.startedBy.kind === "event" && r.startedBy.event === "deal.updated")
       .slice(0, 20);
-    const details = await Promise.all(fromDeals.map((r) => flowkit.getRun(r.id)));
+    const details = await Promise.all(fromDeals.map((r) => flowline.getRun(r.id)));
     const next: Record<string, RunSummary> = {};
     // Newest first, so the first run seen per deal is its latest.
     for (const d of details) {

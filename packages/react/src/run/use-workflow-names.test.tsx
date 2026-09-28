@@ -1,9 +1,9 @@
-import type { WorkflowSummary } from "@flowkit/core";
+import type { WorkflowSummary } from "@flowline/core";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockClient, setupDom } from "../../test/dom";
-import { FlowkitProvider } from "../provider";
+import { FlowlineProvider } from "../provider";
 import { useWorkflowNames } from "./use-workflow-names";
 
 beforeEach(setupDom);
@@ -16,7 +16,7 @@ describe("useWorkflowNames", () => {
     let name = "Lead routing";
     const client = mockClient({ listWorkflows: vi.fn(async () => [summary("leads", name)]) });
     const wrapper = ({ children }: { children: ReactNode }) => (
-      <FlowkitProvider client={client}>{children}</FlowkitProvider>
+      <FlowlineProvider client={client}>{children}</FlowlineProvider>
     );
     let now = 1_000_000;
     vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -43,7 +43,7 @@ describe("useWorkflowNames", () => {
   it("loads nothing while disabled", () => {
     const client = mockClient({ listWorkflows: vi.fn(async () => []) });
     const wrapper = ({ children }: { children: ReactNode }) => (
-      <FlowkitProvider client={client}>{children}</FlowkitProvider>
+      <FlowlineProvider client={client}>{children}</FlowlineProvider>
     );
     renderHook(() => useWorkflowNames(["a"], false), { wrapper });
     expect(client.listWorkflows).not.toHaveBeenCalled();

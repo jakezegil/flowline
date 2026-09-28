@@ -1,9 +1,9 @@
-import type { Issue } from "@flowkit/core";
+import type { Issue } from "@flowline/core";
 import { LoaderCircle, Play, Redo2, Undo2 } from "lucide-react";
 import { type JSX, type ReactNode, useEffect, useRef, useState } from "react";
 import { isMac } from "../canvas/keyboard";
 import { useEditorStore, useEditorStoreApi, useIssues, useShallow } from "../hooks";
-import { useFlowkit, useFlowkitAppearance } from "../provider";
+import { useFlowline, useFlowlineAppearance } from "../provider";
 import { errorText, Hint, httpStatus, isNetworkError } from "../ui/primitives";
 import { useToast } from "../ui/toaster";
 import { IssuesPill, issueTargets } from "./issues-pill";
@@ -21,14 +21,14 @@ export interface HeaderCallbacks {
  * keep focus in the box (with its text selected), so the keyboard doesn't drop to the page.
  */
 function NameField() {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const name = useEditorStore((s) => s.doc.name);
   const rename = useEditorStore((s) => s.renameWorkflow);
   const [draft, setDraft] = useState<string | null>(null);
   const value = draft ?? name;
   return (
     <input
-      className="fk-name"
+      className="fl-name"
       aria-label={labels.workflowName}
       value={value}
       placeholder={labels.untitledWorkflow}
@@ -60,7 +60,7 @@ function NameField() {
 
 /** "Unsaved changes", "Draft · v3" or "Published v2". */
 function StatusChip() {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const { dirty, saved, published } = useEditorStore(
     useShallow((s) => ({ dirty: s.dirty, saved: s.savedVersion, published: s.publishedVersion })),
   );
@@ -79,8 +79,8 @@ function StatusChip() {
   const hint = tone !== "live" && published !== null ? labels.statusLive(published) : undefined;
   return (
     <Hint content={hint}>
-      <span className="fk-status" data-tone={tone} role="status" tabIndex={hint ? 0 : undefined}>
-        <span className="fk-status__dot" aria-hidden />
+      <span className="fl-status" data-tone={tone} role="status" tabIndex={hint ? 0 : undefined}>
+        <span className="fl-status__dot" aria-hidden />
         {text}
       </span>
     </Hint>
@@ -112,8 +112,8 @@ export function EditorHeader({
   headerLeft?: ReactNode;
   callbacks: HeaderCallbacks;
 }): JSX.Element {
-  const { labels } = useFlowkitAppearance();
-  const { client } = useFlowkit();
+  const { labels } = useFlowlineAppearance();
+  const { client } = useFlowline();
   const store = useEditorStoreApi();
   const toast = useToast();
   /** A failure's reason in the user's terms (no "Failed to fetch"). */
@@ -251,18 +251,18 @@ export function EditorHeader({
   const publishDisabled = errors > 0 || upToDate || busy !== null;
 
   return (
-    <header className="fk-header">
-      <div className="fk-header__title">
-        {headerLeft !== undefined && <div className="fk-header__left">{headerLeft}</div>}
+    <header className="fl-header">
+      <div className="fl-header__title">
+        {headerLeft !== undefined && <div className="fl-header__left">{headerLeft}</div>}
         <NameField />
         <StatusChip />
       </div>
-      <div className="fk-header__actions" role="toolbar" aria-label={labels.editorToolbar}>
-        <div className="fk-segment">
+      <div className="fl-header__actions" role="toolbar" aria-label={labels.editorToolbar}>
+        <div className="fl-segment">
           <Hint content={`${labels.undo} (${shortcut("Z")})`}>
             <button
               type="button"
-              className="fk-icon-btn"
+              className="fl-icon-btn"
               aria-label={labels.undo}
               aria-disabled={!canUndo || undefined}
               onClick={() => canUndo && store.getState().undo()}
@@ -273,7 +273,7 @@ export function EditorHeader({
           <Hint content={`${labels.redo} (${shortcut("Z", true)})`}>
             <button
               type="button"
-              className="fk-icon-btn"
+              className="fl-icon-btn"
               aria-label={labels.redo}
               aria-disabled={!canRedo || undefined}
               onClick={() => canRedo && store.getState().redo()}
@@ -283,15 +283,15 @@ export function EditorHeader({
           </Hint>
         </div>
         <IssuesPill />
-        <span className="fk-header__spacer" />
+        <span className="fl-header__spacer" />
         <Hint content={shortcut("S")}>
           <button
             type="button"
-            className="fk-btn"
+            className="fl-btn"
             aria-disabled={busy !== null || undefined}
             onClick={() => !busyRef.current && void save()}
           >
-            {busy === "save" && <LoaderCircle size={14} className="fk-spin" aria-hidden />}
+            {busy === "save" && <LoaderCircle size={14} className="fl-spin" aria-hidden />}
             {busy === "save" ? labels.saving : labels.save}
           </button>
         </Hint>
@@ -299,27 +299,27 @@ export function EditorHeader({
           <Hint content={published === null ? labels.runNeedsPublish : undefined}>
             <button
               type="button"
-              className="fk-btn fk-btn--run"
+              className="fl-btn fl-btn--run"
               aria-disabled={published === null || busy !== null || undefined}
               onClick={onRun}
             >
               {busy === "run" ? (
-                <LoaderCircle size={14} className="fk-spin" aria-hidden />
+                <LoaderCircle size={14} className="fl-spin" aria-hidden />
               ) : (
                 <Play size={13} aria-hidden />
               )}
-              <span className="fk-btn__text">{labels.run}</span>
+              <span className="fl-btn__text">{labels.run}</span>
             </button>
           </Hint>
         )}
         <Hint content={publishHint}>
           <button
             type="button"
-            className="fk-btn fk-btn--primary"
+            className="fl-btn fl-btn--primary"
             aria-disabled={publishDisabled || undefined}
             onClick={() => !publishDisabled && void publish()}
           >
-            {busy === "publish" && <LoaderCircle size={14} className="fk-spin" aria-hidden />}
+            {busy === "publish" && <LoaderCircle size={14} className="fl-spin" aria-hidden />}
             {busy === "publish" ? labels.publishing : labels.publish}
           </button>
         </Hint>

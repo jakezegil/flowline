@@ -5,9 +5,9 @@
  *
  * @module
  */
-import type { JSONSchema, ValueExpr } from "@flowkit/core";
+import type { JSONSchema, ValueExpr } from "@flowline/core";
 import { type JSX, useRef } from "react";
-import { useFlowkitAppearance } from "../../provider";
+import { useFlowlineAppearance } from "../../provider";
 import { AddButton, focusLastItem, ItemActions, useItemKeys } from "../fields/collections";
 import { FieldShell, IssueNotes } from "../fields/shell";
 import { type FieldProps, useFormEnv } from "../form-context";
@@ -42,7 +42,7 @@ type Case = Record<string, ValueExpr>;
 /** The `"cases"` widget. */
 export function CasesWidget(p: FieldProps): JSX.Element {
   const env = useFormEnv();
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const listRef = useRef<HTMLOListElement>(null);
   const cases: Case[] = Array.isArray(p.value) ? p.value.map((c) => asObject(c) ?? {}) : [];
   const keys = useItemKeys(cases.length);
@@ -85,20 +85,20 @@ export function CasesWidget(p: FieldProps): JSX.Element {
       bare={p.bare}
     >
       {cases.length === 0 ? (
-        <p className="fk-empty-note">{labels.emptyCases}</p>
+        <p className="fl-empty-note">{labels.emptyCases}</p>
       ) : (
-        <ol ref={listRef} className="fk-list fk-cases">
+        <ol ref={listRef} className="fl-list fl-cases">
           {cases.map((c, i) => {
             const path = `${p.path}[${i}]`;
             const id = String(c.id ?? "");
             const name =
               (typeof c.label === "string" && c.label) || labels.itemTitle(labels.caseLabel, i + 1);
             return (
-              <li key={keys.keys[i]} className="fk-case">
-                <div className="fk-case__card">
-                  <div className="fk-case__fields">
+              <li key={keys.keys[i]} className="fl-case">
+                <div className="fl-case__card">
+                  <div className="fl-case__fields">
                     <input
-                      className="fk-input fk-case__label"
+                      className="fl-input fl-case__label"
                       value={typeof c.label === "string" ? c.label : ""}
                       placeholder={labels.caseLabel}
                       aria-label={`${labels.itemTitle(labels.caseLabel, i + 1)}`}
@@ -130,7 +130,7 @@ export function CasesWidget(p: FieldProps): JSX.Element {
                         }
                       />
                     )}
-                    <span className="fk-case__id">{labels.caseId(id)}</span>
+                    <span className="fl-case__id">{labels.caseId(id)}</span>
                   </div>
                   <ItemActions
                     index={i}

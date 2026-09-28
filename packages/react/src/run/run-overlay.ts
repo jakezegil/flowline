@@ -8,7 +8,7 @@
  * @module
  */
 
-import type { JournalEntry, Manifest, NodeManifest, RunDetail, Step } from "@flowkit/core";
+import type { JournalEntry, Manifest, NodeManifest, RunDetail, Step } from "@flowline/core";
 import type { RunOverlay, RunStepStatus } from "../canvas/canvas-context";
 import { layoutTree } from "../layout/layout-tree";
 

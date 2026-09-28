@@ -1,4 +1,4 @@
-import { allStepIds, insertStep, type Step, type WorkflowDoc } from "@flowkit/core";
+import { allStepIds, insertStep, type Step, type WorkflowDoc } from "@flowline/core";
 import { describe, expect, test } from "vitest";
 import { branchyDoc, docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
 import {

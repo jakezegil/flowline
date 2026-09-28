@@ -5,11 +5,11 @@
  *
  * @module
  */
-import type { WorkflowSummary } from "@flowkit/core/client";
+import type { WorkflowSummary } from "@flowline/core/client";
 import { ArrowUpRight, LoaderCircle, RefreshCw, Send, Webhook } from "lucide-react";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
-import { api, flowkit, invalidate, useQuery } from "../api";
+import { api, flowline, invalidate, useQuery } from "../api";
 import { Badge, CopyButton, EmptyState, ErrorState, PageHeader } from "../ui";
 
 const SAMPLES = {
@@ -53,7 +53,7 @@ interface Sent {
 /** The webhook tester page. */
 export function WebhookTesterPage(): JSX.Element {
   const demo = useQuery("all", api.demo);
-  const workflows = useQuery<WorkflowSummary[]>("workflows", () => flowkit.listWorkflows());
+  const workflows = useQuery<WorkflowSummary[]>("workflows", () => flowline.listWorkflows());
   const hooks = useMemo(() => Object.entries(demo.data?.webhooks ?? {}), [demo.data]);
   const [workflowId, setWorkflowId] = useState<string | undefined>(undefined);
   const [sample, setSample] = useState<SampleKey>("enterprise");

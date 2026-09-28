@@ -1,9 +1,9 @@
 {
-  "name": "@flowkit/nodes-builtin",
+  "name": "@flowline/nodes-builtin",
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
-  "description": "Built-in Flowkit nodes: conditionals, switch, forEach, stop, delay, waitForCallback, httpRequest, transform, callSubflow and triggers.",
+  "description": "Built-in Flowline nodes: conditionals, switch, forEach, stop, delay, waitForCallback, httpRequest, transform, callSubflow and triggers.",
   "keywords": [
     "workflow",
     "automation",
@@ -12,23 +12,23 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jakezegil/flowkit.git",
+    "url": "git+https://github.com/jakezegil/flowline.git",
     "directory": "packages/nodes-builtin"
   },
-  "homepage": "https://github.com/jakezegil/flowkit/tree/main/packages/nodes-builtin#readme",
-  "bugs": "https://github.com/jakezegil/flowkit/issues",
+  "homepage": "https://github.com/jakezegil/flowline/tree/main/packages/nodes-builtin#readme",
+  "bugs": "https://github.com/jakezegil/flowline/issues",
   "engines": {
     "node": ">=20.18.1"
   },
   "sideEffects": false,
   "exports": {
     ".": {
-      "flowkit-source": "./src/index.ts",
+      "flowline-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./ssrf": {
-      "flowkit-source": "./src/ssrf.ts",
+      "flowline-source": "./src/ssrf.ts",
       "types": "./dist/ssrf.d.ts",
       "default": "./dist/ssrf.js"
     }
@@ -55,7 +55,7 @@
     "manifest:playground": "UPDATE_PLAYGROUND_MANIFEST=1 vitest run src/playground-manifest.test.ts && biome format --write ../react/playground/builtin-manifest.json"
   },
   "dependencies": {
-    "@flowkit/core": "workspace:^"
+    "@flowline/core": "workspace:^"
   },
   "peerDependencies": {
     "zod": "^4"

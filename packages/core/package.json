@@ -1,9 +1,9 @@
 {
-  "name": "@flowkit/core",
+  "name": "@flowline/core",
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
-  "description": "Framework-agnostic core for defining Flowkit workflow nodes and plugins, and for building, validating and rendering workflow documents.",
+  "description": "Framework-agnostic core for defining Flowline workflow nodes and plugins, and for building, validating and rendering workflow documents.",
   "keywords": [
     "workflow",
     "automation",
@@ -13,23 +13,23 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jakezegil/flowkit.git",
+    "url": "git+https://github.com/jakezegil/flowline.git",
     "directory": "packages/core"
   },
-  "homepage": "https://github.com/jakezegil/flowkit/tree/main/packages/core#readme",
-  "bugs": "https://github.com/jakezegil/flowkit/issues",
+  "homepage": "https://github.com/jakezegil/flowline/tree/main/packages/core#readme",
+  "bugs": "https://github.com/jakezegil/flowline/issues",
   "engines": {
     "node": ">=20.18.1"
   },
   "sideEffects": false,
   "exports": {
     ".": {
-      "flowkit-source": "./src/index.ts",
+      "flowline-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./client": {
-      "flowkit-source": "./src/client.ts",
+      "flowline-source": "./src/client.ts",
       "types": "./dist/client.d.ts",
       "default": "./dist/client.js"
     }

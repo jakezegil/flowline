@@ -4,9 +4,9 @@
  * @module
  */
 import { createHash } from "node:crypto";
-import { branch, defineNode, FatalError, type Step, suspend, ui, walkSteps } from "@flowkit/core";
-import type { Engine } from "@flowkit/engine";
-import { parseDuration } from "@flowkit/nodes-builtin";
+import { branch, defineNode, FatalError, type Step, suspend, ui, walkSteps } from "@flowline/core";
+import type { Engine } from "@flowline/engine";
+import { parseDuration } from "@flowline/nodes-builtin";
 import { z } from "zod";
 import type { CrmStore } from "../crm-store";
 import { userId } from "./contacts";

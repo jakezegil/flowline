@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { FieldWidgetProps } from "@flowkit/react";
+import type { FieldWidgetProps } from "@flowline/react";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";

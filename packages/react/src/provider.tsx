@@ -1,5 +1,5 @@
-import type { JSONSchema, UiMeta, ValueExpr } from "@flowkit/core";
-import type { FlowkitClient } from "@flowkit/core/client";
+import type { JSONSchema, UiMeta, ValueExpr } from "@flowline/core";
+import type { FlowlineClient } from "@flowline/core/client";
 import {
   type ComponentType,
   createContext,
@@ -8,12 +8,12 @@ import {
   useContext,
   useMemo,
 } from "react";
-import { FlowkitClientContext } from "./hooks";
+import { FlowlineClientContext } from "./hooks";
 import { type IconComponent, resolveIconIn } from "./icons";
-import { defaultLabels, type FlowkitLabels, resolveLabels } from "./labels";
-import type { FlowkitTheme } from "./theme";
+import { defaultLabels, type FlowlineLabels, resolveLabels } from "./labels";
+import type { FlowlineTheme } from "./theme";
 
-/** Props given to a config field widget registered with {@link FlowkitProvider}. */
+/** Props given to a config field widget registered with {@link FlowlineProvider}. */
 export interface FieldWidgetProps {
   /** Current value (a literal, `{ $ref }`, `{ $tpl }`, …), `undefined` when unset. */
   value: ValueExpr | undefined;
@@ -21,7 +21,7 @@ export interface FieldWidgetProps {
   onChange(v: ValueExpr | undefined): void;
   /** The field's JSON Schema. */
   schema: JSONSchema;
-  /** The field's editor hints (`x-flowkit`). */
+  /** The field's editor hints (`x-flowline`). */
   meta: UiMeta;
   /** ID of the step being configured (`"__trigger"` for the trigger). */
   stepId: string;
@@ -31,11 +31,11 @@ export interface FieldWidgetProps {
   readOnly?: boolean;
 }
 
-/** A custom config field control, selected by `x-flowkit.widget` in a field's schema. */
+/** A custom config field control, selected by `x-flowline.widget` in a field's schema. */
 export type FieldWidget = ComponentType<FieldWidgetProps>;
 
-/** A notice Flowkit would show as a toast (see `<FlowkitProvider onNotify>`). */
-export interface FlowkitNotice {
+/** A notice Flowline would show as a toast (see `<FlowlineProvider onNotify>`). */
+export interface FlowlineNotice {
   /** The text, already in the provider's `labels`. */
   message: string;
   /** `success` (saved, published, run started…), `danger` (a failed action) or `neutral`. */
@@ -47,48 +47,48 @@ export interface FlowkitNotice {
 }
 
 /**
- * Receives Flowkit's notices instead of its built-in toast. Return `false` to let Flowkit show
+ * Receives Flowline's notices instead of its built-in toast. Return `false` to let Flowline show
  * this one itself.
  */
 // biome-ignore lint/suspicious/noConfusingVoidType: `void` so any plain handler (no return) fits; `false` opts back into the built-in toast.
-export type NotifyHandler = (notice: FlowkitNotice) => void | false;
+export type NotifyHandler = (notice: FlowlineNotice) => void | false;
 
-interface FlowkitContextValue {
-  client: FlowkitClient;
+interface FlowlineContextValue {
+  client: FlowlineClient;
   widgets: Record<string, FieldWidget>;
-  theme: FlowkitTheme;
-  labels: FlowkitLabels;
+  theme: FlowlineTheme;
+  labels: FlowlineLabels;
   resolveIcon(name?: string): IconComponent;
   onNotify?: NotifyHandler;
 }
 
-const FlowkitContext = createContext<FlowkitContextValue | null>(null);
+const FlowlineContext = createContext<FlowlineContextValue | null>(null);
 
 const NO_WIDGETS: Record<string, FieldWidget> = {};
-const NO_THEME: FlowkitTheme = {};
+const NO_THEME: FlowlineTheme = {};
 
 /**
- * Supplies the HTTP client, theme, text, custom field widgets and icons to every Flowkit
- * component below it. Place it once near the root of the part of your app that embeds Flowkit.
+ * Supplies the HTTP client, theme, text, custom field widgets and icons to every Flowline
+ * component below it. Place it once near the root of the part of your app that embeds Flowline.
  *
  * @example
- * <FlowkitProvider
- *   client={createClient({ baseUrl: "/api/flowkit" })}
+ * <FlowlineProvider
+ *   client={createClient({ baseUrl: "/api/flowline" })}
  *   theme={{ colorMode: "dark" }}
  *   labels={{ addStep: "Schritt hinzufügen", delete: "Löschen" }}
  *   icons={{ rocket: Rocket }}
  * >
  *   <WorkflowEditor workflowId="welcome" />
- * </FlowkitProvider>
+ * </FlowlineProvider>
  */
-export function FlowkitProvider(props: {
-  client: FlowkitClient;
-  theme?: FlowkitTheme;
+export function FlowlineProvider(props: {
+  client: FlowlineClient;
+  theme?: FlowlineTheme;
   /**
    * Overrides for any of the UI's visible and accessible text (English by default), for
    * translation or wording changes. Keep the object stable (memoize it) across renders.
    */
-  labels?: Partial<FlowkitLabels>;
+  labels?: Partial<FlowlineLabels>;
   widgets?: Record<string, FieldWidget>;
   /**
    * Icons by manifest icon name (exact, or kebab-case: `"rocket"` also matches `"Rocket"`),
@@ -100,9 +100,9 @@ export function FlowkitProvider(props: {
    */
   icons?: Record<string, ComponentType<{ size?: number }>>;
   /**
-   * Routes Flowkit's notices ("Saved as v3", "Run resumed", "Deleted “Send email” · Undo", errors) to
-   * your app's own toasts instead of Flowkit's. Without it Flowkit shows them itself. Return
-   * `false` for a notice to have Flowkit show it after all.
+   * Routes Flowline's notices ("Saved as v3", "Run resumed", "Deleted “Send email” · Undo", errors) to
+   * your app's own toasts instead of Flowline's. Without it Flowline shows them itself. Return
+   * `false` for a notice to have Flowline show it after all.
    *
    * @example onNotify={(n) => toast[n.tone === "danger" ? "error" : "info"](n.message)}
    */
@@ -112,7 +112,7 @@ export function FlowkitProvider(props: {
   const { client, theme = NO_THEME, widgets = NO_WIDGETS, icons, labels, children } = props;
   const { onNotify } = props;
   const resolved = useMemo(() => resolveLabels(labels), [labels]);
-  const value = useMemo<FlowkitContextValue>(
+  const value = useMemo<FlowlineContextValue>(
     () => ({
       client,
       widgets,
@@ -124,24 +124,24 @@ export function FlowkitProvider(props: {
     [client, widgets, theme, resolved, icons, onNotify],
   );
   return (
-    <FlowkitClientContext.Provider value={client}>
-      <FlowkitContext.Provider value={value}>{children}</FlowkitContext.Provider>
-    </FlowkitClientContext.Provider>
+    <FlowlineClientContext.Provider value={client}>
+      <FlowlineContext.Provider value={value}>{children}</FlowlineContext.Provider>
+    </FlowlineClientContext.Provider>
   );
 }
 
 /**
- * The client, field widgets and icon resolver from the nearest {@link FlowkitProvider}.
+ * The client, field widgets and icon resolver from the nearest {@link FlowlineProvider}.
  * `resolveIcon` tries the provider's `icons`, then the bundled Lucide icons, then a neutral box.
- * @throws If there is no `<FlowkitProvider>` above.
+ * @throws If there is no `<FlowlineProvider>` above.
  */
-export function useFlowkit(): {
-  client: FlowkitClient;
+export function useFlowline(): {
+  client: FlowlineClient;
   widgets: Record<string, FieldWidget>;
   resolveIcon(name?: string): IconComponent;
 } {
-  const ctx = useContext(FlowkitContext);
-  if (!ctx) throw new Error("useFlowkit must be used inside <FlowkitProvider>");
+  const ctx = useContext(FlowlineContext);
+  if (!ctx) throw new Error("useFlowline must be used inside <FlowlineProvider>");
   return ctx;
 }
 
@@ -154,11 +154,11 @@ const NO_PROVIDER = { theme: NO_THEME, labels: defaultLabels, resolveIcon: defau
  * provider (the canvas): falls back to the default theme, English labels and the bundled icons.
  * @internal
  */
-export function useFlowkitAppearance(): {
-  theme: FlowkitTheme;
-  labels: FlowkitLabels;
+export function useFlowlineAppearance(): {
+  theme: FlowlineTheme;
+  labels: FlowlineLabels;
   resolveIcon(name?: string): IconComponent;
   onNotify?: NotifyHandler;
 } {
-  return useContext(FlowkitContext) ?? NO_PROVIDER;
+  return useContext(FlowlineContext) ?? NO_PROVIDER;
 }

@@ -1,4 +1,4 @@
-import { branchesFor, type NodeManifest, type Step } from "@flowkit/core";
+import { branchesFor, type NodeManifest, type Step } from "@flowline/core";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
@@ -57,12 +57,12 @@ function Row({
 }) {
   return (
     <>
-      <span className="fk-menu__icon" aria-hidden>
+      <span className="fl-menu__icon" aria-hidden>
         <Icon size={14} />
       </span>
-      <span className="fk-menu__label">{label}</span>
+      <span className="fl-menu__label">{label}</span>
       {kbd && (
-        <kbd className="fk-menu__kbd" aria-hidden>
+        <kbd className="fl-menu__kbd" aria-hidden>
           {kbd}
         </kbd>
       )}
@@ -91,47 +91,47 @@ function StepMenuItems({
   const l = useLabels();
   return (
     <>
-      <M.Item className="fk-menu__item" onSelect={actions.rename}>
+      <M.Item className="fl-menu__item" onSelect={actions.rename}>
         <Row icon={Pencil} label={l.rename} kbd="F2" />
       </M.Item>
-      <M.Item className="fk-menu__item" onSelect={actions.duplicate}>
+      <M.Item className="fl-menu__item" onSelect={actions.duplicate}>
         <Row icon={CopyPlus} label={l.duplicate} kbd={`${m}D`} />
       </M.Item>
-      <M.Item className="fk-menu__item" onSelect={actions.copyReference}>
+      <M.Item className="fl-menu__item" onSelect={actions.copyReference}>
         <Row icon={Link2} label={l.copyReference} />
       </M.Item>
-      <M.Item className="fk-menu__item" onSelect={actions.replace}>
+      <M.Item className="fl-menu__item" onSelect={actions.replace}>
         <Row icon={Replace} label={l.replace} />
       </M.Item>
-      <M.Item className="fk-menu__item" onSelect={actions.toggleDisabled}>
+      <M.Item className="fl-menu__item" onSelect={actions.toggleDisabled}>
         {step.disabled ? (
           <Row icon={Eye} label={l.enable} />
         ) : (
           <Row icon={EyeOff} label={l.disable} />
         )}
       </M.Item>
-      <M.Separator className="fk-menu__sep" />
-      <M.Item className="fk-menu__item" onSelect={actions.copy}>
+      <M.Separator className="fl-menu__sep" />
+      <M.Item className="fl-menu__item" onSelect={actions.copy}>
         <Row icon={Copy} label={l.copy} kbd={`${m}C`} />
       </M.Item>
-      <M.Item className="fk-menu__item" disabled={!canPaste} onSelect={actions.pasteAfter}>
+      <M.Item className="fl-menu__item" disabled={!canPaste} onSelect={actions.pasteAfter}>
         <Row icon={ClipboardPaste} label={l.pasteAfter} kbd={`${m}V`} />
       </M.Item>
       {branches.length > 0 && (
         <M.Sub>
-          <M.SubTrigger className="fk-menu__item" disabled={!canPaste}>
+          <M.SubTrigger className="fl-menu__item" disabled={!canPaste}>
             <Row icon={ClipboardPaste} label={l.pasteInsideBranch} />
-            <ChevronRight size={14} className="fk-menu__chevron" aria-hidden />
+            <ChevronRight size={14} className="fl-menu__chevron" aria-hidden />
           </M.SubTrigger>
           <M.Portal container={container}>
-            <M.SubContent className="fk-menu" sideOffset={4} collisionPadding={8}>
+            <M.SubContent className="fl-menu" sideOffset={4} collisionPadding={8}>
               {branches.map((b) => (
                 <M.Item
                   key={b.id}
-                  className="fk-menu__item"
+                  className="fl-menu__item"
                   onSelect={() => actions.pasteInside(b.id)}
                 >
-                  <span className="fk-menu__label">{b.label}</span>
+                  <span className="fl-menu__label">{b.label}</span>
                 </M.Item>
               ))}
             </M.SubContent>
@@ -140,15 +140,15 @@ function StepMenuItems({
       )}
       {loopBody !== undefined && (
         <M.Item
-          className="fk-menu__item"
+          className="fl-menu__item"
           disabled={!canPaste}
           onSelect={() => actions.pasteInside(loopBody)}
         >
           <Row icon={ClipboardPaste} label={l.pasteInsideLoop} />
         </M.Item>
       )}
-      <M.Separator className="fk-menu__sep" />
-      <M.Item className="fk-menu__item" data-danger onSelect={actions.remove}>
+      <M.Separator className="fl-menu__sep" />
+      <M.Item className="fl-menu__item" data-danger onSelect={actions.remove}>
         <Row icon={Trash2} label={l.delete} kbd="⌫" />
       </M.Item>
     </>
@@ -168,7 +168,7 @@ export function StepContextMenu({ children, ...props }: StepMenuProps & { childr
     <ContextMenu.Root modal={false} onOpenChange={(open) => open && props.actions.target()}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal container={container}>
-        <ContextMenu.Content className="fk-menu" collisionPadding={8} aria-label="Step actions">
+        <ContextMenu.Content className="fl-menu" collisionPadding={8} aria-label="Step actions">
           <StepMenuItems kit={contextKit} {...props} />
         </ContextMenu.Content>
       </ContextMenu.Portal>
@@ -186,7 +186,7 @@ export function StepKebabMenu(props: StepMenuProps & { name: string }) {
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          className="fk-card__kebab nodrag nopan"
+          className="fl-card__kebab nodrag nopan"
           aria-label={labels.actionsFor(name)}
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
@@ -196,7 +196,7 @@ export function StepKebabMenu(props: StepMenuProps & { name: string }) {
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal container={container}>
         <DropdownMenu.Content
-          className="fk-menu"
+          className="fl-menu"
           align="start"
           side="bottom"
           sideOffset={6}

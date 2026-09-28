@@ -8,14 +8,14 @@ import {
   type Step,
   suspend,
   type WorkflowDoc,
-} from "@flowkit/core";
-import { createMemoryStorage } from "@flowkit/storage-memory";
+} from "@flowline/core";
+import { createMemoryStorage } from "@flowline/storage-memory";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createEngine, type EngineOptions } from "./engine";
 import {
   FatalError,
-  FlowkitValidationError,
+  FlowlineValidationError,
   ResumeHostHandledError,
   ResumeUnverifiableError,
   RetryableError,
@@ -271,7 +271,7 @@ describe("callbacks", () => {
     behaviours.a = waitForCallback(handles);
     await startRun(wf([step("a")]));
     await makeEngine().drain();
-    expect(handles[0]?.resumeUrl).toBe(`/flowkit/resume/${handles[0]?.token}`);
+    expect(handles[0]?.resumeUrl).toBe(`/flowline/resume/${handles[0]?.token}`);
   });
 
   it("wakes with a timeout when the callback expires, and the token stops working", async () => {
@@ -450,7 +450,7 @@ describe("resume declarations", () => {
     await engine.drain();
     const { callbackToken } = await getRun(id);
     await expect(engine.resumeRun(TENANT, id, { ok: "yes" }, "u1")).rejects.toThrow(
-      FlowkitValidationError,
+      FlowlineValidationError,
     );
     await expect(engine.resume(callbackToken as string, null)).rejects.toThrow(
       /Resume body for step "a"/,

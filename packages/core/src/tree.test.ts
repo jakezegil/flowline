@@ -3,7 +3,7 @@ import {
   allStepIds,
   codeBlocksRename,
   duplicateStep,
-  FlowkitTreeError,
+  FlowlineTreeError,
   findStep,
   generateStepId,
   insertStep,
@@ -143,7 +143,7 @@ describe("insertStep", () => {
     const newStep: Step = { id: "x", type: "log.write", config: {} };
     expect(() =>
       insertStep(doc, { parentId: "nope", branch: "ifTrue", index: 0 }, newStep),
-    ).toThrow(FlowkitTreeError);
+    ).toThrow(FlowlineTreeError);
   });
 
   test("throws when branch does not exist on parent", () => {
@@ -151,20 +151,20 @@ describe("insertStep", () => {
     const newStep: Step = { id: "x", type: "log.write", config: {} };
     expect(() =>
       insertStep(doc, { parentId: "checkVip", branch: "nope", index: 0 }, newStep),
-    ).toThrow(FlowkitTreeError);
+    ).toThrow(FlowlineTreeError);
   });
 
   test("throws when index is out of range", () => {
     const doc = frozenClone(baseDoc());
     const newStep: Step = { id: "x", type: "log.write", config: {} };
-    expect(() => insertStep(doc, { parentId: null, index: 99 }, newStep)).toThrow(FlowkitTreeError);
-    expect(() => insertStep(doc, { parentId: null, index: -1 }, newStep)).toThrow(FlowkitTreeError);
+    expect(() => insertStep(doc, { parentId: null, index: 99 }, newStep)).toThrow(FlowlineTreeError);
+    expect(() => insertStep(doc, { parentId: null, index: -1 }, newStep)).toThrow(FlowlineTreeError);
   });
 
   test("throws when step id already exists in doc", () => {
     const doc = frozenClone(baseDoc());
     const dup: Step = { id: "loadContact", type: "log.write", config: {} };
-    expect(() => insertStep(doc, { parentId: null, index: 0 }, dup)).toThrow(FlowkitTreeError);
+    expect(() => insertStep(doc, { parentId: null, index: 0 }, dup)).toThrow(FlowlineTreeError);
   });
 });
 
@@ -180,7 +180,7 @@ describe("removeStep", () => {
 
   test("throws for unknown id", () => {
     const doc = frozenClone(baseDoc());
-    expect(() => removeStep(doc, "nope")).toThrow(FlowkitTreeError);
+    expect(() => removeStep(doc, "nope")).toThrow(FlowlineTreeError);
   });
 });
 
@@ -196,7 +196,7 @@ describe("moveStep", () => {
     const doc = frozenClone(baseDoc());
     expect(() =>
       moveStep(doc, "checkVip", { parentId: "checkVip", branch: "ifTrue", index: 0 }),
-    ).toThrow(FlowkitTreeError);
+    ).toThrow(FlowlineTreeError);
   });
 });
 
@@ -211,7 +211,7 @@ describe("updateStep", () => {
 
   test("throws for unknown id", () => {
     const doc = frozenClone(baseDoc());
-    expect(() => updateStep(doc, "nope", (s) => s)).toThrow(FlowkitTreeError);
+    expect(() => updateStep(doc, "nope", (s) => s)).toThrow(FlowlineTreeError);
   });
 });
 
@@ -276,7 +276,7 @@ describe("duplicateStep", () => {
 
   test("throws for unknown id", () => {
     const doc = frozenClone(baseDoc());
-    expect(() => duplicateStep(doc, "nope")).toThrow(FlowkitTreeError);
+    expect(() => duplicateStep(doc, "nope")).toThrow(FlowlineTreeError);
   });
 });
 
@@ -298,8 +298,8 @@ describe("renameStepId / isGeneratedStepId (L25)", () => {
     });
     expect(next.output).toEqual({ email: { $ref: "steps.getContact.email" } });
     expect(renameStepId(doc, "checkVip", "checkVip")).toBe(doc);
-    expect(() => renameStepId(doc, "checkVip", "loadContact")).toThrow(FlowkitTreeError);
-    expect(() => renameStepId(doc, "nope", "x")).toThrow(FlowkitTreeError);
+    expect(() => renameStepId(doc, "checkVip", "loadContact")).toThrow(FlowlineTreeError);
+    expect(() => renameStepId(doc, "nope", "x")).toThrow(FlowlineTreeError);
   });
 
   /** A manifest whose Transform has a `code` field (`widget: "code"`) and a plain `label`. */
@@ -308,7 +308,7 @@ describe("renameStepId / isGeneratedStepId (L25)", () => {
       {
         type: "core.transform",
         input: {
-          properties: { code: { "x-flowkit": { widget: "code" } }, label: { type: "string" } },
+          properties: { code: { "x-flowline": { widget: "code" } }, label: { type: "string" } },
         },
       },
     ],

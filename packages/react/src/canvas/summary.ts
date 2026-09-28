@@ -19,8 +19,8 @@ import {
   type RefPath,
   type Step,
   type ValueExpr,
-} from "@flowkit/core";
-import { defaultLabels, type FlowkitLabels } from "../labels";
+} from "@flowline/core";
+import { defaultLabels, type FlowlineLabels } from "../labels";
 import { metaOf, optionLabel } from "../panel/schema";
 
 /** An optional section of a summary: `{{#key}}…{{/key}}`. */
@@ -76,7 +76,7 @@ function pathLabel(segments: (string | number)[]): string {
 export function refLabel(
   ref: string,
   stepName: (id: string) => string | undefined,
-  labels: FlowkitLabels = defaultLabels,
+  labels: FlowlineLabels = defaultLabels,
 ): string {
   let path: RefPath;
   try {
@@ -185,7 +185,7 @@ export function summaryText(parts: readonly SummaryPart[]): string {
 function ruleParts(
   group: RuleLike,
   stepName: (id: string) => string | undefined,
-  labels: FlowkitLabels,
+  labels: FlowlineLabels,
 ): SummaryPart[] {
   const rules = flatRules(group);
   const [first] = rules;
@@ -219,7 +219,7 @@ function ruleParts(
 }
 
 /** Display text of a literal value (a choice of an enum field by its option label). */
-function literalText(value: unknown, labels: FlowkitLabels, field?: JSONSchema): string {
+function literalText(value: unknown, labels: FlowlineLabels, field?: JSONSchema): string {
   if (Array.isArray(value)) return labels.items(value.length);
   if (typeof value === "object" && value !== null) return "…";
   if (Array.isArray(field?.enum) && field.enum.includes(value as never))
@@ -230,12 +230,12 @@ function literalText(value: unknown, labels: FlowkitLabels, field?: JSONSchema):
 function unsetParts(
   path: string,
   schema: JSONSchema | undefined,
-  labels: FlowkitLabels,
+  labels: FlowlineLabels,
 ): SummaryPart[] {
   const field = fieldSchema(schema, path);
   const fallback = field?.default;
   if (!isUnset(fallback)) return [{ kind: "default", text: literalText(fallback, labels, field) }];
-  const meta = field?.["x-flowkit"] as { label?: unknown } | undefined;
+  const meta = field?.["x-flowline"] as { label?: unknown } | undefined;
   const label =
     typeof meta?.label === "string" && meta.label
       ? meta.label
@@ -250,7 +250,7 @@ function valueParts(
   path: string,
   schema: JSONSchema | undefined,
   stepName: (id: string) => string | undefined,
-  labels: FlowkitLabels,
+  labels: FlowlineLabels,
 ): SummaryPart[] {
   if (isUnset(value)) return unsetParts(path, schema, labels);
   if (isRef(value))
@@ -271,14 +271,14 @@ function valueParts(
 /**
  * Renders `summary` against `step.config`. Adjacent text parts are merged. An unset value shows
  * its schema default (from `inputSchema`, the node's input schema) muted, or else "No <label>"
- * built from the field's `x-flowkit.label`, `title` or humanized key.
+ * built from the field's `x-flowline.label`, `title` or humanized key.
  */
 export function renderSummary(
   summary: string,
   step: Step,
   stepName: (id: string) => string | undefined,
   inputSchema?: JSONSchema,
-  labels: FlowkitLabels = defaultLabels,
+  labels: FlowlineLabels = defaultLabels,
 ): RenderedSummary {
   const out: SummaryPart[] = [];
   let values = 0;

@@ -11,7 +11,7 @@ afterEach(cleanup);
 const rowNames = () =>
   screen
     .getAllByRole("treeitem")
-    .map((r) => r.querySelector(".fk-dp__name, .fk-dp__section-name")?.textContent);
+    .map((r) => r.querySelector(".fl-dp__name, .fl-dp__section-name")?.textContent);
 
 describe("DataPicker", () => {
   test("lists the trigger and upstream steps, loop first, then trigger, then nearest step first", () => {
@@ -19,15 +19,15 @@ describe("DataPicker", () => {
     const sections = screen
       .getAllByRole("treeitem")
       .filter((r) => r.getAttribute("aria-level") === "1")
-      .map((r) => r.querySelector(".fk-dp__section-name")?.textContent);
+      .map((r) => r.querySelector(".fl-dp__section-name")?.textContent);
     expect(sections).toEqual(["For each tag", "Trigger", "Fetch orders", "Load contact"]);
   });
 
   test("L4: the trigger is headed like its pills, with its own name as the caption", () => {
     render(<DataPicker scope={scope} samples={samples} onPick={() => {}} />);
     const trigger = screen.getAllByRole("treeitem")[0] as HTMLElement;
-    expect(trigger.querySelector(".fk-dp__section-name")?.textContent).toBe("Trigger");
-    expect(trigger.querySelector(".fk-dp__caption")?.textContent).toBe("Deal updated");
+    expect(trigger.querySelector(".fl-dp__section-name")?.textContent).toBe("Trigger");
+    expect(trigger.querySelector(".fl-dp__caption")?.textContent).toBe("Deal updated");
   });
 
   test("shows fields with types and sample values", () => {
@@ -81,7 +81,7 @@ describe("DataPicker", () => {
     if (!tags) throw new Error("no tags row");
     fireEvent.click(within(tags).getByTitle("Insert all of tags"));
     expect(onPick).toHaveBeenLastCalledWith("steps.load.tags", "string[]");
-    fireEvent.click(tags.querySelector(".fk-dp__chevron") as HTMLElement);
+    fireEvent.click(tags.querySelector(".fl-dp__chevron") as HTMLElement);
     const first = screen
       .getAllByRole("treeitem")
       .find((r) => r.textContent?.includes("First item"));
@@ -98,7 +98,7 @@ describe("DataPicker", () => {
     fireEvent.click(tags);
     expect(onPick).toHaveBeenLastCalledWith("steps.load.tags", "string[]");
     expect(tags.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(tags.querySelector(".fk-dp__chevron") as HTMLElement);
+    fireEvent.click(tags.querySelector(".fl-dp__chevron") as HTMLElement);
     expect(onPick).toHaveBeenCalledTimes(1);
     const reopened = screen.getAllByRole("treeitem").find((r) => r.textContent?.startsWith("tags"));
     expect(reopened?.getAttribute("aria-expanded")).toBe("true");

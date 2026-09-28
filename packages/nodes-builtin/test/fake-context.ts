@@ -1,4 +1,4 @@
-import type { NodeContext } from "@flowkit/core";
+import type { NodeContext } from "@flowline/core";
 
 /** Fixed "now" of {@link fakeContext}: 2026-01-01T00:00:00Z. */
 export const NOW = Date.UTC(2026, 0, 1);
@@ -25,7 +25,7 @@ export function fakeContext(overrides: Partial<NodeContext> = {}): NodeContext {
     async callback({ timeoutMs }) {
       return {
         token: "tok",
-        resumeUrl: "https://x/flowkit/resume/tok",
+        resumeUrl: "https://x/flowline/resume/tok",
         expiresAt: NOW + timeoutMs,
       };
     },

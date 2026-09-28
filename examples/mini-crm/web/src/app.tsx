@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { FlowkitProvider, type FlowkitTheme, useRunChanges } from "@flowkit/react";
+import { FlowlineProvider, type FlowlineTheme, useRunChanges } from "@flowline/react";
 import {
   Activity,
   BadgeCheck,
@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { type JSX, type ReactNode, useEffect, useMemo, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router";
-import { api, flowkit, invalidate, useQuery } from "./api";
+import { api, flowline, invalidate, useQuery } from "./api";
 import { ApprovalsPage } from "./pages/approvals";
 import { ContactsPage } from "./pages/contacts";
 import { DealsPage } from "./pages/deals";
@@ -39,11 +39,11 @@ import { WorkflowsPage } from "./pages/workflows";
 import { Dialog, ToastProvider, useToast } from "./ui";
 import { UserSelect } from "./widgets/user-select";
 
-/** Custom config field widgets, by the `x-flowkit.widget` name the server's plugin uses. */
+/** Custom config field widgets, by the `x-flowline.widget` name the server's plugin uses. */
 const WIDGETS = { "crm.userSelect": UserSelect };
 
 /**
- * Icons the manifest names that Flowkit doesn't bundle (it bundles a common Lucide set and shows
+ * Icons the manifest names that Flowline doesn't bundle (it bundles a common Lucide set and shows
  * a neutral box for anything else).
  */
 const ICONS = {
@@ -297,10 +297,10 @@ export function App(): JSX.Element {
   const forced = fullBleed || narrow;
   const collapsed = userCollapsed || forced;
   const resolved = theme === "system" ? (prefersDark ? "dark" : "light") : theme;
-  const flowkitTheme = useMemo<FlowkitTheme>(() => ({ colorMode: resolved }), [resolved]);
+  const flowlineTheme = useMemo<FlowlineTheme>(() => ({ colorMode: resolved }), [resolved]);
 
   return (
-    <FlowkitProvider client={flowkit} widgets={WIDGETS} icons={ICONS} theme={flowkitTheme}>
+    <FlowlineProvider client={flowline} widgets={WIDGETS} icons={ICONS} theme={flowlineTheme}>
       <ToastProvider>
         <div className="shell" data-collapsed={collapsed || undefined}>
           <Sidebar
@@ -328,6 +328,6 @@ export function App(): JSX.Element {
           </main>
         </div>
       </ToastProvider>
-    </FlowkitProvider>
+    </FlowlineProvider>
   );
 }

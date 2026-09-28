@@ -1,5 +1,5 @@
 /**
- * Flowkit without a UI: a `demo` plugin, a workflow built in code, an in-memory engine.
+ * Flowline without a UI: a `demo` plugin, a workflow built in code, an in-memory engine.
  * Run it with `pnpm --filter headless start`.
  */
 import { pathToFileURL } from "node:url";
@@ -11,10 +11,10 @@ import {
   ref,
   tpl,
   workflow,
-} from "@flowkit/core";
-import { createEngine } from "@flowkit/engine";
-import { and, conditionNode, isTrue, manualTrigger, stopNode } from "@flowkit/nodes-builtin";
-import { createMemoryStorage } from "@flowkit/storage-memory";
+} from "@flowline/core";
+import { createEngine } from "@flowline/engine";
+import { and, conditionNode, isTrue, manualTrigger, stopNode } from "@flowline/nodes-builtin";
+import { createMemoryStorage } from "@flowline/storage-memory";
 import { z } from "zod";
 
 /** A sent notification. */
@@ -25,8 +25,8 @@ export interface Message {
 }
 
 // Type `ctx.services` for every handler.
-declare module "@flowkit/core" {
-  interface FlowkitServices {
+declare module "@flowline/core" {
+  interface FlowlineServices {
     users: Map<string, { name: string; email: string; vip: boolean }>;
     outbox: Message[];
   }

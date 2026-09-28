@@ -1,8 +1,8 @@
 import { describe, expect, expectTypeOf, test } from "vitest";
 import { z } from "zod";
 import { type ConfigOf, type DeepExpr, ref, type TriggerConfigOf, tpl, workflow } from "./builder";
-import { branch, defineNode, defineTrigger, FlowkitDefinitionError, stop } from "./define";
-import { FlowkitRefError } from "./refs";
+import { branch, defineNode, defineTrigger, FlowlineDefinitionError, stop } from "./define";
+import { FlowlineRefError } from "./refs";
 import type { RefExpr, TplExpr, WorkflowDoc } from "./types";
 
 const dealUpdated = defineTrigger({
@@ -162,13 +162,13 @@ describe("workflow builder", () => {
   });
 
   test("rejects invalid workflow ids", () => {
-    expect(() => workflow("Bad Id")).toThrow(FlowkitDefinitionError);
+    expect(() => workflow("Bad Id")).toThrow(FlowlineDefinitionError);
     expect(() => workflow("Bad Id")).toThrow(/Invalid workflow id "Bad Id"/);
   });
 
   test("rejects invalid step ids", () => {
     const b = workflow("wf").trigger(dealUpdated);
-    expect(() => b.step("1st", delay, { duration: "1s" })).toThrow(FlowkitDefinitionError);
+    expect(() => b.step("1st", delay, { duration: "1s" })).toThrow(FlowlineDefinitionError);
     expect(() => b.step("has-dash", delay, { duration: "1s" })).toThrow(
       /Invalid step id "has-dash"/,
     );
@@ -212,14 +212,14 @@ describe("workflow builder", () => {
 describe("ref / tpl", () => {
   test("ref() builds a RefExpr and validates the path eagerly", () => {
     expect(ref("steps.load.emails[0]")).toEqual({ $ref: "steps.load.emails[0]" });
-    expect(() => ref("nope.x")).toThrow(FlowkitRefError);
-    expect(() => ref("steps.")).toThrow(FlowkitRefError);
+    expect(() => ref("nope.x")).toThrow(FlowlineRefError);
+    expect(() => ref("steps.")).toThrow(FlowlineRefError);
     expectTypeOf(ref("trigger")).toEqualTypeOf<RefExpr>();
   });
 
   test("tpl() builds a TplExpr and validates embedded refs eagerly", () => {
     expect(tpl("Hi {{trigger.name}}")).toEqual({ $tpl: "Hi {{trigger.name}}" });
-    expect(() => tpl("Hi {{bogus.name}}")).toThrow(FlowkitRefError);
+    expect(() => tpl("Hi {{bogus.name}}")).toThrow(FlowlineRefError);
     expectTypeOf(tpl("x")).toEqualTypeOf<TplExpr>();
   });
 });

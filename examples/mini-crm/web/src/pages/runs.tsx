@@ -5,11 +5,11 @@
  *
  * @module
  */
-import type { WorkflowSummary } from "@flowkit/core/client";
-import { RunList } from "@flowkit/react";
+import type { WorkflowSummary } from "@flowline/core/client";
+import { RunList } from "@flowline/react";
 import type { JSX } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { flowkit, useQuery } from "../api";
+import { flowline, useQuery } from "../api";
 import { useRunSubjects } from "../run-subject";
 import { RunDetail } from "./run-detail";
 
@@ -30,7 +30,7 @@ export function RunsPage(): JSX.Element {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const workflowId = params.get("workflow") ?? undefined;
-  const workflows = useQuery<WorkflowSummary[]>("workflows", () => flowkit.listWorkflows());
+  const workflows = useQuery<WorkflowSummary[]>("workflows", () => flowline.listWorkflows());
   const query = workflowId ? `?workflow=${encodeURIComponent(workflowId)}` : "";
   const describeRun = useRunSubjects();
   const selected = workflows.data?.find((w) => w.id === workflowId);

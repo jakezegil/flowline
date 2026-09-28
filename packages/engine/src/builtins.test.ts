@@ -11,7 +11,7 @@ import {
   tpl,
   type WorkflowDoc,
   workflow,
-} from "@flowkit/core";
+} from "@flowline/core";
 import {
   and,
   builtinPlugin,
@@ -27,8 +27,8 @@ import {
   switchNode,
   transformNode,
   waitForCallbackNode,
-} from "@flowkit/nodes-builtin";
-import { createMemoryStorage } from "@flowkit/storage-memory";
+} from "@flowline/nodes-builtin";
+import { createMemoryStorage } from "@flowline/storage-memory";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createEngine, type Engine } from "./engine";
@@ -637,7 +637,7 @@ describe("built-ins over HTTP", () => {
       expect(post?.headers["content-type"]).toBe("application/json");
       expect(post?.headers["idempotency-key"]).toBe(sha256(`${id}:wait:${token}`));
       expect(JSON.parse(post?.body ?? "")).toEqual({
-        resumeUrl: `https://crm.example/flowkit/resume/${token}`,
+        resumeUrl: `https://crm.example/flowline/resume/${token}`,
         expiresAt: now + DAY,
         runId: id,
       });
@@ -748,7 +748,7 @@ describe("built-ins over HTTP", () => {
       expect(waiting).toMatchObject({ status: "waiting", waitReason: "callback" });
       expect(received).toHaveLength(1);
       expect(JSON.parse(received[0]?.body ?? "").resumeUrl).toBe(
-        `https://crm.example/flowkit/resume/${waiting.callbackToken}`,
+        `https://crm.example/flowline/resume/${waiting.callbackToken}`,
       );
     });
 

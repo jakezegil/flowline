@@ -1,4 +1,4 @@
-import type { StepLocation } from "@flowkit/core";
+import type { StepLocation } from "@flowline/core";
 import { type Edge, EdgeLabelRenderer, type EdgeProps } from "@xyflow/react";
 import { Plus, TriangleAlert } from "lucide-react";
 import { type CSSProperties, memo } from "react";
@@ -43,12 +43,12 @@ function AddButton({ p, loc }: { p: Point; loc: StepLocation }) {
   const name = useEditorStore((s) => insertLabel(s.doc, s.manifest, loc, labels));
   if (readOnly) return null;
   return (
-    <div className="fk-edge-ctl nodrag nopan" style={at(p)}>
+    <div className="fl-edge-ctl nodrag nopan" style={at(p)}>
       {/* Out of the tab order (they'd all come before the cards): from the keyboard, ⌘K adds a
           step after the focused card and ⇧⌘K before it. */}
       <button
         type="button"
-        className="fk-add"
+        className="fl-add"
         tabIndex={-1}
         aria-label={name}
         title={name}
@@ -69,7 +69,7 @@ function AddButton({ p, loc }: { p: Point; loc: StepLocation }) {
 function EdgePath({ d, className }: { d: string; className?: string }) {
   return (
     <path
-      className={className ? `fk-edge ${className}` : "fk-edge"}
+      className={className ? `fl-edge ${className}` : "fl-edge"}
       d={d}
       style={{ d: `path("${d}")` } as CSSProperties}
       fill="none"
@@ -114,7 +114,7 @@ export const AddEdge = memo(function AddEdge({ data }: EdgeProps<FlowEdge>) {
   const { geometry, edge } = data;
   return (
     <>
-      <EdgePath d={geometry.path} className={dimmed ? "fk-edge--dimmed" : undefined} />
+      <EdgePath d={geometry.path} className={dimmed ? "fl-edge--dimmed" : undefined} />
       {geometry.plus && edge.kind === "add" && (
         <EdgeLabelRenderer>
           <AddButton p={geometry.plus} loc={edge.loc} />
@@ -132,11 +132,11 @@ export const BranchEdge = memo(function BranchEdge({ data }: EdgeProps<FlowEdge>
   const { geometry, edge, leftover, label } = data;
   return (
     <>
-      <EdgePath d={geometry.path} className={dimmed ? "fk-edge--dimmed" : undefined} />
+      <EdgePath d={geometry.path} className={dimmed ? "fl-edge--dimmed" : undefined} />
       <EdgeLabelRenderer>
         {geometry.label && (
           <div
-            className="fk-branch-label nodrag nopan"
+            className="fl-branch-label nodrag nopan"
             data-leftover={leftover || undefined}
             data-dimmed={dimmed || undefined}
             style={at(geometry.label)}
@@ -159,7 +159,7 @@ export const JoinEdge = memo(function JoinEdge({ data }: EdgeProps<FlowEdge>) {
   const { geometry, edge } = data;
   return (
     <>
-      <EdgePath d={geometry.path} className={dimmed ? "fk-edge--dimmed" : undefined} />
+      <EdgePath d={geometry.path} className={dimmed ? "fl-edge--dimmed" : undefined} />
       {geometry.plus && edge.loc && (
         <EdgeLabelRenderer>
           <AddButton p={geometry.plus} loc={edge.loc} />
@@ -172,7 +172,7 @@ export const JoinEdge = memo(function JoinEdge({ data }: EdgeProps<FlowEdge>) {
 /** The dashed edge from a loop's join back up to the loop card. */
 export const LoopReturnEdge = memo(function LoopReturnEdge({ data }: EdgeProps<FlowEdge>) {
   if (!data) return null;
-  return <EdgePath d={data.geometry.path} className="fk-edge--loop" />;
+  return <EdgePath d={data.geometry.path} className="fl-edge--loop" />;
 });
 
 /** Edge components by type. */

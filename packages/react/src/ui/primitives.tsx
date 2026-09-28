@@ -17,7 +17,7 @@ import {
   useState,
 } from "react";
 import { PortalContainerContext } from "../canvas/canvas-context";
-import { useFlowkitAppearance } from "../provider";
+import { useFlowlineAppearance } from "../provider";
 
 /** A tooltip on `children` (which must accept a ref). No tooltip when `content` is empty. */
 export function Hint({
@@ -35,7 +35,7 @@ export function Hint({
     <Tooltip.Root>
       <Tooltip.Trigger asChild>{children}</Tooltip.Trigger>
       <Tooltip.Portal container={container}>
-        <Tooltip.Content className="fk-tooltip" side={side} sideOffset={6} collisionPadding={8}>
+        <Tooltip.Content className="fl-tooltip" side={side} sideOffset={6} collisionPadding={8}>
           {content}
         </Tooltip.Content>
       </Tooltip.Portal>
@@ -63,29 +63,29 @@ export function SmallDialog({
   onSubmit?(): void;
 }): JSX.Element {
   const container = useContext(PortalContainerContext);
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const body = (
     <>
-      <div className="fk-dialog__head">
-        <Dialog.Title className="fk-dialog__title">{title}</Dialog.Title>
-        <Dialog.Close className="fk-icon-btn" aria-label={labels.cancel}>
+      <div className="fl-dialog__head">
+        <Dialog.Title className="fl-dialog__title">{title}</Dialog.Title>
+        <Dialog.Close className="fl-icon-btn" aria-label={labels.cancel}>
           <X size={16} aria-hidden />
         </Dialog.Close>
       </div>
       {description ? (
-        <Dialog.Description className="fk-dialog__desc">{description}</Dialog.Description>
+        <Dialog.Description className="fl-dialog__desc">{description}</Dialog.Description>
       ) : (
-        <Dialog.Description className="fk-sr-only">{title}</Dialog.Description>
+        <Dialog.Description className="fl-sr-only">{title}</Dialog.Description>
       )}
-      {children && <div className="fk-dialog__body">{children}</div>}
-      <div className="fk-dialog__foot">{footer}</div>
+      {children && <div className="fl-dialog__body">{children}</div>}
+      <div className="fl-dialog__foot">{footer}</div>
     </>
   );
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal container={container}>
-        <Dialog.Overlay className="fk-dialog-overlay" />
-        <Dialog.Content className="fk-dialog">
+        <Dialog.Overlay className="fl-dialog-overlay" />
+        <Dialog.Content className="fl-dialog">
           {onSubmit ? (
             <form
               onSubmit={(e) => {

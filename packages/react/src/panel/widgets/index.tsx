@@ -1,5 +1,5 @@
 /**
- * Built-in config widgets, selected by `x-flowkit.widget` when the provider registers no widget
+ * Built-in config widgets, selected by `x-flowline.widget` when the provider registers no widget
  * of that name.
  *
  * @module

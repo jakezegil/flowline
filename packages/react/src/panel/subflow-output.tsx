@@ -15,11 +15,11 @@ import {
   UI_META_KEY,
   type ValueExpr,
   type WorkflowDoc,
-} from "@flowkit/core";
+} from "@flowline/core";
 import { X } from "lucide-react";
 import { type JSX, useMemo } from "react";
 import { useEditorStore } from "../hooks";
-import { useFlowkitAppearance } from "../provider";
+import { useFlowlineAppearance } from "../provider";
 import { TRIGGER_KEY } from "../store/editor-store";
 import { FieldShell } from "./fields/shell";
 import { RefTextInput } from "./ref-text-input";
@@ -86,7 +86,7 @@ function outputFormSchema(declared: FieldDecl[], typeLabel: (d: FieldDecl) => st
  * under their output.
  */
 export function SubflowOutput(): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const trigger = useEditorStore((s) => s.doc.trigger);
   const steps = useEditorStore((s) => s.doc.steps);
   const output = useEditorStore((s) => s.doc.output) ?? NO_OUTPUT;
@@ -122,9 +122,9 @@ export function SubflowOutput(): JSX.Element {
       issues={loose}
       group
     >
-      <div className="fk-fields fk-output">
+      <div className="fl-fields fl-output">
         {declared.length === 0 && extra.length === 0 && (
-          <p className="fk-empty-note">{labels.outputMappingEmpty}</p>
+          <p className="fl-empty-note">{labels.outputMappingEmpty}</p>
         )}
         {declared.length > 0 && (
           <SchemaForm
@@ -149,7 +149,7 @@ export function SubflowOutput(): JSX.Element {
               aside={
                 <button
                   type="button"
-                  className="fk-icon-btn"
+                  className="fl-icon-btn"
                   aria-label={labels.removeOutput(key)}
                   title={labels.removeOutput(key)}
                   onClick={() => setOutput(key, undefined)}

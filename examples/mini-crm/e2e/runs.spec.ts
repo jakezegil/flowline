@@ -201,14 +201,14 @@ test("the generic resume endpoint refuses a host-handled approval with 409", asy
   const runId = await sendEnterpriseLead(request);
   await expectWaitingForApproval(page, runId);
 
-  const res = await request.post(`/flowkit/runs/${runId}/resume`, {
+  const res = await request.post(`/flowline/runs/${runId}/resume`, {
     data: { decision: "approved" },
   });
   expect(res.status()).toBe(409);
   expect(await res.json()).toMatchObject({ code: "resume_host_handled" });
 
   // The wait is untouched: the run still waits and the approval is still pending...
-  const detail = (await (await request.get(`/flowkit/runs/${runId}`)).json()) as {
+  const detail = (await (await request.get(`/flowline/runs/${runId}`)).json()) as {
     run: { status: string };
   };
   expect(detail.run.status).toBe("waiting");
@@ -233,7 +233,7 @@ test("the run viewer steps through loop iterations and switches inspector tabs",
   request,
 }) => {
   const id = `loop-${test.info().repeatEachIndex}-${test.info().retry}`;
-  const saved = await request.put(`/flowkit/workflows/${id}?create=true`, {
+  const saved = await request.put(`/flowline/workflows/${id}?create=true`, {
     data: {
       id,
       name: "Greet everyone",
@@ -266,10 +266,10 @@ test("the run viewer steps through loop iterations and switches inspector tabs",
   });
   expect(saved.ok()).toBe(true);
   const { version } = (await saved.json()) as { version: number };
-  expect((await request.post(`/flowkit/workflows/${id}/publish`, { data: { version } })).ok()).toBe(
+  expect((await request.post(`/flowline/workflows/${id}/publish`, { data: { version } })).ok()).toBe(
     true,
   );
-  const started = await request.post(`/flowkit/workflows/${id}/run`, {
+  const started = await request.post(`/flowline/workflows/${id}/run`, {
     data: { input: { names: ["Ada", "Grace", "Linus"] } },
   });
   expect(started.ok()).toBe(true);

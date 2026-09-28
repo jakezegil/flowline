@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { RunViewer, useRun } from "@flowkit/react";
+import { RunViewer, useRun } from "@flowline/react";
 import { Activity, BadgeCheck, Check, X } from "lucide-react";
 import { type JSX, useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";

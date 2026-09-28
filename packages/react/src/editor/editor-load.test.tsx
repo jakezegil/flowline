@@ -1,10 +1,10 @@
-import type { WorkflowDetail, WorkflowDoc } from "@flowkit/core";
+import type { WorkflowDetail, WorkflowDoc } from "@flowline/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { httpError, mockClient, setupDom } from "../../test/dom";
 import { docWith, fixtureDoc, manifest } from "../../test/fixtures";
-import { FlowkitProvider } from "../provider";
+import { FlowlineProvider } from "../provider";
 import { WorkflowEditor } from "./workflow-editor";
 
 beforeAll(setupDom);
@@ -29,11 +29,11 @@ function setup(
     },
   });
   render(
-    <FlowkitProvider client={client}>
+    <FlowlineProvider client={client}>
       <div style={{ height: 800 }}>
         <WorkflowEditor workflowId="leads" {...props} />
       </div>
-    </FlowkitProvider>,
+    </FlowlineProvider>,
   );
   return { client };
 }

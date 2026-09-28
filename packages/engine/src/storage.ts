@@ -1,7 +1,7 @@
 /**
  * The storage contract the engine runs on. Every adapter (memory, Postgres, third-party) must
  * implement {@link StorageAdapter} exactly as documented here and pass
- * `runStorageConformance` from `@flowkit/engine/conformance`.
+ * `runStorageConformance` from `@flowline/engine/conformance`.
  *
  * All timestamps are epoch milliseconds. Storage never reads a clock: every method that needs the
  * current time receives it as `now`.
@@ -19,7 +19,7 @@ import type {
   WorkflowDoc,
   WorkflowSummary,
   WorkflowVersion,
-} from "@flowkit/core";
+} from "@flowline/core";
 
 /**
  * Why a `waiting` run is waiting:
@@ -170,7 +170,7 @@ export interface RunPatch {
    * tenant, nothing is inserted, the accompanying events whose `runId` is the child's id are NOT
    * appended (they were appended when the child was created), and the write still succeeds with the
    * rest of the patch and events. When the id exists in ANOTHER tenant the whole write is rejected
-   * with a `FlowkitStorageError` and nothing changes.
+   * with a `FlowlineStorageError` and nothing changes.
    */
   createChild?: NewRun;
 }
@@ -320,7 +320,7 @@ export interface StorageAdapter {
    * unchanged and appends nothing (also under concurrency: of concurrent calls with one id, exactly
    * one inserts and appends its events).
    *
-   * @throws {FlowkitStorageError} (rejects, writing nothing) if the id belongs to another tenant.
+   * @throws {FlowlineStorageError} (rejects, writing nothing) if the id belongs to another tenant.
    */
   createRun(run: NewRun, events: NewRunEvent[], now: number): Promise<Run>;
 
@@ -383,7 +383,7 @@ export interface StorageAdapter {
    * are cleared. Events may belong to any run (e.g. the child's `run.started`) and get per-run `seq`
    * numbers.
    *
-   * @throws {FlowkitStorageError} (rejects, writing nothing) if `patch.createChild.id` belongs to a
+   * @throws {FlowlineStorageError} (rejects, writing nothing) if `patch.createChild.id` belongs to a
    * run of another tenant.
    */
   commit(lease: Lease, patch: RunPatch, events: NewRunEvent[], now: number): Promise<boolean>;
@@ -447,7 +447,7 @@ export interface StorageAdapter {
    * Any stale lease is cleared (invalidating its token), whether or not `patch.release` is set.
    * Returns `false` and writes nothing when a precondition fails.
    *
-   * @throws {FlowkitStorageError} (rejects, writing nothing) if `patch.createChild.id` belongs to a
+   * @throws {FlowlineStorageError} (rejects, writing nothing) if `patch.createChild.id` belongs to a
    * run of another tenant.
    */
   updateRunUnleased(

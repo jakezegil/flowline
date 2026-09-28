@@ -1,7 +1,7 @@
-import type { RunStatus, RunSummary } from "@flowkit/core";
+import type { RunStatus, RunSummary } from "@flowline/core";
 import { Ban, Check, CircleStop, Clock, LoaderCircle, X } from "lucide-react";
 import type { JSX } from "react";
-import { useFlowkitAppearance } from "../provider";
+import { useFlowlineAppearance } from "../provider";
 
 /** How a run reads to people: its status, plus "stopped" (completed by a Stop step) and "cancelling". */
 export type RunDisplayState = RunStatus | "stopped" | "cancelling";
@@ -26,18 +26,18 @@ export function displayState(
 
 const ICON = {
   queued: <Clock size={12} strokeWidth={2.5} aria-hidden />,
-  running: <LoaderCircle size={12} strokeWidth={2.5} className="fk-spin" aria-hidden />,
+  running: <LoaderCircle size={12} strokeWidth={2.5} className="fl-spin" aria-hidden />,
   waiting: <Clock size={12} strokeWidth={2.5} aria-hidden />,
   completed: <Check size={12} strokeWidth={3} aria-hidden />,
   stopped: <CircleStop size={12} strokeWidth={2.5} aria-hidden />,
   failed: <X size={12} strokeWidth={3} aria-hidden />,
   cancelled: <Ban size={12} strokeWidth={2.5} aria-hidden />,
-  cancelling: <LoaderCircle size={12} strokeWidth={2.5} className="fk-spin" aria-hidden />,
+  cancelling: <LoaderCircle size={12} strokeWidth={2.5} className="fl-spin" aria-hidden />,
 } satisfies Record<RunDisplayState, JSX.Element>;
 
 /** The display name of a run state. */
 export function useRunStateName(): (state: RunDisplayState) => string {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   return (state) =>
     state === "stopped"
       ? labels.runStopped
@@ -56,7 +56,7 @@ export function RunStateChip({
 }): JSX.Element {
   const name = useRunStateName();
   return (
-    <span className="fk-run-chip" data-state={state} data-size={size}>
+    <span className="fl-run-chip" data-state={state} data-size={size}>
       {ICON[state]}
       <span>{name(state)}</span>
     </span>

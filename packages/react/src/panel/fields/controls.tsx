@@ -4,10 +4,10 @@
  *
  * @module
  */
-import { isRef, isTpl, type JSONSchema, type ValueExpr } from "@flowkit/core";
+import { isRef, isTpl, type JSONSchema, type ValueExpr } from "@flowline/core";
 import { Braces } from "lucide-react";
 import { type JSX, type ReactNode, useEffect, useId, useRef, useState } from "react";
-import { useFlowkitAppearance } from "../../provider";
+import { useFlowlineAppearance } from "../../provider";
 import { type FieldProps, fieldMetaOf, useFormEnv } from "../form-context";
 import { RefTextInput } from "../ref-text-input";
 import { metaOf, optionLabel } from "../schema";
@@ -162,7 +162,7 @@ function parseNumber(text: string, integer: boolean): number | undefined {
 /** A number, as text so partial input ("-", "1.") can be typed. */
 export function NumberField(p: FieldProps): JSX.Element {
   const env = useFormEnv();
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const id = useId();
   const integer = p.schema.type === "integer";
   const text = typeof p.value === "number" ? String(p.value) : "";
@@ -175,7 +175,7 @@ export function NumberField(p: FieldProps): JSX.Element {
     <LiteralField p={p} htmlFor={id}>
       <input
         id={id}
-        className="fk-input fk-input--num"
+        className="fl-input fl-input--num"
         type="text"
         inputMode={integer ? "numeric" : "decimal"}
         value={shown}
@@ -196,7 +196,7 @@ export function NumberField(p: FieldProps): JSX.Element {
           if (!bad) setDraft(null);
         }}
       />
-      {bad && <p className="fk-f__local">{labels.invalidNumber}</p>}
+      {bad && <p className="fl-f__local">{labels.invalidNumber}</p>}
     </LiteralField>
   );
 }
@@ -235,7 +235,7 @@ export function enumOptions(schema: JSONSchema): unknown[] {
  */
 export function EnumField(p: FieldProps): JSX.Element {
   const env = useFormEnv();
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const id = useId();
   const values = enumOptions(p.schema);
   const meta = fieldMetaOf(env, p.schema);
@@ -265,7 +265,7 @@ export function EnumField(p: FieldProps): JSX.Element {
     <LiteralField p={p} htmlFor={id}>
       <select
         id={id}
-        className="fk-input fk-select"
+        className="fl-input fl-select"
         value={index === -1 ? "" : String(index)}
         disabled={env.readOnly}
         aria-label={p.bare ? p.label : undefined}
@@ -298,7 +298,7 @@ function isJsonLiteral(v: ValueExpr | undefined): boolean {
  */
 export function AnyField(p: FieldProps): JSX.Element {
   const env = useFormEnv();
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const meta = fieldMetaOf(env, p.schema);
   const [json, setJson] = useState(() => isJsonLiteral(p.value));
   const [bad, setBad] = useState(false);
@@ -355,7 +355,7 @@ export function AnyField(p: FieldProps): JSX.Element {
             literalOnly={meta.literalOnly === true}
             readOnly={env.readOnly}
           />
-          {bad && <p className="fk-f__local">{labels.invalidJson}</p>}
+          {bad && <p className="fl-f__local">{labels.invalidJson}</p>}
         </>
       ) : (
         <RefTextInput

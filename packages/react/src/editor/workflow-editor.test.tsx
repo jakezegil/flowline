@@ -1,9 +1,9 @@
-import type { WorkflowDetail, WorkflowDoc } from "@flowkit/core";
+import type { WorkflowDetail, WorkflowDoc } from "@flowline/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { httpError, mockClient, setupDom } from "../../test/dom";
 import { docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
-import { FlowkitProvider } from "../provider";
+import { FlowlineProvider } from "../provider";
 import { WorkflowEditor } from "./workflow-editor";
 
 beforeAll(setupDom);
@@ -35,7 +35,7 @@ function setup(doc: WorkflowDoc | null, opts: { published?: number | null } = {}
   const onSaved = vi.fn();
   const onRunStarted = vi.fn();
   const utils = render(
-    <FlowkitProvider client={client}>
+    <FlowlineProvider client={client}>
       <div style={{ height: 800 }}>
         <WorkflowEditor
           workflowId={doc?.id ?? "welcome"}
@@ -45,7 +45,7 @@ function setup(doc: WorkflowDoc | null, opts: { published?: number | null } = {}
           initialDoc={docWith([], "welcome")}
         />
       </div>
-    </FlowkitProvider>,
+    </FlowlineProvider>,
   );
   return { client, onPublish, onSaved, onRunStarted, ...utils };
 }
@@ -138,8 +138,8 @@ describe("WorkflowEditor", () => {
     client.publish.mockResolvedValue(undefined);
     fireEvent.click(button("Publish"));
     // The status chip and the toast both say so.
-    await screen.findByText("Published v5", { selector: ".fk-status" });
-    expect(screen.getByText("Published v5", { selector: ".fk-toast__message" })).toBeTruthy();
+    await screen.findByText("Published v5", { selector: ".fl-status" });
+    expect(screen.getByText("Published v5", { selector: ".fl-toast__message" })).toBeTruthy();
     expect(client.publish).toHaveBeenCalledWith("welcome", 5);
     expect(onPublish).toHaveBeenCalledWith(5);
     expect(button("Publish").getAttribute("aria-disabled")).toBe("true");
@@ -206,13 +206,13 @@ describe("WorkflowEditor", () => {
       summary: undefined,
       input: {
         type: "object",
-        properties: { url: { type: "string", "x-flowkit": { label: "URL", outboundUrl: true } } },
+        properties: { url: { type: "string", "x-flowline": { label: "URL", outboundUrl: true } } },
       },
     };
     const m = { ...manifest, nodes: [...manifest.nodes, fetchNode] };
     const doc = docWith([step("fetch", "test.fetch", { url: "http://localhost:8911/x" })]);
     const view = (network?: { allowPrivateNetworks: boolean }) => (
-      <FlowkitProvider
+      <FlowlineProvider
         client={mockClient({
           getManifest: async () => m,
           listSubflows: async () => [],
@@ -222,7 +222,7 @@ describe("WorkflowEditor", () => {
         <div style={{ height: 800 }}>
           <WorkflowEditor workflowId={doc.id} {...(network ? { network } : {})} />
         </div>
-      </FlowkitProvider>
+      </FlowlineProvider>
     );
     const { unmount } = render(view());
     await screen.findByText("Draft · v3");
@@ -251,7 +251,7 @@ describe("WorkflowEditor", () => {
     expect(pill.textContent).not.toBe(before);
     fireEvent.click(button("Show"));
     const field = (await screen.findByRole("textbox", { name: "Subject" })).closest(
-      ".fk-f",
+      ".fl-f",
     ) as HTMLElement;
     expect(field.textContent).toContain("Subject is too long for the mail server");
     // Publishing stays blocked until the flagged step changes.
@@ -277,9 +277,9 @@ describe("WorkflowEditor", () => {
       getWorkflow: async () => detail(fixtureDoc()),
     });
     const { unmount } = render(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <WorkflowEditor workflowId="welcome" onDirtyChange={onDirtyChange} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     const name = await screen.findByRole("textbox", { name: "Workflow name" });
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
@@ -323,7 +323,7 @@ describe("WorkflowEditor", () => {
     await act(async () => {
       finishSave({ ...detail(fixtureDoc(), 4).latest });
     });
-    await screen.findByText("Published v4", { selector: ".fk-status" });
+    await screen.findByText("Published v4", { selector: ".fl-status" });
   });
 
   test("Run asks for the manual trigger's fields and starts a run", async () => {
@@ -341,7 +341,7 @@ describe("WorkflowEditor", () => {
     fireEvent.click(button("Run"));
     const dialog = await screen.findByRole("dialog", { name: "Run workflow" });
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
-    expect(await screen.findByText("Required", { selector: ".fk-field__error" })).toBeTruthy();
+    expect(await screen.findByText("Required", { selector: ".fl-field__error" })).toBeTruthy();
     fireEvent.change(dialog.querySelector("input") as HTMLInputElement, {
       target: { value: "ada@example.com" },
     });

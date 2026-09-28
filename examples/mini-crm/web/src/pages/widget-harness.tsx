@@ -4,8 +4,8 @@
  *
  * @module
  */
-import type { ValueExpr } from "@flowkit/core";
-import { type FieldWidgetProps, useFlowkit } from "@flowkit/react";
+import type { ValueExpr } from "@flowline/core";
+import { type FieldWidgetProps, useFlowline } from "@flowline/react";
 import { type JSX, useState } from "react";
 import { PageHeader } from "../ui";
 import { UserSelect } from "../widgets/user-select";
@@ -20,7 +20,7 @@ function Case(props: {
 }): JSX.Element {
   const [value, setValue] = useState<ValueExpr | undefined>(props.initial);
   // Rendered through the provider's registry, as the config panel will.
-  const Widget = useFlowkit().widgets["crm.userSelect"];
+  const Widget = useFlowline().widgets["crm.userSelect"];
   const widgetProps: FieldWidgetProps = {
     value,
     onChange: setValue,

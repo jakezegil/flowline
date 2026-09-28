@@ -1,4 +1,4 @@
-import type { Issue, JSONSchema, ScopeEntry, UiMeta, ValueExpr } from "@flowkit/core";
+import type { Issue, JSONSchema, ScopeEntry, UiMeta, ValueExpr } from "@flowline/core";
 import { createContext, useContext } from "react";
 import { metaOf } from "./schema";
 

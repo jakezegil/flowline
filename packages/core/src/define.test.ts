@@ -5,8 +5,8 @@ import {
   defineNode,
   definePlugin,
   defineTrigger,
-  FLOWKIT_SIGNAL,
-  FlowkitDefinitionError,
+  FLOWLINE_SIGNAL,
+  FlowlineDefinitionError,
   invokeSubflow,
   isSignal,
   loop,
@@ -145,7 +145,7 @@ describe("defineNode", () => {
   test("rejects a type without a namespace", () => {
     expect(() =>
       defineNode({ type: "load", name: "L", input: z.object({}), run: () => 1 }),
-    ).toThrow(FlowkitDefinitionError);
+    ).toThrow(FlowlineDefinitionError);
     expect(() =>
       defineNode({ type: ".load", name: "L", input: z.object({}), run: () => 1 }),
     ).toThrow(/namespace/);
@@ -186,7 +186,7 @@ describe("defineTrigger", () => {
   test("rejects a type without a namespace and payload + dynamicPayload", () => {
     expect(() =>
       defineTrigger({ type: "manual", name: "M", kind: "manual", config: z.object({}) }),
-    ).toThrow(FlowkitDefinitionError);
+    ).toThrow(FlowlineDefinitionError);
     expect(() =>
       defineTrigger({
         type: "a.b",
@@ -225,8 +225,8 @@ describe("signals", () => {
   });
 
   test("the signal key survives duplicated package copies", () => {
-    expect(FLOWKIT_SIGNAL).toBe(Symbol.for("flowkit.signal"));
-    const foreign = { [Symbol.for("flowkit.signal")]: true, kind: "stop" };
+    expect(FLOWLINE_SIGNAL).toBe(Symbol.for("flowline.signal"));
+    const foreign = { [Symbol.for("flowline.signal")]: true, kind: "stop" };
     expect(isSignal(foreign)).toBe(true);
   });
 
@@ -261,36 +261,36 @@ describe("signals", () => {
 describe("ui helpers", () => {
   const json = (s: z.ZodType) => z.toJSONSchema(s, { io: "input", unrepresentable: "any" });
 
-  test("ui returns the same schema type and attaches x-flowkit", () => {
+  test("ui returns the same schema type and attaches x-flowline", () => {
     const s = ui(z.string().min(1), { label: "Name" });
     expectTypeOf(s).toEqualTypeOf<z.ZodString>();
-    expect(json(s)).toMatchObject({ type: "string", minLength: 1, "x-flowkit": { label: "Name" } });
+    expect(json(s)).toMatchObject({ type: "string", minLength: 1, "x-flowline": { label: "Name" } });
   });
 
   test("ui merges with metadata from an earlier ui call", () => {
     const s = ui(ui(z.string(), { label: "A", group: "g" }), { widget: "w", group: "h" });
-    expect(json(s)["x-flowkit"]).toEqual({ label: "A", widget: "w", group: "h" });
+    expect(json(s)["x-flowline"]).toEqual({ label: "A", widget: "w", group: "h" });
   });
 
   test("ui does not mutate a reused base schema", () => {
     const base = z.string();
     const a = ui(base, { label: "A" });
     const b = ui(base, { label: "B" });
-    expect(json(a)["x-flowkit"]).toEqual({ label: "A" });
-    expect(json(b)["x-flowkit"]).toEqual({ label: "B" });
-    expect(json(base)["x-flowkit"]).toBeUndefined();
+    expect(json(a)["x-flowline"]).toEqual({ label: "A" });
+    expect(json(b)["x-flowline"]).toEqual({ label: "B" });
+    expect(json(base)["x-flowline"]).toBeUndefined();
   });
 
   test("secret, sensitive and fields", () => {
-    expect(json(secret())["x-flowkit"]).toEqual({
+    expect(json(secret())["x-flowline"]).toEqual({
       secret: true,
       widget: "secret",
       literalOnly: true,
     });
     expect(json(secret(z.string().min(3)))).toMatchObject({ minLength: 3 });
-    expect(json(sensitive(z.number()))["x-flowkit"]).toEqual({ sensitive: true });
+    expect(json(sensitive(z.number()))["x-flowline"]).toEqual({ sensitive: true });
     const f = fields();
-    expect(json(f)["x-flowkit"]).toEqual({ widget: "fields" });
+    expect(json(f)["x-flowline"]).toEqual({ widget: "fields" });
     expect(f.parse([{ name: "a", type: "date", required: true }])).toEqual([
       { name: "a", type: "date", required: true },
     ]);

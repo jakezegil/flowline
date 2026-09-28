@@ -1,6 +1,6 @@
 /**
  * Test helpers for running the Postgres adapter on PGlite (in-process WASM Postgres), exposed as
- * `@flowkit/storage-postgres/testing`.
+ * `@flowline/storage-postgres/testing`.
  *
  * @module
  */

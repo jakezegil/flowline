@@ -1,23 +1,23 @@
 /**
  * Engine error classes. Node handlers throw {@link RetryableError} or {@link FatalError} to control
  * retry behaviour (any other error is treated as retryable); storage adapters throw
- * {@link FlowkitStorageError} for contract violations; the engine API throws
- * {@link FlowkitValidationError} for rejected workflows, payloads and inputs.
+ * {@link FlowlineStorageError} for contract violations; the engine API throws
+ * {@link FlowlineValidationError} for rejected workflows, payloads and inputs.
  *
  * @module
  */
-import type { Issue } from "@flowkit/core";
+import type { Issue } from "@flowline/core";
 
-export { FatalError, type FatalErrorOptions, RetryableError } from "@flowkit/core";
+export { FatalError, type FatalErrorOptions, RetryableError } from "@flowline/core";
 
 /**
  * A storage operation violated a storage invariant, e.g. creating a run whose ID already belongs
  * to another tenant. Thrown (rejected) by `StorageAdapter` methods; the operation wrote
  * nothing.
  */
-export class FlowkitStorageError extends Error {
+export class FlowlineStorageError extends Error {
   /** Error name, for `instanceof`-free checks across package copies. */
-  override readonly name: string = "FlowkitStorageError";
+  override readonly name: string = "FlowlineStorageError";
 }
 
 /**
@@ -25,9 +25,9 @@ export class FlowkitStorageError extends Error {
  * `issues` lists the problems. The HTTP handler answers with 400 (422 for a rejected publish) and
  * `{ error, issues }`.
  */
-export class FlowkitValidationError extends Error {
+export class FlowlineValidationError extends Error {
   /** Error name, for `instanceof`-free checks across package copies. */
-  override readonly name: string = "FlowkitValidationError";
+  override readonly name: string = "FlowlineValidationError";
   /** What is wrong. */
   readonly issues: Issue[];
 

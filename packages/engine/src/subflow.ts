@@ -12,7 +12,7 @@ import {
   type Registry,
   type SubflowSignal,
   type WorkflowDoc,
-} from "@flowkit/core";
+} from "@flowline/core";
 import type { z } from "zod";
 import { sha256Hex } from "./context";
 import type { NewRun, Run, StorageAdapter } from "./storage";
@@ -106,7 +106,7 @@ export async function checkTriggerPayload(
  * nothing is declared. A missing output mapping counts as `{}`.
  *
  * Contract for every trigger of kind `subflow` (`core.subflow` and plugin sub-flow triggers alike,
- * see `TriggerKind` in `@flowkit/core`): the declared output is the `FieldDecl` list at config path
+ * see `TriggerKind` in `@flowline/core`): the declared output is the `FieldDecl` list at config path
  * `"output"`. A plugin trigger that keeps its output fields anywhere else is not checked.
  */
 export function subflowOutputProblem(

@@ -4,14 +4,14 @@ import {
   type JSONSchema,
   type TriggerManifest,
   type WorkflowDoc,
-} from "@flowkit/core";
+} from "@flowline/core";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Zap } from "lucide-react";
 import { memo, useRef } from "react";
 import { sameIssues, useEditorStore, useShallow } from "../hooks";
-import type { FlowkitLabels } from "../labels";
+import type { FlowlineLabels } from "../labels";
 import { labelOf, metaOf, optionLabel } from "../panel/schema";
-import { useFlowkitAppearance } from "../provider";
+import { useFlowlineAppearance } from "../provider";
 import { TRIGGER_KEY } from "../store/editor-store";
 import { useCanvasUi, useLabels } from "./canvas-context";
 import { NodeHandles } from "./handles";
@@ -30,7 +30,7 @@ const MAX_FILTER = 24;
 function triggerFilters(
   t: TriggerManifest | undefined,
   trigger: WorkflowDoc["trigger"],
-  labels: FlowkitLabels,
+  labels: FlowlineLabels,
 ): string[] {
   const schema = t?.config as JSONSchema | undefined;
   const props = (schema?.properties ?? {}) as Record<string, JSONSchema>;
@@ -64,7 +64,7 @@ function triggerFilters(
 function triggerCaption(
   t: TriggerManifest | undefined,
   trigger: WorkflowDoc["trigger"],
-  labels: FlowkitLabels,
+  labels: FlowlineLabels,
 ): string {
   if (!t) return labels.triggerUnknown(trigger.type);
   switch (t.kind) {
@@ -94,7 +94,7 @@ const isTriggerIssue = (i: Issue) =>
 
 /** The workflow's trigger card, at the top of the canvas. */
 export const TriggerCard = memo(function TriggerCard({ selected }: NodeProps<TriggerNode>) {
-  const { resolveIcon } = useFlowkitAppearance();
+  const { resolveIcon } = useFlowlineAppearance();
   const labels = useLabels();
   // Only the trigger's slice of the store, so edits to steps don't re-render this card.
   const { trigger, docTrigger } = useEditorStore(
@@ -122,26 +122,26 @@ export const TriggerCard = memo(function TriggerCard({ selected }: NodeProps<Tri
     <>
       <NodeHandles />
       <div
-        className="fk-card fk-card--trigger"
+        className="fl-card fl-card--trigger"
         data-selected={selected || undefined}
         data-unknown={!trigger || undefined}
       >
-        <div className="fk-card__icon" data-tone="trigger" aria-hidden>
+        <div className="fl-card__icon" data-tone="trigger" aria-hidden>
           <Icon size={18} />
         </div>
-        <div className="fk-card__body">
-          <div className="fk-card__title-row">
-            <span className="fk-card__title" title={name}>
+        <div className="fl-card__body">
+          <div className="fl-card__title-row">
+            <span className="fl-card__title" title={name}>
               {name}
             </span>
           </div>
-          <div className="fk-card__summary" title={caption}>
+          <div className="fl-card__summary" title={caption}>
             {caption}
           </div>
         </div>
-        <span className="fk-card__tag">{labels.triggerTag}</span>
+        <span className="fl-card__tag">{labels.triggerTag}</span>
         {!inRunMode && (
-          <div className="fk-card__status">
+          <div className="fl-card__status">
             <DraftBadge issues={issues} testState={testState} />
           </div>
         )}

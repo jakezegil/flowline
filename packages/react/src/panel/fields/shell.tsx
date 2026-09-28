@@ -4,10 +4,10 @@
  *
  * @module
  */
-import type { Issue } from "@flowkit/core";
+import type { Issue } from "@flowline/core";
 import { CircleAlert, TriangleAlert } from "lucide-react";
 import type { JSX, ReactNode } from "react";
-import { useFlowkitAppearance } from "../../provider";
+import { useFlowlineAppearance } from "../../provider";
 import { Hint } from "../../ui/primitives";
 
 /** A field's issues, errors first, each with its icon. */
@@ -17,7 +17,7 @@ export function IssueNotes({ issues }: { issues: readonly Issue[] }): JSX.Elemen
     (a, b) => (a.severity === "error" ? 0 : 1) - (b.severity === "error" ? 0 : 1),
   );
   return (
-    <ul className="fk-f__issues">
+    <ul className="fl-f__issues">
       {sorted.map((i) => (
         <li key={`${i.code}:${i.field ?? ""}:${i.message}`} data-severity={i.severity}>
           {i.severity === "error" ? (
@@ -52,47 +52,47 @@ export function FieldShell(props: {
   bare?: boolean;
   children: ReactNode;
 }): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const invalid = props.issues.some((i) => i.severity === "error");
   const warned = !invalid && props.issues.length > 0;
   const label = (
     <>
       {props.label}
       {props.required && (
-        <span className="fk-f__req">
+        <span className="fl-f__req">
           <span aria-hidden>*</span>
-          <span className="fk-sr-only">{labels.requiredField}</span>
+          <span className="fl-sr-only">{labels.requiredField}</span>
         </span>
       )}
     </>
   );
   const head = (
-    <div className="fk-f__head">
+    <div className="fl-f__head">
       {props.group ? (
-        <legend className="fk-f__label">{label}</legend>
+        <legend className="fl-f__label">{label}</legend>
       ) : (
-        <label className="fk-f__label" htmlFor={props.htmlFor}>
+        <label className="fl-f__label" htmlFor={props.htmlFor}>
           {label}
         </label>
       )}
-      {props.aside && <div className="fk-f__aside">{props.aside}</div>}
-      {props.inline && <div className="fk-f__inline">{props.children}</div>}
+      {props.aside && <div className="fl-f__aside">{props.aside}</div>}
+      {props.inline && <div className="fl-f__inline">{props.children}</div>}
     </div>
   );
   const body = (
     <>
       {head}
       {!props.inline && props.children}
-      {props.description && <p className="fk-f__help">{props.description}</p>}
+      {props.description && <p className="fl-f__help">{props.description}</p>}
       <IssueNotes issues={props.issues} />
     </>
   );
   if (props.bare) {
     return (
-      <div className="fk-f fk-f--bare" data-invalid={invalid ? "" : undefined}>
+      <div className="fl-f fl-f--bare" data-invalid={invalid ? "" : undefined}>
         {props.aside ? (
-          <div className="fk-f__row">
-            <div className="fk-f__grow">{props.children}</div>
+          <div className="fl-f__row">
+            <div className="fl-f__grow">{props.children}</div>
             {props.aside}
           </div>
         ) : (
@@ -103,7 +103,7 @@ export function FieldShell(props: {
     );
   }
   const attrs = {
-    className: "fk-f",
+    className: "fl-f",
     "data-invalid": invalid ? "" : undefined,
     "data-warning": warned ? "" : undefined,
   };
@@ -120,13 +120,13 @@ export function RefToggle({
   onToggle(): void;
   disabled?: boolean;
 }): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const text = on ? labels.useLiteral : labels.useReference;
   return (
     <Hint content={text} side="left">
       <button
         type="button"
-        className="fk-reftoggle"
+        className="fl-reftoggle"
         aria-pressed={on}
         aria-label={labels.useReference}
         disabled={disabled}
@@ -156,7 +156,7 @@ export function AsideToggle({
     <Hint content={label} side="left">
       <button
         type="button"
-        className="fk-reftoggle"
+        className="fl-reftoggle"
         aria-pressed={on}
         aria-label={label}
         disabled={disabled}
@@ -187,7 +187,7 @@ export function Segmented<T extends string | number | boolean>(props: {
   };
   return (
     <div
-      className="fk-seg"
+      className="fl-seg"
       role="radiogroup"
       aria-label={props.label}
       id={props.id}
@@ -219,7 +219,7 @@ export function Segmented<T extends string | number | boolean>(props: {
             role="radio"
             aria-checked={checked}
             tabIndex={checked || (index === -1 && i === 0) ? 0 : -1}
-            className="fk-seg__opt"
+            className="fl-seg__opt"
             disabled={props.disabled}
             onClick={() => props.onChange(o.value)}
           >
@@ -246,11 +246,11 @@ export function Switch(props: {
       id={props.id}
       aria-checked={props.checked}
       aria-label={props.label}
-      className="fk-switch"
+      className="fl-switch"
       disabled={props.disabled}
       onClick={() => props.onChange(!props.checked)}
     >
-      <span className="fk-switch__thumb" aria-hidden />
+      <span className="fl-switch__thumb" aria-hidden />
     </button>
   );
 }

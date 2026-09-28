@@ -1,5 +1,5 @@
 /**
- * An in-memory FlowkitClient for the playground: a couple of workflows and a set of runs in the
+ * An in-memory FlowlineClient for the playground: a couple of workflows and a set of runs in the
  * states the run viewer has to explain (running, waiting on a callback, failed, failed inside a
  * loop, completed, cancelled). Times are relative to page load.
  */
@@ -15,8 +15,8 @@ import type {
   TestStepResponse,
   WorkflowDoc,
   WorkflowVersion,
-} from "@flowkit/core";
-import type { FlowkitClient } from "@flowkit/core/client";
+} from "@flowline/core";
+import type { FlowlineClient } from "@flowline/core/client";
 import { manifest, nestedDoc, webhookDoc } from "./fixtures";
 
 const T0 = Date.now();
@@ -462,10 +462,10 @@ const SUBFLOWS: SubflowInfo[] = [
     input: {
       type: "object",
       properties: {
-        domain: { type: "string", "x-flowkit": { label: "Company domain" } },
+        domain: { type: "string", "x-flowline": { label: "Company domain" } },
         includeContacts: {
           type: "boolean",
-          "x-flowkit": { label: "Include contacts" },
+          "x-flowline": { label: "Include contacts" },
           default: false,
         },
       },
@@ -517,7 +517,7 @@ function testResult({ step }: TestStepRequest): TestStepResponse {
 }
 
 /** The playground client. `wf=clean` edits the onboarding flow with a manual trigger. */
-export function mockClient(): FlowkitClient {
+export function mockClient(): FlowlineClient {
   const docs: Record<string, WorkflowDoc> = {
     "deal-won": nestedDoc(),
     onboarding: onboardingDoc("core.manual"),
@@ -525,7 +525,7 @@ export function mockClient(): FlowkitClient {
   };
   let saved = 7;
   return {
-    baseUrl: "/api/flowkit",
+    baseUrl: "/api/flowline",
     getManifest: () => delay(manifest),
     listWorkflows: () => delay([]),
     getWorkflow: (id) => {
@@ -553,7 +553,7 @@ export function mockClient(): FlowkitClient {
     cancelRun: () => delay(undefined, 300),
     resumeRun: () => delay(undefined, 300),
     subscribeRun: () => () => {},
-  } as FlowkitClient;
+  } as FlowlineClient;
 }
 
 /** The run ID of a playground run state. */

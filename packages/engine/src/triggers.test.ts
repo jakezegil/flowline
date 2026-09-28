@@ -4,8 +4,8 @@ import {
   definePlugin,
   defineTrigger,
   type WorkflowDoc,
-} from "@flowkit/core";
-import { createMemoryStorage } from "@flowkit/storage-memory";
+} from "@flowline/core";
+import { createMemoryStorage } from "@flowline/storage-memory";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createEngine, type Engine } from "./engine";
@@ -140,7 +140,7 @@ describe("emit", () => {
     await deploy(dealDoc("typed"));
     await expect(
       engine.emit("deal.updated", { dealId: 5 }, { tenantId: "t1" }),
-    ).rejects.toMatchObject({ name: "FlowkitValidationError", issues: [expect.any(Object)] });
+    ).rejects.toMatchObject({ name: "FlowlineValidationError", issues: [expect.any(Object)] });
     expect(await storage.listRuns("t1", {})).toEqual([]);
   });
 });
@@ -170,9 +170,9 @@ describe("start", () => {
     await deploy(manualDoc("m"));
     await expect(
       engine.start({ tenantId: "t1", workflowId: "m", input: { count: "3" } }),
-    ).rejects.toMatchObject({ name: "FlowkitValidationError" });
+    ).rejects.toMatchObject({ name: "FlowlineValidationError" });
     await expect(engine.start({ tenantId: "t1", workflowId: "m" })).rejects.toMatchObject({
-      name: "FlowkitValidationError",
+      name: "FlowlineValidationError",
     });
     await expect(
       engine.start({ tenantId: "t2", workflowId: "m", input: { count: 1 } }),

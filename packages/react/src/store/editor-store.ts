@@ -19,7 +19,7 @@ import {
   validateWorkflow,
   type WorkflowDoc,
   walkSteps,
-} from "@flowkit/core";
+} from "@flowline/core";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import {
   cloneWithFreshIds,
@@ -60,7 +60,7 @@ export interface EditorState {
   /**
    * Sample output per step ID ({@link TRIGGER_KEY} → trigger payload sample), used by the data
    * picker and step tests. Editor-local only: persisted to `localStorage` under
-   * `flowkit:samples:<workflowId>` and never written into the workflow doc (it may contain PII).
+   * `flowline:samples:<workflowId>` and never written into the workflow doc (it may contain PII).
    * Entries of removed steps are kept while the editor is open (so undo brings them back) and
    * pruned when samples are next loaded.
    */
@@ -89,7 +89,7 @@ export interface EditorState {
 /**
  * Editor commands. Every doc-changing command is one undo step (except bursts of edits to the
  * same field, see {@link EditorActions.setConfig}) and revalidates the doc. Commands given an
- * unknown step ID, node type or invalid location throw (`FlowkitTreeError` or `Error`) and leave
+ * unknown step ID, node type or invalid location throw (`FlowlineTreeError` or `Error`) and leave
  * the state unchanged.
  */
 export interface EditorActions {
@@ -223,7 +223,7 @@ interface LocalData {
   sampleTypes: Record<string, string>;
 }
 
-const storageKey = (workflowId: string) => `flowkit:samples:${workflowId}`;
+const storageKey = (workflowId: string) => `flowline:samples:${workflowId}`;
 
 function storage(): Storage | undefined {
   try {

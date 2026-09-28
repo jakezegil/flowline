@@ -40,7 +40,7 @@ export async function withTransaction<T>(
 ): Promise<T> {
   if (!pool.connect) {
     throw new Error(
-      "@flowkit/storage-postgres: this operation needs a transaction, so the pool must provide connect()",
+      "@flowline/storage-postgres: this operation needs a transaction, so the pool must provide connect()",
     );
   }
   const client = await pool.connect();
@@ -78,7 +78,7 @@ async function applyMigrations(q: Queryable, s: string): Promise<void> {
 }
 
 /**
- * Bring `schema` (default `"flowkit"`) up to date: create it and its `schema_migrations` table,
+ * Bring `schema` (default `"flowline"`) up to date: create it and its `schema_migrations` table,
  * then apply, in version order, every migration not yet recorded there. Idempotent, so it is safe
  * to call on every start-up.
  *
@@ -90,9 +90,9 @@ async function applyMigrations(q: Queryable, s: string): Promise<void> {
  *
  * @throws {Error} if `schema` is not a plain identifier.
  */
-export async function migrate(db: Queryable, schema = "flowkit"): Promise<void> {
+export async function migrate(db: Queryable, schema = "flowline"): Promise<void> {
   const s = quoteSchema(schema);
-  const lockKey = `flowkit.migrate:${schema}`;
+  const lockKey = `flowline.migrate:${schema}`;
   const pool = db as PoolLike;
   if (pool.connect) {
     await withTransaction(pool, async (tx) => {

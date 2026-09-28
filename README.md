@@ -1,4 +1,4 @@
-# Flowkit
+# Flowline
 
 An embeddable workflow builder for TypeScript apps, in the style of Zapier or n8n. You define typed
 nodes in code. Your users arrange them into workflows on a canvas. A durable engine runs those
@@ -35,31 +35,31 @@ At the end, one app event produces a completed run. `examples/docs-check` runs e
 snippets on every `pnpm test`.
 
 ```sh
-pnpm add @flowkit/core @flowkit/nodes-builtin @flowkit/engine @flowkit/storage-postgres zod@^4 pg
+pnpm add @flowline/core @flowline/nodes-builtin @flowline/engine @flowline/storage-postgres zod@^4 pg
 pnpm add hono @hono/node-server # or any other fetch-style server
-pnpm add @flowkit/react react react-dom # the editor (step 7), in your React app
+pnpm add @flowline/react react react-dom # the editor (step 7), in your React app
 pnpm add -D @types/react @types/react-dom vite @vitejs/plugin-react # or your own bundler
-pnpm add -D @flowkit/storage-memory # for tests and prototypes
+pnpm add -D @flowline/storage-memory # for tests and prototypes
 ```
 
-`zod` 4 is a peer dependency of `@flowkit/core`, `@flowkit/nodes-builtin` and `@flowkit/engine`:
-install it once, so your schemas and flowkit's share one copy. Zod 3 is not supported. If a
-second copy slips in (typically a `link:`/`file:` dependency on a flowkit checkout, which resolves
-its own zod), `createRegistry` throws a `FlowkitDefinitionError` naming the field whose
+`zod` 4 is a peer dependency of `@flowline/core`, `@flowline/nodes-builtin` and `@flowline/engine`:
+install it once, so your schemas and flowline's share one copy. Zod 3 is not supported. If a
+second copy slips in (typically a `link:`/`file:` dependency on a flowline checkout, which resolves
+its own zod), `createRegistry` throws a `FlowlineDefinitionError` naming the field whose
 `ui()`/`secret()`/`sensitive()` metadata it can't read, rather than dropping those guarantees.
 Dedupe zod (`pnpm dedupe`, or an `overrides` entry), or install a packed tarball instead.
 
 ### 1. Define a node
 
-```ts file=flowkit/nodes.ts
-// flowkit/nodes.ts
-import { defineNode, ui } from "@flowkit/core";
+```ts file=flowline/nodes.ts
+// flowline/nodes.ts
+import { defineNode, ui } from "@flowline/core";
 import { z } from "zod";
 import type { Db } from "../db";
 
 // Type ctx.services once, for every handler.
-declare module "@flowkit/core" {
-  interface FlowkitServices {
+declare module "@flowline/core" {
+  interface FlowlineServices {
     db: Db;
   }
 }
@@ -77,9 +77,9 @@ export const loadContact = defineNode({
 
 ### 2. Group nodes into a plugin
 
-```ts file=flowkit/plugin.ts
-// flowkit/plugin.ts
-import { createRegistry, definePlugin, defineTrigger } from "@flowkit/core";
+```ts file=flowline/plugin.ts
+// flowline/plugin.ts
+import { createRegistry, definePlugin, defineTrigger } from "@flowline/core";
 import { z } from "zod";
 import { loadContact } from "./nodes";
 
@@ -103,10 +103,10 @@ export const registry = createRegistry([crm]);
 
 ### 3. Create the engine
 
-```ts file=flowkit/engine.ts
-// flowkit/engine.ts
-import { createEngine } from "@flowkit/engine";
-import { createPostgresStorage, migrate } from "@flowkit/storage-postgres";
+```ts file=flowline/engine.ts
+// flowline/engine.ts
+import { createEngine } from "@flowline/engine";
+import { createPostgresStorage, migrate } from "@flowline/storage-postgres";
 import pg from "pg";
 import { getSession } from "../auth";
 import { db } from "../db";
@@ -129,12 +129,12 @@ export const engine = createEngine({
 });
 ```
 
-For tests and prototypes, use `createMemoryStorage()` from `@flowkit/storage-memory` instead.
+For tests and prototypes, use `createMemoryStorage()` from `@flowline/storage-memory` instead.
 
 ### 4. Mount the HTTP handler
 
 `engine.handler` is a `(Request) => Promise<Response>` function, so it works with any server that
-speaks `fetch`. It serves every route under `basePath`. The default is `/flowkit`, and you can
+speaks `fetch`. It serves every route under `basePath`. The default is `/flowline`, and you can
 change it with `createEngine({ basePath })`. Mount the handler at the same path. This example uses
 Hono:
 
@@ -142,10 +142,10 @@ Hono:
 // server.ts
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { engine } from "./flowkit/engine";
+import { engine } from "./flowline/engine";
 
 const app = new Hono();
-app.all("/flowkit/*", (c) => engine.handler(c.req.raw));
+app.all("/flowline/*", (c) => engine.handler(c.req.raw));
 serve({ fetch: app.fetch, port: 3000 });
 ```
 
@@ -153,7 +153,7 @@ serve({ fetch: app.fetch, port: 3000 });
 
 ```ts file=worker.ts
 // worker.ts (or at the end of server.ts)
-import { engine } from "./flowkit/engine";
+import { engine } from "./flowline/engine";
 
 export const worker = engine.startWorker({ concurrency: 4 });
 process.on("SIGTERM", () => void worker.stop()); // waits for in-flight steps
@@ -167,9 +167,9 @@ storage, so you can run as many as you need.
 Triggers only start *published* workflows. You can build and publish a workflow in the editor
 (step 7), or in code:
 
-```ts file=flowkit/workflows.ts
-// flowkit/workflows.ts
-import { ref, workflow } from "@flowkit/core";
+```ts file=flowline/workflows.ts
+// flowline/workflows.ts
+import { ref, workflow } from "@flowline/core";
 import { engine } from "./engine";
 import { loadContact } from "./nodes";
 import { contactCreated } from "./plugin";
@@ -179,7 +179,7 @@ export const welcomeContact = workflow("welcome-contact", { name: "Welcome new c
   .step("contact", loadContact, { contactId: ref("trigger.contactId") })
   .build();
 
-/** Save a new version and publish it. Throws FlowkitValidationError if the doc is invalid. */
+/** Save a new version and publish it. Throws FlowlineValidationError if the doc is invalid. */
 export async function publishWorkflows(tenantId: string) {
   const { version } = await engine.saveWorkflow(tenantId, welcomeContact, "setup");
   await engine.publish(tenantId, welcomeContact.id, version, "setup");
@@ -190,19 +190,19 @@ export async function publishWorkflows(tenantId: string) {
 
 ```tsx file=WorkflowPage.tsx
 // WorkflowPage.tsx
-import { createClient } from "@flowkit/core/client";
-import { FlowkitProvider, WorkflowEditor } from "@flowkit/react";
-import "@flowkit/react/styles.css";
+import { createClient } from "@flowline/core/client";
+import { FlowlineProvider, WorkflowEditor } from "@flowline/react";
+import "@flowline/react/styles.css";
 
-const client = createClient({ baseUrl: "/flowkit" });
+const client = createClient({ baseUrl: "/flowline" });
 
 export function WorkflowPage() {
   return (
-    <FlowkitProvider client={client}>
+    <FlowlineProvider client={client}>
       <div style={{ height: "100vh" }}>
         <WorkflowEditor workflowId="welcome-contact" />
       </div>
-    </FlowkitProvider>
+    </FlowlineProvider>
   );
 }
 ```
@@ -244,15 +244,15 @@ The editor and viewer add a few hundred KB of JavaScript (CodeMirror and React F
 editor route lazily, with `React.lazy(() => import("./WorkflowPage"))`, so the rest of your app
 doesn't wait for it.
 
-The browser receives only the JSON manifest. `@flowkit/core` and `@flowkit/react` never import
+The browser receives only the JSON manifest. `@flowline/core` and `@flowline/react` never import
 the engine or any server-only code.
 
 ### 8. Start runs from your app
 
 ```ts file=app.ts
 // app.ts, e.g. wherever your app creates contacts
-import { engine } from "./flowkit/engine";
-import { publishWorkflows } from "./flowkit/workflows";
+import { engine } from "./flowline/engine";
+import { publishWorkflows } from "./flowline/workflows";
 
 await publishWorkflows("acme"); // once, at deploy or startup. Each call saves a new version.
 await engine.emit("contact.created", { contactId: "c_42" }, { tenantId: "acme" });
@@ -260,7 +260,7 @@ await engine.emit("contact.created", { contactId: "c_42" }, { tenantId: "acme" }
 
 `emit` starts every published workflow whose trigger listens for the event. It validates the
 payload and returns the new run IDs. The worker then runs the steps. To see the completed run, use
-`GET /flowkit/runs` or `<RunList>` and `<RunViewer>`. For a workflow with a manual trigger, call
+`GET /flowline/runs` or `<RunList>` and `<RunViewer>`. For a workflow with a manual trigger, call
 `engine.start({ tenantId, workflowId, input })`. It validates `input` against the trigger's
 declared fields.
 
@@ -277,9 +277,9 @@ A `WorkflowDoc` is plain JSON with a single trigger and a list of steps. Branchi
 branches rejoin and execution continues with the next step. You can build a doc in the editor or
 in code:
 
-```ts file=flowkit/welcome-vip.ts
-// flowkit/welcome-vip.ts
-import { ref, workflow } from "@flowkit/core";
+```ts file=flowline/welcome-vip.ts
+// flowline/welcome-vip.ts
+import { ref, workflow } from "@flowline/core";
 import {
   and,
   conditionNode,
@@ -287,7 +287,7 @@ import {
   isTrue,
   manualTrigger,
   stopNode,
-} from "@flowkit/nodes-builtin";
+} from "@flowline/nodes-builtin";
 import { engine } from "./engine";
 import { loadContact } from "./nodes";
 
@@ -308,7 +308,7 @@ const doc = workflow("welcome-vip", { name: "Welcome VIPs" })
   .build();
 
 const { version } = await engine.saveWorkflow("acme", doc, "user_1");
-await engine.publish("acme", doc.id, version, "user_1"); // throws FlowkitValidationError if invalid
+await engine.publish("acme", doc.id, version, "user_1"); // throws FlowlineValidationError if invalid
 ```
 
 This uses only the quick start's `crm.loadContact` and built-in nodes, so it publishes against
@@ -350,7 +350,7 @@ produces a string.
   or the run is cancelled. Pass it to `fetch`.
 - Retries follow the node's `retry` policy (by default 3 attempts, with exponential backoff
   starting at 1 s). Throw `FatalError` to fail at once. Throw `RetryableError`, or any other error,
-  to retry. Both classes are exported from `@flowkit/core` and from `@flowkit/engine`. If the input
+  to retry. Both classes are exported from `@flowline/core` and from `@flowline/engine`. If the input
   or output fails schema validation, the step fails at once.
 - `engine.retryRun` continues a failed run from its failed step. `engine.cancelRun` cancels a run
   that is queued or waiting at once. If a worker is running the run, it cancels at the next
@@ -362,8 +362,8 @@ A handler can return `suspend({ until })` to wait until a time, or `suspend({ ca
 for an HTTP call. When the run resumes, the engine calls the same handler again, with
 `ctx.resume` set to one of `timer`, `callback`, `timeout`, `subflow` or `subflowFailed`.
 
-```ts file=flowkit/approval.ts
-import { defineNode, suspend } from "@flowkit/core";
+```ts file=flowline/approval.ts
+import { defineNode, suspend } from "@flowline/core";
 import { z } from "zod";
 
 export const requestApproval = defineNode({
@@ -400,7 +400,7 @@ export const requestApproval = defineNode({
 - Declare how a waiting node is resumed with `resume` on its definition. `resume.body` is a Zod
   schema for the callback body. The engine checks every resume against it (token route,
   authorized route and `engine.resume`/`engine.resumeRun`) and rejects a mismatch with 400 or a
-  `FlowkitValidationError`; the run viewer's Resume dialog starts empty and checks it too.
+  `FlowlineValidationError`; the run viewer's Resume dialog starts empty and checks it too.
   `resume.hostHandled: true` (with an optional `hint`) means your app resumes it, for example
   from an approvals page: `POST <basePath>/runs/:id/resume` answers 409 with
   `code: "resume_host_handled"`, and the viewer shows the hint instead of Resume…. Your own code
@@ -420,7 +420,7 @@ export const requestApproval = defineNode({
   `dedupeKey`.
 - **Webhooks.** `POST <basePath>/hooks/:tenantId/:workflowId/:slug` starts a run. The engine
   generates the slug on the first save. You can add an HMAC check with
-  `X-Flowkit-Signature: sha256=<hex>`. The engine never stores the `authorization`, `cookie`,
+  `X-Flowline-Signature: sha256=<hex>`. The engine never stores the `authorization`, `cookie`,
   signature or `proxy-*` headers. The webhook responds as follows:
 
   | Case | Response |
@@ -442,11 +442,11 @@ export const requestApproval = defineNode({
 A webhook workflow declares the body fields it expects, and optionally a signing secret and a
 deduplication header:
 
-```ts file=flowkit/webhook.ts
-// flowkit/webhook.ts
+```ts file=flowline/webhook.ts
+// flowline/webhook.ts
 import { createHmac } from "node:crypto";
-import { ref, workflow } from "@flowkit/core";
-import { webhookTrigger } from "@flowkit/nodes-builtin";
+import { ref, workflow } from "@flowline/core";
+import { webhookTrigger } from "@flowline/nodes-builtin";
 import { engine } from "./engine";
 import { loadContact } from "./nodes";
 
@@ -466,7 +466,7 @@ export async function publishLeadWebhook(tenantId: string): Promise<string> {
   await engine.publish(tenantId, saved.workflowId, saved.version, "setup");
   // The engine generates the slug on the first save and keeps it in later versions.
   const slug = String(saved.doc.trigger.config.slug);
-  return `https://app.example.com/flowkit/hooks/${tenantId}/${saved.workflowId}/${slug}`;
+  return `https://app.example.com/flowline/hooks/${tenantId}/${saved.workflowId}/${slug}`;
 }
 
 /** What the sending system does: sign the exact body bytes with the secret's value. */
@@ -477,7 +477,7 @@ export function signedRequest(url: string, signingKey: string, requestId: string
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-flowkit-signature": `sha256=${signature}`,
+      "x-flowline-signature": `sha256=${signature}`,
       "x-request-id": requestId,
     },
     body,
@@ -521,14 +521,14 @@ may hold PII. Each place that stores or shows values masks them differently:
 
 | Package | Use |
 |---|---|
-| `@flowkit/storage-memory` | Tests, examples and single-process development. Data is lost when the process exits. |
-| `@flowkit/storage-postgres` | Production. Run `migrate(pool, schema?)` first. Leasing uses `FOR UPDATE SKIP LOCKED`, so any number of workers can share one database. Postgres cannot store NUL bytes (`\u0000`) in strings, so they raise `FlowkitStorageError`. |
+| `@flowline/storage-memory` | Tests, examples and single-process development. Data is lost when the process exits. |
+| `@flowline/storage-postgres` | Production. Run `migrate(pool, schema?)` first. Leasing uses `FOR UPDATE SKIP LOCKED`, so any number of workers can share one database. Postgres cannot store NUL bytes (`\u0000`) in strings, so they raise `FlowlineStorageError`. |
 
-To write your own adapter, implement `StorageAdapter` from `@flowkit/engine`, then check it against
+To write your own adapter, implement `StorageAdapter` from `@flowline/engine`, then check it against
 the conformance suite (it requires Vitest):
 
 ```ts file=my-storage.conformance.ts
-import { runStorageConformance } from "@flowkit/engine/conformance";
+import { runStorageConformance } from "@flowline/engine/conformance";
 import { createMyStorage } from "./my-storage";
 
 runStorageConformance("my-storage", async () => {
@@ -542,7 +542,7 @@ runStorageConformance("my-storage", async () => {
 - **Authorization.** Every editor route goes through `authorize(req)`, which returns
   `{ tenantId, userId }` or `null` (a 401). Every editor request other than `GET` must send
   `Content-Type: application/json`, even when it has no body. Otherwise the engine returns 415.
-  This check keeps cookie-authorized mutations safe from CSRF. `@flowkit/core/client` sets the
+  This check keeps cookie-authorized mutations safe from CSRF. `@flowline/core/client` sets the
   header for you. Without `authorize`, every request acts as tenant
   `"default"` and the engine logs a warning. Always set it in production. Each tenant can see only
   its own data.
@@ -568,22 +568,22 @@ runStorageConformance("my-storage", async () => {
 
 ## Editor
 
-`@flowkit/react` gives you these components:
+`@flowline/react` gives you these components:
 
 - `<WorkflowEditor workflowId>`, which has a `renderPanel` slot for the side panel of the selected
   step.
 - `<RunViewer runId>`
 - `<RunList onSelect>`
-- `<FlowkitProvider>`
+- `<FlowlineProvider>`
 
 The provider accepts `client`, `theme`, `labels`, `icons` and `widgets`.
 
-- **Styles.** Import `@flowkit/react/styles.css`. All the rules sit in `@layer flowkit`, so your own
+- **Styles.** Import `@flowline/react/styles.css`. All the rules sit in `@layer flowline`, so your own
   unlayered CSS wins without any specificity fights. That includes global resets like
-  `button { color: inherit }`, so put those in a layer ordered before `flowkit`
-  (`@layer reset, flowkit;`). See [Styles and cascade layers](packages/react/README.md#styles-and-cascade-layers).
+  `button { color: inherit }`, so put those in a layer ordered before `flowline`
+  (`@layer reset, flowline;`). See [Styles and cascade layers](packages/react/README.md#styles-and-cascade-layers).
 - **Theme.** Set `theme={{ colorMode: "dark", tokens: { accent: "#0f766e" } }}`, or override the
-  `--fk-*` custom properties directly.
+  `--fl-*` custom properties directly.
 - **Labels.** `labels` overrides any visible or accessible text, for translations or rewording.
 - **Icons.** `icons` maps a manifest icon name to a component. A set of common Lucide icons is
   included (see `bundledIconNames`). Any other name, or a URL, shows a generic box until you
@@ -593,15 +593,15 @@ The provider accepts `client`, `theme`, `labels`, `icons` and `widgets`.
 
 ## Testing
 
-`@flowkit/engine/testing` exports `testNode`, which runs one handler, and `runWorkflowInMemory`,
+`@flowline/engine/testing` exports `testNode`, which runs one handler, and `runWorkflowInMemory`,
 which saves, publishes, starts and drains a doc, skipping through timers. `runWorkflowInMemory`
-needs `@flowkit/storage-memory`, which is an optional peer dependency of the engine, so install it
+needs `@flowline/storage-memory`, which is an optional peer dependency of the engine, so install it
 as a dev dependency. Besides `plugins`, `services`, `trigger` and `clock`, it takes `secrets`
 (values by name, for `ctx.secrets`), `http` (the network policy; `{ allowPrivateNetworks: true }`
 reaches a local mock server) and `subflows` (docs published before the workflow that calls them).
-See [Testing your plugin](docs/guides/writing-a-plugin.md#testing). `@flowkit/engine/testing`
+See [Testing your plugin](docs/guides/writing-a-plugin.md#testing). `@flowline/engine/testing`
 never imports `vitest`; the storage conformance suite (`runStorageConformance`, see above) is its
-own entry point, `@flowkit/engine/conformance`, because it does.
+own entry point, `@flowline/engine/conformance`, because it does.
 
 ## Examples
 
@@ -609,19 +609,19 @@ own entry point, `@flowkit/engine/conformance`, because it does.
   engine. It prints the run's audit log. Run it with `pnpm --filter headless start`.
 - [`examples/mini-crm`](examples/mini-crm): a Vite and React app with a Hono server. It includes a
   CRM plugin, sub-flows, webhook lead routing, a manager approval step, the embedded editor and
-  the run viewer. Run it with `pnpm --filter @flowkit/example-mini-crm dev` and open
+  the run viewer. Run it with `pnpm --filter @flowline/example-mini-crm dev` and open
   `http://localhost:5173`.
 
 ## Packages
 
 | Package | What it contains |
 |---|---|
-| `@flowkit/core` | `defineNode`, `defineTrigger`, `definePlugin`, `createRegistry`, the doc types, references, the validator, the `workflow()` builder, and `@flowkit/core/client`. Isomorphic, with no I/O. |
-| `@flowkit/nodes-builtin` | The `core.*` nodes and triggers, and the rule helpers (`and`, `eq`, `isTrue`, ...). |
-| `@flowkit/engine` | `createEngine`: the interpreter, workers, HTTP handler, triggers, SSE and the QuickJS runtime. `@flowkit/engine/testing` holds the test helpers; `@flowkit/engine/conformance` holds the storage conformance suite. |
-| `@flowkit/storage-memory` | The in-memory `StorageAdapter`. |
-| `@flowkit/storage-postgres` | The Postgres `StorageAdapter` and `migrate`. |
-| `@flowkit/react` | The editor, run viewer, run list, hooks and theme. |
+| `@flowline/core` | `defineNode`, `defineTrigger`, `definePlugin`, `createRegistry`, the doc types, references, the validator, the `workflow()` builder, and `@flowline/core/client`. Isomorphic, with no I/O. |
+| `@flowline/nodes-builtin` | The `core.*` nodes and triggers, and the rule helpers (`and`, `eq`, `isTrue`, ...). |
+| `@flowline/engine` | `createEngine`: the interpreter, workers, HTTP handler, triggers, SSE and the QuickJS runtime. `@flowline/engine/testing` holds the test helpers; `@flowline/engine/conformance` holds the storage conformance suite. |
+| `@flowline/storage-memory` | The in-memory `StorageAdapter`. |
+| `@flowline/storage-postgres` | The Postgres `StorageAdapter` and `migrate`. |
+| `@flowline/react` | The editor, run viewer, run list, hooks and theme. |
 
 ## Roadmap
 
@@ -649,13 +649,13 @@ pnpm build         # tsup
 `pnpm test` includes `examples/docs-check`, which checks the docs in two ways:
 
 - It extracts every `ts` or `tsx` block in this README and in the plugin guide, and typechecks
-  them. A block's fence names its file, for example `ts file=flowkit/nodes.ts`. Blocks from the
+  them. A block's fence names its file, for example `ts file=flowline/nodes.ts`. Blocks from the
   same document can import each other. Add `nocheck` to the fence to skip a block.
 - It runs the quick start on memory storage.
 
 If you add a TypeScript block without an annotation, the check fails.
 
-The design spec is `docs/superpowers/specs/2026-09-27-flowkit-design.md`.
+The design spec is `docs/superpowers/specs/2026-09-27-flowline-design.md`.
 
 ### Releasing
 

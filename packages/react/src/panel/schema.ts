@@ -15,7 +15,7 @@ import {
   UI_META_KEY,
   type UiMeta,
   type ValueExpr,
-} from "@flowkit/core";
+} from "@flowline/core";
 
 const MAX_DEPTH = 32;
 
@@ -48,7 +48,7 @@ export function deref(root: JSONSchema, schema: unknown): JSONSchema {
   return cur;
 }
 
-/** The field's editor hints (`x-flowkit`), `{}` when none. */
+/** The field's editor hints (`x-flowline`), `{}` when none. */
 export function metaOf(schema: JSONSchema | undefined): UiMeta {
   const meta = schema?.[UI_META_KEY];
   return typeof meta === "object" && meta !== null ? (meta as UiMeta) : {};
@@ -69,7 +69,7 @@ export function humanize(key: string): string {
 }
 
 /**
- * Display text of an enum value: its `x-flowkit.enumLabels` entry (keyed by the value as a
+ * Display text of an enum value: its `x-flowline.enumLabels` entry (keyed by the value as a
  * string) when `meta` has one, else the value as written unless it is a lowercase word.
  */
 export function optionLabel(value: unknown, meta?: UiMeta): string {
@@ -81,7 +81,7 @@ export function optionLabel(value: unknown, meta?: UiMeta): string {
   return value;
 }
 
-/** A field's label: `x-flowkit.label`, else `title`, else the humanized key. */
+/** A field's label: `x-flowline.label`, else `title`, else the humanized key. */
 export function labelOf(schema: JSONSchema, key: string): string {
   const meta = metaOf(schema);
   if (typeof meta.label === "string" && meta.label !== "") return meta.label;

@@ -1,9 +1,9 @@
 import type { RefExpr, TplExpr, ValueExpr } from "./types";
 
 /** Thrown when a `$ref` path or `{{ }}` template fails to parse. */
-export class FlowkitRefError extends Error {
+export class FlowlineRefError extends Error {
   /** Error name, for `instanceof`-free checks across package copies. */
-  override readonly name = "FlowkitRefError";
+  override readonly name = "FlowlineRefError";
 }
 
 /** The top-level namespace a reference path starts from. */
@@ -23,12 +23,12 @@ export interface RefPath {
 }
 
 const IDENTIFIER = /^[A-Za-z0-9_$]$/;
-/** Matches a valid step ID: see {@link https://flowkit.dev step-id syntax}. */
+/** Matches a valid step ID: see {@link https://flowline.dev step-id syntax}. */
 const STEP_ID = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PLAIN_SEGMENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 function fail(path: string): never {
-  throw new FlowkitRefError(`Invalid reference path: "${path}"`);
+  throw new FlowlineRefError(`Invalid reference path: "${path}"`);
 }
 
 /** Tokenizes a full path (including its root) into a flat list of segments. */
@@ -88,7 +88,7 @@ function tokenize(path: string): (string | number)[] {
  * `run.id`, where `<path>` is `.`-separated identifiers with optional `[n]` numeric or
  * `["a b"]` bracket-string indices.
  *
- * @throws {FlowkitRefError} If the syntax is invalid or the root/path combination is unknown.
+ * @throws {FlowlineRefError} If the syntax is invalid or the root/path combination is unknown.
  */
 export function parseRefPath(path: string): RefPath {
   const tokens = tokenize(path);

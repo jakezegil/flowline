@@ -1,6 +1,6 @@
-import type { Logger, RunDetail, RunSummary, Step, WorkflowDoc } from "@flowkit/core";
-import type { StorageAdapter } from "@flowkit/engine";
-import { createMemoryStorage } from "@flowkit/storage-memory";
+import type { Logger, RunDetail, RunSummary, Step, WorkflowDoc } from "@flowline/core";
+import type { StorageAdapter } from "@flowline/engine";
+import { createMemoryStorage } from "@flowline/storage-memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMiniCrm, type MiniCrm, type MiniCrmOptions, TENANT_ID } from "./app";
 import type { Approval, Contact, OutboxMessage } from "./crm-store";
@@ -61,17 +61,17 @@ async function get<T>(path: string): Promise<T> {
 }
 
 async function runDetail(runId: string): Promise<RunDetail> {
-  return get<RunDetail>(`/flowkit/runs/${runId}`);
+  return get<RunDetail>(`/flowline/runs/${runId}`);
 }
 
 async function runsOf(workflowId: string): Promise<RunSummary[]> {
-  return get<RunSummary[]>(`/flowkit/runs?workflowId=${workflowId}`);
+  return get<RunSummary[]>(`/flowline/runs?workflowId=${workflowId}`);
 }
 
 async function webhookPath(): Promise<string> {
   const demo = await get<{ webhooks: Record<string, string> }>("/api/demo");
   const path = demo.webhooks["inbound-lead-routing"];
-  expect(path).toMatch(/^\/flowkit\/hooks\/acme\/inbound-lead-routing\/[A-Za-z0-9_-]{16,}$/);
+  expect(path).toMatch(/^\/flowline\/hooks\/acme\/inbound-lead-routing\/[A-Za-z0-9_-]{16,}$/);
   return path as string;
 }
 
@@ -170,7 +170,7 @@ describe("inbound lead routing", () => {
   it("approvals are decided in the CRM, not through the generic resume route", async () => {
     const runId = await postLead(enterpriseLead, "lead-generic");
     const [approval] = await get<Approval[]>("/api/approvals");
-    const generic = await call("POST", `/flowkit/runs/${runId}/resume`, { decision: "approved" });
+    const generic = await call("POST", `/flowline/runs/${runId}/resume`, { decision: "approved" });
     expect(generic.status).toBe(409);
     expect(await generic.json()).toMatchObject({ code: "resume_host_handled" });
     expect((await runDetail(runId)).run.status).toBe("waiting");
@@ -235,7 +235,7 @@ describe("inbound lead routing", () => {
   it("answers 410 and expires the approval when its run was cancelled", async () => {
     const runId = await postLead(enterpriseLead, "lead-8");
     const [approval] = await get<Approval[]>("/api/approvals");
-    expect((await call("POST", `/flowkit/runs/${runId}/cancel`)).status).toBe(200);
+    expect((await call("POST", `/flowline/runs/${runId}/cancel`)).status).toBe(200);
     const res = await call("POST", `/api/approvals/${approval?.id}/decision`, {
       decision: "approved",
     });
@@ -537,11 +537,11 @@ describe("CRM API", () => {
     expect(run.output).toMatchObject({ contact: { id: "c_1" } });
   });
 
-  it("serves the engine under /flowkit", async () => {
-    const manifest = await get<{ plugins: { id: string }[] }>("/flowkit/manifest");
+  it("serves the engine under /flowline", async () => {
+    const manifest = await get<{ plugins: { id: string }[] }>("/flowline/manifest");
     expect(manifest.plugins.map((p) => p.id)).toEqual(["core", "crm"]);
     const workflows =
-      await get<{ id: string; publishedVersion: number | null }[]>("/flowkit/workflows");
+      await get<{ id: string; publishedVersion: number | null }[]>("/flowline/workflows");
     expect(workflows.map((w) => w.id).sort()).toEqual(demoFlows.map((d) => d.id).sort());
     expect(workflows.every((w) => w.publishedVersion === 1)).toBe(true);
   });

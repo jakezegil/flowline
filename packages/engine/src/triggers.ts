@@ -9,11 +9,11 @@
  * @module
  */
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import type { Issue, RunOrigin, WorkflowVersion } from "@flowkit/core";
+import type { Issue, RunOrigin, WorkflowVersion } from "@flowline/core";
 import { CronExpressionParser } from "cron-parser";
 import { sha256Hex } from "./context";
 import type { EngineCore } from "./engine";
-import { FlowkitValidationError } from "./errors";
+import { FlowlineValidationError } from "./errors";
 import { checkTriggerPayload, visibleTriggerConfig } from "./subflow";
 import { errorMessage } from "./util";
 
@@ -24,7 +24,7 @@ const DEDUPE_TTL_MS = 7 * 24 * 3_600_000;
 const DROPPED_HEADERS: ReadonlySet<string> = new Set([
   "authorization",
   "cookie",
-  "x-flowkit-signature",
+  "x-flowline-signature",
 ]);
 /** Header names that likely carry credentials (`x-api-key`, `stripe-signature`, `x-auth-token`…). */
 const CREDENTIAL_HEADER = /signature|api-?key|token|secret|password|auth/;
@@ -142,12 +142,12 @@ export function createTriggers(core: EngineCore): Triggers {
     return { runId, created };
   };
 
-  /** `input` checked against `v`'s trigger; throws a {@link FlowkitValidationError} if invalid. */
+  /** `input` checked against `v`'s trigger; throws a {@link FlowlineValidationError} if invalid. */
   const payloadFor = async (v: WorkflowVersion, input: unknown, what: string) => {
     const checked = await checkTriggerPayload(registry, v.doc, input);
     if (!checked.ok) {
       const message = `${what} for workflow "${v.workflowId}": ${checked.message}`;
-      throw new FlowkitValidationError(message, [payloadIssue(message)]);
+      throw new FlowlineValidationError(message, [payloadIssue(message)]);
     }
     return checked.value;
   };
@@ -275,7 +275,7 @@ export function createTriggers(core: EngineCore): Triggers {
       }
       if (secretName !== undefined) {
         const key = await core.opts.secrets?.get(d.tenantId, secretName);
-        const match = /^sha256=([0-9a-f]{64})$/i.exec(d.headers.get("x-flowkit-signature") ?? "");
+        const match = /^sha256=([0-9a-f]{64})$/i.exec(d.headers.get("x-flowline-signature") ?? "");
         if (key === undefined) {
           core.logger?.warn("webhook signing secret is not configured", {
             workflowId: d.workflowId,
@@ -309,7 +309,7 @@ export function createTriggers(core: EngineCore): Triggers {
       try {
         payload = await payloadFor(v, { body, headers }, "Webhook body");
       } catch (err) {
-        if (err instanceof FlowkitValidationError) {
+        if (err instanceof FlowlineValidationError) {
           return { status: "invalid", message: err.message, issues: err.issues };
         }
         throw err;

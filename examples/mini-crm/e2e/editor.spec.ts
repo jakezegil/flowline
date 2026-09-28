@@ -64,7 +64,7 @@ test("builds a workflow from scratch, maps a field through the data picker, save
   // A click on an object inserts it (M13); its chevron opens it.
   await tree
     .getByRole("treeitem", { name: /^deal\b/ })
-    .locator(".fk-dp__chevron")
+    .locator(".fl-dp__chevron")
     .click();
   await tree.getByRole("treeitem", { name: /^contactId\b/ }).click();
   await page.keyboard.press("Escape");
@@ -99,7 +99,7 @@ test("deleting a referenced step flags the stale reference and blocks Publish", 
   const id = uniqueId("stale-ref");
   // Load contact → Email contact, whose To reads the loaded contact's email. Saved, not published,
   // so Publish starts out enabled.
-  const saved = await request.put(`/flowkit/workflows/${id}?create=true`, {
+  const saved = await request.put(`/flowline/workflows/${id}?create=true`, {
     data: {
       id,
       name: "Stale reference",
@@ -159,7 +159,7 @@ test("deleting a referenced step flags the stale reference and blocks Publish", 
   // Saving the broken draft is allowed, but the server refuses to publish it.
   await main.getByRole("button", { name: "Save" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Saved as v2" })).toBeVisible();
-  const published = await request.post(`/flowkit/workflows/${id}/publish`, {
+  const published = await request.post(`/flowline/workflows/${id}/publish`, {
     data: { version: 2 },
   });
   expect(published.ok()).toBe(false);
@@ -181,7 +181,7 @@ test("deleting a referenced step flags the stale reference and blocks Publish", 
 /** Saves a draft (Load contact → Email contact) under a fresh ID and opens it in the editor. */
 async function openEmailWorkflow(page: Page, request: APIRequestContext, base: string) {
   const id = uniqueId(base);
-  const saved = await request.put(`/flowkit/workflows/${id}?create=true`, {
+  const saved = await request.put(`/flowline/workflows/${id}?create=true`, {
     data: {
       id,
       name: "Notify owner",
@@ -226,7 +226,7 @@ test("H1: the data picker never covers the next field, and clicking that field m
   await expect(to.getByRole("img", { name: /Load contact › contact\.email/ })).toBeVisible();
 
   // Wherever the picker is, it isn't over Subject.
-  const pickerBox = await page.locator(".fk-dp").first().boundingBox();
+  const pickerBox = await page.locator(".fl-dp").first().boundingBox();
   const subjectBox = await subject.boundingBox();
   expect(pickerBox && subjectBox).toBeTruthy();
   if (pickerBox && subjectBox) {

@@ -1,4 +1,4 @@
-import type { ValidationContext, WorkflowDoc } from "@flowkit/core";
+import type { ValidationContext, WorkflowDoc } from "@flowline/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { type JSX, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { PortalContainerContext } from "../canvas/canvas-context";
@@ -6,7 +6,7 @@ import { focusedKey } from "../canvas/keyboard";
 import { WorkflowCanvas } from "../canvas/workflow-canvas";
 import { EditorContext, useEditorStore } from "../hooks";
 import { ConfigPanel } from "../panel/config-panel";
-import { useFlowkitAppearance } from "../provider";
+import { useFlowlineAppearance } from "../provider";
 import type { EditorStore } from "../store/editor-store";
 import { themeStyle } from "../theme";
 import { NotFoundState } from "../ui/not-found";
@@ -54,13 +54,13 @@ function EditorBody({
   renderPanel?: (store: EditorStore) => ReactNode;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const selection = useEditorStore((s) => s.selection);
   useUnsavedGuard(store, onDirtyChange);
   return (
-    <div className="fk-editor__body">
+    <div className="fl-editor__body">
       <div
-        className="fk-editor__canvas"
+        className="fl-editor__canvas"
         onKeyDownCapture={(e) => {
           // Enter or Space on a canvas card opens its panel: move focus there so the keyboard
           // follows.
@@ -70,14 +70,14 @@ function EditorBody({
           if (focusedKey(target) === undefined && store.getState().selection === null) return;
           const body = e.currentTarget.parentElement;
           requestAnimationFrame(() =>
-            body?.querySelector<HTMLElement>(".fk-panel [data-autofocus]")?.focus(),
+            body?.querySelector<HTMLElement>(".fl-panel [data-autofocus]")?.focus(),
           );
         }}
       >
         <WorkflowCanvas store={store} />
       </div>
       {selection !== null && (
-        <aside className="fk-panel" aria-label={labels.stepSettings}>
+        <aside className="fl-panel" aria-label={labels.stepSettings}>
           {renderPanel ? renderPanel(store) : <ConfigPanel store={store} />}
         </aside>
       )}
@@ -88,7 +88,7 @@ function EditorBody({
 /**
  * The complete workflow editor: a header (name, save status, undo/redo, issues, Save, Run,
  * Publish), the canvas, and a side panel for the selected step that hides when nothing is
- * selected. Needs a `<FlowkitProvider>` above it and a sized container.
+ * selected. Needs a `<FlowlineProvider>` above it and a sized container.
  *
  * Loads the manifest, callable sub-flows and the workflow by ID. A workflow that doesn't exist
  * starts from `initialDoc` if given, else shows "Workflow not found" with `notFoundAction`. Pass
@@ -172,7 +172,7 @@ export function WorkflowEditor(props: {
   className?: string;
 }): JSX.Element {
   const { workflowId, initialDoc, className, headerLeft, renderPanel } = props;
-  const { theme, labels } = useFlowkitAppearance();
+  const { theme, labels } = useFlowlineAppearance();
   const { state, retry, startNew } = useEditorLoad(
     workflowId,
     initialDoc,
@@ -209,27 +209,27 @@ export function WorkflowEditor(props: {
     );
   } else if (state.status === "error") {
     content = (
-      <div className="fk-state" role="alert">
-        <p className="fk-state__title">{labels.loadWorkflowFailed}</p>
-        <p className="fk-state__detail">{state.message}</p>
-        <button type="button" className="fk-btn" onClick={retry}>
+      <div className="fl-state" role="alert">
+        <p className="fl-state__title">{labels.loadWorkflowFailed}</p>
+        <p className="fl-state__detail">{state.message}</p>
+        <button type="button" className="fl-btn" onClick={retry}>
           {labels.tryAgain}
         </button>
       </div>
     );
   } else {
     content = (
-      <div className="fk-state" role="status" aria-busy="true">
-        <span className="fk-skeleton" aria-hidden />
-        <p className="fk-state__detail">{labels.loadingWorkflow}</p>
+      <div className="fl-state" role="status" aria-busy="true">
+        <span className="fl-skeleton" aria-hidden />
+        <p className="fl-state__detail">{labels.loadingWorkflow}</p>
       </div>
     );
   }
 
   return (
     <div
-      className={className ? `fk-root fk-app fk-editor ${className}` : "fk-root fk-app fk-editor"}
-      data-fk-theme={theme.colorMode ?? "system"}
+      className={className ? `fl-root fl-app fl-editor ${className}` : "fl-root fl-app fl-editor"}
+      data-fl-theme={theme.colorMode ?? "system"}
       style={style}
     >
       <PortalContainerContext.Provider value={portal}>
@@ -237,7 +237,7 @@ export function WorkflowEditor(props: {
           <ToasterProvider>{content}</ToasterProvider>
         </Tooltip.Provider>
       </PortalContainerContext.Provider>
-      <div ref={setPortal} className="fk-portal" />
+      <div ref={setPortal} className="fl-portal" />
     </div>
   );
 }

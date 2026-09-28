@@ -4,9 +4,9 @@
  *
  * @module
  */
-import type { FieldType, ValueExpr } from "@flowkit/core";
+import type { FieldType, ValueExpr } from "@flowline/core";
 import { type JSX, useRef } from "react";
-import { useFlowkitAppearance } from "../../provider";
+import { useFlowlineAppearance } from "../../provider";
 import { AddButton, focusLastItem, ItemActions, useItemKeys } from "../fields/collections";
 import { FieldShell, IssueNotes, Switch } from "../fields/shell";
 import { type FieldProps, useFormEnv } from "../form-context";
@@ -21,7 +21,7 @@ type Decl = Record<string, ValueExpr>;
 /** The `"fields"` widget. */
 export function FieldsWidget(p: FieldProps): JSX.Element {
   const env = useFormEnv();
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const listRef = useRef<HTMLOListElement>(null);
   const decls: Decl[] = Array.isArray(p.value) ? p.value.map((d) => asObject(d) ?? {}) : [];
   const keys = useItemKeys(decls.length);
@@ -51,9 +51,9 @@ export function FieldsWidget(p: FieldProps): JSX.Element {
       bare={p.bare}
     >
       {decls.length === 0 ? (
-        <p className="fk-empty-note">{labels.emptyFields}</p>
+        <p className="fl-empty-note">{labels.emptyFields}</p>
       ) : (
-        <ol ref={listRef} className="fk-list fk-decls">
+        <ol ref={listRef} className="fl-list fl-decls">
           {decls.map((d, i) => {
             const nameText = typeof d.name === "string" ? d.name : "";
             const name = nameText || labels.itemTitle(labels.fieldName, i + 1);
@@ -61,10 +61,10 @@ export function FieldsWidget(p: FieldProps): JSX.Element {
             const dup = nameText !== "" && (counts.get(nameText) ?? 0) > 1;
             const type = typeof d.type === "string" ? d.type : "string";
             return (
-              <li key={keys.keys[i]} className="fk-decl">
-                <div className="fk-decl__main">
+              <li key={keys.keys[i]} className="fl-decl">
+                <div className="fl-decl__main">
                   <input
-                    className="fk-input fk-input--code fk-decl__name"
+                    className="fl-input fl-input--code fl-decl__name"
                     value={nameText}
                     placeholder={labels.fieldName}
                     aria-label={labels.itemTitle(labels.fieldName, i + 1)}
@@ -75,7 +75,7 @@ export function FieldsWidget(p: FieldProps): JSX.Element {
                     onChange={(e) => update(i, { name: e.target.value })}
                   />
                   <select
-                    className="fk-input fk-select fk-decl__type"
+                    className="fl-input fl-select fl-decl__type"
                     aria-label={`${name}: ${labels.fieldType}`}
                     value={type}
                     disabled={env.readOnly}
@@ -105,9 +105,9 @@ export function FieldsWidget(p: FieldProps): JSX.Element {
                     }}
                   />
                 </div>
-                <div className="fk-decl__sub">
+                <div className="fl-decl__sub">
                   <input
-                    className="fk-input fk-input--quiet"
+                    className="fl-input fl-input--quiet"
                     value={typeof d.description === "string" ? d.description : ""}
                     placeholder={labels.fieldDescription}
                     aria-label={`${name}: ${labels.fieldDescription}`}
@@ -119,7 +119,7 @@ export function FieldsWidget(p: FieldProps): JSX.Element {
                     }
                   />
                   {/* biome-ignore lint/a11y/noLabelWithoutControl: the switch inside is the control. */}
-                  <label className="fk-decl__req">
+                  <label className="fl-decl__req">
                     <Switch
                       checked={d.required === true}
                       label={`${name}: ${labels.fieldRequired}`}
@@ -132,7 +132,7 @@ export function FieldsWidget(p: FieldProps): JSX.Element {
                   </label>
                 </div>
                 {(badName || dup) && (
-                  <p className="fk-f__local">
+                  <p className="fl-f__local">
                     {badName ? labels.invalidFieldName : labels.duplicateField}
                   </p>
                 )}

@@ -1,8 +1,8 @@
 /*
- * Mini CRM styles. The palette mirrors Flowkit's `--fk-*` tokens (same accent, neutrals and
+ * Mini CRM styles. The palette mirrors Flowline's `--fl-*` tokens (same accent, neutrals and
  * status colors, light and dark) so the embedded editor and run viewer read as part of the app.
- * Flowkit's own styles live in the `flowkit` cascade layer. The element resets below are in the
- * `reset` layer (ordered before `flowkit` by `layers.css`); the app's class styles are unlayered.
+ * Flowline's own styles live in the `flowline` cascade layer. The element resets below are in the
+ * `reset` layer (ordered before `flowline` by `layers.css`); the app's class styles are unlayered.
  */
 
 /* ------------------------------------------------------------------ tokens */
@@ -98,8 +98,8 @@
 
 /* ------------------------------------------------------------------ base */
 /*
- * Element-level resets sit in the `reset` layer, which `layers.css` orders before `flowkit`: an
- * unlayered `button { color: inherit }` would beat every layered Flowkit rule (unlayered styles
+ * Element-level resets sit in the `reset` layer, which `layers.css` orders before `flowline`: an
+ * unlayered `button { color: inherit }` would beat every layered Flowline rule (unlayered styles
  * win over any layer) and wash out its buttons. Class-level app styles below stay unlayered.
  */
 @layer reset {
@@ -1294,17 +1294,17 @@ tr[data-stage="lost"] td:first-child {
   gap: 4px;
   align-items: center;
   font-weight: 500;
-  color: var(--fk-text-muted);
+  color: var(--fl-text-muted);
 }
 .crumbs a {
   padding: 4px 6px;
-  color: var(--fk-text-muted);
+  color: var(--fl-text-muted);
   border-radius: 6px;
 }
 .crumbs a:hover {
-  color: var(--fk-text);
+  color: var(--fl-text);
   text-decoration: none;
-  background: var(--fk-subtle, var(--c-hover));
+  background: var(--fl-subtle, var(--c-hover));
 }
 
 .runs-page {
@@ -1336,7 +1336,7 @@ tr[data-stage="lost"] td:first-child {
 .runs-page__head select {
   max-width: 190px;
 }
-.runs-page__list > .fk-runs {
+.runs-page__list > .fl-runs {
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -1347,7 +1347,7 @@ tr[data-stage="lost"] td:first-child {
 }
 .runs-page__viewer > .empty {
   height: 100%;
-  background: var(--fk-canvas-bg, var(--c-raised));
+  background: var(--fl-canvas-bg, var(--c-raised));
 }
 @media (max-width: 1100px) {
   .runs-page {
@@ -1627,7 +1627,7 @@ tr[data-stage="lost"] td:first-child {
 
 /* ------------------------------------------------------------------ crm.userSelect widget */
 /*
- * Rendered inside Flowkit's config panel, so it uses the panel's `--fk-*` tokens and falls back
+ * Rendered inside Flowline's config panel, so it uses the panel's `--fl-*` tokens and falls back
  * to the CRM's own (the same values) elsewhere.
  */
 .crm-user-select {
@@ -1636,25 +1636,25 @@ tr[data-stage="lost"] td:first-child {
   align-items: center;
   width: 100%;
   min-height: 40px;
-  font-family: var(--fk-font, var(--c-font));
+  font-family: var(--fl-font, var(--c-font));
   font-size: 13px;
-  color: var(--fk-text, var(--c-text));
-  background: var(--fk-surface, var(--c-surface));
-  border: 1px solid var(--fk-border, var(--c-border));
-  border-radius: var(--fk-radius, 7px);
+  color: var(--fl-text, var(--c-text));
+  background: var(--fl-surface, var(--c-surface));
+  border: 1px solid var(--fl-border, var(--c-border));
+  border-radius: var(--fl-radius, 7px);
 }
 .crm-user-select:hover:not([data-disabled]) {
-  border-color: var(--fk-border-strong, var(--c-border-strong));
+  border-color: var(--fl-border-strong, var(--c-border-strong));
 }
 .crm-user-select:focus-within {
-  border-color: var(--fk-accent, var(--c-accent));
-  box-shadow: 0 0 0 3px var(--fk-ring, var(--c-ring));
+  border-color: var(--fl-accent, var(--c-accent));
+  box-shadow: 0 0 0 3px var(--fl-ring, var(--c-ring));
 }
 .crm-user-select[data-invalid] {
-  border-color: var(--fk-warning, var(--c-warning));
+  border-color: var(--fl-warning, var(--c-warning));
 }
 .crm-user-select[data-disabled] {
-  background: var(--fk-subtle, var(--c-raised));
+  background: var(--fl-subtle, var(--c-raised));
 }
 .crm-user-select__face {
   display: flex;
@@ -1681,28 +1681,28 @@ tr[data-stage="lost"] td:first-child {
 .crm-user-select__meta {
   overflow: hidden;
   font-size: 11.5px;
-  color: var(--fk-text-muted, var(--c-text-muted));
+  color: var(--fl-text-muted, var(--c-text-muted));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .crm-user-select__placeholder {
   flex: 1;
-  color: var(--fk-text-muted, var(--c-text-muted));
+  color: var(--fl-text-muted, var(--c-text-muted));
 }
 .crm-user-select__chevron {
   flex: none;
-  color: var(--fk-text-muted, var(--c-text-muted));
+  color: var(--fl-text-muted, var(--c-text-muted));
 }
 .crm-user-select[data-disabled] .crm-user-select__chevron {
   display: none;
 }
 .crm-user-select__warn {
   flex: none;
-  color: var(--fk-warning, var(--c-warning));
+  color: var(--fl-warning, var(--c-warning));
 }
 .crm-user-select__lead-icon {
   flex: none;
-  color: var(--fk-accent, var(--c-accent));
+  color: var(--fl-accent, var(--c-accent));
 }
 /* The real control: invisible, covering the face, so clicks and keys reach a native select. */
 .crm-user-select__native {
@@ -1720,8 +1720,8 @@ tr[data-stage="lost"] td:first-child {
 .crm-user-select--mapped {
   background: color-mix(
     in srgb,
-    var(--fk-accent, var(--c-accent)) 6%,
-    var(--fk-surface, var(--c-surface))
+    var(--fl-accent, var(--c-accent)) 6%,
+    var(--fl-surface, var(--c-surface))
   );
 }
 .crm-user-select--mapped .crm-user-select__face {
@@ -1734,14 +1734,14 @@ tr[data-stage="lost"] td:first-child {
   margin-right: 6px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--fk-text, var(--c-text));
+  color: var(--fl-text, var(--c-text));
   cursor: pointer;
-  background: var(--fk-surface, var(--c-surface));
-  border: 1px solid var(--fk-border, var(--c-border));
+  background: var(--fl-surface, var(--c-surface));
+  border: 1px solid var(--fl-border, var(--c-border));
   border-radius: 6px;
 }
 .crm-user-select__switch:hover {
-  background: var(--fk-surface-hover, var(--c-raised));
+  background: var(--fl-surface-hover, var(--c-raised));
 }
 
 /* ------------------------------------------------------------------ widget harness */

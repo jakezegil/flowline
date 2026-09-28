@@ -5,13 +5,13 @@ import {
   type ValueExpr,
   validateWorkflow,
   type WorkflowDoc,
-} from "@flowkit/core";
+} from "@flowline/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { type JSX, useState } from "react";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 import builtin from "../../../playground/builtin-manifest.json";
 import { mockClient, setupDom } from "../../../test/dom";
-import { FlowkitProvider } from "../../provider";
+import { FlowlineProvider } from "../../provider";
 import { SchemaForm } from "../schema-form";
 
 beforeAll(setupDom);
@@ -77,9 +77,9 @@ function Form({
 function renderWidget(stepType: string, initial: Value, schema = inputOf(stepType)) {
   latest = initial;
   return render(
-    <FlowkitProvider client={mockClient()}>
+    <FlowlineProvider client={mockClient()}>
       <Form schema={schema} initial={initial} stepType={stepType} />
-    </FlowkitProvider>,
+    </FlowlineProvider>,
   );
 }
 

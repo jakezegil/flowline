@@ -1,6 +1,6 @@
-import type { RunStatus, RunSummary } from "@flowkit/core";
+import type { RunStatus, RunSummary } from "@flowline/core";
 import { type JSX, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useFlowkit, useFlowkitAppearance } from "../provider";
+import { useFlowline, useFlowlineAppearance } from "../provider";
 import { themeStyle } from "../theme";
 import { errorText, useNow } from "../ui/primitives";
 import { publishRunChange, type RunChange, subscribeRunChanges } from "./run-changes";
@@ -57,7 +57,7 @@ function useRunList(
   topLevel: boolean,
   pollMs: number,
 ) {
-  const { client } = useFlowkit();
+  const { client } = useFlowline();
   const [state, setState] = useState<{ key: string; runs?: RunSummary[]; error?: string }>({
     key: "",
   });
@@ -152,9 +152,9 @@ function useRunList(
  * when it started, how long it took, what started it, and the workflow version. Filter tabs
  * narrow it by status ("Completed" and "Stopped" are separate). It refreshes every `pollMs`
  * (5 seconds by default), when the window regains focus, and at once when a `<RunViewer>` of the
- * same `<FlowkitProvider>` sees a run change (e.g. after Cancel run). Across all workflows it
+ * same `<FlowlineProvider>` sees a run change (e.g. after Cancel run). Across all workflows it
  * names each run's workflow and leaves out sub-flow runs (see `includeSubflowRuns`). Pair it with
- * `<RunViewer>`. Needs a `<FlowkitProvider>`.
+ * `<RunViewer>`. Needs a `<FlowlineProvider>`.
  *
  * @example
  * <RunList workflowId="welcome" selectedRunId={runId} onSelect={setRunId} />
@@ -181,7 +181,7 @@ export function RunList(props: {
 }): JSX.Element {
   const { workflowId, selectedRunId, onSelect, pollMs = 5000, className, describeRun } = props;
   const includeSubflowRuns = props.includeSubflowRuns ?? workflowId !== undefined;
-  const { theme, labels } = useFlowkitAppearance();
+  const { theme, labels } = useFlowlineAppearance();
   const stateName = useRunStateName();
   const [status, setStatus] = useState<RunFilter | undefined>(undefined);
   const { runs, error, retry } = useRunList(workflowId, status, !includeSubflowRuns, pollMs);
@@ -196,31 +196,31 @@ export function RunList(props: {
   let body: JSX.Element;
   if (error) {
     body = (
-      <div className="fk-runs__state" role="alert">
+      <div className="fl-runs__state" role="alert">
         <p>{labels.loadRunsFailed}</p>
-        <p className="fk-runs__detail">{error}</p>
-        <button type="button" className="fk-btn fk-btn--sm" onClick={retry}>
+        <p className="fl-runs__detail">{error}</p>
+        <button type="button" className="fl-btn fl-btn--sm" onClick={retry}>
           {labels.tryAgain}
         </button>
       </div>
     );
   } else if (!runs) {
     body = (
-      <ul className="fk-runs__rows" aria-busy="true" aria-label={labels.runs}>
+      <ul className="fl-runs__rows" aria-busy="true" aria-label={labels.runs}>
         {[0, 1, 2, 3].map((i) => (
-          <li key={i} className="fk-runs__skeleton" aria-hidden />
+          <li key={i} className="fl-runs__skeleton" aria-hidden />
         ))}
       </ul>
     );
   } else if (runs.length === 0) {
     body = (
-      <div className="fk-runs__state">
+      <div className="fl-runs__state">
         <p>{status ? labels.noRunsWithStatus(stateName(status)) : labels.noRuns}</p>
       </div>
     );
   } else {
     body = (
-      <ul className="fk-runs__rows" aria-label={labels.runs}>
+      <ul className="fl-runs__rows" aria-label={labels.runs}>
         {runs.map((r) => {
           const end = isTerminal(r.status) ? r.updatedAt : now;
           const state = displayState(r);
@@ -229,33 +229,33 @@ export function RunList(props: {
             <li key={r.id}>
               <button
                 type="button"
-                className="fk-runs__row"
+                className="fl-runs__row"
                 data-status={state}
                 aria-current={r.id === selectedRunId ? "true" : undefined}
                 onClick={() => onSelect(r.id)}
               >
-                <span className="fk-runs__dot" aria-hidden />
-                <span className="fk-runs__main">
-                  <span className="fk-runs__status">{stateName(state)}</span>
+                <span className="fl-runs__dot" aria-hidden />
+                <span className="fl-runs__main">
+                  <span className="fl-runs__status">{stateName(state)}</span>
                   {subject !== undefined && subject !== null && subject !== "" && (
-                    <span className="fk-runs__subject">{subject}</span>
+                    <span className="fl-runs__subject">{subject}</span>
                   )}
-                  <span className="fk-runs__time" title={labels.dateTime(r.createdAt)}>
+                  <span className="fl-runs__time" title={labels.dateTime(r.createdAt)}>
                     {labels.relativeTime(r.createdAt - now)}
                   </span>
                 </span>
-                <span className="fk-runs__sub">
-                  <span className="fk-runs__origin">
+                <span className="fl-runs__sub">
+                  <span className="fl-runs__origin">
                     {workflowId === undefined
                       ? `${names.get(r.workflowId) ?? r.workflowId} · `
                       : ""}
                     {labels.origin(r.startedBy)}
                   </span>
-                  <span className="fk-runs__nums">
-                    <span className="fk-tabular">
+                  <span className="fl-runs__nums">
+                    <span className="fl-tabular">
                       {labels.duration(Math.max(0, end - r.createdAt))}
                     </span>
-                    <span className="fk-version">{labels.version(r.version)}</span>
+                    <span className="fl-version">{labels.version(r.version)}</span>
                   </span>
                 </span>
               </button>
@@ -268,16 +268,16 @@ export function RunList(props: {
 
   return (
     <div
-      className={className ? `fk-root fk-runs ${className}` : "fk-root fk-runs"}
-      data-fk-theme={theme.colorMode ?? "system"}
+      className={className ? `fl-root fl-runs ${className}` : "fl-root fl-runs"}
+      data-fl-theme={theme.colorMode ?? "system"}
       style={style}
     >
-      <fieldset className="fk-runs__filters" aria-label={labels.filterRuns}>
+      <fieldset className="fl-runs__filters" aria-label={labels.filterRuns}>
         {FILTERS.map((f) => (
           <button
             key={f ?? "all"}
             type="button"
-            className="fk-runs__filter"
+            className="fl-runs__filter"
             aria-pressed={f === status}
             {...(f ? { "data-status": f } : {})}
             onClick={() => setStatus(f)}

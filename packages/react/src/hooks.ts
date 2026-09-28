@@ -9,8 +9,8 @@ import {
   unreachableSteps,
   type WorkflowDoc,
   walkSteps,
-} from "@flowkit/core";
-import type { FlowkitClient } from "@flowkit/core/client";
+} from "@flowline/core";
+import type { FlowlineClient } from "@flowline/core/client";
 import {
   createContext,
   useCallback,
@@ -35,17 +35,17 @@ import type { EditorActions, EditorState, EditorStore, TestState } from "./store
 export const EditorContext = createContext<EditorStore | null>(null);
 
 /**
- * Provides the {@link FlowkitClient} used by data hooks such as {@link useRun}.
- * `<FlowkitProvider>` provides it.
+ * Provides the {@link FlowlineClient} used by data hooks such as {@link useRun}.
+ * `<FlowlineProvider>` provides it.
  */
-export const FlowkitClientContext = createContext<FlowkitClient | null>(null);
+export const FlowlineClientContext = createContext<FlowlineClient | null>(null);
 
 /** The {@link EditorStore} from context, for imperative access (`getState()`, `subscribe`). */
 export function useEditorStoreApi(): EditorStore {
   const store = useContext(EditorContext);
   if (!store) {
     throw new Error(
-      "Flowkit editor hooks must be used inside <WorkflowEditor>, <WorkflowCanvas> or <EditorContext.Provider value={store}>",
+      "Flowline editor hooks must be used inside <WorkflowEditor>, <WorkflowCanvas> or <EditorContext.Provider value={store}>",
     );
   }
   return store;
@@ -248,7 +248,7 @@ const TERMINAL_RUN_EVENTS: ReadonlySet<string> = new Set([
  * finished (completed, failed or cancelled). A later fetch (e.g. `refresh()` after a retry,
  * which reuses the run id) that shows the run running again subscribes again. `loading` is true until the
  * first response for this `runId`; a failed refetch sets `error` and keeps the last `detail`.
- * Requires a {@link FlowkitClientContext} (provided by `<FlowkitProvider>`).
+ * Requires a {@link FlowlineClientContext} (provided by `<FlowlineProvider>`).
  */
 export function useRun(runId: string): {
   detail: RunDetail | undefined;
@@ -256,8 +256,8 @@ export function useRun(runId: string): {
   error?: Error;
   refresh(): void;
 } {
-  const client = useContext(FlowkitClientContext);
-  if (!client) throw new Error("useRun must be used inside <FlowkitProvider>");
+  const client = useContext(FlowlineClientContext);
+  if (!client) throw new Error("useRun must be used inside <FlowlineProvider>");
   const [state, setState] = useState<{ runId: string; detail?: RunDetail; error?: Error }>({
     runId,
   });
@@ -330,7 +330,7 @@ export type { RunChange };
  * {@link useRun} loading a run (after its live events, a cancel, a retry or a resume), or a
  * `<RunList>` poll finding a listed run in a new state. `<RunList>` uses it to update at once; use
  * it to refresh data of your own that depends on runs, e.g. a count of pending approvals. Needs a
- * `<FlowkitProvider>`.
+ * `<FlowlineProvider>`.
  *
  * `previous` is the status this app last saw the run in, or `undefined` the first time it sees
  * the run (a viewer opening it): compare the two to react only to real transitions.
@@ -345,8 +345,8 @@ export type { RunChange };
 export function useRunChanges(
   listener: (run: RunChange, previous: RunChange["status"] | undefined) => void,
 ): void {
-  const client = useContext(FlowkitClientContext);
-  if (!client) throw new Error("useRunChanges must be used inside <FlowkitProvider>");
+  const client = useContext(FlowlineClientContext);
+  if (!client) throw new Error("useRunChanges must be used inside <FlowlineProvider>");
   const ref = useRef(listener);
   ref.current = listener;
   useEffect(

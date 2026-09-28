@@ -1,12 +1,12 @@
-import type { JSONSchema, Step } from "@flowkit/core";
+import type { JSONSchema, Step } from "@flowline/core";
 import { describe, expect, test } from "vitest";
 import { renderSummary, summaryStepRefs } from "./summary";
 
 const schema: JSONSchema = {
   type: "object",
   properties: {
-    to: { type: "string", "x-flowkit": { label: "Recipient" } },
-    subject: { type: "string", "x-flowkit": { label: "Subject" } },
+    to: { type: "string", "x-flowline": { label: "Recipient" } },
+    subject: { type: "string", "x-flowline": { label: "Subject" } },
     duration: { type: "string", default: "1h" },
     contactId: { type: "string" },
     url: { type: "string", title: "URL" },
@@ -32,7 +32,7 @@ describe("renderSummary", () => {
     expect(r.parts[0]).toEqual({ kind: "default", text: "3" });
   });
 
-  test('an unset value without a default reads "No <label>" from x-flowkit.label', () => {
+  test('an unset value without a default reads "No <label>" from x-flowline.label', () => {
     const r = renderSummary("{{subject}}", step({ subject: "" }), noNames, schema);
     expect(r.parts).toEqual([{ kind: "empty", label: "No subject" }]);
   });
@@ -78,7 +78,7 @@ describe("renderSummary", () => {
         team: {
           type: "string",
           enum: ["smb", "enterprise"],
-          "x-flowkit": {
+          "x-flowline": {
             enumLabels: { smb: "SMB", enterprise: "Enterprise" },
             showIf: { field: "strategy", equals: "team" },
           },
@@ -102,7 +102,7 @@ describe("renderSummary", () => {
   test("L13: a condition's rules read as its first comparison, then how many more", () => {
     const cond: JSONSchema = {
       type: "object",
-      properties: { rules: { type: "object", "x-flowkit": { widget: "rules" } } },
+      properties: { rules: { type: "object", "x-flowline": { widget: "rules" } } },
     };
     const text = (rules: unknown) =>
       renderSummary(

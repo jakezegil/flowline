@@ -1,9 +1,9 @@
 /**
  * Playground fixtures: the real built-in manifest (plugin "core", dumped from
- * `@flowkit/nodes-builtin` into builtin-manifest.json) plus a fake CRM plugin, and sample
+ * `@flowline/nodes-builtin` into builtin-manifest.json) plus a fake CRM plugin, and sample
  * workflows. The editor only ever sees JSON, so no server code is needed.
  */
-import type { Manifest, NodeManifest, Step, TriggerManifest, WorkflowDoc } from "@flowkit/core";
+import type { Manifest, NodeManifest, Step, TriggerManifest, WorkflowDoc } from "@flowline/core";
 import builtin from "./builtin-manifest.json";
 
 const S = "https://json-schema.org/draft/2020-12/schema";
@@ -15,7 +15,7 @@ const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
 });
 const str = (label: string, extra: Record<string, unknown> = {}) => ({
   type: "string",
-  "x-flowkit": { label },
+  "x-flowline": { label },
   ...extra,
 });
 const out = (properties: Record<string, unknown>) =>
@@ -56,7 +56,7 @@ const crm: NodeManifest[] = [
         stage: {
           type: "string",
           enum: ["lead", "qualified", "customer", "churned"],
-          "x-flowkit": { label: "Lifecycle stage" },
+          "x-flowline": { label: "Lifecycle stage" },
         },
         owner: str("Owner", { description: "Email of the new account owner." }),
       },
@@ -91,18 +91,18 @@ const crm: NodeManifest[] = [
         subject: str("Subject"),
         body: {
           type: "string",
-          "x-flowkit": { label: "Message", multiline: true, placeholder: "Hi {{name}}, …" },
+          "x-flowline": { label: "Message", multiline: true, placeholder: "Hi {{name}}, …" },
         },
         from: {
           type: "string",
           enum: ["sales", "success", "support"],
           default: "sales",
-          "x-flowkit": { label: "Send from" },
+          "x-flowline": { label: "Send from" },
         },
         trackOpens: {
           type: "boolean",
           default: true,
-          "x-flowkit": { label: "Track opens", group: "Advanced" },
+          "x-flowline": { label: "Track opens", group: "Advanced" },
         },
       },
       ["to", "subject"],
@@ -122,12 +122,12 @@ const crm: NodeManifest[] = [
       {
         title: str("Title"),
         owner: str("Owner"),
-        dueInDays: { type: "integer", minimum: 0, "x-flowkit": { label: "Due in (days)" } },
+        dueInDays: { type: "integer", minimum: 0, "x-flowline": { label: "Due in (days)" } },
         priority: {
           type: "string",
           enum: ["low", "normal", "high"],
           default: "normal",
-          "x-flowkit": { label: "Priority" },
+          "x-flowline": { label: "Priority" },
         },
       },
       ["title"],
@@ -289,7 +289,7 @@ export function nestedDoc(): WorkflowDoc {
         {
           method: "POST",
           url: "https://hooks.example.com/deals",
-          headers: { "X-Source": "flowkit" },
+          headers: { "X-Source": "flowline" },
           bodyType: "json",
           body: { dealId: { $ref: "trigger.dealId" }, stage: { $ref: "trigger.stage" } },
           auth: { type: "bearer", secret: "DATA_TEAM_TOKEN" },

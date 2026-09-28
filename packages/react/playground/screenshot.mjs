@@ -55,7 +55,7 @@ async function appShots() {
     ]) {
       const page = await open(`page=editor&wf=deal-won&theme=${theme}`, viewport, theme);
       await shot(page, `editor-${theme}-${size}`);
-      await page.click(".fk-issues");
+      await page.click(".fl-issues");
       await page.waitForTimeout(450);
       await shot(page, `editor-issue-${theme}-${size}`);
       await page.close();
@@ -69,10 +69,10 @@ async function appShots() {
   }
   {
     const page = await open("page=editor&wf=onboarding&theme=light", wide);
-    await page.click(".react-flow__node[data-id='step:approval'] .fk-card");
+    await page.click(".react-flow__node[data-id='step:approval'] .fl-card");
     await page.waitForTimeout(350);
     await shot(page, "editor-selected-light");
-    await page.fill(".fk-name", "Onboarding v2");
+    await page.fill(".fl-name", "Onboarding v2");
     await page.keyboard.press("Enter");
     await page.waitForTimeout(150);
     await shot(page, "editor-unsaved-light");
@@ -80,7 +80,7 @@ async function appShots() {
     await page.waitForTimeout(700);
     await shot(page, "editor-saved-toast-light");
     await page.click("button:has-text('Run')");
-    await page.waitForSelector(".fk-dialog");
+    await page.waitForSelector(".fl-dialog");
     await page.waitForTimeout(250);
     await shot(page, "editor-run-dialog-light");
     await page.close();
@@ -92,7 +92,7 @@ async function appShots() {
     await shot(page, `run-timeline-${theme}`);
     // Off-screen once the run opens on its failed step: click it without scrolling.
     await page
-      .locator(".react-flow__node[data-id='step:loadContact'] .fk-card")
+      .locator(".react-flow__node[data-id='step:loadContact'] .fl-card")
       .evaluate((el) => el.click());
     await page.waitForTimeout(300);
     await shot(page, `run-output-${theme}`);
@@ -101,7 +101,7 @@ async function appShots() {
   {
     const page = await open("page=run&run=waiting&theme=light", wide);
     await page.locator("button:has-text('Resume…')").first().click();
-    await page.waitForSelector(".fk-dialog");
+    await page.waitForSelector(".fl-dialog");
     await page.waitForTimeout(250);
     await shot(page, "run-resume-dialog-light");
     await page.close();
@@ -114,7 +114,7 @@ async function appShots() {
   ]) {
     const page = await open(`page=run&run=waiting&theme=${theme}`, viewport, theme);
     await page.click("button:has-text('Cancel run')");
-    await page.waitForSelector(".fk-confirm");
+    await page.waitForSelector(".fl-confirm");
     await page.waitForTimeout(250);
     await shot(page, `run-cancel-confirm-${theme}-${size}`);
     await page.close();
@@ -126,14 +126,14 @@ async function appShots() {
     await shot(page, "run-retry-hover-dark");
     await page.close();
     const editor = await open("page=editor&wf=onboarding&theme=dark", wide, "dark");
-    await editor.hover(".fk-btn--primary");
+    await editor.hover(".fl-btn--primary");
     await editor.waitForTimeout(250);
     await shot(editor, "editor-publish-hover-dark");
     await editor.close();
   }
   {
     const page = await open("page=run&run=loop&theme=dark", narrow, "dark");
-    await page.click(".fk-panel .fk-icon-btn[aria-label='Close panel']");
+    await page.click(".fl-panel .fl-icon-btn[aria-label='Close panel']");
     await page.waitForTimeout(300);
     await shot(page, "run-loop-dark-narrow-closed");
     await page.close();
@@ -143,16 +143,16 @@ async function appShots() {
 // Config panel states (`--panel` shoots only these).
 async function selectNode(page, key) {
   const id = key === "trigger" ? "trigger" : `step:${key}`;
-  await page.locator(`.react-flow__node[data-id='${id}'] .fk-card`).evaluate((el) => el.click());
-  await page.waitForSelector(".fk-cp");
+  await page.locator(`.react-flow__node[data-id='${id}'] .fl-card`).evaluate((el) => el.click());
+  await page.waitForSelector(".fl-cp");
   await page.waitForTimeout(350);
 }
 async function scrollPanelTo(page, selector) {
   await page
-    .locator(`.fk-cp__body ${selector}`)
+    .locator(`.fl-cp__body ${selector}`)
     .first()
     .evaluate((el) => {
-      const body = el.closest(".fk-cp__body");
+      const body = el.closest(".fl-cp__body");
       body.scrollTop += el.getBoundingClientRect().top - body.getBoundingClientRect().top - 60;
     });
   await page.waitForTimeout(150);
@@ -169,31 +169,31 @@ async function panelShots() {
     await selectNode(page, "notify");
     await scrollPanelTo(page, "[role='radiogroup'][aria-label='Authentication']");
     await shot(page, `panel-http-auth-${theme}`);
-    await page.click(".fk-cp [role='radio']:has-text('Header')");
+    await page.click(".fl-cp [role='radio']:has-text('Header')");
     await page.waitForTimeout(200);
     await shot(page, `panel-http-auth-header-${theme}`);
     await selectNode(page, "nudge");
     await shot(page, `panel-field-issues-${theme}`);
     await selectNode(page, "loadContact");
-    await page.click(".fk-cp [role='tab']:has-text('Test')");
-    await page.click(".fk-cp button:has-text('Test step')");
-    await page.waitForSelector(".fk-cp section[aria-label='Output']");
+    await page.click(".fl-cp [role='tab']:has-text('Test')");
+    await page.click(".fl-cp button:has-text('Test step')");
+    await page.waitForSelector(".fl-cp section[aria-label='Output']");
     await page.waitForTimeout(250);
     await shot(page, `panel-test-output-${theme}`);
     await selectNode(page, "welcomeEmea");
-    await page.click(".fk-cp button:has-text('Test step')");
-    await page.waitForSelector(".fk-cp [role='alert']");
+    await page.click(".fl-cp button:has-text('Test step')");
+    await page.waitForSelector(".fl-cp [role='alert']");
     await page.waitForTimeout(250);
     await shot(page, `panel-test-error-${theme}`);
     await selectNode(page, "trigger");
-    await page.click(".fk-cp button:has-text('Fill from fields')");
+    await page.click(".fl-cp button:has-text('Fill from fields')");
     await page.waitForTimeout(150);
     await shot(page, `panel-trigger-sample-${theme}`);
     await page.close();
 
     const hook = await open(`page=editor&wf=inbound-lead&theme=${theme}`, wide, theme);
     await selectNode(hook, "trigger");
-    await hook.waitForSelector(".fk-webhook__url");
+    await hook.waitForSelector(".fl-webhook__url");
     await shot(hook, `panel-trigger-webhook-${theme}`);
     await selectNode(hook, "enrich");
     await hook.waitForSelector("text=Company domain");
@@ -220,16 +220,16 @@ async function panelShots() {
   const selectedId = await kb.evaluate(() => document.activeElement?.getAttribute("data-id"));
   console.log(`keyboard: arrows moved focus to ${selectedId}`);
   await kb.keyboard.press("Enter");
-  await kb.waitForSelector(".fk-cp");
+  await kb.waitForSelector(".fl-cp");
   await kb.waitForTimeout(200);
-  const inPanel = await kb.evaluate(() => !!document.activeElement?.closest(".fk-cp"));
+  const inPanel = await kb.evaluate(() => !!document.activeElement?.closest(".fl-cp"));
   await kb.keyboard.press("Tab");
   await kb.keyboard.press("Tab");
   await kb.waitForTimeout(100);
   await shot(kb, "panel-keyboard-focus-light");
   await kb.keyboard.press("Escape");
   await kb.waitForTimeout(250);
-  const closed = (await kb.locator(".fk-cp").count()) === 0;
+  const closed = (await kb.locator(".fl-cp").count()) === 0;
   const back = await kb.evaluate(() => document.activeElement?.getAttribute("data-id"));
   console.log(
     `keyboard: focus in panel after Enter=${inPanel}, closed on Esc=${closed}, focus=${back}`,
@@ -243,16 +243,16 @@ async function panelShots() {
   for (const theme of ["light", "dark"]) {
     const rp = await open(`page=editor&wf=deal-won&theme=${theme}`, wide, theme);
     await selectNode(rp, "welcomeEmea");
-    const pills = await rp.locator(".fk-cp .fk-ref-pill").count();
-    const editor = rp.locator(".fk-cp .fk-ref__editor .cm-content").first();
+    const pills = await rp.locator(".fl-cp .fl-ref-pill").count();
+    const editor = rp.locator(".fl-cp .fl-ref__editor .cm-content").first();
     await editor.click();
     await rp.waitForTimeout(300);
-    const pickerOnFocus = await rp.locator(".fk-ref-popover").isVisible();
+    const pickerOnFocus = await rp.locator(".fl-ref-popover").isVisible();
     await shot(rp, `panel-picker-${theme}`);
     await rp.keyboard.press("Escape");
     await rp.waitForTimeout(200);
-    const pickerClosed = (await rp.locator(".fk-ref-popover").count()) === 0;
-    const panelKept1 = (await rp.locator(".fk-cp").count()) === 1;
+    const pickerClosed = (await rp.locator(".fl-ref-popover").count()) === 0;
+    const panelKept1 = (await rp.locator(".fl-cp").count()) === 1;
     await rp.keyboard.press("End");
     await rp.keyboard.type(" {{ema");
     await rp.waitForTimeout(300);
@@ -261,10 +261,10 @@ async function panelShots() {
     await rp.keyboard.press("Escape");
     await rp.waitForTimeout(200);
     const acClosed = (await rp.locator(".cm-tooltip-autocomplete").count()) === 0;
-    const panelKept2 = (await rp.locator(".fk-cp").count()) === 1;
+    const panelKept2 = (await rp.locator(".fl-cp").count()) === 1;
     await rp.keyboard.press("Escape");
     await rp.waitForTimeout(250);
-    const panelClosed = (await rp.locator(".fk-cp").count()) === 0;
+    const panelClosed = (await rp.locator(".fl-cp").count()) === 0;
     const result = {
       pills,
       pickerOnFocus,
@@ -319,12 +319,12 @@ for (const theme of ["light", "dark"]) {
 // Hover + selection.
 {
   const page = await open("theme=light&doc=nested&mode=edit", wide);
-  await page.click(".react-flow__node[data-id='step:region'] .fk-card");
-  await page.hover(".react-flow__node[data-id='step:markCustomer'] .fk-card");
+  await page.click(".react-flow__node[data-id='step:region'] .fl-card");
+  await page.hover(".react-flow__node[data-id='step:markCustomer'] .fl-card");
   await page.waitForTimeout(250);
   await shot(page, "selected-hover-light");
   // Badge tooltip on the invalid step.
-  await page.hover(".react-flow__node[data-id='step:nudge'] .fk-badge");
+  await page.hover(".react-flow__node[data-id='step:nudge'] .fl-badge");
   await page.waitForTimeout(600);
   await shot(page, "tooltip-light");
   await page.close();
@@ -338,7 +338,7 @@ for (const [size, viewport, theme] of [
 ]) {
   const page = await open(`theme=${theme}&doc=nested&mode=edit`, viewport, theme);
   await page.locator("button[aria-label='Add step here']").first().click();
-  await page.waitForSelector(".fk-picker");
+  await page.waitForSelector(".fl-picker");
   await page.waitForTimeout(250);
   await shot(page, `picker-${theme}-${size}`);
   if (size === "wide" && theme === "light") {
@@ -352,10 +352,10 @@ for (const [size, viewport, theme] of [
 // Context menu with the paste-inside-branch submenu.
 for (const theme of ["light", "dark"]) {
   const page = await open(`theme=${theme}&doc=nested&mode=edit`, wide, theme);
-  await page.click(".react-flow__node[data-id='step:loadContact'] .fk-card");
+  await page.click(".react-flow__node[data-id='step:loadContact'] .fl-card");
   await page.keyboard.press("ControlOrMeta+c");
-  await page.click(".react-flow__node[data-id='step:isWon'] .fk-card", { button: "right" });
-  await page.waitForSelector(".fk-menu");
+  await page.click(".react-flow__node[data-id='step:isWon'] .fl-card", { button: "right" });
+  await page.waitForSelector(".fl-menu");
   await page.hover("text=Paste inside branch");
   await page.waitForTimeout(300);
   await shot(page, `menu-${theme}`);
@@ -365,7 +365,7 @@ for (const theme of ["light", "dark"]) {
 // Delete with undo toast; insert animation mid-flight.
 {
   const page = await open("theme=light&doc=nested&mode=edit", wide);
-  await page.click(".react-flow__node[data-id='step:wait'] .fk-card");
+  await page.click(".react-flow__node[data-id='step:wait'] .fl-card");
   await page.keyboard.press("Delete");
   await page.waitForTimeout(80);
   await shot(page, "delete-midflight-light");

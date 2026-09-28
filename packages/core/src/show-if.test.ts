@@ -3,7 +3,7 @@ import { dropHiddenFields, hiddenFields, isFieldShown, showIfOf, showIfProblems 
 import type { JSONSchema } from "./types";
 
 const cond = (field: string, rest: object = {}) => ({
-  "x-flowkit": { showIf: { field, ...rest } },
+  "x-flowline": { showIf: { field, ...rest } },
 });
 
 const schema: JSONSchema = {

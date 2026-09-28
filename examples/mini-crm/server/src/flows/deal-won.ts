@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { ref, type WorkflowDoc, workflow } from "@flowkit/core";
+import { ref, type WorkflowDoc, workflow } from "@flowline/core";
 import {
   and,
   conditionNode,
@@ -12,7 +12,7 @@ import {
   gte,
   stopNode,
   transformNode,
-} from "@flowkit/nodes-builtin";
+} from "@flowline/nodes-builtin";
 import { dealUpdated, getContact, sendEmail } from "../plugin";
 import { withStepNames } from "./names";
 

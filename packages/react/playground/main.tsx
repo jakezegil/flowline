@@ -1,16 +1,16 @@
 /**
- * Dev playground: `pnpm --filter @flowkit/react playground`. URL params pick the state, so the
+ * Dev playground: `pnpm --filter @flowline/react playground`. URL params pick the state, so the
  * screenshot script can drive it: `?theme=light|dark|system&doc=nested|empty&mode=edit|readonly|run`
  * for the bare canvas, `?page=editor&wf=deal-won|onboarding|inbound-lead` for the editor, and
  * `?page=run&run=running|waiting|failed|loop` for the run viewer beside the run list, and
  * `?page=picker` (or `/picker`) for the reference input, data picker and code editor.
  */
-import type { FlowkitClient } from "@flowkit/core/client";
+import type { FlowlineClient } from "@flowline/core/client";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   createEditorStore,
-  FlowkitProvider,
+  FlowlineProvider,
   RunList,
   type RunOverlay,
   RunViewer,
@@ -33,7 +33,7 @@ const initial = {
   mode: (params.get("mode") as Mode | null) ?? "edit",
 };
 
-const client = {} as FlowkitClient;
+const client = {} as FlowlineClient;
 
 const runOverlay: RunOverlay = {
   stepStatus: {
@@ -96,10 +96,10 @@ function CanvasPage() {
   const [overlay, setOverlay] = useState(runOverlay);
 
   return (
-    <FlowkitProvider client={client} theme={themeValue}>
+    <FlowlineProvider client={client} theme={themeValue}>
       <div className="pg" data-theme={theme}>
         <header className="pg-bar">
-          <strong>Flowkit canvas</strong>
+          <strong>Flowline canvas</strong>
           <Select
             label="Theme"
             value={theme}
@@ -153,7 +153,7 @@ function CanvasPage() {
           />
         </main>
       </div>
-    </FlowkitProvider>
+    </FlowlineProvider>
   );
 }
 
@@ -167,7 +167,7 @@ function AppPage({ page }: { page: "editor" | "run" }) {
   );
   const [log, setLog] = useState("");
   return (
-    <FlowkitProvider client={appClient} theme={themeValue}>
+    <FlowlineProvider client={appClient} theme={themeValue}>
       <div className="pg pg--app" data-theme={theme}>
         {page === "editor" ? (
           <WorkflowEditor
@@ -197,7 +197,7 @@ function AppPage({ page }: { page: "editor" | "run" }) {
         )}
         {log && <output className="pg-log pg-log--float">{log}</output>}
       </div>
-    </FlowkitProvider>
+    </FlowlineProvider>
   );
 }
 

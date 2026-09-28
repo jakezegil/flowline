@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { type JSONSchema, UI_META_KEY } from "@flowkit/core";
+import { type JSONSchema, UI_META_KEY } from "@flowline/core";
 
 /** The value that replaces masked fields. */
 export const REDACTED = "[redacted]";
@@ -96,7 +96,7 @@ function redactAt(
 }
 
 /**
- * Replace every value whose JSON Schema carries `"x-flowkit": { secret: true }` (and, with
+ * Replace every value whose JSON Schema carries `"x-flowline": { secret: true }` (and, with
  * `mask: "all"`, `{ sensitive: true }`) with {@link REDACTED}. Follows object properties, record values
  * (`additionalProperties`), array items, unions and local `$ref`s. Returns `value` itself when
  * nothing is masked; never mutates it.

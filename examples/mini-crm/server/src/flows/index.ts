@@ -3,8 +3,8 @@
  *
  * @module
  */
-import type { WorkflowDoc } from "@flowkit/core";
-import type { Engine } from "@flowkit/engine";
+import type { WorkflowDoc } from "@flowline/core";
+import type { Engine } from "@flowline/engine";
 import { dealWonFollowUpFlow } from "./deal-won";
 import { inboundLeadRoutingFlow } from "./lead-routing";
 import { createContactFlow, getContactFlow, getOrCreateContactFlow } from "./subflows";
@@ -29,7 +29,7 @@ export const demoFlows: readonly WorkflowDoc[] = [
  * Save and publish the demo workflows the tenant does not have yet. Existing workflows are left
  * alone, so edits made in the editor survive a restart against Postgres.
  *
- * @throws `FlowkitValidationError` if a demo workflow does not validate.
+ * @throws `FlowlineValidationError` if a demo workflow does not validate.
  */
 export async function seedFlows(engine: Engine, tenantId: string, actor = "seed"): Promise<void> {
   const existing = new Set((await engine.storage.listWorkflows(tenantId)).map((w) => w.id));

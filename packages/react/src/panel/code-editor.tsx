@@ -24,10 +24,10 @@ import {
   lineNumbers,
   tooltips,
 } from "@codemirror/view";
-import { type JSONSchema, type ScopeEntry, schemaAtPath } from "@flowkit/core";
+import { type JSONSchema, type ScopeEntry, schemaAtPath } from "@flowline/core";
 import { type JSX, useContext, useEffect, useId, useRef } from "react";
 import { PortalContainerContext } from "../canvas/canvas-context";
-import { useFlowkitAppearance } from "../provider";
+import { useFlowlineAppearance } from "../provider";
 import { codeEditorTheme } from "./picker/editor-theme";
 import { shortType } from "./picker/schema-tree";
 
@@ -124,7 +124,7 @@ export function CodeEditor(props: {
   readOnly?: boolean;
 }): JSX.Element {
   const { value, scope, ariaLabel, readOnly = false } = props;
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const portal = useContext(PortalContainerContext);
   const hintId = `${useId()}hint`;
   const hostRef = useRef<HTMLDivElement>(null);
@@ -214,7 +214,7 @@ export function CodeEditor(props: {
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: keeps Escape inside the editor
     <div
-      className="fk-code"
+      className="fl-code"
       data-readonly={readOnly || undefined}
       onKeyDown={(e) => {
         // Escape in the editor closes its completions, or releases its hold on Tab ("press
@@ -223,8 +223,8 @@ export function CodeEditor(props: {
         if (e.key === "Escape") e.stopPropagation();
       }}
     >
-      <div ref={hostRef} className="fk-code__editor" />
-      <span id={hintId} className="fk-sr-only">
+      <div ref={hostRef} className="fl-code__editor" />
+      <span id={hintId} className="fl-sr-only">
         {labels.codeEditorHint}
       </span>
     </div>

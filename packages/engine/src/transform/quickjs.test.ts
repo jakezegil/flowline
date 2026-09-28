@@ -65,7 +65,7 @@ describe("quickjsRuntime", () => {
     "globalThis.process",
     "XMLHttpRequest",
     "setTimeout",
-    "__flowkitInput",
+    "__flowlineInput",
   ])("%s is not available", async (name) => {
     expect(await rt.run(`return { type: typeof ${name} };`, scope, limits)).toEqual({
       type: "undefined",

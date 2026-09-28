@@ -1,6 +1,6 @@
-import type { FieldDecl } from "@flowkit/core";
+import type { FieldDecl } from "@flowline/core";
 import { type JSX, useId, useState } from "react";
-import { useFlowkitAppearance } from "../provider";
+import { useFlowlineAppearance } from "../provider";
 import { SmallDialog } from "../ui/primitives";
 
 /** The manual trigger's declared input fields (its `fields` config), ignoring malformed entries. */
@@ -74,7 +74,7 @@ export function RunDialog({
   busy: boolean;
   onRun(input: Record<string, unknown>): void;
 }): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const [draft, setDraft] = useState<Draft>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const id = useId();
@@ -101,10 +101,10 @@ export function RunDialog({
       onSubmit={submit}
       footer={
         <>
-          <button type="button" className="fk-btn" onClick={() => onOpenChange(false)}>
+          <button type="button" className="fl-btn" onClick={() => onOpenChange(false)}>
             {labels.cancel}
           </button>
-          <button type="submit" className="fk-btn fk-btn--primary" disabled={busy}>
+          <button type="submit" className="fl-btn fl-btn--primary" disabled={busy}>
             {labels.startRun}
           </button>
         </>
@@ -122,9 +122,9 @@ export function RunDialog({
           "aria-describedby": err ? errId : f.description ? `${fid}-desc` : undefined,
         };
         return (
-          <div key={f.name} className="fk-field" data-kind={f.type}>
+          <div key={f.name} className="fl-field" data-kind={f.type}>
             {f.type === "boolean" ? (
-              <label className="fk-check" htmlFor={fid}>
+              <label className="fl-check" htmlFor={fid}>
                 <input
                   {...common}
                   type="checkbox"
@@ -135,14 +135,14 @@ export function RunDialog({
               </label>
             ) : (
               <>
-                <label className="fk-field__label" htmlFor={fid}>
+                <label className="fl-field__label" htmlFor={fid}>
                   {f.name}
-                  {f.required && <span className="fk-field__req">{labels.required}</span>}
+                  {f.required && <span className="fl-field__req">{labels.required}</span>}
                 </label>
                 {f.type === "object" || f.type === "array" ? (
                   <textarea
                     {...common}
-                    className="fk-input fk-input--mono"
+                    className="fl-input fl-input--mono"
                     rows={3}
                     placeholder={
                       f.type === "array" ? labels.jsonListPlaceholder : labels.jsonPlaceholder
@@ -153,7 +153,7 @@ export function RunDialog({
                 ) : (
                   <input
                     {...common}
-                    className="fk-input"
+                    className="fl-input"
                     type={
                       f.type === "number" ? "number" : f.type === "date" ? "datetime-local" : "text"
                     }
@@ -164,12 +164,12 @@ export function RunDialog({
               </>
             )}
             {f.description && !err && (
-              <div id={`${fid}-desc`} className="fk-field__hint">
+              <div id={`${fid}-desc`} className="fl-field__hint">
                 {f.description}
               </div>
             )}
             {err && (
-              <div id={errId} className="fk-field__error">
+              <div id={errId} className="fl-field__error">
                 {err}
               </div>
             )}

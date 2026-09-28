@@ -11,8 +11,8 @@ export {
 export {
   FatalError,
   type FatalErrorOptions,
-  FlowkitStorageError,
-  FlowkitValidationError,
+  FlowlineStorageError,
+  FlowlineValidationError,
   ResumeHostHandledError,
   ResumeUnverifiableError,
   RetryableError,

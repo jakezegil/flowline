@@ -5,7 +5,7 @@
  * Only the icons below are bundled, imported statically so bundlers tree-shake the rest of
  * Lucide. (Resolving any Lucide name at runtime, e.g. with `lucide-react/dynamic`, would make
  * every consumer's bundler emit a chunk per icon, about 1,600 of them.) For other icons, pass them
- * to `<FlowkitProvider icons={{ "rocket": Rocket }}>`.
+ * to `<FlowlineProvider icons={{ "rocket": Rocket }}>`.
  *
  * @module
  */

@@ -5,13 +5,13 @@
  */
 import type {
   CallbackHandle,
-  FlowkitServices,
+  FlowlineServices,
   Logger,
   NodeContext,
   ResolveScope,
   ResumeInfo,
   TransformRuntime,
-} from "@flowkit/core";
+} from "@flowline/core";
 import { FatalError } from "./errors";
 import { createGuardedFetch, type GuardedFetch } from "./http";
 import { quickjsRuntime } from "./transform/quickjs";
@@ -25,7 +25,7 @@ export interface ContextArgs {
   stepPath: string;
   attempt: number;
   idempotencyKey: string;
-  services: FlowkitServices;
+  services: FlowlineServices;
   logger?: Logger;
   signal: AbortSignal;
   clock: () => number;

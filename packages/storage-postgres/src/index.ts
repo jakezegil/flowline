@@ -1,5 +1,5 @@
 /**
- * Postgres {@link StorageAdapter} for Flowkit. Runs on any {@link Queryable} (a `pg.Pool` in
+ * Postgres {@link StorageAdapter} for Flowline. Runs on any {@link Queryable} (a `pg.Pool` in
  * production, PGlite in tests); leasing uses `FOR UPDATE SKIP LOCKED`, and every multi-statement
  * write runs in one transaction on a connection from `pool.connect()`.
  *
@@ -11,9 +11,9 @@ import type {
   RunSummary,
   WorkflowSummary,
   WorkflowVersion,
-} from "@flowkit/core";
+} from "@flowline/core";
 import {
-  FlowkitStorageError,
+  FlowlineStorageError,
   type NewRun,
   type NewRunEvent,
   type ResumeEvent,
@@ -21,7 +21,7 @@ import {
   type RunPatch,
   type StorageAdapter,
   type WorkflowAuditEntry,
-} from "@flowkit/engine";
+} from "@flowline/engine";
 import { type PoolLike, type Queryable, withTransaction } from "./migrate";
 import { quoteSchema } from "./schema";
 
@@ -38,7 +38,7 @@ export interface PgStorageOptions {
    * without it.
    */
   pool: Queryable & { connect?(): Promise<Queryable & { release(err?: Error | boolean): void }> };
-  /** Postgres schema holding the tables (created by {@link migrate}). Default `"flowkit"`. */
+  /** Postgres schema holding the tables (created by {@link migrate}). Default `"flowline"`. */
   schema?: string;
 }
 
@@ -172,12 +172,12 @@ function toVersion(row: Row): WorkflowVersion {
  */
 const UNSTORABLE_STRING_CODES = new Set(["22P05", "22021"]);
 
-/** Turn Postgres's "unstorable string" errors into a {@link FlowkitStorageError}. */
+/** Turn Postgres's "unstorable string" errors into a {@link FlowlineStorageError}. */
 function translateError(err: unknown): unknown {
   const code = (err as { code?: unknown } | null)?.code;
   if (typeof code !== "string" || !UNSTORABLE_STRING_CODES.has(code)) return err;
   const detail = err instanceof Error ? err.message : String(err);
-  return new FlowkitStorageError(
+  return new FlowlineStorageError(
     `Postgres cannot store this value: strings containing NUL (\\u0000) or invalid UTF-8 are not supported (SQLSTATE ${code}: ${detail})`,
     { cause: err },
   );
@@ -263,7 +263,7 @@ function patchAssignments(patch: RunPatch, now: number, p: Params): string[] {
  */
 export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
   const pool = withErrorTranslation(opts.pool);
-  const schemaName = opts.schema ?? "flowkit";
+  const schemaName = opts.schema ?? "flowline";
   const s = quoteSchema(schemaName);
   const tx = <T>(fn: (q: Queryable) => Promise<T>) => withTransaction(pool, fn);
 
@@ -323,7 +323,7 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
     const rows: string[] = [];
     for (const runId of runIds) {
       await q.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
-        `flowkit.run_events:${schemaName}:${runId}`,
+        `flowline.run_events:${schemaName}:${runId}`,
       ]);
       const { rows: maxRows } = await q.query<{ max: unknown }>(
         `SELECT coalesce(max(seq), 0) AS max FROM ${s}.run_events WHERE run_id = $1`,
@@ -369,7 +369,7 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
     let childExisted = false;
     if (child && !(await insertRun(q, child, now))) {
       if ((await tenantOf(q, child.id)) !== child.tenantId) {
-        throw new FlowkitStorageError(`Run id "${child.id}" already belongs to another tenant`);
+        throw new FlowlineStorageError(`Run id "${child.id}" already belongs to another tenant`);
       }
       childExisted = true;
     }
@@ -584,7 +584,7 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
         ]);
         const existing = rows[0];
         if (!existing || existing.tenant_id !== run.tenantId) {
-          throw new FlowkitStorageError(`Run id "${run.id}" already belongs to another tenant`);
+          throw new FlowlineStorageError(`Run id "${run.id}" already belongs to another tenant`);
         }
         return toRun(existing);
       });

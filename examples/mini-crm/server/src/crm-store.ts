@@ -2,7 +2,7 @@
  * The mini CRM's data: an in-memory store of contacts, deals, users, sent emails (the outbox) and
  * approval requests, seeded with demo data. It stands in for a real CRM's database.
  *
- * The store knows nothing about Flowkit. It reports changes (`contact.created`, `deal.updated`)
+ * The store knows nothing about Flowline. It reports changes (`contact.created`, `deal.updated`)
  * to the listener the app registers with {@link CrmStore.onEvent}, which turns them into
  * `engine.emit` calls.
  *

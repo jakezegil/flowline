@@ -52,7 +52,7 @@ describe("pill widgets", () => {
     expect(roots.live - before).toBe(0);
     // The pills carry their icons (filled in a microtask the first time an icon is used).
     await new Promise((r) => setTimeout(r, 0));
-    expect(document.querySelectorAll(".fk-ref-pill__icon svg")).toHaveLength(3);
+    expect(document.querySelectorAll(".fl-ref-pill__icon svg")).toHaveLength(3);
     expect(roots.live - before).toBe(0);
     cleanup();
   });

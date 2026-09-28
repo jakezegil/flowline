@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { FlowkitDefinitionError, type NodeDefinition, type TriggerDefinition } from "./define";
+import { FlowlineDefinitionError, type NodeDefinition, type TriggerDefinition } from "./define";
 import { isValidStepId, RESERVED_STEP_IDS, STEP_ID_PATTERN } from "./ids";
 import { parseRefPath, parseTemplate } from "./refs";
 import type { RefExpr, Step, TplExpr, ValueExpr, WorkflowDoc } from "./types";
@@ -9,7 +9,7 @@ const WORKFLOW_ID = /^[a-z0-9][a-z0-9-_]*$/;
 /**
  * Create a reference expression (`{ $ref: path }`). The path syntax is checked immediately.
  *
- * @throws {@link FlowkitRefError} if `path` is not a valid reference path.
+ * @throws {@link FlowlineRefError} if `path` is not a valid reference path.
  *
  * @example
  * ```ts
@@ -25,7 +25,7 @@ export function ref(path: string): RefExpr {
  * Create a template expression (`{ $tpl: template }`). Every `{{ path }}` inside is checked
  * immediately.
  *
- * @throws {@link FlowkitRefError} if an interpolated path is not a valid reference path.
+ * @throws {@link FlowlineRefError} if an interpolated path is not a valid reference path.
  *
  * @example
  * ```ts
@@ -94,7 +94,7 @@ export interface StepsBuilder {
    * switch case IDs, forEach's `body`) to a callback that adds the branch's steps to the builder
    * it receives and returns it.
    *
-   * @throws {@link FlowkitDefinitionError} if `id` is not a valid step ID or is already used
+   * @throws {@link FlowlineDefinitionError} if `id` is not a valid step ID or is already used
    * anywhere in the workflow.
    */
   step<N extends AnyNode>(
@@ -117,7 +117,7 @@ export interface WorkflowBuilder extends StepsBuilder {
    * Produce the workflow document. Each call returns a fresh copy. The builder does not check
    * the doc against a registry; use `validateWorkflow` for that.
    *
-   * @throws {@link FlowkitDefinitionError} if no trigger was set.
+   * @throws {@link FlowlineDefinitionError} if no trigger was set.
    */
   build(): WorkflowDoc;
 }
@@ -139,7 +139,7 @@ function cleanConfig(config: unknown): Record<string, ValueExpr> {
   return (cleanValue(config ?? {}) ?? {}) as Record<string, ValueExpr>;
 }
 
-const STEPS = Symbol("flowkit.builderSteps");
+const STEPS = Symbol("flowline.builderSteps");
 
 class StepsBuilderImpl implements StepsBuilder {
   readonly [STEPS]: Step[] = [];
@@ -152,12 +152,12 @@ class StepsBuilderImpl implements StepsBuilder {
     ...[config, branches]: [config?: unknown, branches?: BranchFillers]
   ): this {
     if (!isValidStepId(id)) {
-      throw new FlowkitDefinitionError(
+      throw new FlowlineDefinitionError(
         `Invalid step id "${id}": must match ${STEP_ID_PATTERN} (letters, digits, underscores; not starting with a digit) and not be one of ${[...RESERVED_STEP_IDS].join(", ")}`,
       );
     }
     if (this.usedIds.has(id)) {
-      throw new FlowkitDefinitionError(
+      throw new FlowlineDefinitionError(
         `Duplicate step id "${id}": step ids must be unique within a workflow`,
       );
     }
@@ -170,7 +170,7 @@ class StepsBuilderImpl implements StepsBuilder {
         const child = new StepsBuilderImpl(this.usedIds);
         const result = fill(child);
         if (!(result instanceof StepsBuilderImpl)) {
-          throw new FlowkitDefinitionError(
+          throw new FlowlineDefinitionError(
             `Branch "${branchId}" of step "${id}" must return the builder it was given`,
           );
         }
@@ -205,7 +205,7 @@ class WorkflowBuilderImpl extends StepsBuilderImpl implements WorkflowBuilder {
 
   build(): WorkflowDoc {
     if (this.#trigger === undefined) {
-      throw new FlowkitDefinitionError(
+      throw new FlowlineDefinitionError(
         `workflow "${this.id}" has no trigger; call .trigger() before .build()`,
       );
     }
@@ -227,12 +227,12 @@ class WorkflowBuilderImpl extends StepsBuilderImpl implements WorkflowBuilder {
  *
  * @param id - Workflow ID, matching `/^[a-z0-9][a-z0-9-_]*$/`.
  * @param meta - Display name (defaults to `id`) and description.
- * @throws {@link FlowkitDefinitionError} if `id` is invalid.
+ * @throws {@link FlowlineDefinitionError} if `id` is invalid.
  *
  * @example
  * ```ts
- * import { ref, workflow } from "@flowkit/core";
- * import { and, conditionNode, delayNode, eq, eventTrigger, stopNode } from "@flowkit/nodes-builtin";
+ * import { ref, workflow } from "@flowline/core";
+ * import { and, conditionNode, delayNode, eq, eventTrigger, stopNode } from "@flowline/nodes-builtin";
  *
  * const dealWon = workflow("deal-won", { name: "Deal won follow-up" })
  *   .trigger(eventTrigger, { event: "deal.updated" })
@@ -242,14 +242,14 @@ class WorkflowBuilderImpl extends StepsBuilderImpl implements WorkflowBuilder {
  *   })
  *   .build();
  * ```
- * (This example is compiled by `@flowkit/nodes-builtin`'s `builder-example.test.ts`.)
+ * (This example is compiled by `@flowline/nodes-builtin`'s `builder-example.test.ts`.)
  */
 export function workflow(
   id: string,
   meta: { name?: string; description?: string } = {},
 ): WorkflowBuilder {
   if (typeof id !== "string" || !WORKFLOW_ID.test(id)) {
-    throw new FlowkitDefinitionError(
+    throw new FlowlineDefinitionError(
       `Invalid workflow id "${id}": must match ${WORKFLOW_ID} (lowercase letters, digits, "-", "_")`,
     );
   }

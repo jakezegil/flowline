@@ -6,17 +6,17 @@
  * @module
  */
 
-import type { Manifest, ValidationContext, WorkflowDetail, WorkflowDoc } from "@flowkit/core";
+import type { Manifest, ValidationContext, WorkflowDetail, WorkflowDoc } from "@flowline/core";
 import { useEffect, useState } from "react";
-import type { FlowkitLabels } from "../labels";
-import { useFlowkit, useFlowkitAppearance } from "../provider";
+import type { FlowlineLabels } from "../labels";
+import { useFlowline, useFlowlineAppearance } from "../provider";
 import { defaultConfig } from "../store/commands";
 import { createEditorStore, type EditorStore } from "../store/editor-store";
 import type { NotFoundAction } from "../ui/not-found";
 import { errorText, httpStatus, isNetworkError } from "../ui/primitives";
 
 /** A new workflow: a manual trigger (else the first trigger in the manifest) and no steps. */
-export function blankDoc(id: string, manifest: Manifest, labels: FlowkitLabels): WorkflowDoc {
+export function blankDoc(id: string, manifest: Manifest, labels: FlowlineLabels): WorkflowDoc {
   const t = manifest.triggers.find((x) => x.kind === "manual") ?? manifest.triggers[0];
   return {
     id,
@@ -49,8 +49,8 @@ export function useEditorLoad(
   create = false,
   network?: ValidationContext["network"],
 ): { state: EditorLoadState; retry(): void; startNew(): void } {
-  const { client } = useFlowkit();
-  const { labels } = useFlowkitAppearance();
+  const { client } = useFlowline();
+  const { labels } = useFlowlineAppearance();
   const [state, setState] = useState<EditorLoadState>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
   // Create mode chosen after a not-found, for this workflow ID only.
@@ -115,7 +115,7 @@ export type EditorNotFoundAction = NotFoundAction | "create" | null | undefined;
  */
 export function notFoundActionFor(
   action: EditorNotFoundAction,
-  labels: FlowkitLabels,
+  labels: FlowlineLabels,
   startNew: () => void,
 ): NotFoundAction | null {
   if (action === "create") return { label: labels.createWorkflow, onClick: startNew };

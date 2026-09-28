@@ -14,7 +14,7 @@ export const RejoinNode = memo(function RejoinNode(_: NodeProps<JoinNode>) {
   return (
     <>
       <NodeHandles />
-      <div className="fk-join" aria-hidden />
+      <div className="fl-join" aria-hidden />
     </>
   );
 });
@@ -23,9 +23,9 @@ export const RejoinNode = memo(function RejoinNode(_: NodeProps<JoinNode>) {
 export const EndNode = memo(function EndNode(_: NodeProps<EndNode>) {
   const labels = useLabels();
   return (
-    <div className="fk-end">
+    <div className="fl-end">
       <NodeHandles />
-      <span className="fk-end__label">{labels.end}</span>
+      <span className="fl-end__label">{labels.end}</span>
     </div>
   );
 });

@@ -17,7 +17,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { type FlowkitNotice, type NotifyHandler, useFlowkitAppearance } from "../provider";
+import { type FlowlineNotice, type NotifyHandler, useFlowlineAppearance } from "../provider";
 
 /** What a toast looks like: neutral, a success, or an error. */
 export type ToastTone = "neutral" | "success" | "danger";
@@ -46,10 +46,10 @@ export function useToast(): (t: ToastInput) => void {
 }
 
 /**
- * Hands `notice` to the provider's `onNotify`, if any. `true` when the host took it (so Flowkit
- * shows nothing); `false` when Flowkit should show its own toast.
+ * Hands `notice` to the provider's `onNotify`, if any. `true` when the host took it (so Flowline
+ * shows nothing); `false` when Flowline should show its own toast.
  */
-export function notifyHost(onNotify: NotifyHandler | undefined, notice: FlowkitNotice): boolean {
+export function notifyHost(onNotify: NotifyHandler | undefined, notice: FlowlineNotice): boolean {
   return onNotify !== undefined && onNotify(notice) !== false;
 }
 
@@ -63,9 +63,9 @@ export function ToasterProvider({
 }: {
   children: ReactNode;
   /** What `onNotify` is told raised the notices. */
-  source?: FlowkitNotice["source"];
+  source?: FlowlineNotice["source"];
 }): JSX.Element {
-  const { onNotify } = useFlowkitAppearance();
+  const { onNotify } = useFlowlineAppearance();
   const notify = useRef(onNotify);
   notify.current = onNotify;
   const [toast, setToast] = useState<ShownToast | null>(null);
@@ -73,7 +73,7 @@ export function ToasterProvider({
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const show = useCallback(
     (t: ToastInput) => {
-      const notice: FlowkitNotice = {
+      const notice: FlowlineNotice = {
         message: t.message,
         tone: t.tone ?? "neutral",
         source,
@@ -101,25 +101,25 @@ export function ToasterProvider({
 }
 
 function ToastRegion({ toast, onDismiss }: { toast: ShownToast | null; onDismiss(): void }) {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const danger = toast?.tone === "danger";
   return (
     <div
-      className="fk-toasts fk-toasts--app"
+      className="fl-toasts fl-toasts--app"
       role="status"
       aria-live={danger ? "assertive" : "polite"}
     >
       {toast && (
-        <div key={toast.id} className="fk-toast" data-tone={toast.tone ?? "neutral"}>
+        <div key={toast.id} className="fl-toast" data-tone={toast.tone ?? "neutral"}>
           {toast.tone === "success" && (
-            <CircleCheck size={15} className="fk-toast__icon" aria-hidden />
+            <CircleCheck size={15} className="fl-toast__icon" aria-hidden />
           )}
-          {danger && <CircleAlert size={15} className="fk-toast__icon" aria-hidden />}
-          <span className="fk-toast__message">{toast.message}</span>
+          {danger && <CircleAlert size={15} className="fl-toast__icon" aria-hidden />}
+          <span className="fl-toast__message">{toast.message}</span>
           {toast.action && (
             <button
               type="button"
-              className="fk-toast__action"
+              className="fl-toast__action"
               onClick={() => {
                 toast.action?.run();
                 onDismiss();
@@ -130,7 +130,7 @@ function ToastRegion({ toast, onDismiss }: { toast: ShownToast | null; onDismiss
           )}
           <button
             type="button"
-            className="fk-toast__close"
+            className="fl-toast__close"
             aria-label={labels.dismiss}
             onClick={onDismiss}
           >

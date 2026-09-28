@@ -1,7 +1,7 @@
 /**
  * Pulls TypeScript code blocks out of Markdown. A block is checked when its fence names a file:
  *
- *     ```ts file=flowkit/nodes.ts
+ *     ```ts file=flowline/nodes.ts
  *
  * The blocks of one document become the files of one project (plus that project's stubs), so
  * they can import each other exactly as the prose describes. `nocheck` opts a block out.

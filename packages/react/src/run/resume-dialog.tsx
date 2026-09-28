@@ -5,10 +5,10 @@
  * @module
  */
 
-import { checkJson, describeType, isAnySchema, type JSONSchema } from "@flowkit/core";
+import { checkJson, describeType, isAnySchema, type JSONSchema } from "@flowline/core";
 import { LoaderCircle } from "lucide-react";
 import { type JSX, useEffect, useId, useState } from "react";
-import { useFlowkitAppearance } from "../provider";
+import { useFlowlineAppearance } from "../provider";
 import { SmallDialog } from "../ui/primitives";
 
 const MAX_EXAMPLE_DEPTH = 4;
@@ -62,7 +62,7 @@ export function ResumeDialog({
   /** JSON Schema of the callback body (the node's `resume.body`). */
   schema?: JSONSchema | undefined;
 }): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const bodySchema = schema !== undefined && !isAnySchema(schema) ? schema : undefined;
   const declared = bodySchema !== undefined;
   const [text, setText] = useState(declared ? "" : "{}");
@@ -119,23 +119,23 @@ export function ResumeDialog({
       onSubmit={() => void submit()}
       footer={
         <>
-          <button type="button" className="fk-btn" onClick={() => onOpenChange(false)}>
+          <button type="button" className="fl-btn" onClick={() => onOpenChange(false)}>
             {labels.cancel}
           </button>
-          <button type="submit" className="fk-btn fk-btn--primary" disabled={busy}>
-            {busy && <LoaderCircle size={14} className="fk-spin" aria-hidden />}
+          <button type="submit" className="fl-btn fl-btn--primary" disabled={busy}>
+            {busy && <LoaderCircle size={14} className="fl-spin" aria-hidden />}
             {labels.resumeTitle}
           </button>
         </>
       }
     >
-      <div className="fk-field">
-        <label className="fk-field__label" htmlFor={bodyId}>
+      <div className="fl-field">
+        <label className="fl-field__label" htmlFor={bodyId}>
           {labels.callbackBody}
         </label>
         <textarea
           id={bodyId}
-          className="fk-input fk-input--mono"
+          className="fl-input fl-input--mono"
           rows={6}
           spellCheck={false}
           value={text}
@@ -145,12 +145,12 @@ export function ResumeDialog({
           onChange={(e) => setText(e.target.value)}
         />
         {bodySchema && (
-          <div id={hintId} className="fk-field__hint">
+          <div id={hintId} className="fl-field__hint">
             {labels.callbackBodyExpects(describeType(bodySchema))}
           </div>
         )}
         {problems.length > 0 && (
-          <div id={errId} className="fk-field__error">
+          <div id={errId} className="fl-field__error">
             {problems.join(" · ")}
           </div>
         )}
