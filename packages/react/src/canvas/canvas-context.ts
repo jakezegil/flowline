@@ -1,0 +1,139 @@
+/**
+ * State shared by the canvas' nodes, edges and overlays that isn't part of the editor store:
+ * read-only mode, the run overlay, the open step picker, inline rename and toasts. Kept in a small
+ * per-canvas Zustand store so a card re-renders only when its own slice changes.
+ *
+ * @module
+ */
+
+import type { StepLocation } from "@flowkit/core";
+import { createContext, useContext } from "react";
+import { useStore } from "zustand";
+import { createStore, type StoreApi } from "zustand/vanilla";
+import type { FlowkitLabels } from "../labels";
+
+/** Per-step run state shown on the canvas in run mode. */
+export interface RunStepStatus {
+  status: "done" | "failed" | "running" | "waiting" | "skipped" | "pending";
+  durationMs?: number;
+  attempts?: number;
+}
+
+/**
+ * Run state painted over a read-only canvas (built by the run viewer from a run's journal).
+ * Steps without an entry in `stepStatus` show no status.
+ */
+export interface RunOverlay {
+  /** Status per step ID. */
+  stepStatus: Record<string, RunStepStatus>;
+  /**
+   * IDs of the edges the run took (edge IDs of `layoutTree`, e.g. `"step:cond->step:email"`).
+   * Branch edges of a step that ran but aren't in this set are dimmed.
+   */
+  takenEdges: Set<string>;
+  /** The iteration shown per loop step ID, its iteration count and the first failed iteration. */
+  loopIteration: Record<string, { index: number; count: number; failedIndex?: number }>;
+  /** Called by a loop card's iteration stepper. */
+  onIterationChange?(stepId: string, index: number): void;
+}
+
+/** What the step picker adds or changes. */
+export type PickerRequest =
+  | { mode: "insert"; loc: StepLocation }
+  | { mode: "replace"; stepId: string };
+
+/** A transient notice with an optional action (e.g. "Step deleted · Undo"). */
+export interface Toast {
+  id: number;
+  message: string;
+  action?: { label: string; run(): void };
+}
+
+/** The canvas' UI state. */
+export interface CanvasUiState {
+  readOnly: boolean;
+  /** The UI text (from `<FlowkitProvider labels>`, else English). */
+  labels: FlowkitLabels;
+  overlay: RunOverlay | undefined;
+  /** The open picker and the element it is anchored to. */
+  picker: { request: PickerRequest; anchor: HTMLElement | null } | null;
+  /** Step whose name is being edited inline. */
+  renaming: string | null;
+  toasts: Toast[];
+}
+
+/** Commands that change the canvas' UI state. */
+export interface CanvasUiActions {
+  openPicker(request: PickerRequest, anchor: HTMLElement | null): void;
+  closePicker(): void;
+  startRename(stepId: string): void;
+  stopRename(): void;
+  /** Shows a toast for 5 seconds. */
+  toast(message: string, action?: Toast["action"]): void;
+  dismissToast(id: number): void;
+}
+
+/** A canvas' UI store. */
+export type CanvasUiStore = StoreApi<CanvasUiState & CanvasUiActions>;
+
+/** How long a toast stays up. */
+export const TOAST_MS = 5000;
+
+/** Creates the UI store of one canvas. */
+export function createCanvasUiStore(init: {
+  readOnly: boolean;
+  overlay: RunOverlay | undefined;
+  labels: FlowkitLabels;
+}): CanvasUiStore {
+  let nextToast = 1;
+  return createStore<CanvasUiState & CanvasUiActions>()((set, get) => ({
+    ...init,
+    picker: null,
+    renaming: null,
+    toasts: [],
+    openPicker: (request, anchor) => set({ picker: { request, anchor } }),
+    closePicker: () => {
+      if (get().picker) set({ picker: null });
+    },
+    startRename: (stepId) => set({ renaming: stepId }),
+    stopRename: () => {
+      if (get().renaming !== null) set({ renaming: null });
+    },
+    toast(message, action) {
+      const id = nextToast++;
+      // One toast at a time: a new notice replaces the previous one.
+      set({ toasts: [{ id, message, ...(action ? { action } : {}) }] });
+      setTimeout(() => get().dismissToast(id), TOAST_MS);
+    },
+    dismissToast(id) {
+      const { toasts } = get();
+      if (toasts.some((t) => t.id === id)) set({ toasts: toasts.filter((t) => t.id !== id) });
+    },
+  }));
+}
+
+/** The canvas UI store of the enclosing canvas. */
+export const CanvasUiContext = createContext<CanvasUiStore | null>(null);
+
+/** The element Radix portals render into (inside `.fk-root`, so theme tokens apply). */
+export const PortalContainerContext = createContext<HTMLElement | null>(null);
+
+/** Returns the canvas root element (`.fk-root`), for focusing and anchoring to nodes. */
+export const RootElementContext = createContext<() => HTMLElement | null>(() => null);
+
+/** The enclosing canvas' UI store. */
+export function useCanvasUiApi(): CanvasUiStore {
+  const store = useContext(CanvasUiContext);
+  if (!store) throw new Error("Canvas components must be rendered inside <WorkflowCanvas>");
+  return store;
+}
+
+/** Subscribes to a slice of the canvas UI state. */
+export function useCanvasUi<T>(selector: (s: CanvasUiState & CanvasUiActions) => T): T {
+  return useStore(useCanvasUiApi(), selector);
+}
+
+/** The UI text of the enclosing canvas. */
+export function useLabels(): FlowkitLabels {
+  return useCanvasUi((s) => s.labels);
+}

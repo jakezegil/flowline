@@ -276,3 +276,88 @@ describe("duplicateStep", () => {
     expect(() => duplicateStep(doc, "nope")).toThrow(FlowkitTreeError);
   });
 });
+
+describe("structural sharing", () => {
+  function twoBlocksDoc(): WorkflowDoc {
+    const leaf = (id: string): Step => ({ id, type: "crm.sendEmail", config: {} });
+    return frozenClone({
+      id: "wf-share",
+      name: "Sharing",
+      trigger: { type: "crm.dealUpdated", config: {} },
+      steps: [
+        {
+          id: "outer",
+          type: "logic.condition",
+          config: {},
+          branches: {
+            if: [
+              { id: "left", type: "logic.condition", config: {}, branches: { if: [leaf("a")] } },
+              { id: "right", type: "logic.condition", config: {}, branches: { if: [leaf("b")] } },
+            ],
+            else: [leaf("c")],
+          },
+        },
+        { id: "sibling", type: "logic.condition", config: {}, branches: { if: [leaf("d")] } },
+      ],
+    });
+  }
+
+  test("editing a nested step keeps untouched steps and branches referentially equal", () => {
+    const doc = twoBlocksDoc();
+    const next = updateStep(doc, "a", (s) => ({ ...s, name: "Renamed" }));
+    const before = (id: string) => findStep(doc, id)?.step;
+    const after = (id: string) => findStep(next, id)?.step;
+    expect(after("a")?.name).toBe("Renamed");
+    // Untouched branching steps, anywhere in the tree, are the same objects.
+    expect(after("right")).toBe(before("right"));
+    expect(after("sibling")).toBe(before("sibling"));
+    expect(after("c")).toBe(before("c"));
+    expect(after("outer")?.branches?.else).toBe(before("outer")?.branches?.else);
+    // Only the path to the edit is copied.
+    expect(after("left")).not.toBe(before("left"));
+    expect(after("outer")).not.toBe(before("outer"));
+    expect(Object.keys(after("outer")?.branches ?? {})).toEqual(["if", "else"]);
+  });
+
+  test("insert and remove share every step they don't change", () => {
+    const doc = twoBlocksDoc();
+    const step: Step = { id: "new", type: "crm.sendEmail", config: {} };
+    const inserted = insertStep(doc, { parentId: "right", branch: "if", index: 1 }, step);
+    expect(findStep(inserted, "left")?.step).toBe(findStep(doc, "left")?.step);
+    expect(findStep(inserted, "sibling")?.step).toBe(findStep(doc, "sibling")?.step);
+    const removed = removeStep(inserted, "new");
+    expect(findStep(removed, "left")?.step).toBe(findStep(doc, "left")?.step);
+    expect(findStep(removed, "right")?.step).toEqual(findStep(doc, "right")?.step);
+  });
+
+  test("move shares every step off the source and target paths, and the moved step itself", () => {
+    const doc = twoBlocksDoc();
+    const before = (id: string) => findStep(doc, id)?.step;
+    // a: outer › if › left › if  →  sibling › if (index 0)
+    const next = moveStep(doc, "a", { parentId: "sibling", branch: "if", index: 0 });
+    const after = (id: string) => findStep(next, id)?.step;
+    expect(after("sibling")?.branches?.if?.map((s) => s.id)).toEqual(["a", "d"]);
+    expect(after("a")).toBe(before("a"));
+    expect(after("d")).toBe(before("d"));
+    expect(after("right")).toBe(before("right"));
+    expect(after("c")).toBe(before("c"));
+    expect(after("outer")?.branches?.else).toBe(before("outer")?.branches?.else);
+    // Only the source and target paths are copied.
+    expect(after("left")).not.toBe(before("left"));
+    expect(after("sibling")).not.toBe(before("sibling"));
+  });
+
+  test("duplicate shares every step except the copy's parent path", () => {
+    const doc = twoBlocksDoc();
+    const before = (id: string) => findStep(doc, id)?.step;
+    const { doc: next, newId } = duplicateStep(doc, "b");
+    const after = (id: string) => findStep(next, id)?.step;
+    expect(after("right")?.branches?.if?.map((s) => s.id)).toEqual(["b", newId]);
+    expect(after("b")).toBe(before("b"));
+    expect(after("left")).toBe(before("left"));
+    expect(after("sibling")).toBe(before("sibling"));
+    expect(after("c")).toBe(before("c"));
+    expect(after("right")).not.toBe(before("right"));
+    expect(after("outer")).not.toBe(before("outer"));
+  });
+});

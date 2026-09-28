@@ -73,8 +73,11 @@ export function useWorkflow(): { doc: WorkflowDoc; issues: Issue[]; dirty: boole
 
 const stepIndexes = new WeakMap<WorkflowDoc, Map<string, Step>>();
 
-/** Steps of `doc` by ID, built once per doc snapshot. */
-function stepIndex(doc: WorkflowDoc): Map<string, Step> {
+/**
+ * Steps of `doc` by ID (first pre-order match), built once per doc snapshot.
+ * @internal
+ */
+export function stepIndex(doc: WorkflowDoc): Map<string, Step> {
   let idx = stepIndexes.get(doc);
   if (!idx) {
     const built = new Map<string, Step>();
@@ -91,7 +94,11 @@ const NO_ISSUES: Issue[] = [];
 const issueIndexes = new WeakMap<Issue[], Map<string, Issue[]>>();
 const lastIssueIndexes = new WeakMap<EditorStore, Map<string, Issue[]>>();
 
-function sameIssues(a: Issue[], b: Issue[]): boolean {
+/**
+ * Whether two issue lists have the same issues in the same order.
+ * @internal
+ */
+export function sameIssues(a: Issue[], b: Issue[]): boolean {
   return (
     a.length === b.length &&
     a.every((x, i) => {

@@ -1,6 +1,9 @@
 /** Package version. */
 export const VERSION = "0.1.0";
 
+export type { RunOverlay, RunStepStatus } from "./canvas/canvas-context";
+export { WorkflowCanvas } from "./canvas/workflow-canvas";
+
 export {
   EditorContext,
   FlowkitClientContext,
@@ -14,6 +17,8 @@ export {
   useStep,
   useWorkflow,
 } from "./hooks";
+export { bundledIconNames, type IconComponent } from "./icons";
+export { defaultLabels, type FlowkitLabels } from "./labels";
 export {
   BRANCH_GAP,
   CARD_H,
@@ -26,6 +31,12 @@ export {
 } from "./layout/constants";
 export { type LayoutEdge, type LayoutNode, layoutTree } from "./layout/layout-tree";
 export {
+  type FieldWidget,
+  type FieldWidgetProps,
+  FlowkitProvider,
+  useFlowkit,
+} from "./provider";
+export {
   createEditorStore,
   type EditorActions,
   type EditorState,
@@ -34,3 +45,4 @@ export {
   type TestState,
   TRIGGER_KEY,
 } from "./store/editor-store";
+export type { FlowkitTheme, ThemeToken } from "./theme";

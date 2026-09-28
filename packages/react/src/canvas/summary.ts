@@ -1,0 +1,205 @@
+/**
+ * Renders a node's `summary` template (e.g. `"Load {{contactId}}"`) against a step's config for
+ * its card: `{{key}}` is a config path; literal values render as text, references as pills
+ * labelled like `Trigger › contactId` or `Load contact › email`.
+ *
+ * @module
+ */
+
+import {
+  configValueAt,
+  isRef,
+  isTpl,
+  type JSONSchema,
+  parseRefPath,
+  parseTemplate,
+  type RefPath,
+  type Step,
+  type ValueExpr,
+} from "@flowkit/core";
+import { defaultLabels, type FlowkitLabels } from "../labels";
+
+/** A chunk of a rendered summary. */
+export type SummaryPart =
+  | { kind: "text"; text: string }
+  | { kind: "ref"; label: string; ref: string }
+  /** An unset value's schema default, shown muted. */
+  | { kind: "default"; text: string }
+  /** A config value that is not set and has no default, e.g. "No subject" (shown muted). */
+  | { kind: "empty"; label: string };
+
+/** A rendered summary. `blank`: every value the template reads is unset, with no default. */
+export interface RenderedSummary {
+  parts: SummaryPart[];
+  blank: boolean;
+}
+
+/** Longest literal shown before truncating with an ellipsis. */
+const MAX_LITERAL = 48;
+
+function truncate(text: string): string {
+  return text.length > MAX_LITERAL ? `${text.slice(0, MAX_LITERAL - 1)}…` : text;
+}
+
+function pathLabel(segments: (string | number)[]): string {
+  return segments.map((s) => (typeof s === "number" ? `[${s}]` : s)).join(".");
+}
+
+/**
+ * Pill label of a ref path. `stepName` gives the display name of a step ID (or `undefined`
+ * when there is no such step, in which case the ID is shown).
+ */
+export function refLabel(
+  ref: string,
+  stepName: (id: string) => string | undefined,
+  labels: FlowkitLabels = defaultLabels,
+): string {
+  let path: RefPath;
+  try {
+    path = parseRefPath(ref);
+  } catch {
+    return ref;
+  }
+  const rest = pathLabel(path.segments);
+  const join = (head: string, tail: string) => (tail ? `${head} › ${tail}` : head);
+  switch (path.root) {
+    case "trigger":
+      return join(labels.refTrigger, rest);
+    case "steps": {
+      const id = path.stepId as string;
+      return join(stepName(id) ?? id, rest);
+    }
+    case "loop":
+      return path.segments[0] === "index"
+        ? labels.refLoopIndex
+        : join(labels.refItem, pathLabel(path.segments.slice(1)));
+    case "run":
+      return labels.refRunId;
+    default:
+      return ref;
+  }
+}
+
+/** The step IDs referenced by the values the summary template of `step` reads. */
+export function summaryStepRefs(summary: string | undefined, step: Step): string[] {
+  if (!summary) return [];
+  const ids = new Set<string>();
+  const visit = (ref: string) => {
+    try {
+      const p = parseRefPath(ref);
+      if (p.root === "steps" && p.stepId) ids.add(p.stepId);
+    } catch {
+      // Invalid refs are labelled verbatim.
+    }
+  };
+  for (const part of parseTemplate(summary)) {
+    if (!("ref" in part)) continue;
+    const value = configValueAt(step.config, part.ref) as ValueExpr | undefined;
+    if (isRef(value)) visit(value.$ref);
+    else if (isTpl(value)) {
+      for (const p of parseTemplate(value.$tpl)) if ("ref" in p) visit(p.ref);
+    }
+  }
+  return [...ids];
+}
+
+/** The schema of the config field at dot path `path` of an object schema. */
+function fieldSchema(schema: JSONSchema | undefined, path: string): JSONSchema | undefined {
+  let cur: unknown = schema;
+  for (const key of path.split(".")) {
+    const props = (cur as { properties?: Record<string, unknown> } | undefined)?.properties;
+    cur = props?.[key];
+    if (typeof cur !== "object" || cur === null) return undefined;
+  }
+  return cur as JSONSchema;
+}
+
+/** "contactId" → "Contact id", "due_date" → "Due date". */
+function humanize(key: string): string {
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** Display text of a literal value. */
+function literalText(value: unknown, labels: FlowkitLabels): string {
+  if (Array.isArray(value)) return labels.items(value.length);
+  if (typeof value === "object" && value !== null) return "…";
+  return truncate(String(value));
+}
+
+const isUnset = (v: unknown) => v === undefined || v === null || v === "";
+
+function unsetParts(
+  path: string,
+  schema: JSONSchema | undefined,
+  labels: FlowkitLabels,
+): SummaryPart[] {
+  const field = fieldSchema(schema, path);
+  const fallback = field?.default;
+  if (!isUnset(fallback)) return [{ kind: "default", text: literalText(fallback, labels) }];
+  const meta = field?.["x-flowkit"] as { label?: unknown } | undefined;
+  const label =
+    typeof meta?.label === "string" && meta.label
+      ? meta.label
+      : typeof field?.title === "string" && field.title
+        ? field.title
+        : humanize(path.split(".").pop() ?? path);
+  return [{ kind: "empty", label: labels.noValue(label) }];
+}
+
+function valueParts(
+  value: ValueExpr | undefined,
+  path: string,
+  schema: JSONSchema | undefined,
+  stepName: (id: string) => string | undefined,
+  labels: FlowkitLabels,
+): SummaryPart[] {
+  if (isUnset(value)) return unsetParts(path, schema, labels);
+  if (isRef(value))
+    return [{ kind: "ref", ref: value.$ref, label: refLabel(value.$ref, stepName, labels) }];
+  if (isTpl(value)) {
+    return parseTemplate(value.$tpl).map((p) =>
+      "text" in p
+        ? { kind: "text", text: truncate(p.text) }
+        : { kind: "ref", ref: p.ref, label: refLabel(p.ref, stepName, labels) },
+    );
+  }
+  return [{ kind: "text", text: literalText(value, labels) }];
+}
+
+/**
+ * Renders `summary` against `step.config`. Adjacent text parts are merged. An unset value shows
+ * its schema default (from `inputSchema`, the node's input schema) muted, or else "No <label>"
+ * built from the field's `x-flowkit.label`, `title` or humanized key.
+ */
+export function renderSummary(
+  summary: string,
+  step: Step,
+  stepName: (id: string) => string | undefined,
+  inputSchema?: JSONSchema,
+  labels: FlowkitLabels = defaultLabels,
+): RenderedSummary {
+  const out: SummaryPart[] = [];
+  let values = 0;
+  let unset = 0;
+  for (const part of parseTemplate(summary)) {
+    let parts: SummaryPart[];
+    if ("text" in part) parts = [{ kind: "text", text: part.text }];
+    else {
+      values++;
+      const value = configValueAt(step.config, part.ref) as ValueExpr | undefined;
+      parts = valueParts(value, part.ref, inputSchema, stepName, labels);
+      if (parts[0]?.kind === "empty") unset++;
+    }
+    for (const p of parts) {
+      const last = out[out.length - 1];
+      if (p.kind === "text" && last?.kind === "text") last.text += p.text;
+      else out.push(p.kind === "text" ? { ...p } : p);
+    }
+  }
+  return { parts: out, blank: values > 0 && unset === values };
+}
