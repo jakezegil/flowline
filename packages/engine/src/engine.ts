@@ -43,8 +43,10 @@ import { createWorkflows } from "./workflows";
 /** Options of {@link createEngine}. */
 export interface EngineOptions {
   /**
-   * Plugins, nodes and triggers the engine can run. The built-in `core` plugin is added unless
-   * `builtins` is `false` or the registry already has a plugin with ID `"core"`.
+   * Plugins, nodes and triggers the engine can run. The built-in `core` plugin (`builtinPlugin`)
+   * is added unless `builtins` is `false` or the registry already has a plugin with ID `"core"`,
+   * such as one from `createBuiltinPlugin({ compare, operators })`: register that one yourself so
+   * the engine and the editor manifest share its choices.
    */
   registry: Registry;
   /** Where workflows, runs and events are persisted. */
@@ -92,8 +94,9 @@ export interface EngineOptions {
   /** Engine and handler logger. */
   logger?: Logger;
   /**
-   * Register the built-in `core.*` nodes and triggers (`@flowlinejs/nodes-builtin`) ahead of the
-   * registry's own plugins. Default `true`.
+   * Register the built-in `core.*` nodes and triggers (`builtinPlugin` from
+   * `@flowlinejs/nodes-builtin`) ahead of the registry's own plugins, unless the registry already
+   * has a `core` plugin (e.g. from `createBuiltinPlugin`). Default `true`.
    */
   builtins?: boolean;
   /** Deduplication of deliveries (`emit`, `start`, webhooks, schedules). */
@@ -393,7 +396,11 @@ export interface EngineCore {
   triggerEvent(e: TriggerEvent): void;
 }
 
-/** The host registry with the built-in `core` plugin in front, unless disabled or already there. */
+/**
+ * The host registry with the built-in `core` plugin in front, unless disabled or already there.
+ * "Already there" is decided by plugin ID, not identity, so a `core` plugin made by
+ * `createBuiltinPlugin(opts)` is kept as the only one.
+ */
 function withBuiltins({ registry, builtins = true }: EngineOptions): Registry {
   if (!builtins || registry.plugins.some((p) => p.id === builtinPlugin.id)) return registry;
   return createRegistry([builtinPlugin, ...registry.plugins]);

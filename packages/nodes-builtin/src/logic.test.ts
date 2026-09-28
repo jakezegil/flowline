@@ -77,6 +77,46 @@ describe("core.switch", () => {
     });
   });
 
+  describe("compare", () => {
+    const route = (value: unknown, compare?: "strict" | "loose", caseSensitive?: boolean) =>
+      switchNode.run({
+        input: switchNode.input.parse({ value, cases, compare, caseSensitive }),
+        ctx,
+      });
+
+    it("defaults to loose", async () => {
+      expect(switchNode.input.parse({ value: 1, cases }).compare).toBe("loose");
+      expect(await route("1")).toMatchObject({ branch: "small" });
+    });
+
+    it("strict matches only values of the same type", async () => {
+      expect(await route("1", "strict")).toMatchObject({ branch: "default" });
+      expect(await route(2, "strict")).toMatchObject({ branch: "again" });
+      expect(await route("2", "strict")).toMatchObject({ branch: "large" });
+    });
+
+    it("strict ignores caseSensitive: always case-sensitive", async () => {
+      const regions = [{ id: "emea", label: "EMEA", value: "emea" }];
+      const r = (value: string, caseSensitive?: boolean) =>
+        switchNode.run({
+          input: switchNode.input.parse({
+            value,
+            cases: regions,
+            compare: "strict",
+            caseSensitive,
+          }),
+          ctx,
+        });
+      expect(await r("EMEA")).toMatchObject({ branch: "default" });
+      expect(await r("EMEA", false)).toMatchObject({ branch: "default" });
+      expect(await r("emea")).toMatchObject({ branch: "emea" });
+    });
+
+    it("rejects an unknown compare value", () => {
+      expect(switchNode.input.safeParse({ value: 1, cases, compare: "fuzzy" }).success).toBe(false);
+    });
+  });
+
   it("requires unique, path-safe case IDs other than default", () => {
     const parse = (c: unknown[]) => switchNode.input.safeParse({ value: 1, cases: c });
     expect(parse([]).success).toBe(true);

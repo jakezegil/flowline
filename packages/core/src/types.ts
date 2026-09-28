@@ -169,6 +169,34 @@ export interface UiMeta {
    *   judged by the value it resolved to. A handler never sees a hidden field.
    */
   showIf?: ShowIf;
+  /**
+   * On a rule operator enum (the `op` field of `core.condition` rules): host-registered operators
+   * the rules widget offers alongside the built-in ones, filtered by the left operand's type. Their
+   * ids are also in the enum and their labels in `enumLabels`. Set by `createBuiltinPlugin({
+   * operators })` from `@flowlinejs/nodes-builtin`.
+   */
+  operators?: RuleOperatorMeta[];
+}
+
+/**
+ * Value type of a rule's left operand, as the rules widget infers it from the data in scope.
+ * `"date"` is ISO 8601 text; `"any"` is a value of unknown type.
+ */
+export type RuleValueType = "string" | "date" | "number" | "boolean" | "array" | "object" | "any";
+
+/**
+ * Editor description of a host-registered rule operator (see {@link UiMeta.operators}). The
+ * evaluator itself stays on the server; only this metadata travels in the manifest.
+ */
+export interface RuleOperatorMeta {
+  /** Operator id stored in the rule's `op`, e.g. `"isUnassigned"`. */
+  id: string;
+  /** Display text in the operator select, e.g. `"is unassigned"`. */
+  label: string;
+  /** `unary` operators take no right-hand value (`isEmpty`-like); `binary` ones do. */
+  arity: "unary" | "binary";
+  /** Left-value types the widget offers the operator for. Default: every type. */
+  types?: RuleValueType[];
 }
 
 /**

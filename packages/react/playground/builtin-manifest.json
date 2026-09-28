@@ -71,14 +71,14 @@
                           "x-flowline": {
                             "label": "Compare with"
                           },
-                          "description": "Numbers and text compare loosely (\"5\" equals 5). Dates and times are UTC unless they include an offset. For \"is one of\", give a list or comma-separated text."
+                          "description": "In Loose mode numbers and text compare loosely (\"5\" equals 5); Strict mode compares values of the same type only. Dates and times are UTC unless they include an offset. For \"is one of\", give a list (Loose mode also takes comma-separated text)."
                         },
                         "caseSensitive": {
                           "type": "boolean",
                           "x-flowline": {
                             "label": "Match case"
                           },
-                          "description": "Off by default, so \"Won\" equals \"won\"."
+                          "description": "Off by default, so \"Won\" equals \"won\". Strict mode always matches case."
                         }
                       },
                       "required": ["left", "op"]
@@ -92,6 +92,19 @@
                   "label": "Rules",
                   "warnIfEmpty": "Condition has no rules, so it always takes the same path"
                 }
+              },
+              "compare": {
+                "default": "loose",
+                "type": "string",
+                "enum": ["strict", "loose"],
+                "x-flowline": {
+                  "label": "Compare",
+                  "enumLabels": {
+                    "strict": "Strict",
+                    "loose": "Loose"
+                  }
+                },
+                "description": "Strict: values must have the same type and text must match case (\"5\" does not equal 5). Loose: numeric text, \"true\"/\"false\" and dates are converted, and text ignores case unless Match case is on."
               }
             },
             "required": ["combinator", "rules"],
@@ -99,7 +112,7 @@
               "label": "Conditions",
               "widget": "rules"
             },
-            "description": "Text compares ignoring case unless Match case is on. Dates and times are UTC unless they include an offset. \"Is one of\" takes a list or comma-separated text."
+            "description": "Strict compares values of the same type only and matches case. Loose converts numeric text, \"true\"/\"false\" and dates, and ignores case unless Match case is on. Dates and times are UTC unless they include an offset. \"Is one of\" takes a list (Loose also takes comma-separated text)."
           }
         },
         "required": ["rules"],
@@ -154,14 +167,14 @@
                           "x-flowline": {
                             "label": "Compare with"
                           },
-                          "description": "Numbers and text compare loosely (\"5\" equals 5). Dates and times are UTC unless they include an offset. For \"is one of\", give a list or comma-separated text."
+                          "description": "In Loose mode numbers and text compare loosely (\"5\" equals 5); Strict mode compares values of the same type only. Dates and times are UTC unless they include an offset. For \"is one of\", give a list (Loose mode also takes comma-separated text)."
                         },
                         "caseSensitive": {
                           "type": "boolean",
                           "x-flowline": {
                             "label": "Match case"
                           },
-                          "description": "Off by default, so \"Won\" equals \"won\"."
+                          "description": "Off by default, so \"Won\" equals \"won\". Strict mode always matches case."
                         }
                       },
                       "required": ["left", "op"]
@@ -225,14 +238,27 @@
             "x-flowline": {
               "label": "Value to match"
             },
-            "description": "Compared with each case. Numbers and text compare loosely, so \"5\" matches 5 and \"EMEA\" matches \"emea\"."
+            "description": "Compared with each case. In Loose mode numbers and text compare loosely, so \"5\" matches 5 and \"EMEA\" matches \"emea\"; Strict mode matches values of the same type only."
+          },
+          "compare": {
+            "default": "loose",
+            "type": "string",
+            "enum": ["strict", "loose"],
+            "x-flowline": {
+              "label": "Compare",
+              "enumLabels": {
+                "strict": "Strict",
+                "loose": "Loose"
+              }
+            },
+            "description": "Strict: values must have the same type and text must match case (\"5\" does not equal 5). Loose: numeric text, \"true\"/\"false\" and dates are converted, and text ignores case unless Match case is on."
           },
           "caseSensitive": {
             "type": "boolean",
             "x-flowline": {
               "label": "Match case"
             },
-            "description": "Off by default, so \"EMEA\" matches \"emea\"."
+            "description": "Off by default, so \"EMEA\" matches \"emea\". Strict mode always matches case."
           },
           "cases": {
             "type": "array",

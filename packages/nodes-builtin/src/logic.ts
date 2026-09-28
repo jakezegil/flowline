@@ -5,39 +5,70 @@
  */
 import { branch, defineNode, loop, stop, ui } from "@flowlinejs/core";
 import { z } from "zod";
-import { ConditionRulesSchema, evaluateRules, looseEquals } from "./rules";
+import {
+  type CompareMode,
+  type CustomOperator,
+  compareSchema,
+  createConditionRulesSchema,
+  evaluateRules,
+  looseEquals,
+  strictEquals,
+} from "./rules";
 
 /** Branch IDs are part of step paths, so they must not contain `/`, `[` or `]`. */
 const BRANCH_ID = /^[A-Za-z0-9_-]+$/;
 const DEFAULT_BRANCH = "default";
 
-/** If / else on a rule group: takes `if` when the rules match, `else` otherwise. */
-export const conditionNode = defineNode({
-  type: "core.condition",
-  name: "If / else",
-  description: "Take the If path when the conditions match, and the Else path when they don't.",
-  icon: "split",
-  category: "Logic",
-  keywords: ["if", "else", "condition", "branch", "filter"],
-  summary: "If {{rules}}",
-  input: z.object({
-    rules: ui(ConditionRulesSchema, { label: "Conditions", widget: "rules" }).describe(
-      'Text compares ignoring case unless Match case is on. Dates and times are UTC unless they include an offset. "Is one of" takes a list or comma-separated text.',
-    ),
-  }),
-  output: z.object({ matched: z.boolean() }),
-  branches: {
-    kind: "static",
-    branches: [
-      { id: "if", label: "If" },
-      { id: "else", label: "Else" },
-    ],
-  },
-  run: ({ input }) => {
-    const matched = evaluateRules(input.rules);
-    return branch(matched ? "if" : "else", { matched });
-  },
-});
+/** Host choices the condition and switch nodes are built with (see `createBuiltinPlugin`). */
+export interface LogicOptions {
+  /** Default compare mode. */
+  compare: CompareMode;
+  /** Host rule operators (`core.condition` only). Ids are already checked to be unique. */
+  operators: readonly CustomOperator[];
+}
+
+const LOOSE: LogicOptions = { compare: "loose", operators: [] };
+
+/** A `core.condition` node with `opts` applied. */
+export function createConditionNode(opts: LogicOptions) {
+  const operators = Object.fromEntries(opts.operators.map((o) => [o.id, o]));
+  return defineNode({
+    type: "core.condition",
+    name: "If / else",
+    description: "Take the If path when the conditions match, and the Else path when they don't.",
+    icon: "split",
+    category: "Logic",
+    keywords: ["if", "else", "condition", "branch", "filter"],
+    summary: "If {{rules}}",
+    input: z.object({
+      rules: ui(
+        createConditionRulesSchema({ defaultCompare: opts.compare, operators: opts.operators }),
+        { label: "Conditions", widget: "rules" },
+      ).describe(
+        'Strict compares values of the same type only and matches case. Loose converts numeric text, "true"/"false" and dates, and ignores case unless Match case is on. Dates and times are UTC unless they include an offset. "Is one of" takes a list (Loose also takes comma-separated text).',
+      ),
+    }),
+    output: z.object({ matched: z.boolean() }),
+    branches: {
+      kind: "static",
+      branches: [
+        { id: "if", label: "If" },
+        { id: "else", label: "Else" },
+      ],
+    },
+    run: ({ input }) => {
+      const matched = evaluateRules(input.rules, { compare: opts.compare, operators });
+      return branch(matched ? "if" : "else", { matched });
+    },
+  });
+}
+
+/**
+ * If / else on a rule group: takes `if` when the rules match, `else` otherwise. This is the
+ * instance in `builtinPlugin` (loose by default, no custom operators); `createBuiltinPlugin`
+ * builds its own.
+ */
+export const conditionNode: ReturnType<typeof createConditionNode> = createConditionNode(LOOSE);
 
 const SwitchCase = z.object({
   id: ui(z.string().regex(BRANCH_ID, "Use letters, digits, - and _ only"), { label: "ID" }),
@@ -46,64 +77,76 @@ const SwitchCase = z.object({
   value: ui(z.unknown(), { label: "Matches", placeholder: "gold" }),
 });
 
+/** A `core.switch` node whose `compare` defaults to `opts.compare`. */
+export function createSwitchNode(opts: LogicOptions) {
+  return defineNode({
+    type: "core.switch",
+    name: "Switch",
+    description:
+      "Compare a value with each case in order and take the path of the first match, or Default when none match.",
+    icon: "route",
+    category: "Logic",
+    keywords: ["case", "route", "branch", "match"],
+    summary: "Route by {{value}}",
+    input: z.object({
+      value: ui(z.unknown(), { label: "Value to match" }).describe(
+        'Compared with each case. In Loose mode numbers and text compare loosely, so "5" matches 5 and "EMEA" matches "emea"; Strict mode matches values of the same type only.',
+      ),
+      compare: compareSchema(opts.compare),
+      caseSensitive: ui(z.boolean(), { label: "Match case" })
+        .describe('Off by default, so "EMEA" matches "emea". Strict mode always matches case.')
+        .optional(),
+      cases: ui(
+        z.array(SwitchCase).superRefine((cases, check) => {
+          const seen = new Set<string>();
+          cases.forEach((c, i) => {
+            if (c.id === DEFAULT_BRANCH) {
+              check.addIssue({
+                code: "custom",
+                path: [i, "id"],
+                message: `Case ID "${DEFAULT_BRANCH}" is reserved for the Default branch`,
+              });
+            } else if (seen.has(c.id)) {
+              check.addIssue({
+                code: "custom",
+                path: [i, "id"],
+                message: `Case ID "${c.id}" is used twice`,
+              });
+            }
+            seen.add(c.id);
+          });
+        }),
+        { label: "Cases", widget: "cases" },
+      ),
+    }),
+    output: z.object({ matched: z.string() }),
+    branches: {
+      kind: "fromConfig",
+      configPath: "cases",
+      idKey: "id",
+      labelKey: "label",
+      append: [{ id: DEFAULT_BRANCH, label: "Default" }],
+    },
+    run: ({ input }) => {
+      const caseSensitive = input.caseSensitive ?? false;
+      const equals =
+        (input.compare ?? opts.compare) === "strict"
+          ? strictEquals
+          : (a: unknown, b: unknown) => looseEquals(a, b, { caseSensitive });
+      const hit = input.cases.find((c) => equals(input.value, c.value));
+      const matched = hit ? hit.id : DEFAULT_BRANCH;
+      return branch(matched, { matched });
+    },
+  });
+}
+
 /**
- * Routes to the first case whose value equals the input value (loosely, see `looseEquals`;
- * ignoring case unless `caseSensitive` is set), or to `default`.
+ * Routes to the first case whose value equals the input value, or to `default`. With `compare:
+ * "loose"` (the default) values compare loosely (see `looseEquals`), ignoring case unless
+ * `caseSensitive` is set; with `"strict"`, by `strictEquals`. This is the instance in
+ * `builtinPlugin`; `createBuiltinPlugin` builds its own.
  */
-export const switchNode = defineNode({
-  type: "core.switch",
-  name: "Switch",
-  description:
-    "Compare a value with each case in order and take the path of the first match, or Default when none match.",
-  icon: "route",
-  category: "Logic",
-  keywords: ["case", "route", "branch", "match"],
-  summary: "Route by {{value}}",
-  input: z.object({
-    value: ui(z.unknown(), { label: "Value to match" }).describe(
-      'Compared with each case. Numbers and text compare loosely, so "5" matches 5 and "EMEA" matches "emea".',
-    ),
-    caseSensitive: ui(z.boolean(), { label: "Match case" })
-      .describe('Off by default, so "EMEA" matches "emea".')
-      .optional(),
-    cases: ui(
-      z.array(SwitchCase).superRefine((cases, check) => {
-        const seen = new Set<string>();
-        cases.forEach((c, i) => {
-          if (c.id === DEFAULT_BRANCH) {
-            check.addIssue({
-              code: "custom",
-              path: [i, "id"],
-              message: `Case ID "${DEFAULT_BRANCH}" is reserved for the Default branch`,
-            });
-          } else if (seen.has(c.id)) {
-            check.addIssue({
-              code: "custom",
-              path: [i, "id"],
-              message: `Case ID "${c.id}" is used twice`,
-            });
-          }
-          seen.add(c.id);
-        });
-      }),
-      { label: "Cases", widget: "cases" },
-    ),
-  }),
-  output: z.object({ matched: z.string() }),
-  branches: {
-    kind: "fromConfig",
-    configPath: "cases",
-    idKey: "id",
-    labelKey: "label",
-    append: [{ id: DEFAULT_BRANCH, label: "Default" }],
-  },
-  run: ({ input }) => {
-    const caseSensitive = input.caseSensitive ?? false;
-    const hit = input.cases.find((c) => looseEquals(input.value, c.value, { caseSensitive }));
-    const matched = hit ? hit.id : DEFAULT_BRANCH;
-    return branch(matched, { matched });
-  },
-});
+export const switchNode: ReturnType<typeof createSwitchNode> = createSwitchNode(LOOSE);
 
 /**
  * Runs the `body` branch once per item, in order. The engine does the iterating: body steps see

@@ -9,11 +9,11 @@ import type { z } from "zod";
 import {
   and,
   builtinPlugin,
+  type ConditionRules,
   conditionNode,
   delayNode,
   eq,
   eventTrigger,
-  type RuleGroup,
   stopNode,
 } from "./index";
 
@@ -40,8 +40,8 @@ describe("the workflow() TSDoc example", () => {
 });
 
 describe("condition rules are typed", () => {
-  it("takes a RuleGroup, not unknown", () => {
-    expectTypeOf<z.input<typeof conditionNode.input>["rules"]>().toEqualTypeOf<RuleGroup>();
+  it("takes ConditionRules (a RuleGroup plus compare), not unknown", () => {
+    expectTypeOf<z.input<typeof conditionNode.input>["rules"]>().toEqualTypeOf<ConditionRules>();
 
     const build = () =>
       workflow("typed")

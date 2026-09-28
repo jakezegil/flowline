@@ -288,6 +288,7 @@ helpers:
 | `refOnly` / `literalOnly` | Accepts only a reference, or only a literal. |
 | `oneOfRequired` | Goes on the object schema. Exactly one group of properties must be set, for example `[["duration"], ["until"]]`. |
 | `warnIfEmpty` | Goes on an array. The validator warns with this message if the list is empty. |
+| `operators` | Goes on the `op` enum of condition rules. It lists host rule operators (`{ id, label, arity, types? }`) for the rules widget. `createBuiltinPlugin({ operators })` sets it, so you rarely write it yourself. |
 
 Without a `widget`, a field gets a default control for its schema type. Strings get a text input
 that also accepts references (pills). Numbers and booleans get their own inputs, with a toggle to
