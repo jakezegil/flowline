@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { asSchema, derefSchema } from "./json-schema";
+import { asSchema, derefSchema, discriminatedMember, isDiscriminatedUnion } from "./json-schema";
 import { isRef, isTpl } from "./refs";
 import type { JSONSchema, Literal, ShowIf, UiMeta } from "./types";
 
@@ -106,20 +106,33 @@ export function hiddenFields(
   return hidden;
 }
 
+/** The members of a union schema (`anyOf` / `oneOf`), if it is one. */
+function unionMembers(s: JSONSchema): JSONSchema[] | undefined {
+  const members = Array.isArray(s.anyOf) ? s.anyOf : Array.isArray(s.oneOf) ? s.oneOf : undefined;
+  return members?.map(asSchema);
+}
+
+/** Whether `members` are a nullable wrapper: exactly `[T, null]`. */
+function isNullablePair(root: JSONSchema, members: JSONSchema[]): boolean {
+  return members.length === 2 && members.some((m) => derefSchema(root, m).type === "null");
+}
+
 /** `schema` without a nullable wrapper: `anyOf [T, null]` → `T`. */
 function nonNull(root: JSONSchema, schema: JSONSchema): JSONSchema {
   const s = derefSchema(root, schema);
-  const members = Array.isArray(s.anyOf) ? s.anyOf : undefined;
-  if (members?.length !== 2) return s;
-  const resolved = members.map((m) => derefSchema(root, asSchema(m)));
-  if (!resolved.some((m) => m.type === "null")) return s;
-  return resolved.find((m) => m.type !== "null") ?? s;
+  const members = unionMembers(s);
+  if (!members || !isNullablePair(root, members)) return s;
+  const inner = members.find((m) => derefSchema(root, m).type !== "null");
+  return inner ? derefSchema(root, inner) : s;
 }
 
 /**
- * `value` with the values of hidden fields ({@link hiddenFields}) removed, at every level of
- * objects and arrays that `schema` describes. The engine applies this to a step's resolved
- * config before parsing its input, so handlers never see a hidden field. The argument is not
+ * `value` with the values of hidden fields ({@link hiddenFields}) removed, at every level that
+ * `schema` describes: object properties, map values (`additionalProperties`), array items,
+ * nullable wrappers and discriminated unions (the member the value's discriminator names, as the
+ * validator picks it). A union without a discriminator is left as is; {@link showIfProblems}
+ * rejects `showIf` inside one. The engine applies this to a step's resolved config and to trigger
+ * config before parsing them, so plugin code never sees a hidden field. The argument is not
  * modified.
  *
  * @param root - Schema that `$ref`s resolve against. Defaults to `schema`.
@@ -135,35 +148,55 @@ export function dropHiddenFields(
     return isObject(items) ? value.map((v) => dropHiddenFields(v, items, root)) : value;
   }
   if (!isObject(value)) return value;
+  const members = unionMembers(s);
+  if (members && !isObject(s.properties)) {
+    const member = discriminatedMember(root, members, value);
+    return member ? dropHiddenFields(value, member, root) : value;
+  }
   const props = propertiesOf(s);
-  if (Object.keys(props).length === 0) return value;
+  const extra = isObject(s.additionalProperties) ? s.additionalProperties : undefined;
+  if (Object.keys(props).length === 0 && !extra) return value;
   const hidden = hiddenFields(value, s, root);
   const out: [string, unknown][] = [];
   for (const [k, v] of Object.entries(value)) {
     if (hidden.has(k)) continue;
-    const prop = props[k];
-    out.push([k, isObject(prop) ? dropHiddenFields(v, prop, root) : v]);
+    const sub = Object.hasOwn(props, k) ? props[k] : extra;
+    out.push([k, isObject(sub) ? dropHiddenFields(v, sub, root) : v]);
   }
   return Object.fromEntries(out);
 }
 
 /**
- * Definition errors in the {@link UiMeta.showIf} conditions anywhere in `schema`: a condition
- * whose `field` isn't a sibling property, a conditional field that is required (it must be
- * optional, since a hidden field has no value), and conditions that form a cycle. Empty when
- * all are sound.
+ * Definition errors in the {@link UiMeta.showIf} conditions anywhere in `schema`:
+ * - a condition whose `field` isn't a sibling property;
+ * - a conditional field that is required (it must be optional, since a hidden field has no
+ *   value);
+ * - conditions that form a cycle;
+ * - a condition where {@link dropHiddenFields} can't reach it: inside a union without a
+ *   discriminator, an `allOf` or a tuple (`prefixItems`).
+ *
+ * Empty when all are sound.
  */
 export function showIfProblems(schema: JSONSchema): string[] {
   const problems: string[] = [];
   const seen = new Set<unknown>();
-  const visit = (node: unknown, path: string): void => {
+  const seenUnreachable = new Set<unknown>();
+  const refs = new Set<string>();
+  /** `unreachable`: why hidden values below here can't be dropped, if they can't. */
+  const visit = (node: unknown, path: string, unreachable?: string): void => {
     if (Array.isArray(node)) {
-      for (const item of node) visit(item, path);
+      for (const item of node) visit(item, path, unreachable);
       return;
     }
-    if (!isObject(node) || seen.has(node)) return;
-    seen.add(node);
+    const done = unreachable ? seenUnreachable : seen;
+    if (!isObject(node) || done.has(node)) return;
+    done.add(node);
     const s = node as JSONSchema;
+    // Follow a $ref once per reachability (recursive schemas would loop otherwise).
+    if (typeof s.$ref === "string" && !refs.has(`${unreachable}|${s.$ref}`)) {
+      refs.add(`${unreachable}|${s.$ref}`);
+      visit(derefSchema(schema, s), path, unreachable);
+    }
     const props = propertiesOf(s);
     const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
     const edges = new Map<string, string>();
@@ -171,6 +204,10 @@ export function showIfProblems(schema: JSONSchema): string[] {
     for (const [key, prop] of Object.entries(props)) {
       const cond = showIfOf(prop, schema);
       if (!cond) continue;
+      if (unreachable) {
+        problems.push(`"${at(key)}" has showIf inside ${unreachable}, which isn't supported`);
+        continue;
+      }
       if (!Object.hasOwn(props, cond.field) || cond.field === key) {
         problems.push(`"${at(key)}" has showIf on "${cond.field}", which isn't a sibling field`);
         continue;
@@ -192,12 +229,22 @@ export function showIfProblems(schema: JSONSchema): string[] {
       for (const k of chain) reported.add(k);
       problems.push(`showIf conditions form a cycle: ${[...chain, start].map(at).join(" → ")}`);
     }
-    for (const [key, prop] of Object.entries(props)) visit(prop, at(key));
-    for (const k of ["items", "prefixItems", "additionalProperties", "anyOf", "oneOf", "allOf"]) {
-      visit(s[k], k === "items" || k === "prefixItems" ? `${path}[]` : path);
+    for (const [key, prop] of Object.entries(props)) visit(prop, at(key), unreachable);
+    visit(s.items, `${path}[]`, unreachable);
+    visit(s.additionalProperties, `${path}.*`, unreachable);
+    visit(s.prefixItems, `${path}[]`, unreachable ?? "a tuple (prefixItems)");
+    visit(s.allOf, path, unreachable ?? "an allOf");
+    const members = unionMembers(s);
+    if (members) {
+      const supported = isNullablePair(schema, members) || isDiscriminatedUnion(schema, members);
+      visit(
+        members,
+        path,
+        unreachable ?? (supported ? undefined : "a union without a discriminator"),
+      );
     }
     for (const k of ["$defs", "definitions"]) {
-      if (isObject(s[k])) for (const def of Object.values(s[k])) visit(def, path);
+      if (isObject(s[k])) for (const def of Object.values(s[k])) visit(def, path, unreachable);
     }
   };
   visit(schema, "");

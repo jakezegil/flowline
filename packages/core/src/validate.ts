@@ -6,6 +6,7 @@ import {
   configValueAt,
   derefSchema,
   describeType,
+  discriminatedMember,
   fieldsToJsonSchema,
   isAnySchema,
   isAssignable,
@@ -357,48 +358,6 @@ function isEmptyValue(value: unknown, root: JSONSchema, schema: JSONSchema): boo
   if (value === undefined || value === "") return true;
   if (isTpl(value) && value.$tpl.trim() === "") return true;
   return value === null && !allowsNull(root, schema);
-}
-
-/** A property's constant value (`const`, or a one-value `enum`), if it has one. */
-function constOf(root: JSONSchema, prop: unknown): { value: unknown } | undefined {
-  if (typeof prop !== "object" || prop === null) return undefined;
-  const s = derefSchema(root, prop as JSONSchema);
-  if ("const" in s) return { value: s.const };
-  if (Array.isArray(s.enum) && s.enum.length === 1) return { value: s.enum[0] };
-  return undefined;
-}
-
-/**
- * For a union of objects told apart by a property holding a distinct constant in every member
- * (e.g. `type`), the member whose constant equals the value's; otherwise `undefined`.
- */
-function discriminatedMember(
-  root: JSONSchema,
-  members: readonly JSONSchema[],
-  value: unknown,
-): JSONSchema | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-  const obj = value as Record<string, unknown>;
-  const propsOf = (m: JSONSchema) =>
-    typeof m.properties === "object" && m.properties !== null
-      ? (m.properties as Record<string, unknown>)
-      : undefined;
-  // Members that can't hold an object (e.g. the `null` of a nullable union) take no part.
-  const objects = members
-    .map((m) => ({ m, props: propsOf(derefSchema(root, m)) }))
-    .filter((x): x is { m: JSONSchema; props: Record<string, unknown> } => x.props !== undefined);
-  const first = objects[0];
-  if (!first || objects.length < 2) return undefined;
-  for (const key of Object.keys(first.props)) {
-    if (!(key in obj)) continue;
-    const consts = objects.map((x) => constOf(root, x.props[key]));
-    if (consts.some((c) => c === undefined)) continue;
-    const values = consts.map((c) => JSON.stringify(c?.value));
-    if (new Set(values).size !== values.length) continue;
-    const i = values.indexOf(JSON.stringify(obj[key]));
-    return i >= 0 ? objects[i]?.m : undefined;
-  }
-  return undefined;
 }
 
 function errorCount(r: Reporter): number {

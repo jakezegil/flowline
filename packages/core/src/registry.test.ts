@@ -293,4 +293,19 @@ describe("showIf definitions", () => {
       build(z.object({ d: ui(z.string(), { showIf: { field: "d" } }).optional() })),
     ).toThrow(FlowkitDefinitionError);
   });
+
+  test("showIf is allowed in a discriminated union's members, not in a plain union's", () => {
+    const member = (type: string) =>
+      z.object({
+        type: z.literal(type),
+        mode: z.enum(["a", "b"]).default("a"),
+        extra: ui(z.string(), { showIf: { field: "mode", equals: "b" } }).optional(),
+      });
+    expect(() =>
+      build(z.object({ auth: z.discriminatedUnion("type", [member("key"), member("basic")]) })),
+    ).not.toThrow();
+    expect(() => build(z.object({ auth: z.union([member("key"), z.string()]) }))).toThrow(
+      /"auth.extra" has showIf inside a union without a discriminator/,
+    );
+  });
 });
