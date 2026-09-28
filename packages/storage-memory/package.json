@@ -1,9 +1,9 @@
 {
-  "name": "@flowkit/storage-memory",
+  "name": "@flowline/storage-memory",
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
-  "description": "In-memory StorageAdapter for the Flowkit engine, for tests and quick starts.",
+  "description": "In-memory StorageAdapter for the Flowline engine, for tests and quick starts.",
   "keywords": [
     "workflow",
     "automation",
@@ -13,18 +13,18 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jakezegil/flowkit.git",
+    "url": "git+https://github.com/jakezegil/flowline.git",
     "directory": "packages/storage-memory"
   },
-  "homepage": "https://github.com/jakezegil/flowkit/tree/main/packages/storage-memory#readme",
-  "bugs": "https://github.com/jakezegil/flowkit/issues",
+  "homepage": "https://github.com/jakezegil/flowline/tree/main/packages/storage-memory#readme",
+  "bugs": "https://github.com/jakezegil/flowline/issues",
   "engines": {
     "node": ">=20.18.1"
   },
   "sideEffects": false,
   "exports": {
     ".": {
-      "flowkit-source": "./src/index.ts",
+      "flowline-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
@@ -46,8 +46,8 @@
     "build": "tsup"
   },
   "dependencies": {
-    "@flowkit/engine": "workspace:^",
-    "@flowkit/core": "workspace:^"
+    "@flowline/engine": "workspace:^",
+    "@flowline/core": "workspace:^"
   },
   "devDependencies": {
     "vitest": "5.0.0",

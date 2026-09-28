@@ -1,9 +1,9 @@
 /**
- * `@flowkit/nodes-builtin`: the `core.*` nodes and triggers every Flowkit engine provides.
+ * `@flowline/nodes-builtin`: the `core.*` nodes and triggers every Flowline engine provides.
  *
  * @module
  */
-import { definePlugin, type PluginDefinition } from "@flowkit/core";
+import { definePlugin, type PluginDefinition } from "@flowline/core";
 import { httpRequest } from "./http";
 import { conditionNode, forEachNode, stopNode, switchNode } from "./logic";
 import { callSubflowNode } from "./subflow";

@@ -1,18 +1,18 @@
 # mini-crm
 
-An example CRM that embeds Flowkit. It defines its own `crm` plugin (nodes and triggers over its
-data), ships demo workflows built in code, and serves both its own REST API and the Flowkit engine
+An example CRM that embeds Flowline. It defines its own `crm` plugin (nodes and triggers over its
+data), ships demo workflows built in code, and serves both its own REST API and the Flowline engine
 from one Hono app.
 
 ## Quick start
 
 ```sh
 pnpm install
-pnpm --filter @flowkit/example-mini-crm dev   # or: pnpm --filter ./examples/mini-crm dev
+pnpm --filter @flowline/example-mini-crm dev   # or: pnpm --filter ./examples/mini-crm dev
 ```
 
 `dev` runs the server on `http://localhost:8787` (reloading on change) and the web app on
-`http://localhost:5173`. Vite proxies `/api` and `/flowkit` to the server. Open the web app.
+`http://localhost:5173`. Vite proxies `/api` and `/flowline` to the server. Open the web app.
 
 A two-minute tour:
 
@@ -29,7 +29,7 @@ data.
 
 ## Web app
 
-`web/` is a React app (Vite, React Router 7) that embeds `@flowkit/react` in CRM pages:
+`web/` is a React app (Vite, React Router 7) that embeds `@flowline/react` in CRM pages:
 
 | Page | What it shows |
 | --- | --- |
@@ -42,25 +42,25 @@ data.
 | Outbox | Sent emails with a reading pane, each linking to the run that sent it |
 | Webhook tester | POSTs a JSON body to a webhook workflow, optionally with `X-Request-Id`, and links to the run |
 
-How it wires Flowkit (`web/src/app.tsx`):
+How it wires Flowline (`web/src/app.tsx`):
 
-- One `<FlowkitProvider client={createClient({ baseUrl: "/flowkit" })}>` wraps the app.
+- One `<FlowlineProvider client={createClient({ baseUrl: "/flowline" })}>` wraps the app.
 - `widgets={{ "crm.userSelect": UserSelect }}` renders the plugin's user ID fields (owner,
   approver) as a user picker (`web/src/widgets/user-select.tsx`). `/dev/widgets` shows it in
   every state.
-- `icons` supplies the manifest's icons that Flowkit doesn't bundle.
+- `icons` supplies the manifest's icons that Flowline doesn't bundle.
 - `theme={{ colorMode }}` follows the CRM's light, dark or system setting. The CRM's own colors
-  (`web/src/styles.css`) use the same values as Flowkit's `--fk-*` tokens, so no token overrides
+  (`web/src/styles.css`) use the same values as Flowline's `--fl-*` tokens, so no token overrides
   are needed.
 
 `MINI_CRM_API` points the proxy at another server (default `http://localhost:8787`), and
-`WEB_PORT` changes the web port. `pnpm --filter @flowkit/example-mini-crm build` builds the app
+`WEB_PORT` changes the web port. `pnpm --filter @flowline/example-mini-crm build` builds the app
 into `web/dist`.
 
 ## Server
 
 ```sh
-pnpm --filter @flowkit/example-mini-crm start   # server only; `dev:server` reloads on change
+pnpm --filter @flowline/example-mini-crm start   # server only; `dev:server` reloads on change
 ```
 
 The server listens on `http://localhost:8787` and runs a background worker (`concurrency: 2`,
@@ -87,7 +87,7 @@ against Postgres:
 ### No authentication
 
 **The demo has no authentication.** Every request acts as user `demo-user` of tenant `acme`, both
-on `/api/*` and on `/flowkit/*`. Anyone who can reach the server can read everything, decide
+on `/api/*` and on `/flowline/*`. Anyone who can reach the server can read everything, decide
 approvals and edit workflows. Webhook slugs are visible too.
 
 A production host must authenticate every request with its own session and derive the tenant and
@@ -131,7 +131,7 @@ Treat webhook slugs as credentials, and show them only to users of the owning te
 
 ### REST API
 
-All bodies are JSON (send `content-type: application/json`; the `/flowkit` editor API requires it
+All bodies are JSON (send `content-type: application/json`; the `/flowline` editor API requires it
 on every POST, PUT and PATCH, even a bodyless one). Errors are `{ error }` with one of these
 statuses:
 
@@ -153,9 +153,9 @@ statuses:
 | `POST /api/approvals/:id/decision` `{ decision: "approved" \| "rejected" }` | 202 `{ approval }`, and the waiting run resumes. 409 `{ error, approval }` when it was already decided. 410 `{ error: "gone", approval }` when the run no longer waits, e.g. it was cancelled; the approval becomes `expired` |
 | `GET /api/demo` | `{ tenantId, userId, webhooks }`. `webhooks` maps workflow IDs to webhook paths, e.g. `webhooks["inbound-lead-routing"]` |
 | `POST /api/demo/reset` | 204. Cancels the tenant's unfinished runs, then restores the CRM seed data and empties the outbox and approvals. Workflows are kept |
-| `/flowkit/*` | The Flowkit engine: the editor API (`/flowkit/manifest`, `/flowkit/workflows`, `/flowkit/runs`, ...), webhooks and callbacks |
+| `/flowline/*` | The Flowline engine: the editor API (`/flowline/manifest`, `/flowline/workflows`, `/flowline/runs`, ...), webhooks and callbacks |
 
-To find the runs a CRM change started, list them with `GET /flowkit/runs?workflowId=...`.
+To find the runs a CRM change started, list them with `GET /flowline/runs?workflowId=...`.
 
 **How approvals resume.** An approval stores only the waiting step, as `runId` and `stepPath`. It
 never stores a callback token or resume URL.
@@ -169,7 +169,7 @@ never stores a callback token or resume URL.
    `engine.resumeRun(tenantId, runId, { decision }, userId, { expectStep: stepPath })`. With
    `expectStep`, the engine resumes only the callback wait of that step, checking and resuming in
    one compare-and-set, and answers `"gone"` otherwise. The call records `by` on the
-   `run.resumed` event. Over HTTP the same guard is `POST /flowkit/runs/:id/resume?step=<stepPath>`.
+   `run.resumed` event. Over HTTP the same guard is `POST /flowline/runs/:id/resume?step=<stepPath>`.
 5. If the resume throws while the run still waits at the step, the approval goes back to
    `pending` and the request fails with 500, so the client can retry. If the run stopped waiting
    meanwhile, the approval becomes `expired`.

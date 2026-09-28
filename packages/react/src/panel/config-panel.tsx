@@ -5,13 +5,13 @@
  *
  * @module
  */
-import type { Issue } from "@flowkit/core";
+import type { Issue } from "@flowline/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { CircleOff, Copy, X } from "lucide-react";
 import { type JSX, type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { nodeElement, nodeIdOf } from "../canvas/actions";
 import { EditorContext, useEditorStore, useStep } from "../hooks";
-import { useFlowkitAppearance } from "../provider";
+import { useFlowlineAppearance } from "../provider";
 import { type EditorStore, TRIGGER_KEY } from "../store/editor-store";
 import { Hint } from "../ui/primitives";
 import { IssueNotes } from "./fields/shell";
@@ -25,7 +25,7 @@ type Tab = "configure" | "test";
 
 /** The step or trigger's display name, editable in place (steps only). */
 function PanelTitle({ selection }: { selection: string }): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const info = useStep(selection);
   const rename = useEditorStore((s) => s.renameStep);
   const triggerName = useEditorStore((s) =>
@@ -46,8 +46,8 @@ function PanelTitle({ selection }: { selection: string }): JSX.Element {
 
   if (selection === TRIGGER_KEY || !info) {
     return (
-      <h2 className="fk-cp__name">
-        <span className="fk-cp__name-text" tabIndex={-1} data-autofocus>
+      <h2 className="fl-cp__name">
+        <span className="fl-cp__name-text" tabIndex={-1} data-autofocus>
           {selection === TRIGGER_KEY ? (triggerName ?? labels.triggerTag) : selection}
         </span>
       </h2>
@@ -61,9 +61,9 @@ function PanelTitle({ selection }: { selection: string }): JSX.Element {
   };
   if (editing) {
     return (
-      <h2 className="fk-cp__name">
+      <h2 className="fl-cp__name">
         <input
-          className="fk-input fk-cp__name-input"
+          className="fl-input fl-cp__name-input"
           aria-label={labels.renameStep}
           value={draft}
           placeholder={info.manifest?.name ?? info.step.type}
@@ -87,12 +87,12 @@ function PanelTitle({ selection }: { selection: string }): JSX.Element {
     );
   }
   return (
-    <h2 className="fk-cp__name">
+    <h2 className="fl-cp__name">
       <Hint content={labels.renameStep}>
         <button
           ref={buttonRef}
           type="button"
-          className="fk-cp__name-btn"
+          className="fl-cp__name-btn"
           data-autofocus
           aria-label={`${shown}, ${labels.renameStep}`}
           onClick={() => {
@@ -109,7 +109,7 @@ function PanelTitle({ selection }: { selection: string }): JSX.Element {
 
 /** Icon, name, type and ID of the selection, with the close button. */
 function PanelHeader({ selection, onClose }: { selection: string; onClose(): void }): JSX.Element {
-  const { labels, resolveIcon } = useFlowkitAppearance();
+  const { labels, resolveIcon } = useFlowlineAppearance();
   const info = useStep(selection);
   const trigger = useEditorStore((s) =>
     selection === TRIGGER_KEY
@@ -123,19 +123,19 @@ function PanelHeader({ selection, onClose }: { selection: string; onClose(): voi
   const [copied, setCopied] = useState(false);
   const showType = isTrigger || info?.step.name !== undefined || !info?.manifest;
   return (
-    <div className="fk-panel__head fk-cp__head">
-      <span className="fk-cp__icon" data-kind={isTrigger ? "trigger" : "step"} aria-hidden>
+    <div className="fl-panel__head fl-cp__head">
+      <span className="fl-cp__icon" data-kind={isTrigger ? "trigger" : "step"} aria-hidden>
         <Icon size={18} />
       </span>
-      <div className="fk-cp__titles">
+      <div className="fl-cp__titles">
         <PanelTitle selection={selection} />
-        <div className="fk-cp__meta">
-          {showType && <span className="fk-cp__type">{typeName}</span>}
+        <div className="fl-cp__meta">
+          {showType && <span className="fl-cp__type">{typeName}</span>}
           {!isTrigger && info && (
             <Hint content={copied ? labels.copied : info.step.id}>
               <button
                 type="button"
-                className="fk-cp__id"
+                className="fl-cp__id"
                 aria-label={labels.stepIdCaption(info.step.id)}
                 onClick={() => {
                   try {
@@ -156,12 +156,12 @@ function PanelHeader({ selection, onClose }: { selection: string; onClose(): voi
               </button>
             </Hint>
           )}
-          {isTrigger && !trigger && <span className="fk-cp__type">{triggerType}</span>}
+          {isTrigger && !trigger && <span className="fl-cp__type">{triggerType}</span>}
         </div>
       </div>
       <button
         type="button"
-        className="fk-icon-btn"
+        className="fl-icon-btn"
         aria-label={labels.closePanel}
         onClick={onClose}
       >
@@ -187,7 +187,7 @@ function unclaimed(
 
 /** The Configure tab of a step. */
 function StepConfigure({ stepId }: { stepId: string }): JSX.Element | null {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const info = useStep(stepId);
   const setConfig = useEditorStore((s) => s.setConfig);
   const toggleDisabled = useEditorStore((s) => s.toggleDisabled);
@@ -197,24 +197,24 @@ function StepConfigure({ stepId }: { stepId: string }): JSX.Element | null {
   const { step, manifest } = info;
   const hasFields = schema !== undefined && propertiesOf(schema).some(([, s]) => !metaOf(s).hidden);
   return (
-    <div className="fk-cp__section">
+    <div className="fl-cp__section">
       {step.disabled && (
-        <div className="fk-callout" data-tone="muted" role="note">
+        <div className="fl-callout" data-tone="muted" role="note">
           <CircleOff size={15} aria-hidden />
           <p>{labels.disabledBanner}</p>
           <button
             type="button"
-            className="fk-btn fk-btn--sm"
+            className="fl-btn fl-btn--sm"
             onClick={() => toggleDisabled(stepId)}
           >
             {labels.enableStep}
           </button>
         </div>
       )}
-      {manifest?.description && <p className="fk-cp__desc">{manifest.description}</p>}
+      {manifest?.description && <p className="fl-cp__desc">{manifest.description}</p>}
       <IssueNotes issues={loose} />
       {!manifest ? (
-        <p className="fk-empty-note">{labels.unknownNodeHelp}</p>
+        <p className="fl-empty-note">{labels.unknownNodeHelp}</p>
       ) : hasFields ? (
         <SchemaForm
           schema={manifest.input}
@@ -224,7 +224,7 @@ function StepConfigure({ stepId }: { stepId: string }): JSX.Element | null {
           issues={info.issues}
         />
       ) : (
-        <p className="fk-empty-note">{labels.nothingToConfigure}</p>
+        <p className="fl-empty-note">{labels.nothingToConfigure}</p>
       )}
     </div>
   );
@@ -242,7 +242,7 @@ function PanelTabs({
   onTab(t: Tab): void;
   ids: Record<Tab, { tab: string; panel: string }>;
 }): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const info = useStep(selection);
   const allIssues = useEditorStore((s) => s.issues);
   // The store's test state is the one source of truth, shared with the canvas cards.
@@ -270,14 +270,14 @@ function PanelTabs({
     document.getElementById(ids[next].tab)?.focus();
   };
   return (
-    <div className="fk-tabs" role="tablist" aria-orientation="horizontal" onKeyDown={onKeyDown}>
+    <div className="fl-tabs" role="tablist" aria-orientation="horizontal" onKeyDown={onKeyDown}>
       {tabs.map((t) => (
         <button
           key={t}
           id={ids[t].tab}
           type="button"
           role="tab"
-          className="fk-tab"
+          className="fl-tab"
           aria-selected={tab === t}
           aria-controls={ids[t].panel}
           tabIndex={tab === t ? 0 : -1}
@@ -285,14 +285,14 @@ function PanelTabs({
         >
           {t === "configure" ? labels.configureTab : labels.testTab}
           {t === "configure" && count > 0 && (
-            <span className="fk-tab__badge" data-severity={errors > 0 ? "error" : "warning"}>
+            <span className="fl-tab__badge" data-severity={errors > 0 ? "error" : "warning"}>
               {/* The number is for the eye; assistive tech hears "Configure, 2 issues" (L3). */}
               <span aria-hidden="true">{count}</span>
-              <span className="fk-sr-only">, {labels.issueCount(count)}</span>
+              <span className="fl-sr-only">, {labels.issueCount(count)}</span>
             </span>
           )}
           {t === "test" && testState && (
-            <span className="fk-tab__dot" data-state={testState} aria-hidden />
+            <span className="fl-tab__dot" data-state={testState} aria-hidden />
           )}
         </button>
       ))}
@@ -347,7 +347,7 @@ function PanelContent({
       return;
     }
     const key = store.getState().selection;
-    const app = rootRef.current?.closest<HTMLElement>(".fk-app") ?? null;
+    const app = rootRef.current?.closest<HTMLElement>(".fl-app") ?? null;
     store.getState().select(null);
     if (key)
       requestAnimationFrame(() => nodeElement(app, nodeIdOf(key))?.focus({ preventScroll: true }));
@@ -357,7 +357,7 @@ function PanelContent({
     // biome-ignore lint/a11y/noStaticElementInteractions: Esc anywhere in the panel closes it.
     <div
       ref={rootRef}
-      className="fk-panel__inner fk-cp"
+      className="fl-panel__inner fl-cp"
       onKeyDown={(e) => {
         if (e.key !== "Escape" || e.defaultPrevented) return;
         if (!(e.target instanceof Node) || !rootRef.current?.contains(e.target)) return;
@@ -369,7 +369,7 @@ function PanelContent({
       <PanelTabs selection={selection} tab={tab} onTab={setTab} ids={ids} />
       <div
         key={`b:${selection}:${tab}`}
-        className="fk-panel__body fk-cp__body"
+        className="fl-panel__body fl-cp__body"
         role="tabpanel"
         id={ids[tab].panel}
         aria-labelledby={ids[tab].tab}

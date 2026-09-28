@@ -181,26 +181,26 @@ class PillWidget extends WidgetType {
   override toDOM(): HTMLElement {
     const { info } = this;
     const el = document.createElement("span");
-    el.className = info.stale ? "fk-ref-pill fk-ref-pill--stale" : "fk-ref-pill";
+    el.className = info.stale ? "fl-ref-pill fl-ref-pill--stale" : "fl-ref-pill";
     el.setAttribute("role", "img");
     el.setAttribute("aria-label", this.resolver.ariaLabel(info));
     el.dataset.ref = info.ref;
     const icon = document.createElement("span");
-    icon.className = "fk-ref-pill__icon";
+    icon.className = "fl-ref-pill__icon";
     icon.setAttribute("aria-hidden", "true");
     // Markup, not a React root: CodeMirror may reuse this DOM without destroying the widget.
     fillIcon(icon, this.resolver.icon(info.icon));
     el.append(icon);
     const head = document.createElement("span");
-    head.className = "fk-ref-pill__head";
+    head.className = "fl-ref-pill__head";
     head.textContent = info.head;
     el.append(head);
     if (info.path) {
       const sep = document.createElement("span");
-      sep.className = "fk-ref-pill__sep";
+      sep.className = "fl-ref-pill__sep";
       sep.textContent = "›";
       const path = document.createElement("span");
-      path.className = "fk-ref-pill__path";
+      path.className = "fl-ref-pill__path";
       path.textContent = info.path;
       el.append(sep, path);
     }
@@ -267,23 +267,23 @@ const pillHover = hoverTooltip(
       create() {
         const info = resolver.info(ref);
         const dom = document.createElement("div");
-        dom.className = "fk-ref-card";
+        dom.className = "fl-ref-card";
         const title = document.createElement("div");
-        title.className = "fk-ref-card__title";
+        title.className = "fl-ref-card__title";
         title.textContent = info.label;
         const meta = document.createElement("div");
-        meta.className = "fk-ref-card__meta";
+        meta.className = "fl-ref-card__meta";
         const code = document.createElement("code");
         code.textContent = info.ref;
         const type = document.createElement("span");
-        type.className = "fk-ref-card__type";
+        type.className = "fl-ref-card__type";
         type.textContent = info.type;
         meta.append(code, type);
         dom.append(title, meta);
         const sample = resolver.sample(ref);
         if (sample !== undefined) {
           const row = document.createElement("div");
-          row.className = "fk-ref-card__sample";
+          row.className = "fl-ref-card__sample";
           const label = document.createElement("span");
           label.textContent = resolver.sampleLabel;
           const value = document.createElement("span");
@@ -293,7 +293,7 @@ const pillHover = hoverTooltip(
         }
         if (info.stale) {
           const warn = document.createElement("div");
-          warn.className = "fk-ref-card__warn";
+          warn.className = "fl-ref-card__warn";
           warn.textContent = resolver.staleHint;
           dom.append(warn);
         }

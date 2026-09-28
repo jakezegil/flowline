@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   collectRefs,
-  FlowkitRefError,
+  FlowlineRefError,
   formatRefPath,
   isRef,
   isTpl,
@@ -75,8 +75,8 @@ describe("parseRefPath", () => {
     "run.other",
     "run",
     "",
-  ])("throws FlowkitRefError on bad path %s", (bad) => {
-    expect(() => parseRefPath(bad)).toThrow(FlowkitRefError);
+  ])("throws FlowlineRefError on bad path %s", (bad) => {
+    expect(() => parseRefPath(bad)).toThrow(FlowlineRefError);
   });
 });
 

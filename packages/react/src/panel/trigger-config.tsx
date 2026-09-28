@@ -11,11 +11,11 @@ import {
   type JSONSchema,
   payloadSchemaFor,
   type TriggerManifest,
-} from "@flowkit/core";
+} from "@flowline/core";
 import { Check, Copy, Info, Link2, Zap } from "lucide-react";
 import { type JSX, useEffect, useId, useMemo, useState } from "react";
 import { useEditorStore } from "../hooks";
-import { useFlowkit, useFlowkitAppearance } from "../provider";
+import { useFlowline, useFlowlineAppearance } from "../provider";
 import { TRIGGER_KEY } from "../store/editor-store";
 import { IssueNotes } from "./fields/shell";
 import { deref, typesOf } from "./schema";
@@ -62,8 +62,8 @@ function useCopy(): [boolean, (text: string) => void] {
  * from the last saved version, so the URL shows once the workflow has been saved.
  */
 function WebhookUrl(): JSX.Element {
-  const { client } = useFlowkit();
-  const { labels } = useFlowkitAppearance();
+  const { client } = useFlowline();
+  const { labels } = useFlowlineAppearance();
   const docId = useEditorStore((s) => s.doc.id);
   const docSlug = useEditorStore((s) => s.doc.trigger.config.slug);
   const savedVersion = useEditorStore((s) => s.savedVersion);
@@ -99,30 +99,30 @@ function WebhookUrl(): JSX.Element {
   }
 
   return (
-    <div className="fk-webhook">
-      <div className="fk-webhook__head">
+    <div className="fl-webhook">
+      <div className="fl-webhook__head">
         <Link2 size={14} aria-hidden />
-        <span className="fk-webhook__title">{labels.webhookUrl}</span>
+        <span className="fl-webhook__title">{labels.webhookUrl}</span>
       </div>
       {url ? (
         <>
-          <div className="fk-webhook__row">
+          <div className="fl-webhook__row">
             <input
-              className="fk-input fk-input--code fk-webhook__url"
+              className="fl-input fl-input--code fl-webhook__url"
               readOnly
               value={url}
               aria-label={labels.webhookUrl}
               onFocus={(e) => e.currentTarget.select()}
             />
-            <button type="button" className="fk-btn" onClick={() => copy(url)}>
+            <button type="button" className="fl-btn" onClick={() => copy(url)}>
               {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
               {copied ? labels.copied : labels.copyUrl}
             </button>
           </div>
-          <p className="fk-f__help">{labels.webhookUrlHint}</p>
+          <p className="fl-f__help">{labels.webhookUrlHint}</p>
         </>
       ) : (
-        <p className="fk-webhook__pending">{labels.webhookSaveFirst}</p>
+        <p className="fl-webhook__pending">{labels.webhookSaveFirst}</p>
       )}
     </div>
   );
@@ -130,7 +130,7 @@ function WebhookUrl(): JSX.Element {
 
 /** Trigger type choice, grouped by plugin. */
 function TriggerTypeSelect({ triggers }: { triggers: TriggerManifest[] }): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const id = useId();
   const type = useEditorStore((s) => s.doc.trigger.type);
   const plugins = useEditorStore((s) => s.manifest.plugins);
@@ -141,15 +141,15 @@ function TriggerTypeSelect({ triggers }: { triggers: TriggerManifest[] }): JSX.E
     .filter((g) => g.items.length > 0);
   const ungrouped = triggers.filter((t) => !plugins.some((p) => p.id === t.plugin));
   return (
-    <div className="fk-f">
-      <div className="fk-f__head">
-        <label className="fk-f__label" htmlFor={id}>
+    <div className="fl-f">
+      <div className="fl-f__head">
+        <label className="fl-f__label" htmlFor={id}>
           {labels.triggerType}
         </label>
       </div>
       <select
         id={id}
-        className="fk-input fk-select"
+        className="fl-input fl-select"
         value={type}
         onChange={(e) => setTrigger(e.target.value)}
       >
@@ -175,7 +175,7 @@ function TriggerTypeSelect({ triggers }: { triggers: TriggerManifest[] }): JSX.E
 
 /** The Configure tab of the trigger. */
 export function TriggerConfigure(): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const trigger = useEditorStore((s) => s.doc.trigger);
   const triggers = useEditorStore((s) => s.manifest.triggers);
   const allIssues = useEditorStore((s) => s.issues);
@@ -186,13 +186,13 @@ export function TriggerConfigure(): JSX.Element {
   const hasFields = m && Object.keys((m.config.properties ?? {}) as object).length > 0;
   const showOutput = useHasOutputMapping();
   return (
-    <div className="fk-cp__section">
+    <div className="fl-cp__section">
       <TriggerTypeSelect triggers={triggers} />
-      {m?.description && <p className="fk-cp__desc">{m.description}</p>}
+      {m?.description && <p className="fl-cp__desc">{m.description}</p>}
       <IssueNotes issues={loose} />
       {m?.kind === "webhook" && <WebhookUrl />}
       {m?.kind === "event" && m.event && (
-        <p className="fk-callout" data-tone="info">
+        <p className="fl-callout" data-tone="info">
           <Zap size={15} aria-hidden />
           <span>{labels.eventTriggerHint(m.event)}</span>
         </p>
@@ -289,7 +289,7 @@ export function exampleOf(root: JSONSchema, schema: JSONSchema, key = "", depth 
 
 /** The trigger's Test tab: the sample payload that data pickers and step tests use. */
 export function TriggerSample(): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const trigger = useEditorStore((s) => s.doc.trigger);
   const manifest = useEditorStore((s) => s.manifest);
   const doc = useEditorStore((s) => s.doc);
@@ -322,16 +322,16 @@ export function TriggerSample(): JSX.Element {
   }, [m, doc, manifest, ctx, trigger]);
   const dirty = draft !== stored;
   return (
-    <div className="fk-cp__section">
-      <div className="fk-f">
-        <div className="fk-f__head">
-          <label className="fk-f__label" htmlFor={id}>
+    <div className="fl-cp__section">
+      <div className="fl-f">
+        <div className="fl-f__head">
+          <label className="fl-f__label" htmlFor={id}>
             {m?.kind === "manual" ? labels.manualSample : labels.triggerSample}
           </label>
-          <div className="fk-f__aside">
+          <div className="fl-f__aside">
             <button
               type="button"
-              className="fk-btn fk-btn--sm fk-btn--ghost"
+              className="fl-btn fl-btn--sm fl-btn--ghost"
               onClick={() => setDraft(JSON.stringify(exampleOf(payload, payload), null, 2))}
             >
               {labels.fillFromFields}
@@ -340,7 +340,7 @@ export function TriggerSample(): JSX.Element {
         </div>
         <textarea
           id={id}
-          className="fk-input fk-input--mono fk-sample"
+          className="fl-input fl-input--mono fl-sample"
           rows={12}
           spellCheck={false}
           value={draft}
@@ -348,15 +348,15 @@ export function TriggerSample(): JSX.Element {
           aria-invalid={error || undefined}
           onChange={(e) => setDraft(e.target.value)}
         />
-        {error && <p className="fk-f__local">{labels.invalidJson}</p>}
-        <p className="fk-f__help">
+        {error && <p className="fl-f__local">{labels.invalidJson}</p>}
+        <p className="fl-f__help">
           <Info size={12} aria-hidden /> {labels.triggerSampleHint}
         </p>
       </div>
-      <div className="fk-cp__actions">
+      <div className="fl-cp__actions">
         <button
           type="button"
-          className="fk-btn fk-btn--primary"
+          className="fl-btn fl-btn--primary"
           disabled={error || draft.trim() === "" || !dirty}
           onClick={() => {
             setSample(TRIGGER_KEY, parsed);
@@ -368,7 +368,7 @@ export function TriggerSample(): JSX.Element {
           {savedFlash ? labels.sampleSaved : labels.saveSample}
         </button>
         {dirty && stored !== "" && (
-          <button type="button" className="fk-btn fk-btn--ghost" onClick={() => setDraft(stored)}>
+          <button type="button" className="fl-btn fl-btn--ghost" onClick={() => setDraft(stored)}>
             {labels.cancel}
           </button>
         )}

@@ -6,7 +6,7 @@ export { WorkflowCanvas } from "./canvas/workflow-canvas";
 export { WorkflowEditor } from "./editor/workflow-editor";
 export {
   EditorContext,
-  FlowkitClientContext,
+  FlowlineClientContext,
   type RunChange,
   useDataPicker,
   useEditorStore,
@@ -20,7 +20,7 @@ export {
   useWorkflow,
 } from "./hooks";
 export { bundledIconNames, type IconComponent } from "./icons";
-export { defaultLabels, type FlowkitLabels } from "./labels";
+export { defaultLabels, type FlowlineLabels } from "./labels";
 export {
   BRANCH_GAP,
   CARD_H,
@@ -43,10 +43,10 @@ export {
 export {
   type FieldWidget,
   type FieldWidgetProps,
-  type FlowkitNotice,
-  FlowkitProvider,
+  type FlowlineNotice,
+  FlowlineProvider,
   type NotifyHandler,
-  useFlowkit,
+  useFlowline,
 } from "./provider";
 export { RunList } from "./run/run-list";
 export { buildRunOverlay } from "./run/run-overlay";
@@ -61,5 +61,5 @@ export {
   type TestState,
   TRIGGER_KEY,
 } from "./store/editor-store";
-export type { FlowkitTheme, ThemeToken } from "./theme";
+export type { FlowlineTheme, ThemeToken } from "./theme";
 export type { NotFoundAction } from "./ui/not-found";

@@ -1,15 +1,15 @@
 /**
  * Every piece of text the canvas shows or announces, so hosts can translate it. Pass overrides
- * as `<FlowkitProvider labels={...}>`; anything not overridden uses the English default.
+ * as `<FlowlineProvider labels={...}>`; anything not overridden uses the English default.
  *
  * @module
  */
 
-import type { RunEventType, RunOrigin } from "@flowkit/core";
+import type { RunEventType, RunOrigin } from "@flowline/core";
 import type { RunStepStatus } from "./canvas/canvas-context";
 
 /** The canvas's visible and accessible text. Functions build text that includes values. */
-export interface FlowkitLabels {
+export interface FlowlineLabels {
   // Canvas and controls
   /** Accessible name of the canvas. */
   canvas: string;
@@ -185,7 +185,7 @@ export interface FlowkitLabels {
   noMatches(query: string): string;
   stepCategories: string;
   tabAll: string;
-  /** The tab of Flowkit's built-in nodes. */
+  /** The tab of Flowline's built-in nodes. */
   tabLogic: string;
 
   // Formatting
@@ -429,7 +429,7 @@ export interface FlowkitLabels {
   stoppedAt(step: string): string;
   /**
    * The waiting line of a step the host app resumes (`resume.hostHandled`, e.g. an approval), in
-   * place of {@link FlowkitLabels.waitingForCallback}: "Waiting for a decision · expires in 3 days".
+   * place of {@link FlowlineLabels.waitingForCallback}: "Waiting for a decision · expires in 3 days".
    */
   waitingForDecision(expires: string | undefined): string;
   /** Title of a cancelled run's banner when it was waiting at a step. */
@@ -531,7 +531,7 @@ const add =
   'Press Control+K (Command+K on a Mac) to add a step after this one (what the "+" between steps does), Shift with it to add one before';
 
 /** The English defaults. */
-export const defaultLabels: FlowkitLabels = {
+export const defaultLabels: FlowlineLabels = {
   canvas: "Workflow canvas",
   canvasHelpReadOnly: nav,
   canvasHelp: `${nav} ${add}, Delete to remove it, and Escape to clear the selection.`,
@@ -993,7 +993,7 @@ function relativeTime(deltaMs: number): string {
 }
 
 /** `defaultLabels` with `overrides` applied (record-valued labels merge key by key). */
-export function resolveLabels(overrides: Partial<FlowkitLabels> | undefined): FlowkitLabels {
+export function resolveLabels(overrides: Partial<FlowlineLabels> | undefined): FlowlineLabels {
   if (!overrides) return defaultLabels;
   return {
     ...defaultLabels,

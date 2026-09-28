@@ -25,7 +25,7 @@ import {
   placeholder as placeholderExt,
   tooltips,
 } from "@codemirror/view";
-import { type JSONSchema, parseRefPath, type ScopeEntry, type ValueExpr } from "@flowkit/core";
+import { type JSONSchema, parseRefPath, type ScopeEntry, type ValueExpr } from "@flowline/core";
 import * as Popover from "@radix-ui/react-popover";
 import { Variable } from "lucide-react";
 import {
@@ -41,7 +41,7 @@ import {
   useState,
 } from "react";
 import { PortalContainerContext } from "../canvas/canvas-context";
-import { useFlowkitAppearance } from "../provider";
+import { useFlowlineAppearance } from "../provider";
 import { DataPickerView, type PickerExit, type PickVia } from "./data-picker";
 import { refInputTheme } from "./picker/editor-theme";
 import { jsonToParts, partsToJson } from "./picker/json-parts";
@@ -97,7 +97,7 @@ function tabbableBeside(root: Element, dir: 1 | -1): HTMLElement | null {
       inTabOrder(el) &&
       !(el as HTMLButtonElement).disabled &&
       !el.hasAttribute("data-radix-focus-guard") &&
-      !el.closest("[hidden], [inert], .fk-dp, .fk-ref-popover") &&
+      !el.closest("[hidden], [inert], .fl-dp, .fl-ref-popover") &&
       !root.contains(el),
   );
   const after = (el: Element) =>
@@ -111,9 +111,9 @@ function tabbableBeside(root: Element, dir: 1 | -1): HTMLElement | null {
  * panel has {@link DOCK_ROOM} to its left inside the app (not a bottom sheet or a narrow app).
  */
 function dockBeside(field: HTMLElement): DockRect | undefined {
-  const panel = field.closest(".fk-panel");
+  const panel = field.closest(".fl-panel");
   if (!panel) return undefined;
-  const app = panel.closest(".fk-app") ?? document.documentElement;
+  const app = panel.closest(".fl-app") ?? document.documentElement;
   const p = panel.getBoundingClientRect();
   if (p.width === 0 || p.left - app.getBoundingClientRect().left < DOCK_ROOM) return undefined;
   return () => {
@@ -226,7 +226,7 @@ function docOf(
 
 /** JSON text in the mono font of code. */
 const jsonTheme = EditorView.theme({
-  ".cm-content": { fontFamily: "var(--fk-font-mono)", fontSize: "12px" },
+  ".cm-content": { fontFamily: "var(--fl-font-mono)", fontSize: "12px" },
 });
 
 /**
@@ -281,7 +281,7 @@ export function RefTextInput(props: {
   );
   const onJsonErrorRef = useRef(props.onJsonError);
   onJsonErrorRef.current = props.onJsonError;
-  const { labels, resolveIcon } = useFlowkitAppearance();
+  const { labels, resolveIcon } = useFlowlineAppearance();
   const portal = useContext(PortalContainerContext);
   const id = useId();
   const pickerId = `${id}picker`;
@@ -544,7 +544,7 @@ export function RefTextInput(props: {
   const onExit = (reason: PickerExit) => {
     if (reason === "tab" || reason === "shiftTab") {
       // Tab leaves the field for the next (or previous) control, as it would from the field.
-      const root = fieldRef.current?.closest(".fk-ref-field") ?? null;
+      const root = fieldRef.current?.closest(".fl-ref-field") ?? null;
       const target = root ? tabbableBeside(root, reason === "tab" ? 1 : -1) : null;
       setOpen(false);
       if (target) target.focus();
@@ -585,7 +585,7 @@ export function RefTextInput(props: {
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: focus tracking for the field and its popover
     <div
-      className="fk-ref-field"
+      className="fl-ref-field"
       onFocus={() => {
         setFocused(true);
         if (!quietFocus.current && withPicker) setOpen(true);
@@ -601,17 +601,17 @@ export function RefTextInput(props: {
         <Popover.Anchor virtualRef={anchor} />
         <div
           ref={fieldRef}
-          className="fk-ref"
+          className="fl-ref"
           data-multiline={multiline || undefined}
           data-focused={focused || undefined}
           data-readonly={readOnly || undefined}
           data-single={singlePill || undefined}
         >
-          <div ref={hostRef} className="fk-ref__editor" />
+          <div ref={hostRef} className="fl-ref__editor" />
           {withPicker && (
             <button
               type="button"
-              className="fk-ref__browse"
+              className="fl-ref__browse"
               tabIndex={-1}
               aria-label={labels.browseData}
               aria-expanded={pickerOpen}
@@ -631,12 +631,12 @@ export function RefTextInput(props: {
         </div>
         {pickerOpen && dock === null && (
           // biome-ignore lint/a11y/noStaticElementInteractions: keeps focus in the field while picking
-          <div ref={contentRef} className="fk-ref-inline" onMouseDown={keepFocus}>
+          <div ref={contentRef} className="fl-ref-inline" onMouseDown={keepFocus}>
             {picker}
           </div>
         )}
         {withPicker && (
-          <span id={hintId} className="fk-sr-only">
+          <span id={hintId} className="fl-sr-only">
             {singlePill ? labels.refPickHint : labels.refInputHint(multiline)}
           </span>
         )}
@@ -644,7 +644,7 @@ export function RefTextInput(props: {
           <Popover.Portal container={portal}>
             <Popover.Content
               ref={contentRef}
-              className="fk-ref-popover"
+              className="fl-ref-popover"
               data-docked=""
               side="left"
               align="start"

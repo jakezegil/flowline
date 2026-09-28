@@ -3,11 +3,11 @@ import type { FieldDecl, UiMeta } from "./types";
 import { assertZod4 } from "./zod-check";
 
 /** JSON Schema / Zod metadata key under which {@link UiMeta} travels. */
-export const UI_META_KEY = "x-flowkit";
+export const UI_META_KEY = "x-flowline";
 
 /**
  * Attach editor hints to a field schema. The hints travel in the manifest's JSON Schema under
- * `"x-flowkit"` on the property. Calling `ui` on a schema that already has hints merges them
+ * `"x-flowline"` on the property. Calling `ui` on a schema that already has hints merges them
  * (later keys win). Returns a new schema of the same type; the argument is not modified, so one
  * base schema can be reused with different hints.
  *

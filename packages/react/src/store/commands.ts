@@ -1,5 +1,5 @@
 /**
- * Pure document commands used by the editor store, built on `@flowkit/core`'s immutable tree
+ * Pure document commands used by the editor store, built on `@flowline/core`'s immutable tree
  * operations. Nothing here mutates its inputs.
  *
  * @module
@@ -8,7 +8,7 @@
 import {
   branchesFor,
   duplicateStep,
-  FlowkitTreeError,
+  FlowlineTreeError,
   findStep,
   type JSONSchema,
   type NodeManifest,
@@ -16,7 +16,7 @@ import {
   updateStep,
   type ValueExpr,
   type WorkflowDoc,
-} from "@flowkit/core";
+} from "@flowline/core";
 
 /**
  * Initial config for a new step or trigger: the `default` of each top-level property of the
@@ -73,11 +73,11 @@ export function createStep(id: string, m: NodeManifest): Step {
  * {@link syncBranches}). The canvas still shows them and the validator flags them
  * (`branch.unknown`), which blocks publishing until the user moves or deletes those steps.
  *
- * @throws {FlowkitTreeError} If `id` doesn't exist.
+ * @throws {FlowlineTreeError} If `id` doesn't exist.
  */
 export function replaceStepType(doc: WorkflowDoc, id: string, m: NodeManifest): WorkflowDoc {
   const found = findStep(doc, id);
-  if (!found) throw new FlowkitTreeError(`Step "${id}" not found`);
+  if (!found) throw new FlowlineTreeError(`Step "${id}" not found`);
   const old = found.step;
   const replaced = syncBranches(
     {

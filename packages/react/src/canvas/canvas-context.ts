@@ -6,12 +6,12 @@
  * @module
  */
 
-import type { StepLocation } from "@flowkit/core";
+import type { StepLocation } from "@flowline/core";
 import { createContext, useContext } from "react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import type { FlowkitLabels } from "../labels";
-import type { FlowkitNotice, NotifyHandler } from "../provider";
+import type { FlowlineLabels } from "../labels";
+import type { FlowlineNotice, NotifyHandler } from "../provider";
 import { notifyHost } from "../ui/toaster";
 
 /** Per-step run state shown on the canvas in run mode. */
@@ -74,8 +74,8 @@ export interface Toast {
 /** The canvas' UI state. */
 export interface CanvasUiState {
   readOnly: boolean;
-  /** The UI text (from `<FlowkitProvider labels>`, else English). */
-  labels: FlowkitLabels;
+  /** The UI text (from `<FlowlineProvider labels>`, else English). */
+  labels: FlowlineLabels;
   overlay: RunOverlay | undefined;
   /** The open picker and the element it is anchored to. */
   picker: { request: PickerRequest; anchor: HTMLElement | null } | null;
@@ -107,7 +107,7 @@ export const TOAST_MS = 5000;
 export function createCanvasUiStore(init: {
   readOnly: boolean;
   overlay: RunOverlay | undefined;
-  labels: FlowkitLabels;
+  labels: FlowlineLabels;
   notify?: NotifyHandler;
 }): CanvasUiStore {
   let nextToast = 1;
@@ -126,7 +126,7 @@ export function createCanvasUiStore(init: {
       if (get().renaming !== null) set({ renaming: null });
     },
     toast(message, action) {
-      const notice: FlowkitNotice = {
+      const notice: FlowlineNotice = {
         message,
         tone: "neutral",
         source: "canvas",
@@ -148,10 +148,10 @@ export function createCanvasUiStore(init: {
 /** The canvas UI store of the enclosing canvas. */
 export const CanvasUiContext = createContext<CanvasUiStore | null>(null);
 
-/** The element Radix portals render into (inside `.fk-root`, so theme tokens apply). */
+/** The element Radix portals render into (inside `.fl-root`, so theme tokens apply). */
 export const PortalContainerContext = createContext<HTMLElement | null>(null);
 
-/** Returns the canvas root element (`.fk-root`), for focusing and anchoring to nodes. */
+/** Returns the canvas root element (`.fl-root`), for focusing and anchoring to nodes. */
 export const RootElementContext = createContext<() => HTMLElement | null>(() => null);
 
 /** The enclosing canvas' UI store. */
@@ -167,6 +167,6 @@ export function useCanvasUi<T>(selector: (s: CanvasUiState & CanvasUiActions) =>
 }
 
 /** The UI text of the enclosing canvas. */
-export function useLabels(): FlowkitLabels {
+export function useLabels(): FlowlineLabels {
   return useCanvasUi((s) => s.labels);
 }

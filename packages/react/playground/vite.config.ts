@@ -8,6 +8,6 @@ export default defineConfig({
   plugins: [react()],
   // Run workspace packages from `src` (see /source-conditions.ts; inlined here because this
   // package's tsconfig `rootDir` can't reach the repo root).
-  resolve: { conditions: ["flowkit-source", ...defaultClientConditions] },
+  resolve: { conditions: ["flowline-source", ...defaultClientConditions] },
   server: { port: 5174, strictPort: false },
 });

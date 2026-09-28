@@ -12,7 +12,7 @@
  */
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP, type LookupFunction } from "node:net";
-import { isPrivateAddress, type Logger, normalizeHost } from "@flowkit/core";
+import { isPrivateAddress, type Logger, normalizeHost } from "@flowline/core";
 import { Agent, fetch as undiciFetch } from "undici";
 import { FatalError, RetryableError } from "./errors";
 

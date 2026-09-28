@@ -1,6 +1,6 @@
 import { acceptCompletion, currentCompletions } from "@codemirror/autocomplete";
 import { deleteCharBackward, redo, undo } from "@codemirror/commands";
-import type { ScopeEntry, ValueExpr } from "@flowkit/core";
+import type { ScopeEntry, ValueExpr } from "@flowline/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -37,7 +37,7 @@ function setup(props: Props = {}) {
   return { onChange, view: () => editorView("Subject") };
 }
 
-const pills = () => Array.from(document.querySelectorAll(".fk-ref-pill"));
+const pills = () => Array.from(document.querySelectorAll(".fl-ref-pill"));
 
 /** Focuses the editor (opening the picker) and clicks the picker row whose text starts with `name`. */
 function pickRow(name: string) {
@@ -101,9 +101,9 @@ describe("RefTextInput", () => {
       invalidRefs: new Set(["steps.load.email"]),
     });
     const [gone, name, flagged] = pills();
-    expect(gone?.classList.contains("fk-ref-pill--stale")).toBe(true);
-    expect(name?.classList.contains("fk-ref-pill--stale")).toBe(false);
-    expect(flagged?.classList.contains("fk-ref-pill--stale")).toBe(true);
+    expect(gone?.classList.contains("fl-ref-pill--stale")).toBe(true);
+    expect(name?.classList.contains("fl-ref-pill--stale")).toBe(false);
+    expect(flagged?.classList.contains("fl-ref-pill--stale")).toBe(true);
     expect(gone?.getAttribute("aria-label")).toBe("gone › id: not available here");
   });
 
@@ -540,8 +540,8 @@ describe("RefTextInput", () => {
   describe("I4: Tab moves on from a picker field, never back into it", () => {
     function form() {
       render(
-        <div className="fk-app">
-          <div className="fk-panel">
+        <div className="fl-app">
+          <div className="fl-panel">
             <input aria-label="Before" />
             <RefTextInput
               ariaLabel="Subject"
@@ -559,8 +559,8 @@ describe("RefTextInput", () => {
       vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
         this: Element,
       ) {
-        if (this.classList.contains("fk-panel")) return DOMRect.fromRect({ x: 800, width: 400 });
-        if (this.classList.contains("fk-app")) return DOMRect.fromRect({ x: 0, width: 1200 });
+        if (this.classList.contains("fl-panel")) return DOMRect.fromRect({ x: 800, width: 400 });
+        if (this.classList.contains("fl-app")) return DOMRect.fromRect({ x: 0, width: 1200 });
         return DOMRect.fromRect({ x: 816, y: 200, width: 368, height: 32 });
       });
 
@@ -572,7 +572,7 @@ describe("RefTextInput", () => {
           focus();
           const search = await screen.findByRole("combobox", { name: "Search data" });
           expect(search.tabIndex).toBe(-1);
-          expect(Boolean(search.closest(".fk-ref-inline"))).toBe(mode === "inline");
+          expect(Boolean(search.closest(".fl-ref-inline"))).toBe(mode === "inline");
           search.focus();
           fireEvent.keyDown(search, { key: "Tab" });
           expect(document.activeElement).toBe(screen.getByLabelText("Timeout"));
@@ -611,8 +611,8 @@ describe("RefTextInput", () => {
         );
         try {
           render(
-            <div className="fk-app">
-              <div className="fk-panel">
+            <div className="fl-app">
+              <div className="fl-panel">
                 {field("To")}
                 {field("Subject")}
                 {/* A Radix focus guard, as a portaled popover adds: never a destination. */}
@@ -650,8 +650,8 @@ describe("RefTextInput", () => {
   describe("placement (H1): the picker never covers the next field", () => {
     function form() {
       render(
-        <div className="fk-app">
-          <div className="fk-panel">
+        <div className="fl-app">
+          <div className="fl-panel">
             <RefTextInput
               ariaLabel="Subject"
               scope={scope}
@@ -669,15 +669,15 @@ describe("RefTextInput", () => {
       form();
       focus();
       const tree = await screen.findByRole("tree");
-      const inline = tree.closest(".fk-ref-inline");
+      const inline = tree.closest(".fl-ref-inline");
       expect(inline).toBeTruthy();
-      expect(inline?.closest(".fk-ref-field")).toBeTruthy();
+      expect(inline?.closest(".fl-ref-field")).toBeTruthy();
       const next = screen.getByLabelText("Timeout");
       // In the flow of the form, above the next field: it pushes it down rather than covering it.
       expect(inline?.compareDocumentPosition(next) ?? 0).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       // Pressing inside the picker keeps focus in the field.
       const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
-      inline?.querySelector(".fk-dp__foot")?.dispatchEvent(press);
+      inline?.querySelector(".fl-dp__foot")?.dispatchEvent(press);
       expect(press.defaultPrevented).toBe(true);
       // Moving to another field closes it.
       const content = document.querySelector(".cm-content") as HTMLElement;
@@ -691,18 +691,18 @@ describe("RefTextInput", () => {
       const rects = vi
         .spyOn(Element.prototype, "getBoundingClientRect")
         .mockImplementation(function (this: Element) {
-          if (this.classList.contains("fk-panel")) return DOMRect.fromRect({ x: 800, width: 400 });
-          if (this.classList.contains("fk-app")) return DOMRect.fromRect({ x: 0, width: 1200 });
+          if (this.classList.contains("fl-panel")) return DOMRect.fromRect({ x: 800, width: 400 });
+          if (this.classList.contains("fl-app")) return DOMRect.fromRect({ x: 0, width: 1200 });
           return DOMRect.fromRect({ x: 816, y: 200, width: 368, height: 32 });
         });
       try {
         form();
         focus();
         const tree = await screen.findByRole("tree");
-        const popover = tree.closest(".fk-ref-popover");
+        const popover = tree.closest(".fl-ref-popover");
         expect(popover?.hasAttribute("data-docked")).toBe(true);
-        expect(document.querySelector(".fk-ref-inline")).toBeNull();
-        expect(popover?.closest(".fk-panel")).toBeNull();
+        expect(document.querySelector(".fl-ref-inline")).toBeNull();
+        expect(popover?.closest(".fl-panel")).toBeNull();
       } finally {
         rects.mockRestore();
       }

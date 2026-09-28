@@ -1,7 +1,7 @@
 /**
  * The `crm.userSelect` config field widget: picks a CRM user for user ID fields (a deal's owner,
  * an approval's approver). The server's plugin names it with `ui(..., { widget: "crm.userSelect" })`
- * and the app registers it on `<FlowkitProvider widgets>`.
+ * and the app registers it on `<FlowlineProvider widgets>`.
  *
  * It is a native `<select>` under a styled face (avatar, name, role), so keyboard use and screen
  * readers work as with any select. A value mapped from workflow data (`{ $ref }` or `{ $tpl }`)
@@ -9,8 +9,8 @@
  *
  * @module
  */
-import type { ValueExpr } from "@flowkit/core";
-import type { FieldWidgetProps } from "@flowkit/react";
+import type { ValueExpr } from "@flowline/core";
+import type { FieldWidgetProps } from "@flowline/react";
 import { Braces, ChevronsUpDown, TriangleAlert } from "lucide-react";
 import { type JSX, useId } from "react";
 import { type User, useUsers } from "../api";

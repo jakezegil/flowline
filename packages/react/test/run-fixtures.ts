@@ -7,7 +7,7 @@ import type {
   RunEvent,
   RunStatus,
   WorkflowDoc,
-} from "@flowkit/core";
+} from "@flowline/core";
 import { docWith, manifest, step } from "./fixtures";
 
 /**

@@ -5,12 +5,12 @@
  *
  * @module
  */
-import type { SubflowInfo } from "@flowkit/core";
-import type { FlowkitClient } from "@flowkit/core/client";
+import type { SubflowInfo } from "@flowline/core";
+import type { FlowlineClient } from "@flowline/core/client";
 import { KeyRound, RotateCw } from "lucide-react";
 import { type JSX, useContext, useEffect, useId, useState, useSyncExternalStore } from "react";
 import { EditorContext } from "../../hooks";
-import { useFlowkit, useFlowkitAppearance } from "../../provider";
+import { useFlowline, useFlowlineAppearance } from "../../provider";
 import { errorText } from "../../ui/primitives";
 import { FieldShell } from "../fields/shell";
 import { type FieldProps, useFormEnv } from "../form-context";
@@ -19,7 +19,7 @@ import { asObject, NestedForm, ObjectFields, withKey } from "../schema-form";
 
 type ListKey = "secrets" | "subflows";
 type Entry = { promise: Promise<unknown>; at: number };
-const cache = new WeakMap<FlowkitClient, Map<ListKey, Entry>>();
+const cache = new WeakMap<FlowlineClient, Map<ListKey, Entry>>();
 /** A cached list older than this is fetched again when a field needing it mounts or is focused. */
 const STALE_MS = 15_000;
 
@@ -31,9 +31,9 @@ const STALE_MS = 15_000;
  */
 function useServerList<T>(
   key: ListKey,
-  load: (c: FlowkitClient) => Promise<T>,
+  load: (c: FlowlineClient) => Promise<T>,
 ): { data?: T; error?: string; retry(): void; refresh(): void } {
-  const { client } = useFlowkit();
+  const { client } = useFlowline();
   const [state, setState] = useState<{ data?: T; error?: string }>({});
   const [attempt, setAttempt] = useState(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` re-runs the load on retry and refresh.
@@ -72,11 +72,11 @@ function useServerList<T>(
 }
 
 function LoadError({ message, retry }: { message: string; retry(): void }): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   return (
-    <p className="fk-f__local fk-load-error">
+    <p className="fl-f__local fl-load-error">
       {labels.loadFailed(message)}
-      <button type="button" className="fk-link-btn" onClick={retry}>
+      <button type="button" className="fl-link-btn" onClick={retry}>
         <RotateCw size={12} aria-hidden />
         {labels.tryAgain}
       </button>
@@ -87,7 +87,7 @@ function LoadError({ message, retry }: { message: string; retry(): void }): JSX.
 /** The `"secret"` widget: a choice of configured secret names (never values). */
 export function SecretWidget(p: FieldProps): JSX.Element {
   const env = useFormEnv();
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const id = useId();
   const secrets = useServerList("secrets", (c) => c.listSecrets());
   const value = typeof p.value === "string" ? p.value : "";
@@ -106,7 +106,7 @@ export function SecretWidget(p: FieldProps): JSX.Element {
         <>
           <input
             id={id}
-            className="fk-input fk-input--code"
+            className="fl-input fl-input--code"
             value={value}
             placeholder={labels.chooseSecret}
             readOnly={env.readOnly}
@@ -115,11 +115,11 @@ export function SecretWidget(p: FieldProps): JSX.Element {
           <LoadError message={secrets.error} retry={secrets.retry} />
         </>
       ) : (
-        <div className="fk-select-wrap">
-          <KeyRound size={14} className="fk-select-wrap__icon" aria-hidden />
+        <div className="fl-select-wrap">
+          <KeyRound size={14} className="fl-select-wrap__icon" aria-hidden />
           <select
             id={id}
-            className="fk-input fk-select fk-select--icon"
+            className="fl-input fl-select fl-select--icon"
             value={value}
             disabled={env.readOnly || secrets.data === undefined}
             aria-invalid={missing || undefined}
@@ -173,7 +173,7 @@ function useSubflows(): {
 /** The `"subflowSelect"` widget: a choice of published workflows with a sub-flow trigger. */
 export function SubflowSelectWidget(p: FieldProps): JSX.Element {
   const env = useFormEnv();
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const id = useId();
   const self = useCurrentWorkflowId();
   const subflows = useSubflows();
@@ -192,7 +192,7 @@ export function SubflowSelectWidget(p: FieldProps): JSX.Element {
     >
       <select
         id={id}
-        className="fk-input fk-select"
+        className="fl-input fl-select"
         value={value}
         disabled={env.readOnly || subflows.data === undefined}
         aria-invalid={missing || undefined}
@@ -217,7 +217,7 @@ export function SubflowSelectWidget(p: FieldProps): JSX.Element {
         <LoadError message={subflows.error} retry={subflows.retry} />
       )}
       {subflows.data !== undefined && options.length === 0 && (
-        <p className="fk-f__help">{labels.noSubflows}</p>
+        <p className="fl-f__help">{labels.noSubflows}</p>
       )}
     </FieldShell>
   );
@@ -229,7 +229,7 @@ export function SubflowSelectWidget(p: FieldProps): JSX.Element {
  */
 export function SubflowInputWidget(p: FieldProps): JSX.Element {
   const env = useFormEnv();
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const store = useContext(EditorContext);
   const subflows = useSubflows();
   const selectKey = propertiesOf(env.root).find(
@@ -251,15 +251,15 @@ export function SubflowInputWidget(p: FieldProps): JSX.Element {
       bare={p.bare}
     >
       {id === undefined ? (
-        <p className="fk-empty-note">{labels.subflowFirst}</p>
+        <p className="fl-empty-note">{labels.subflowFirst}</p>
       ) : input === undefined ? (
-        <p className="fk-empty-note">
+        <p className="fl-empty-note">
           {subflows.error ? labels.loadFailed(subflows.error) : labels.loading}
         </p>
       ) : !hasFields ? (
-        <p className="fk-empty-note">{labels.subflowNoInput}</p>
+        <p className="fl-empty-note">{labels.subflowNoInput}</p>
       ) : (
-        <div className="fk-nest">
+        <div className="fl-nest">
           <NestedForm env={{ root: input }}>
             <ObjectFields
               schema={input}

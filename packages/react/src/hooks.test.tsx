@@ -1,12 +1,12 @@
-import type { RunDetail, RunEvent } from "@flowkit/core";
-import type { FlowkitClient } from "@flowkit/core/client";
+import type { RunDetail, RunEvent } from "@flowline/core";
+import type { FlowlineClient } from "@flowline/core/client";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { docWith, fixtureDoc, manifest, step } from "../test/fixtures";
 import {
   EditorContext,
-  FlowkitClientContext,
+  FlowlineClientContext,
   unreachableIds,
   useDataPicker,
   useIssues,
@@ -96,7 +96,7 @@ describe("useRun", () => {
         listener = onEvent;
         return unsubscribe;
       }),
-    } as unknown as FlowkitClient;
+    } as unknown as FlowlineClient;
     return { client, unsubscribe, emit: () => listener?.({} as RunEvent) };
   }
 
@@ -104,7 +104,7 @@ describe("useRun", () => {
     const { client, unsubscribe, emit } = fakeClient();
     const { result, unmount } = renderHook(() => useRun("r1"), {
       wrapper: ({ children }) => (
-        <FlowkitClientContext.Provider value={client}>{children}</FlowkitClientContext.Provider>
+        <FlowlineClientContext.Provider value={client}>{children}</FlowlineClientContext.Provider>
       ),
     });
     expect(result.current.loading).toBe(true);
@@ -134,7 +134,7 @@ describe("useRun", () => {
     });
     const { result } = renderHook(() => useRun("r1"), {
       wrapper: ({ children }) => (
-        <FlowkitClientContext.Provider value={client}>{children}</FlowkitClientContext.Provider>
+        <FlowlineClientContext.Provider value={client}>{children}</FlowlineClientContext.Provider>
       ),
     });
     await waitFor(() => expect(result.current.detail).toBeDefined());
@@ -153,7 +153,7 @@ describe("useRun", () => {
     const { client } = fakeClient();
     const { result } = renderHook(() => useRun("r1"), {
       wrapper: ({ children }) => (
-        <FlowkitClientContext.Provider value={client}>{children}</FlowkitClientContext.Provider>
+        <FlowlineClientContext.Provider value={client}>{children}</FlowlineClientContext.Provider>
       ),
     });
     await waitFor(() => expect(result.current.detail).toBeDefined());

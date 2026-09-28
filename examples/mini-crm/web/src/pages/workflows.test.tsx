@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import type { Manifest, WorkflowDoc } from "@flowkit/core";
-import { createClient } from "@flowkit/core/client";
-import { FlowkitProvider } from "@flowkit/react";
+import type { Manifest, WorkflowDoc } from "@flowline/core";
+import { createClient } from "@flowline/core/client";
+import { FlowlineProvider } from "@flowline/react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
@@ -10,7 +10,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 const saveWorkflow = vi.fn(async (_doc: WorkflowDoc) => ({}));
 vi.mock("../api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api")>()),
-  flowkit: { saveWorkflow: (doc: WorkflowDoc) => saveWorkflow(doc) },
+  flowline: { saveWorkflow: (doc: WorkflowDoc) => saveWorkflow(doc) },
 }));
 
 const { NewWorkflowDialog, defaultTrigger, slugify, triggersFor } = await import("./workflows");
@@ -43,11 +43,11 @@ afterEach(() => {
 
 function renderDialog() {
   render(
-    <FlowkitProvider client={createClient({ baseUrl: "/flowkit" })}>
+    <FlowlineProvider client={createClient({ baseUrl: "/flowline" })}>
       <MemoryRouter>
         <NewWorkflowDialog open onClose={() => {}} manifest={MANIFEST} taken={new Set()} />
       </MemoryRouter>
-    </FlowkitProvider>,
+    </FlowlineProvider>,
   );
 }
 
@@ -92,7 +92,7 @@ describe("New workflow dialog", () => {
 
   it("says so, and cannot create, when the app has no trigger of the kind", async () => {
     render(
-      <FlowkitProvider client={createClient({ baseUrl: "/flowkit" })}>
+      <FlowlineProvider client={createClient({ baseUrl: "/flowline" })}>
         <MemoryRouter>
           <NewWorkflowDialog
             open
@@ -101,7 +101,7 @@ describe("New workflow dialog", () => {
             taken={new Set()}
           />
         </MemoryRouter>
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     await userEvent.click(screen.getByRole("radio", { name: /^Sub-flow/ }));
     await userEvent.type(screen.getByLabelText("Name"), "Get or create contact");

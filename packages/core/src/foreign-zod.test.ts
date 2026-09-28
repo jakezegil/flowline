@@ -1,17 +1,17 @@
 /**
- * Ruling 73: a schema built by a second copy of zod whose flowkit metadata core can't read is a
+ * Ruling 73: a schema built by a second copy of zod whose flowline metadata core can't read is a
  * definition error, never a silently dropped secret()/sensitive() guard.
  */
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { z as z3 } from "zod/v3";
-import { defineNode, definePlugin, FlowkitDefinitionError } from "./define";
+import { defineNode, definePlugin, FlowlineDefinitionError } from "./define";
 import { createRegistry } from "./registry";
 import { secret, sensitive, ui } from "./ui";
 
 /**
  * A stand-in for a schema built by another zod copy (e.g. the host's, next to a `link:`ed
- * flowkit's): its `.meta()` reads that copy's own registry, which core's zod never sees.
+ * flowline's): its `.meta()` reads that copy's own registry, which core's zod never sees.
  */
 function fromForeignZod<T extends z.ZodType>(
   schema: T,
@@ -36,7 +36,7 @@ const nodeWith = (input: z.ZodObject) =>
   ]);
 
 describe("schemas from a different zod copy", () => {
-  const secretMeta = { "x-flowkit": { secret: true, widget: "secret", literalOnly: true } };
+  const secretMeta = { "x-flowline": { secret: true, widget: "secret", literalOnly: true } };
 
   test("a secret field whose metadata core's zod can't read is a definition error", () => {
     const input = z.object({
@@ -44,7 +44,7 @@ describe("schemas from a different zod copy", () => {
       apiKey: fromForeignZod(z.string().min(3), secretMeta),
     });
     const build = () => nodeWith(input).manifest();
-    expect(build).toThrow(FlowkitDefinitionError);
+    expect(build).toThrow(FlowlineDefinitionError);
     expect(build).toThrow(/field "apiKey" of the input schema of "host.call"/);
     expect(build).toThrow(/different copy of zod \(4\.1\.0\)/);
     expect(build).toThrow(/pnpm dedupe/);
@@ -53,13 +53,13 @@ describe("schemas from a different zod copy", () => {
   test("so is a sensitive or ui() field, nested or wrapped, even from the same zod version", () => {
     const sensitiveField = fromForeignZod(
       z.string(),
-      { "x-flowkit": { sensitive: true } },
+      { "x-flowline": { sensitive: true } },
       z.core.version,
     );
     const input = z.object({ person: z.object({ ssn: sensitiveField.optional() }) });
     expect(() => nodeWith(input).manifest()).toThrow(/field "person.ssn"/);
 
-    const labelled = fromForeignZod(z.number(), { "x-flowkit": { label: "Count" } });
+    const labelled = fromForeignZod(z.number(), { "x-flowline": { label: "Count" } });
     expect(() => nodeWith(z.object({ items: z.array(labelled) })).manifest()).toThrow(
       /field "items\[\]"/,
     );
@@ -83,9 +83,9 @@ describe("schemas from a different zod copy", () => {
       () => secret(zod3),
       () => sensitive(zod3),
     ]) {
-      expect(call).toThrow(FlowkitDefinitionError);
+      expect(call).toThrow(FlowlineDefinitionError);
       expect(call).toThrow(
-        /ui\(\) \(or secret\(\)\/sensitive\(\)\) got a zod 3 schema, but flowkit requires zod ≥4 \(@flowkit\/core uses zod 4\.\d+\.\d+\)/,
+        /ui\(\) \(or secret\(\)\/sensitive\(\)\) got a zod 3 schema, but flowline requires zod ≥4 \(@flowline\/core uses zod 4\.\d+\.\d+\)/,
       );
       expect(call).toThrow(/upgrade to zod 4/);
       expect(call).toThrow(/pnpm dedupe/);
@@ -95,7 +95,7 @@ describe("schemas from a different zod copy", () => {
   test("a zod 3 input schema, or a zod 3 field in a zod 4 object, names what was found", () => {
     const whole = z3.object({ name: z3.string() }) as unknown as z.ZodObject;
     expect(() => nodeWith(whole).manifest()).toThrow(
-      /^The input schema of "host\.call" got a zod 3 schema, but flowkit requires zod ≥4/,
+      /^The input schema of "host\.call" got a zod 3 schema, but flowline requires zod ≥4/,
     );
 
     const mixed = z.object({
@@ -117,7 +117,7 @@ describe("schemas from a different zod copy", () => {
     });
     expect(() => nodeWith(input).manifest()).not.toThrow();
     expect(nodeWith(input).manifest().nodes[0]?.input.properties).toMatchObject({
-      key: { "x-flowkit": { secret: true } },
+      key: { "x-flowline": { secret: true } },
     });
   });
 });

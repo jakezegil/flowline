@@ -7,7 +7,7 @@
 
 import { Check, ChevronRight, Copy, Lock } from "lucide-react";
 import { type JSX, useState } from "react";
-import { useFlowkitAppearance } from "../provider";
+import { useFlowlineAppearance } from "../provider";
 import { Hint } from "./primitives";
 
 /** The engine's placeholder for masked secret and sensitive values. */
@@ -18,7 +18,7 @@ const OPEN_DEPTH = 2;
 
 /** A JSON value as an expandable tree, with a "Copy JSON" button. */
 export function JsonTree({ value, label }: { value: unknown; label?: string }): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const [copied, setCopied] = useState(false);
   const copy = () => {
     const text = JSON.stringify(value, null, 2) ?? "undefined";
@@ -36,17 +36,17 @@ export function JsonTree({ value, label }: { value: unknown; label?: string }): 
     }
   };
   return (
-    <figure className="fk-json" aria-label={label}>
+    <figure className="fl-json" aria-label={label}>
       <button
         type="button"
-        className="fk-json__copy"
+        className="fl-json__copy"
         onClick={copy}
         aria-label={copied ? labels.copied : labels.copyJson}
       >
         {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
         <span>{copied ? labels.copied : labels.copyJson}</span>
       </button>
-      <div className="fk-json__body">
+      <div className="fl-json__body">
         <JsonNode value={value} depth={0} />
       </div>
     </figure>
@@ -54,13 +54,13 @@ export function JsonTree({ value, label }: { value: unknown; label?: string }): 
 }
 
 function JsonNode({ name, value, depth }: { name?: string; value: unknown; depth: number }) {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const [open, setOpen] = useState(depth < OPEN_DEPTH);
   const key =
     name !== undefined ? (
-      <span className="fk-json__key">
+      <span className="fl-json__key">
         {name}
-        <span className="fk-json__colon">:</span>
+        <span className="fl-json__colon">:</span>
       </span>
     ) : null;
 
@@ -72,40 +72,40 @@ function JsonNode({ name, value, depth }: { name?: string; value: unknown; depth
     const count = isArray ? labels.items(entries.length) : labels.keys(entries.length);
     if (entries.length === 0) {
       return (
-        <div className="fk-json__row">
+        <div className="fl-json__row">
           {key}
-          <span className="fk-json__punct">{isArray ? "[]" : "{}"}</span>
+          <span className="fl-json__punct">{isArray ? "[]" : "{}"}</span>
         </div>
       );
     }
     return (
-      <div className="fk-json__group">
+      <div className="fl-json__group">
         <button
           type="button"
-          className="fk-json__row fk-json__toggle"
+          className="fl-json__row fl-json__toggle"
           aria-expanded={open}
           aria-label={`${name ?? ""} ${open ? labels.collapse : labels.expand}`.trim()}
           onClick={() => setOpen(!open)}
         >
-          <ChevronRight size={12} className="fk-json__chev" aria-hidden />
+          <ChevronRight size={12} className="fl-json__chev" aria-hidden />
           {key}
-          <span className="fk-json__punct">{isArray ? "[" : "{"}</span>
+          <span className="fl-json__punct">{isArray ? "[" : "{"}</span>
           {!open && (
             <>
-              <span className="fk-json__count">{count}</span>
-              <span className="fk-json__punct">{isArray ? "]" : "}"}</span>
+              <span className="fl-json__count">{count}</span>
+              <span className="fl-json__punct">{isArray ? "]" : "}"}</span>
             </>
           )}
         </button>
         {open && (
           <>
-            <div className="fk-json__children">
+            <div className="fl-json__children">
               {entries.map(([k, v]) => (
                 <JsonNode key={k} name={isArray ? undefined : k} value={v} depth={depth + 1} />
               ))}
             </div>
-            <div className="fk-json__row fk-json__close">
-              <span className="fk-json__punct">{isArray ? "]" : "}"}</span>
+            <div className="fl-json__row fl-json__close">
+              <span className="fl-json__punct">{isArray ? "]" : "}"}</span>
             </div>
           </>
         )}
@@ -114,7 +114,7 @@ function JsonNode({ name, value, depth }: { name?: string; value: unknown; depth
   }
 
   return (
-    <div className="fk-json__row">
+    <div className="fl-json__row">
       {key}
       <Scalar value={value} />
     </div>
@@ -122,11 +122,11 @@ function JsonNode({ name, value, depth }: { name?: string; value: unknown; depth
 }
 
 function Scalar({ value }: { value: unknown }) {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   if (value === REDACTED) {
     return (
       <Hint content={labels.redacted} side="top">
-        <span className="fk-json__redacted" role="img" aria-label={labels.redacted}>
+        <span className="fl-json__redacted" role="img" aria-label={labels.redacted}>
           <Lock size={10} aria-hidden />
           <span aria-hidden>{labels.redactedValue}</span>
         </span>
@@ -134,10 +134,10 @@ function Scalar({ value }: { value: unknown }) {
     );
   }
   if (typeof value === "string") {
-    return <span className="fk-json__str">"{value}"</span>;
+    return <span className="fl-json__str">"{value}"</span>;
   }
-  if (typeof value === "number") return <span className="fk-json__num">{String(value)}</span>;
-  if (typeof value === "boolean") return <span className="fk-json__bool">{String(value)}</span>;
-  if (value === null) return <span className="fk-json__null">null</span>;
-  return <span className="fk-json__null">undefined</span>;
+  if (typeof value === "number") return <span className="fl-json__num">{String(value)}</span>;
+  if (typeof value === "boolean") return <span className="fl-json__bool">{String(value)}</span>;
+  if (value === null) return <span className="fl-json__null">null</span>;
+  return <span className="fl-json__null">undefined</span>;
 }

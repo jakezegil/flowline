@@ -1,9 +1,9 @@
 {
-  "name": "@flowkit/storage-postgres",
+  "name": "@flowline/storage-postgres",
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
-  "description": "Postgres StorageAdapter for the Flowkit engine, with idempotent migrations and worker-safe run claiming via SKIP LOCKED.",
+  "description": "Postgres StorageAdapter for the Flowline engine, with idempotent migrations and worker-safe run claiming via SKIP LOCKED.",
   "keywords": [
     "workflow",
     "automation",
@@ -13,23 +13,23 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jakezegil/flowkit.git",
+    "url": "git+https://github.com/jakezegil/flowline.git",
     "directory": "packages/storage-postgres"
   },
-  "homepage": "https://github.com/jakezegil/flowkit/tree/main/packages/storage-postgres#readme",
-  "bugs": "https://github.com/jakezegil/flowkit/issues",
+  "homepage": "https://github.com/jakezegil/flowline/tree/main/packages/storage-postgres#readme",
+  "bugs": "https://github.com/jakezegil/flowline/issues",
   "engines": {
     "node": ">=20.18.1"
   },
   "sideEffects": false,
   "exports": {
     ".": {
-      "flowkit-source": "./src/index.ts",
+      "flowline-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./testing": {
-      "flowkit-source": "./src/testing.ts",
+      "flowline-source": "./src/testing.ts",
       "types": "./dist/testing.d.ts",
       "default": "./dist/testing.js"
     }
@@ -55,8 +55,8 @@
     "build": "tsup"
   },
   "dependencies": {
-    "@flowkit/core": "workspace:^",
-    "@flowkit/engine": "workspace:^"
+    "@flowline/core": "workspace:^",
+    "@flowline/engine": "workspace:^"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",

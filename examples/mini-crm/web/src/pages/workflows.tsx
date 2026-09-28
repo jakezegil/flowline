@@ -5,13 +5,13 @@
  *
  * @module
  */
-import type { Manifest, WorkflowDoc } from "@flowkit/core";
-import type { WorkflowSummary } from "@flowkit/core/client";
-import { useFlowkit } from "@flowkit/react";
+import type { Manifest, WorkflowDoc } from "@flowline/core";
+import type { WorkflowSummary } from "@flowline/core/client";
+import { useFlowline } from "@flowline/react";
 import { ChevronRight, Plus, Workflow } from "lucide-react";
 import { type FormEvent, type JSX, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { flowkit, invalidate, useQuery } from "../api";
+import { flowline, invalidate, useQuery } from "../api";
 import {
   Badge,
   Dialog,
@@ -90,7 +90,7 @@ function defaultTriggerConfig(t: TriggerDef): WorkflowDoc["trigger"]["config"] {
 }
 
 function TriggerLabel(props: { type: string; manifest: Manifest | undefined }): JSX.Element {
-  const { resolveIcon } = useFlowkit();
+  const { resolveIcon } = useFlowline();
   const def = props.manifest?.triggers.find((t) => t.type === props.type);
   const Icon = resolveIcon(def?.icon);
   return (
@@ -111,7 +111,7 @@ export function NewWorkflowDialog(props: {
   taken: Set<string>;
 }): JSX.Element {
   const navigate = useNavigate();
-  const { resolveIcon } = useFlowkit();
+  const { resolveIcon } = useFlowline();
   const [name, setName] = useState("");
   const [idEdited, setIdEdited] = useState<string | null>(null);
   const [kind, setKind] = useState<WorkflowKind>("workflow");
@@ -146,7 +146,7 @@ export function NewWorkflowDialog(props: {
     setSaving(true);
     setSaveError(null);
     try {
-      await flowkit.saveWorkflow(doc);
+      await flowline.saveWorkflow(doc);
       invalidate("workflows");
       navigate(`/workflows/${id}`);
     } catch (err) {
@@ -291,8 +291,8 @@ export function NewWorkflowDialog(props: {
 
 /** The workflows page. */
 export function WorkflowsPage(): JSX.Element {
-  const workflows = useQuery<WorkflowSummary[]>("workflows", () => flowkit.listWorkflows());
-  const manifest = useQuery<Manifest>("static", () => flowkit.getManifest());
+  const workflows = useQuery<WorkflowSummary[]>("workflows", () => flowline.listWorkflows());
+  const manifest = useQuery<Manifest>("static", () => flowline.getManifest());
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const now = useNow();

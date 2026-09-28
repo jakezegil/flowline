@@ -5,7 +5,7 @@
  */
 import {
   createRegistry,
-  type FlowkitServices,
+  type FlowlineServices,
   findStep,
   type Issue,
   type Logger,
@@ -20,12 +20,12 @@ import {
   type TransformRuntime,
   type WorkflowDoc,
   type WorkflowVersion,
-} from "@flowkit/core";
-import { builtinPlugin } from "@flowkit/nodes-builtin";
+} from "@flowline/core";
+import { builtinPlugin } from "@flowline/nodes-builtin";
 import {
   EngineConflictError,
   EngineNotFoundError,
-  FlowkitValidationError,
+  FlowlineValidationError,
   ResumeHostHandledError,
   ResumeUnverifiableError,
 } from "./errors";
@@ -48,7 +48,7 @@ export interface EngineOptions {
   /** Where workflows, runs and events are persisted. */
   storage: StorageAdapter;
   /** Host services exposed to handlers as `ctx.services`. */
-  services?: FlowkitServices;
+  services?: FlowlineServices;
   /** Host secret store; handlers read secrets with `ctx.secrets.get(name)`. */
   secrets?: {
     /** The secret's value for the tenant, or `undefined` if it is not configured. */
@@ -68,7 +68,7 @@ export interface EngineOptions {
   clock?: () => number;
   /** Public origin used to build callback URLs, e.g. `"https://app.example.com"`. */
   publicUrl?: string;
-  /** Path the HTTP handler is mounted under. Default `"/flowkit"`. */
+  /** Path the HTTP handler is mounted under. Default `"/flowline"`. */
   basePath?: string;
   /** Lease duration in ms; the lease is renewed every `leaseMs / 2` while a handler runs. Default `30_000`. */
   leaseMs?: number;
@@ -84,7 +84,7 @@ export interface EngineOptions {
   /** Engine and handler logger. */
   logger?: Logger;
   /**
-   * Register the built-in `core.*` nodes and triggers (`@flowkit/nodes-builtin`) ahead of the
+   * Register the built-in `core.*` nodes and triggers (`@flowline/nodes-builtin`) ahead of the
    * registry's own plugins. Default `true`.
    */
   builtins?: boolean;
@@ -156,7 +156,7 @@ export interface Engine {
    * The token is a bearer capability: it resumes the wait even when the node declares
    * `resume.hostHandled`. Never hand out the token of a step only your app may decide.
    *
-   * @throws {FlowkitValidationError} (rejects, resuming nothing) when the waiting step's node
+   * @throws {FlowlineValidationError} (rejects, resuming nothing) when the waiting step's node
    * declares `resume.body` and `body` doesn't match it.
    * @throws {ResumeUnverifiableError} when the waiting step can't be checked.
    */
@@ -172,7 +172,7 @@ export interface Engine {
    * new wait at the same step) is not resumed. Use it when the caller decided about one specific
    * step, e.g. an approval inbox.
    *
-   * @throws {FlowkitValidationError} when the waiting step's node declares `resume.body` and
+   * @throws {FlowlineValidationError} when the waiting step's node declares `resume.body` and
    * `body` doesn't match it.
    * @throws {ResumeHostHandledError} with `opts.refuseHostHandled`, when the waiting step's node
    * declares `resume.hostHandled`.
@@ -230,9 +230,9 @@ export interface Engine {
 
   /**
    * The HTTP API under `basePath`. Mount it on any `fetch`-style server, e.g.
-   * `app.all("/flowkit/*", (c) => engine.handler(c.req.raw))`. Every route has a method on
-   * `createClient()` from `@flowkit/core/client` (see `FlowkitClient`), and the request and
-   * response bodies are types exported from `@flowkit/core` (`WorkflowDetail`, `RunDetail`,
+   * `app.all("/flowline/*", (c) => engine.handler(c.req.raw))`. Every route has a method on
+   * `createClient()` from `@flowline/core/client` (see `FlowlineClient`), and the request and
+   * response bodies are types exported from `@flowline/core` (`WorkflowDetail`, `RunDetail`,
    * `TestStepRequest`, `ApiErrorBody`, …).
    * Editor routes require `authorize` (without it every request acts as tenant `"default"`, with a
    * logged warning); webhooks and callback resumes are authenticated by slug/signature and token.
@@ -248,7 +248,7 @@ export interface Engine {
    * Start a run of every published workflow of the tenant whose `event` trigger listens to `event`
    * (a plugin trigger's `event`, or `config.event` of `core.event`) and whose `filter` accepts the
    * payload. The payload is validated against each trigger's payload schema first: if it is
-   * invalid for any of them, a {@link FlowkitValidationError} is thrown and no run is created.
+   * invalid for any of them, a {@link FlowlineValidationError} is thrown and no run is created.
    * With a dedupe key (`opts.dedupeKey`, else the trigger's `dedupeKey()`), at most one run per
    * workflow and key is ever started. Resolves the IDs of the runs this call started.
    */
@@ -260,7 +260,7 @@ export interface Engine {
   /**
    * Start a run of the workflow's published version with `input` (default `{}`) as the trigger
    * payload, validated against the trigger's declared fields or payload schema (a
-   * {@link FlowkitValidationError} when invalid). `startedBy` defaults to `{ kind: "manual" }`. With
+   * {@link FlowlineValidationError} when invalid). `startedBy` defaults to `{ kind: "manual" }`. With
    * `dedupeKey`, repeated calls start one run and all resolve its ID.
    *
    * @throws Error if the workflow has no published version in the tenant.
@@ -288,7 +288,7 @@ export interface Engine {
    * With `opts.create`, saves only a workflow that doesn't exist yet (as version 1): an editor
    * creating a new workflow never overwrites an existing one under the same ID.
    *
-   * @throws {@link FlowkitValidationError} if `doc` is not a structurally valid document.
+   * @throws {@link FlowlineValidationError} if `doc` is not a structurally valid document.
    * @throws {@link WorkflowExistsError} with `opts.create`, if the workflow already exists.
    */
   saveWorkflow(
@@ -300,7 +300,7 @@ export interface Engine {
   /**
    * Publish a saved version (after validating it) and audit it (`published`).
    *
-   * @throws {@link FlowkitValidationError} with the issues if the version has errors.
+   * @throws {@link FlowlineValidationError} with the issues if the version has errors.
    * @throws Error if the version does not exist.
    */
   publish(tenantId: string, workflowId: string, version: number, actor: string): Promise<void>;
@@ -361,7 +361,7 @@ function withBuiltins({ registry, builtins = true }: EngineOptions): Registry {
  * while a handler runs re-runs that step (use `ctx.idempotencyKey` towards external systems).
  * The built-in `core.*` nodes and triggers are available unless `builtins: false`.
  *
- * @throws `FlowkitDefinitionError` when the registry's manifest can't be built (see
+ * @throws `FlowlineDefinitionError` when the registry's manifest can't be built (see
  * `Registry.manifest`).
  *
  * @example
@@ -473,7 +473,7 @@ export function createEngine(options: EngineOptions): Engine {
     const issue = res.error.issues[0];
     const field = issue && issue.path.length > 0 ? `field "${issue.path.join(".")}" ` : "";
     const message = `Resume body for step "${stepId}": ${field}${issue?.message ?? "is invalid"}`;
-    throw new FlowkitValidationError(message, [
+    throw new FlowlineValidationError(message, [
       { code: "config.invalid", severity: "error", message, stepId },
     ]);
   };

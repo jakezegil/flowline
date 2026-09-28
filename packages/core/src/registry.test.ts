@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { branch, defineNode, definePlugin, defineTrigger, FlowkitDefinitionError } from "./define";
+import { branch, defineNode, definePlugin, defineTrigger, FlowlineDefinitionError } from "./define";
 import { createRegistry } from "./registry";
 import type { JSONSchema } from "./types";
 import { fields, secret, ui } from "./ui";
@@ -35,7 +35,7 @@ test("manifest carries JSON Schema and ui meta", () => {
   const m = createRegistry([crm]).manifest();
   const n = m.nodes[0]!;
   expect(n.plugin).toBe("crm");
-  expect(props(n.input).contactId!["x-flowkit"]).toEqual({
+  expect(props(n.input).contactId!["x-flowline"]).toEqual({
     label: "Contact",
     widget: "crm.contactSelect",
   });
@@ -56,7 +56,7 @@ test("rejects types outside plugin namespace", () => {
 
 test("rejects duplicates", () => {
   const again = definePlugin({ id: "crm", name: "CRM 2", nodes: [loadContact] });
-  expect(() => createRegistry([crm, again])).toThrow(FlowkitDefinitionError);
+  expect(() => createRegistry([crm, again])).toThrow(FlowlineDefinitionError);
   expect(() => createRegistry([crm, again])).toThrow(/crm/);
   const dupNode = definePlugin({ id: "crm", name: "CRM", nodes: [loadContact, loadContact] });
   expect(() => createRegistry([dupNode])).toThrow(/Duplicate.*crm\.loadContact/);
@@ -158,7 +158,7 @@ test("defaults for output, payload, dynamic specs and branches", () => {
   // no declared output: any value (empty schema), never a stripping `z.object({})`
   expect(m.nodes[0]!.output).toEqual({ kind: "schema", schema: {} });
   expect(m.nodes[1]!.output).toEqual({ kind: "fields", configPath: "fields" });
-  expect(props(m.nodes[1]!.input).fields!["x-flowkit"]).toEqual({ widget: "fields" });
+  expect(props(m.nodes[1]!.input).fields!["x-flowline"]).toEqual({ widget: "fields" });
   expect(m.triggers[0]!.payload).toEqual({ kind: "webhook", configPath: "fields" });
   // no declared payload: any value (empty schema), never a stripping `z.object({})`
   expect(m.triggers[1]!.payload).toEqual({ kind: "schema", schema: {} });
@@ -203,7 +203,7 @@ describe("ui metadata survives JSON Schema conversion", () => {
     ["reusedA", { label: "Same" }],
     ["reusedB", { label: "Same" }],
   ])("%s", (key, meta) => {
-    expect(p[key]!["x-flowkit"]).toEqual(meta);
+    expect(p[key]!["x-flowline"]).toEqual(meta);
   });
 
   test("nullable fields keep their anyOf shape without duplicated meta", () => {
@@ -216,9 +216,9 @@ describe("ui metadata survives JSON Schema conversion", () => {
   });
 
   test("nested object and array item properties", () => {
-    expect(props(p.nested!).inner!["x-flowkit"]).toEqual({ widget: "slider" });
+    expect(props(p.nested!).inner!["x-flowline"]).toEqual({ widget: "slider" });
     const item = p.list!.items as JSONSchema;
-    expect(props(item).q!["x-flowkit"]).toEqual({ multiline: true });
+    expect(props(item).q!["x-flowline"]).toEqual({ multiline: true });
   });
 });
 
@@ -291,7 +291,7 @@ describe("showIf definitions", () => {
     ).toThrow(/cycle: d → e → d/);
     expect(() =>
       build(z.object({ d: ui(z.string(), { showIf: { field: "d" } }).optional() })),
-    ).toThrow(FlowkitDefinitionError);
+    ).toThrow(FlowlineDefinitionError);
   });
 
   test("a secret() field, or a webhook's signing secret, can't have showIf", () => {
@@ -307,7 +307,7 @@ describe("showIf definitions", () => {
           auth: ui(z.object({ key: secret() }), { showIf: { field: "signed" } }).optional(),
         }),
       ),
-    ).toThrow(FlowkitDefinitionError);
+    ).toThrow(FlowlineDefinitionError);
     const hook = (secretField: z.ZodType) =>
       createRegistry([
         definePlugin({

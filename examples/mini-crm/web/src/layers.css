@@ -1,7 +1,7 @@
 /*
  * Cascade-layer order, imported before any other stylesheet: the first time a layer is named
- * fixes its place. `reset` (the app's element resets) sits below `flowkit`, so a reset like
- * `button { color: inherit }` can't override Flowkit's buttons. Unlayered app styles still beat
- * both, which is how the app themes Flowkit on purpose.
+ * fixes its place. `reset` (the app's element resets) sits below `flowline`, so a reset like
+ * `button { color: inherit }` can't override Flowline's buttons. Unlayered app styles still beat
+ * both, which is how the app themes Flowline on purpose.
  */
-@layer reset, flowkit;
+@layer reset, flowline;

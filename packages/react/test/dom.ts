@@ -1,4 +1,4 @@
-import type { FlowkitClient } from "@flowkit/core/client";
+import type { FlowlineClient } from "@flowline/core/client";
 import { vi } from "vitest";
 
 /** jsdom has no layout: gives xyflow a sized container and the APIs Radix/cmdk expect. */
@@ -26,10 +26,10 @@ export function setupDom(): void {
 }
 
 /** A client whose every method is a `vi.fn()` that rejects until given an implementation. */
-export function mockClient(overrides: Partial<FlowkitClient> = {}): {
-  [K in Exclude<keyof FlowkitClient, "baseUrl">]: ReturnType<typeof vi.fn> & FlowkitClient[K];
+export function mockClient(overrides: Partial<FlowlineClient> = {}): {
+  [K in Exclude<keyof FlowlineClient, "baseUrl">]: ReturnType<typeof vi.fn> & FlowlineClient[K];
 } {
-  const methods: Exclude<keyof FlowkitClient, "baseUrl">[] = [
+  const methods: Exclude<keyof FlowlineClient, "baseUrl">[] = [
     "getManifest",
     "listWorkflows",
     "getWorkflow",
@@ -55,7 +55,7 @@ export function mockClient(overrides: Partial<FlowkitClient> = {}): {
   return client as never;
 }
 
-/** A `FlowkitHttpError`-shaped rejection. */
+/** A `FlowlineHttpError`-shaped rejection. */
 export function httpError(status: number, body: unknown = {}): Error {
-  return Object.assign(new Error(`HTTP ${status}`), { name: "FlowkitHttpError", status, body });
+  return Object.assign(new Error(`HTTP ${status}`), { name: "FlowlineHttpError", status, body });
 }

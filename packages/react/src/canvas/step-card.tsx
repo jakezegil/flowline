@@ -1,4 +1,4 @@
-import type { Issue, NodeManifest, Step } from "@flowkit/core";
+import type { Issue, NodeManifest, Step } from "@flowline/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import type { Node, NodeProps } from "@xyflow/react";
 import {
@@ -23,8 +23,8 @@ import {
   useShallow,
   useStep,
 } from "../hooks";
-import type { FlowkitLabels } from "../labels";
-import { useFlowkitAppearance } from "../provider";
+import type { FlowlineLabels } from "../labels";
+import { useFlowlineAppearance } from "../provider";
 import type { TestState } from "../store/editor-store";
 import { focusNode, stepActions } from "./actions";
 import {
@@ -64,7 +64,7 @@ function Badge({
 }) {
   const container = useContext(PortalContainerContext);
   const badge = (
-    <span className="fk-badge" data-tone={tone} role="img" aria-label={label}>
+    <span className="fl-badge" data-tone={tone} role="img" aria-label={label}>
       {children}
     </span>
   );
@@ -73,7 +73,7 @@ function Badge({
     <Tooltip.Root>
       <Tooltip.Trigger asChild>{badge}</Tooltip.Trigger>
       <Tooltip.Portal container={container}>
-        <Tooltip.Content className="fk-tooltip" side="top" sideOffset={6} collisionPadding={8}>
+        <Tooltip.Content className="fl-tooltip" side="top" sideOffset={6} collisionPadding={8}>
           {tooltip}
         </Tooltip.Content>
       </Tooltip.Portal>
@@ -85,7 +85,7 @@ function Badge({
 function IssueList({ issues }: { issues: Issue[] }) {
   if (issues.length === 1) return <>{issues[0]?.message}</>;
   return (
-    <ul className="fk-tooltip__list">
+    <ul className="fl-tooltip__list">
       {issues.map((i) => (
         <li key={`${i.code}:${i.field ?? ""}:${i.message}`}>{i.message}</li>
       ))}
@@ -111,7 +111,7 @@ export function DraftBadge({ issues, testState }: { issues: Issue[]; testState?:
   if (testState === "needs-test") {
     return (
       <Badge tone="warning" label={labels.needsTest} tooltip={labels.needsTest}>
-        <span className="fk-badge__dot" aria-hidden />
+        <span className="fl-badge__dot" aria-hidden />
       </Badge>
     );
   }
@@ -142,7 +142,7 @@ function RunBadge({ run }: { run: RunStepStatus }) {
   const icon = {
     done: <Check size={11} strokeWidth={3} aria-hidden />,
     failed: <X size={11} strokeWidth={3} aria-hidden />,
-    running: <LoaderCircle size={11} strokeWidth={2.5} className="fk-spin" aria-hidden />,
+    running: <LoaderCircle size={11} strokeWidth={2.5} className="fl-spin" aria-hidden />,
     waiting: <Clock size={11} strokeWidth={2.5} aria-hidden />,
     skipped: <Minus size={11} strokeWidth={3} aria-hidden />,
     pending: <CircleDashed size={11} strokeWidth={2.5} aria-hidden />,
@@ -157,7 +157,7 @@ function RunBadge({ run }: { run: RunStepStatus }) {
 }
 
 /** Subtitle of a card in run mode: duration and retry count. */
-function runSubtitle(run: RunStepStatus, labels: FlowkitLabels): string {
+function runSubtitle(run: RunStepStatus, labels: FlowlineLabels): string {
   const parts: string[] = [labels.runStatus[run.status]];
   if (run.durationMs !== undefined) parts.push(labels.duration(run.durationMs));
   if (run.attempts !== undefined && run.attempts > 1) parts.push(labels.attempts(run.attempts));
@@ -168,19 +168,19 @@ function runSubtitle(run: RunStepStatus, labels: FlowkitLabels): string {
 export function SummaryLine({ parts }: { parts: SummaryPart[] }) {
   // The whole summary as a tooltip, for when the card cuts it short.
   return (
-    <span className="fk-summary" title={summaryText(parts)}>
+    <span className="fl-summary" title={summaryText(parts)}>
       {parts.map((p, i) => {
         const key = `${i}:${p.kind}`;
         if (p.kind === "text") {
           return (
-            <span key={key} className="fk-summary__text">
+            <span key={key} className="fl-summary__text">
               {p.text}
             </span>
           );
         }
         if (p.kind === "ref") {
           return (
-            <span key={key} className="fk-pill" title={p.label}>
+            <span key={key} className="fl-pill" title={p.label}>
               {p.label}
             </span>
           );
@@ -188,7 +188,7 @@ export function SummaryLine({ parts }: { parts: SummaryPart[] }) {
         return (
           <span
             key={key}
-            className="fk-summary__text fk-summary__unset"
+            className="fl-summary__text fl-summary__unset"
             data-kind={p.kind === "default" ? "default" : "empty"}
           >
             {p.kind === "default" ? p.text : p.label}
@@ -225,7 +225,7 @@ function RenameInput({
   return (
     <input
       ref={ref}
-      className="fk-card__rename nodrag nopan"
+      className="fl-card__rename nodrag nopan"
       defaultValue={initial}
       aria-label={labels.stepName}
       onClick={(e) => e.stopPropagation()}
@@ -257,7 +257,7 @@ function IterationStepper({ stepId, run }: { stepId: string; run: RunStepStatus 
         (iter.failedIndex === undefined || iter.failedIndex === iter.index);
   return (
     <div
-      className="fk-iter nodrag nopan"
+      className="fl-iter nodrag nopan"
       role="toolbar"
       aria-label={labels.loopIteration}
       onClick={(e) => e.stopPropagation()}
@@ -301,7 +301,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
   const store = useEditorStoreApi();
   const ui = useCanvasUiApi();
   const root = useContext(RootElementContext);
-  const { resolveIcon } = useFlowkitAppearance();
+  const { resolveIcon } = useFlowlineAppearance();
   const readOnly = useCanvasUi((s) => s.readOnly);
   const renaming = useCanvasUi((s) => s.renaming === stepId);
   const run = useCanvasUi((s) => s.overlay?.stepStatus[stepId]);
@@ -351,7 +351,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
 
   const card = (
     <div
-      className="fk-card"
+      className="fl-card"
       data-selected={selected || undefined}
       data-disabled={step.disabled || undefined}
       data-unknown={!manifest || undefined}
@@ -359,11 +359,11 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
       data-dimmed={dimmed || undefined}
       data-unreachable={(unreachable && !inRunMode) || undefined}
     >
-      <div className="fk-card__icon" data-tone={control ? "control" : "action"} aria-hidden>
+      <div className="fl-card__icon" data-tone={control ? "control" : "action"} aria-hidden>
         <Icon size={18} />
       </div>
-      <div className="fk-card__body">
-        <div className="fk-card__title-row">
+      <div className="fl-card__body">
+        <div className="fl-card__title-row">
           {renaming && !readOnly ? (
             <RenameInput
               initial={step.name ?? name}
@@ -376,7 +376,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
           ) : (
             // biome-ignore lint/a11y/noStaticElementInteractions: double-click to rename is a mouse shortcut; F2 and the menus are the keyboard path.
             <span
-              className="fk-card__title"
+              className="fl-card__title"
               title={name}
               onDoubleClick={
                 readOnly
@@ -390,11 +390,11 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
               {name}
             </span>
           )}
-          {step.disabled && <span className="fk-chip">{labels.disabled}</span>}
+          {step.disabled && <span className="fl-chip">{labels.disabled}</span>}
         </div>
-        {subtitle !== undefined && <div className="fk-card__summary">{subtitle}</div>}
+        {subtitle !== undefined && <div className="fl-card__summary">{subtitle}</div>}
       </div>
-      <div className="fk-card__aside" data-overlay={(!inRunMode && !readOnly) || undefined}>
+      <div className="fl-card__aside" data-overlay={(!inRunMode && !readOnly) || undefined}>
         {run && run.status !== "pending" && run.status !== "skipped" ? (
           <IterationStepper stepId={stepId} run={run} />
         ) : null}
@@ -402,7 +402,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
           <StepKebabMenu step={step} manifest={manifest} actions={actions} name={name} />
         )}
       </div>
-      <div className="fk-card__status">
+      <div className="fl-card__status">
         {run ? (
           <RunBadge run={run} />
         ) : (

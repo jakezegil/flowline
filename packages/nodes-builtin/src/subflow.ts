@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { defineNode, FatalError, invokeSubflow, ui } from "@flowkit/core";
+import { defineNode, FatalError, invokeSubflow, ui } from "@flowline/core";
 import { z } from "zod";
 
 /**

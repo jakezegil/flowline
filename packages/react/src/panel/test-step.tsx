@@ -13,7 +13,7 @@ import {
   resolveValue,
   type TestStepResponse,
   type ValueExpr,
-} from "@flowkit/core";
+} from "@flowline/core";
 import {
   CircleAlert,
   CircleCheck,
@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { useEditorStore, useEditorStoreApi, useStep } from "../hooks";
-import { useFlowkit, useFlowkitAppearance } from "../provider";
+import { useFlowline, useFlowlineAppearance } from "../provider";
 import { TRIGGER_KEY } from "../store/editor-store";
 import { JsonTree } from "../ui/json-tree";
 import { errorText } from "../ui/primitives";
@@ -62,7 +62,7 @@ function resolveInput(
 
 /** Test state line: tested, needs a new test (and why), or never tested. */
 function TestStatus({ stepId }: { stepId: string }): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const info = useStep(stepId);
   const sampleType = useEditorStore((s) => s.sampleTypes[stepId]);
   // The state comes from the store (shared with the canvas); the type only explains it.
@@ -71,7 +71,7 @@ function TestStatus({ stepId }: { stepId: string }): JSX.Element {
     sampleType !== undefined && info !== undefined && sampleType !== info.step.type;
   if (state === "tested") {
     return (
-      <p className="fk-test__status" data-tone="success">
+      <p className="fl-test__status" data-tone="success">
         <CircleCheck size={14} aria-hidden />
         {labels.tested}
       </p>
@@ -79,11 +79,11 @@ function TestStatus({ stepId }: { stepId: string }): JSX.Element {
   }
   if (state === "needs-test") {
     return (
-      <p className="fk-test__status" data-tone="warning">
+      <p className="fl-test__status" data-tone="warning">
         <TriangleAlert size={14} aria-hidden />
-        <span className="fk-test__text">
+        <span className="fl-test__text">
           <strong>{labels.needsRetest}</strong>
-          <span className="fk-test__why">
+          <span className="fl-test__why">
             {typeChanged ? labels.sampleTypeChanged : labels.needsTest}
           </span>
         </span>
@@ -91,7 +91,7 @@ function TestStatus({ stepId }: { stepId: string }): JSX.Element {
     );
   }
   return (
-    <p className="fk-test__status">
+    <p className="fl-test__status">
       <CircleDashed size={14} aria-hidden />
       {labels.notTested}
     </p>
@@ -105,8 +105,8 @@ function TestStatus({ stepId }: { stepId: string }): JSX.Element {
  * trigger have no sample yet, since their references would resolve to nothing.
  */
 export function TestStep({ stepId }: { stepId: string }): JSX.Element | null {
-  const { client } = useFlowkit();
-  const { labels } = useFlowkitAppearance();
+  const { client } = useFlowline();
+  const { labels } = useFlowlineAppearance();
   const store = useEditorStoreApi();
   const info = useStep(stepId);
   const doc = useEditorStore((s) => s.doc);
@@ -177,18 +177,18 @@ export function TestStep({ stepId }: { stepId: string }): JSX.Element | null {
   const lastSample = samples[stepId];
 
   return (
-    <div className="fk-test">
-      <div className="fk-test__top">
+    <div className="fl-test">
+      <div className="fl-test__top">
         <TestStatus stepId={stepId} />
         <button
           type="button"
-          className="fk-btn fk-btn--primary"
+          className="fl-btn fl-btn--primary"
           onClick={() => void run()}
           aria-disabled={busy || undefined}
           disabled={busy}
         >
           {busy ? (
-            <LoaderCircle size={14} className="fk-spin" aria-hidden />
+            <LoaderCircle size={14} className="fl-spin" aria-hidden />
           ) : (
             <FlaskConical size={14} aria-hidden />
           )}
@@ -199,20 +199,20 @@ export function TestStep({ stepId }: { stepId: string }): JSX.Element | null {
               : labels.testStep}
         </button>
       </div>
-      <p className="fk-test__intro">{labels.testIntro}</p>
+      <p className="fl-test__intro">{labels.testIntro}</p>
 
       {missing.length > 0 && (
-        <div className="fk-callout" data-tone="warning" role="note">
+        <div className="fl-callout" data-tone="warning" role="note">
           <TriangleAlert size={15} aria-hidden />
           <div>
-            <p className="fk-callout__title">{labels.upstreamUntested}</p>
+            <p className="fl-callout__title">{labels.upstreamUntested}</p>
             <p>{labels.upstreamList(missing.map((e) => e.label))}</p>
-            <div className="fk-callout__actions">
+            <div className="fl-callout__actions">
               {missing.map((e) => (
                 <button
                   key={e.refBase}
                   type="button"
-                  className="fk-btn fk-btn--sm"
+                  className="fl-btn fl-btn--sm"
                   onClick={() => select(e.kind === "trigger" ? TRIGGER_KEY : (e.stepId ?? null))}
                 >
                   {e.kind === "trigger" ? labels.addTriggerSample : e.label}
@@ -223,41 +223,41 @@ export function TestStep({ stepId }: { stepId: string }): JSX.Element | null {
         </div>
       )}
 
-      <section className="fk-test__section" aria-label={labels.testInput}>
-        <h3 className="fk-section-title">{labels.testInput}</h3>
+      <section className="fl-test__section" aria-label={labels.testInput}>
+        <h3 className="fl-section-title">{labels.testInput}</h3>
         <JsonTree value={response?.input ?? input ?? {}} label={labels.testInput} />
       </section>
 
       {result && (
         <section
-          className="fk-test__section"
+          className="fl-test__section"
           aria-label={failed ? labels.testError : labels.testOutput}
           aria-live="polite"
         >
-          <h3 className="fk-section-title">
+          <h3 className="fl-section-title">
             {failed ? labels.testError : labels.testOutput}
             {response && (
-              <span className="fk-section-title__meta">
+              <span className="fl-section-title__meta">
                 {labels.testDuration(response.durationMs)}
               </span>
             )}
           </h3>
           {failed ? (
-            <div className="fk-callout" data-tone="danger" role="alert">
+            <div className="fl-callout" data-tone="danger" role="alert">
               <CircleAlert size={15} aria-hidden />
-              <p className="fk-callout__mono">{errorMessage}</p>
+              <p className="fl-callout__mono">{errorMessage}</p>
             </div>
           ) : (
             <>
               {(response?.branch || response?.signal) && (
-                <p className="fk-test__facts">
+                <p className="fl-test__facts">
                   {response.branch && (
-                    <span className="fk-test__fact">
+                    <span className="fl-test__fact">
                       {labels.testBranch(branchLabel(response.branch))}
                     </span>
                   )}
                   {response.signal && (
-                    <span className="fk-test__fact">{labels.testSignal[response.signal]}</span>
+                    <span className="fl-test__fact">{labels.testSignal[response.signal]}</span>
                   )}
                 </p>
               )}
@@ -268,8 +268,8 @@ export function TestStep({ stepId }: { stepId: string }): JSX.Element | null {
       )}
 
       {!result && lastSample !== undefined && (
-        <section className="fk-test__section" aria-label={labels.testSample}>
-          <h3 className="fk-section-title">{labels.testSample}</h3>
+        <section className="fl-test__section" aria-label={labels.testSample}>
+          <h3 className="fl-section-title">{labels.testSample}</h3>
           <JsonTree value={lastSample} label={labels.testSample} />
         </section>
       )}

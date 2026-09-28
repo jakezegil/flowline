@@ -1,6 +1,6 @@
-# @flowkit/nodes-builtin
+# @flowline/nodes-builtin
 
-The `core.*` nodes and triggers every Flowkit engine provides: `condition`, `switch`, `forEach`,
+The `core.*` nodes and triggers every Flowline engine provides: `condition`, `switch`, `forEach`,
 `stop`, `delay`, `waitForCallback`, `callSubflow`, `httpRequest` (with an SSRF guard) and a
 sandboxed JavaScript `transform`, plus the event, webhook, manual, schedule and sub-flow triggers.
 `createEngine` registers `builtinPlugin` automatically unless you pass `builtins: false`.
@@ -8,20 +8,20 @@ sandboxed JavaScript `transform`, plus the event, webhook, manual, schedule and 
 ## Install
 
 ```sh
-pnpm add @flowkit/nodes-builtin @flowkit/core zod@^4
+pnpm add @flowline/nodes-builtin @flowline/core zod@^4
 ```
 
 `zod` 4 is a required peer dependency.
 
 ## Usage
 
-You normally don't import this package directly — `@flowkit/engine`'s `createEngine` adds
+You normally don't import this package directly — `@flowline/engine`'s `createEngine` adds
 `builtinPlugin` for you. To build a manifest for the editor without an engine, or to register the
 builtins alongside your own plugins explicitly:
 
 ```ts
-import { createRegistry } from "@flowkit/core";
-import { builtinPlugin } from "@flowkit/nodes-builtin";
+import { createRegistry } from "@flowline/core";
+import { builtinPlugin } from "@flowline/nodes-builtin";
 
 export const registry = createRegistry([builtinPlugin /*, ...yourPlugins */]);
 ```

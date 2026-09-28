@@ -4,9 +4,9 @@
  *
  * @module
  */
-import type { StorageAdapter } from "@flowkit/engine";
-import { createMemoryStorage } from "@flowkit/storage-memory";
-import { createPostgresStorage, migrate } from "@flowkit/storage-postgres";
+import type { StorageAdapter } from "@flowline/engine";
+import { createMemoryStorage } from "@flowline/storage-memory";
+import { createPostgresStorage, migrate } from "@flowline/storage-postgres";
 import { serve } from "@hono/node-server";
 import pg from "pg";
 import { createMiniCrm, TENANT_ID } from "./app";
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   const server = serve({ fetch: app.fetch, port }, () => {
     console.info(`mini-crm server on ${publicUrl} (storage: ${label}, tenant: ${TENANT_ID})`);
     console.info(`  CRM API:     ${publicUrl}/api/contacts`);
-    console.info(`  Flowkit API: ${publicUrl}/flowkit/manifest`);
+    console.info(`  Flowline API: ${publicUrl}/flowline/manifest`);
     console.info(`  Webhooks:    ${publicUrl}/api/demo`);
   });
 

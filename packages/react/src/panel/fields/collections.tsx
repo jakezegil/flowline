@@ -4,10 +4,10 @@
  *
  * @module
  */
-import type { JSONSchema, ValueExpr } from "@flowkit/core";
+import type { JSONSchema, ValueExpr } from "@flowline/core";
 import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 import { type JSX, useEffect, useId, useRef, useState } from "react";
-import { useFlowkitAppearance } from "../../provider";
+import { useFlowlineAppearance } from "../../provider";
 import { type FieldProps, fieldMetaOf, useFormEnv } from "../form-context";
 import { RefTextInput } from "../ref-text-input";
 import {
@@ -79,14 +79,14 @@ export function ItemActions({
   onRemove(): void;
   disabled?: boolean;
 }): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   return (
-    <div className="fk-item__actions">
+    <div className="fl-item__actions">
       {count > 1 && (
         <>
           <button
             type="button"
-            className="fk-mini-btn"
+            className="fl-mini-btn"
             aria-label={`${labels.moveUp}: ${name}`}
             disabled={disabled || index === 0}
             onClick={() => onMove(index - 1)}
@@ -95,7 +95,7 @@ export function ItemActions({
           </button>
           <button
             type="button"
-            className="fk-mini-btn"
+            className="fl-mini-btn"
             aria-label={`${labels.moveDown}: ${name}`}
             disabled={disabled || index === count - 1}
             onClick={() => onMove(index + 1)}
@@ -106,7 +106,7 @@ export function ItemActions({
       )}
       <button
         type="button"
-        className="fk-mini-btn fk-mini-btn--danger"
+        className="fl-mini-btn fl-mini-btn--danger"
         aria-label={`${labels.remove}: ${name}`}
         disabled={disabled}
         onClick={onRemove}
@@ -128,7 +128,7 @@ export function AddButton({
   disabled?: boolean;
 }): JSX.Element {
   return (
-    <button type="button" className="fk-add-btn" onClick={onClick} disabled={disabled}>
+    <button type="button" className="fl-add-btn" onClick={onClick} disabled={disabled}>
       <Plus size={14} aria-hidden />
       {label}
     </button>
@@ -173,7 +173,7 @@ function itemName(v: ValueExpr | undefined): string | undefined {
  */
 export function ArrayField(p: FieldProps): JSX.Element {
   const env = useFormEnv();
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const meta = fieldMetaOf(env, p.schema);
   const listRef = useRef<HTMLOListElement>(null);
   const items = itemsOf(env.root, p.schema);
@@ -231,7 +231,7 @@ export function ArrayField(p: FieldProps): JSX.Element {
       ) : (
         <>
           {list.length > 0 && (
-            <ol ref={listRef} className={objectItems ? "fk-list fk-list--cards" : "fk-list"}>
+            <ol ref={listRef} className={objectItems ? "fl-list fl-list--cards" : "fl-list"}>
               {list.map((v, i) => {
                 const name = itemName(v) ?? labels.itemTitle(itemLabel, i + 1);
                 const actions = (
@@ -248,11 +248,11 @@ export function ArrayField(p: FieldProps): JSX.Element {
                 const onItem = (nv: ValueExpr | undefined) =>
                   set(list.map((x, j) => (j === i ? (nv ?? null) : x)));
                 return (
-                  <li key={keys.keys[i]} className={objectItems ? "fk-item" : "fk-row"}>
+                  <li key={keys.keys[i]} className={objectItems ? "fl-item" : "fl-row"}>
                     {objectItems ? (
                       <>
-                        <div className="fk-item__head">
-                          <span className="fk-item__title">{name}</span>
+                        <div className="fl-item__head">
+                          <span className="fl-item__title">{name}</span>
                           {actions}
                         </div>
                         <ObjectFields
@@ -264,7 +264,7 @@ export function ArrayField(p: FieldProps): JSX.Element {
                       </>
                     ) : (
                       <>
-                        <div className="fk-row__control">
+                        <div className="fl-row__control">
                           <Field
                             schema={items}
                             fieldKey={String(i)}
@@ -304,7 +304,7 @@ export function ObjectField(p: FieldProps): JSX.Element {
       group
       bare={p.bare}
     >
-      <div className="fk-nest">
+      <div className="fl-nest">
         <ObjectFields
           schema={p.schema}
           path={p.path}
@@ -340,7 +340,7 @@ function objectOf(rows: MapRow[]): Record<string, ValueExpr> {
 /** String-keyed values (`additionalProperties`), e.g. headers: key / value rows. */
 export function MapField(p: FieldProps): JSX.Element {
   const env = useFormEnv();
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const meta = fieldMetaOf(env, p.schema);
   const listRef = useRef<HTMLOListElement>(null);
   const valueSchema = mapValueOf(env.root, p.schema);
@@ -401,15 +401,15 @@ export function MapField(p: FieldProps): JSX.Element {
       ) : (
         <>
           {rows.length > 0 && (
-            <ol ref={listRef} className="fk-list fk-kv">
+            <ol ref={listRef} className="fl-list fl-kv">
               {rows.map((r, i) => {
                 const dup = r.key !== "" && (counts.get(r.key) ?? 0) > 1;
                 const name = r.key || labels.itemTitle(labels.mapKey, i + 1);
                 return (
-                  <li key={r.id} className="fk-kv__row">
+                  <li key={r.id} className="fl-kv__row">
                     <input
                       id={`${keyId}-${r.id}`}
-                      className="fk-input fk-kv__key"
+                      className="fl-input fl-kv__key"
                       value={r.key}
                       placeholder={labels.mapKey}
                       aria-label={`${p.label}: ${labels.mapKey} ${i + 1}`}
@@ -420,7 +420,7 @@ export function MapField(p: FieldProps): JSX.Element {
                         commit(rows.map((x) => (x.id === r.id ? { ...x, key: e.target.value } : x)))
                       }
                     />
-                    <div className="fk-kv__value">
+                    <div className="fl-kv__value">
                       {textValues ? (
                         <RefTextInput
                           value={r.value}
@@ -452,16 +452,16 @@ export function MapField(p: FieldProps): JSX.Element {
                     </div>
                     <button
                       type="button"
-                      className="fk-mini-btn fk-mini-btn--danger"
+                      className="fl-mini-btn fl-mini-btn--danger"
                       aria-label={`${labels.remove}: ${name}`}
                       disabled={env.readOnly}
                       onClick={() => commit(rows.filter((x) => x.id !== r.id))}
                     >
                       <X size={13} aria-hidden />
                     </button>
-                    {dup && <p className="fk-f__local fk-kv__error">{labels.duplicateKey}</p>}
+                    {dup && <p className="fl-f__local fl-kv__error">{labels.duplicateKey}</p>}
                     {r.key !== "" && (
-                      <div className="fk-kv__issues">
+                      <div className="fl-kv__issues">
                         <IssueNotes issues={issuesAt(env.issues, `${p.path}.${r.key}`)} />
                       </div>
                     )}
@@ -490,7 +490,7 @@ export function MapField(p: FieldProps): JSX.Element {
  */
 export function UnionField(p: FieldProps): JSX.Element | null {
   const env = useFormEnv();
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const id = useId();
   const union = discriminatedUnion(env.root, p.schema);
   const obj = asObject(p.value) ?? asObject(p.schema.default as ValueExpr | undefined);
@@ -529,7 +529,7 @@ export function UnionField(p: FieldProps): JSX.Element | null {
       ) : (
         <select
           id={id}
-          className="fk-input fk-select"
+          className="fl-input fl-select"
           value={variant ? String(union.variants.indexOf(variant)) : ""}
           disabled={env.readOnly}
           onChange={(e) => {
@@ -546,7 +546,7 @@ export function UnionField(p: FieldProps): JSX.Element | null {
         </select>
       )}
       {variant && Object.keys(variant.schema.properties ?? {}).length > 1 && (
-        <div className="fk-nest fk-nest--variant">
+        <div className="fl-nest fl-nest--variant">
           <ObjectFields
             schema={variant.schema}
             path={p.path}

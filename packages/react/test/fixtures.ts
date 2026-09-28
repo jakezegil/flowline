@@ -1,4 +1,4 @@
-import type { Manifest, NodeManifest, Step, WorkflowDoc } from "@flowkit/core";
+import type { Manifest, NodeManifest, Step, WorkflowDoc } from "@flowline/core";
 
 /**
  * Shared test fixtures: a hand-written JSON manifest (the editor only ever sees JSON) covering
@@ -29,7 +29,7 @@ const nodes: NodeManifest[] = [
     input: {
       $schema: S,
       type: "object",
-      properties: { contactId: { type: "string", "x-flowkit": { label: "Contact" } } },
+      properties: { contactId: { type: "string", "x-flowline": { label: "Contact" } } },
       required: ["contactId"],
     },
     output: { kind: "schema", schema: contactSchema },
@@ -44,8 +44,8 @@ const nodes: NodeManifest[] = [
       $schema: S,
       type: "object",
       properties: {
-        to: { type: "string", "x-flowkit": { label: "To" } },
-        subject: { type: "string", default: "Hello", "x-flowkit": { label: "Subject" } },
+        to: { type: "string", "x-flowline": { label: "To" } },
+        subject: { type: "string", default: "Hello", "x-flowline": { label: "Subject" } },
         mode: { type: "string", enum: ["html", "text"], default: "html" },
         cc: { type: "array", items: { type: "string" }, default: [] },
       },

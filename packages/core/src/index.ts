@@ -32,7 +32,7 @@ export {
   type WorkflowBuilder,
   workflow,
 } from "./builder";
-export type { ClientOptions, FlowkitClient } from "./client";
+export type { ClientOptions, FlowlineClient } from "./client";
 export {
   type BranchSignal,
   branch,
@@ -40,9 +40,9 @@ export {
   defineNode,
   definePlugin,
   defineTrigger,
-  FLOWKIT_SIGNAL,
-  FlowkitDefinitionError,
-  type FlowkitServices,
+  FLOWLINE_SIGNAL,
+  FlowlineDefinitionError,
+  type FlowlineServices,
   invokeSubflow,
   isSignal,
   type Logger,
@@ -86,7 +86,7 @@ export {
 export { isPrivateAddress, isPrivateHost, normalizeHost } from "./net";
 export {
   collectRefs,
-  FlowkitRefError,
+  FlowlineRefError,
   formatRefPath,
   isRef,
   isTpl,
@@ -117,7 +117,7 @@ export {
   allStepIds,
   codeBlocksRename,
   duplicateStep,
-  FlowkitTreeError,
+  FlowlineTreeError,
   type FoundStep,
   findStep,
   generateStepId,

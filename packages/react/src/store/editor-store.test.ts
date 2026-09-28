@@ -1,4 +1,4 @@
-import { allStepIds, findStep, type Issue, type Step, type WorkflowDoc } from "@flowkit/core";
+import { allStepIds, findStep, type Issue, type Step, type WorkflowDoc } from "@flowline/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { branchyDoc, docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
 import { createEditorStore, type EditorStore } from "./editor-store";
@@ -375,7 +375,7 @@ describe("test state and samples", () => {
 
   test("a stored sample of another node type loads as needs-test", () => {
     localStorage.setItem(
-      "flowkit:samples:welcome",
+      "flowline:samples:welcome",
       JSON.stringify({
         samples: { email: {}, load: {} },
         testState: { email: "tested", load: "tested" },
@@ -408,7 +408,7 @@ describe("test state and samples", () => {
     const store = storeFor();
     store.getState().setSample("load", { email: "secret@pii.com" });
     expect(JSON.stringify(store.getState().doc)).not.toContain("secret@pii.com");
-    const raw = localStorage.getItem("flowkit:samples:welcome");
+    const raw = localStorage.getItem("flowline:samples:welcome");
     expect(raw).toContain("secret@pii.com");
     const reopened = storeFor();
     expect(reopened.getState().samples.load).toEqual({ email: "secret@pii.com" });
@@ -416,7 +416,7 @@ describe("test state and samples", () => {
   });
 
   test("corrupt or unavailable storage is ignored", () => {
-    localStorage.setItem("flowkit:samples:welcome", "{not json");
+    localStorage.setItem("flowline:samples:welcome", "{not json");
     expect(storeFor().getState().samples).toEqual({});
     const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("QuotaExceeded");
@@ -446,7 +446,7 @@ describe("test state and samples", () => {
     expect(id).toBe("sendEmail");
     expect(store.getState().samples.sendEmail).toBeUndefined();
     expect(store.getState().testState.sendEmail).toBeUndefined();
-    expect(localStorage.getItem("flowkit:samples:welcome")).not.toContain("old");
+    expect(localStorage.getItem("flowline:samples:welcome")).not.toContain("old");
   });
 
   test("pasted and duplicated subtrees start without samples under their new ids", () => {
@@ -463,7 +463,7 @@ describe("test state and samples", () => {
 
   test("loading samples prunes entries of steps that no longer exist", () => {
     localStorage.setItem(
-      "flowkit:samples:welcome",
+      "flowline:samples:welcome",
       JSON.stringify({
         samples: { load: 1, gone: 2, __trigger: 3 },
         testState: { load: "tested", gone: "tested" },
@@ -483,7 +483,7 @@ describe("SSR", () => {
 
   test("without window the store starts empty until hydrateLocal()", () => {
     localStorage.setItem(
-      "flowkit:samples:welcome",
+      "flowline:samples:welcome",
       JSON.stringify({ samples: { load: 1 }, testState: { load: "tested" } }),
     );
     vi.stubGlobal("window", undefined);
@@ -578,7 +578,7 @@ describe("replaceStep", () => {
           name: "Code",
           input: {
             type: "object",
-            properties: { code: { type: "string", "x-flowkit": { widget: "code" } } },
+            properties: { code: { type: "string", "x-flowline": { widget: "code" } } },
           },
         },
       ],
@@ -706,7 +706,7 @@ describe("save state", () => {
 
   test("replaceDoc swaps the document, clears history and loads that workflow's samples", () => {
     localStorage.setItem(
-      "flowkit:samples:other",
+      "flowline:samples:other",
       JSON.stringify({ samples: { a: 1 }, testState: { a: "tested" } }),
     );
     const store = storeFor();

@@ -1,17 +1,17 @@
 /**
- * The mini CRM server: a Hono app serving the CRM's REST API under `/api` and the Flowkit engine
- * (editor API, webhooks, callbacks) under `/flowkit`.
+ * The mini CRM server: a Hono app serving the CRM's REST API under `/api` and the Flowline engine
+ * (editor API, webhooks, callbacks) under `/flowline`.
  *
  * @module
  */
-import { createRegistry, type Logger } from "@flowkit/core";
+import { createRegistry, type Logger } from "@flowline/core";
 import {
   createEngine,
   type Engine,
-  FlowkitValidationError,
+  FlowlineValidationError,
   type StorageAdapter,
-} from "@flowkit/engine";
-import { createMemoryStorage } from "@flowkit/storage-memory";
+} from "@flowline/engine";
+import { createMemoryStorage } from "@flowline/storage-memory";
 import { Hono } from "hono";
 import { z } from "zod";
 import { CrmError, type CrmStore, createCrmStore, DEAL_STAGES } from "./crm-store";
@@ -41,7 +41,7 @@ export interface MiniCrmOptions {
 export interface MiniCrm {
   /** The HTTP app; serve it with `@hono/node-server` or call `app.request()` in tests. */
   app: Hono;
-  /** The Flowkit engine. Run a worker (`engine.startWorker()`) or `engine.drain()` it. */
+  /** The Flowline engine. Run a worker (`engine.startWorker()`) or `engine.drain()` it. */
   engine: Engine;
   /** The CRM store. */
   crm: CrmStore;
@@ -69,7 +69,7 @@ const DealPatchBody = z
 const DecisionBody = z.object({ decision: z.enum(["approved", "rejected"]) });
 
 /**
- * Who is calling. The demo has no login, so every request, to `/api` and to `/flowkit` alike, is
+ * Who is calling. The demo has no login, so every request, to `/api` and to `/flowline` alike, is
  * user `demo-user` of tenant `acme`.
  *
  * A production host must instead authenticate the request with its own session (cookie, bearer
@@ -161,7 +161,7 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
 
   app.onError((err, c) => {
     if (err instanceof CrmError) return c.json({ error: err.message }, err.status);
-    if (err instanceof FlowkitValidationError) {
+    if (err instanceof FlowlineValidationError) {
       return c.json({ error: err.message, issues: err.issues }, 400);
     }
     logger.error("request failed", { path: c.req.path, error: String(err) });
@@ -238,7 +238,7 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
     for (const v of await engine.storage.listPublished({ tenantId: TENANT_ID })) {
       const slug = v.doc.trigger.config.slug;
       if (v.doc.trigger.type === "core.webhook" && typeof slug === "string") {
-        webhooks[v.workflowId] = `/flowkit/hooks/${TENANT_ID}/${v.workflowId}/${slug}`;
+        webhooks[v.workflowId] = `/flowline/hooks/${TENANT_ID}/${v.workflowId}/${slug}`;
       }
     }
     return c.json({ tenantId: TENANT_ID, userId: DEMO_USER_ID, webhooks });
@@ -254,7 +254,7 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
     return c.body(null, 204);
   });
 
-  app.all("/flowkit/*", (c) => engine.handler(c.req.raw));
+  app.all("/flowline/*", (c) => engine.handler(c.req.raw));
 
   return { app, engine, crm };
 }

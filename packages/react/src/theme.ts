@@ -1,13 +1,13 @@
 /**
- * Theming: Flowkit's look is driven by `--fk-*` CSS custom properties defined in `styles.css`
- * (light and dark sets). A {@link FlowkitTheme} picks the color mode and overrides tokens.
+ * Theming: Flowline's look is driven by `--fl-*` CSS custom properties defined in `styles.css`
+ * (light and dark sets). A {@link FlowlineTheme} picks the color mode and overrides tokens.
  *
  * @module
  */
 
 import type { CSSProperties } from "react";
 
-/** Names of the themeable design tokens. Each maps to a `--fk-<kebab-name>` CSS variable. */
+/** Names of the themeable design tokens. Each maps to a `--fl-<kebab-name>` CSS variable. */
 export type ThemeToken =
   | "accent"
   | "accentFg"
@@ -25,8 +25,8 @@ export type ThemeToken =
   | "font"
   | "fontMono";
 
-/** Color mode and token overrides for Flowkit components. */
-export interface FlowkitTheme {
+/** Color mode and token overrides for Flowline components. */
+export interface FlowlineTheme {
   /** `"system"` follows `prefers-color-scheme`. Default `"system"`. */
   colorMode?: "light" | "dark" | "system";
   /**
@@ -36,13 +36,13 @@ export interface FlowkitTheme {
   tokens?: Partial<Record<ThemeToken, string>>;
 }
 
-/** The CSS variable a token is stored in, e.g. `"textMuted"` → `"--fk-text-muted"`. */
+/** The CSS variable a token is stored in, e.g. `"textMuted"` → `"--fl-text-muted"`. */
 export function tokenVar(token: ThemeToken): string {
-  return `--fk-${token.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
+  return `--fl-${token.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
 }
 
 /** Inline style setting the CSS variables of `tokens` (empty values are skipped). */
-export function themeStyle(tokens: FlowkitTheme["tokens"]): CSSProperties {
+export function themeStyle(tokens: FlowlineTheme["tokens"]): CSSProperties {
   const style: Record<string, string> = {};
   for (const [token, value] of Object.entries(tokens ?? {})) {
     if (value) style[tokenVar(token as ThemeToken)] = value;

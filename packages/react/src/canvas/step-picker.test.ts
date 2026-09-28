@@ -1,4 +1,4 @@
-import type { NodeManifest } from "@flowkit/core";
+import type { NodeManifest } from "@flowline/core";
 import { describe, expect, test } from "vitest";
 import { rankSteps, stepMatchScore } from "./step-picker";
 

@@ -9,13 +9,13 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import type { Engine } from "@flowkit/engine";
+import type { Engine } from "@flowline/engine";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { extractBlocks } from "./extract";
 
 vi.mock("pg", () => ({ default: { Pool: class {} } }));
-vi.mock("@flowkit/storage-postgres", async () => {
-  const { createMemoryStorage } = await import("@flowkit/storage-memory");
+vi.mock("@flowline/storage-postgres", async () => {
+  const { createMemoryStorage } = await import("@flowline/storage-memory");
   return { migrate: async () => {}, createPostgresStorage: () => createMemoryStorage() };
 });
 vi.mock("@hono/node-server", () => ({ serve: vi.fn() }));
@@ -90,7 +90,7 @@ describe("docs", () => {
   }, 60_000);
 
   it("runs the README quick start to a completed run", async () => {
-    const { engine } = (await load("flowkit/engine.ts")) as { engine: Engine };
+    const { engine } = (await load("flowline/engine.ts")) as { engine: Engine };
     await load("app.ts"); // publishes welcome-contact and emits contact.created
     const { worker } = (await load("worker.ts")) as { worker: { stop(): Promise<void> } };
     try {
@@ -106,7 +106,7 @@ describe("docs", () => {
     }
 
     // Through the mounted HTTP handler, as the editor and run viewer see it.
-    const res = await app.fetch(new Request("http://localhost/flowkit/runs"));
+    const res = await app.fetch(new Request("http://localhost/flowline/runs"));
     expect(res.status).toBe(200);
     const runs = (await res.json()) as { id: string; workflowId: string; status: string }[];
     expect(runs).toMatchObject([{ workflowId: "welcome-contact", status: "completed" }]);
@@ -118,22 +118,22 @@ describe("docs", () => {
   }, 20_000);
 
   it("publishes the tree-model sample against the quick-start engine", async () => {
-    const { engine } = (await load("flowkit/engine.ts")) as { engine: Engine };
-    await load("flowkit/welcome-vip.ts"); // saves and publishes, throwing if invalid
+    const { engine } = (await load("flowline/engine.ts")) as { engine: Engine };
+    await load("flowline/welcome-vip.ts"); // saves and publishes, throwing if invalid
     const detail = await engine.storage.getPublishedVersion("acme", "welcome-vip");
     expect(detail?.doc.steps.map((s) => s.id)).toEqual(["contact", "check", "refresh"]);
   });
 
   it("calls the README's signed webhook through the mounted handler", async () => {
-    const { engine } = (await load("flowkit/engine.ts")) as { engine: Engine };
-    const { publishLeadWebhook, signedRequest } = (await load("flowkit/webhook.ts")) as {
+    const { engine } = (await load("flowline/engine.ts")) as { engine: Engine };
+    const { publishLeadWebhook, signedRequest } = (await load("flowline/webhook.ts")) as {
       publishLeadWebhook(tenantId: string): Promise<string>;
       signedRequest(url: string, key: string, requestId: string): Request;
     };
     const { WEBHOOK_KEY } = (await load("vault.ts")) as { WEBHOOK_KEY: string };
 
     const url = await publishLeadWebhook("acme");
-    expect(url).toMatch(/^https:\/\/app\.example\.com\/flowkit\/hooks\/acme\/lead-received\/\S+$/);
+    expect(url).toMatch(/^https:\/\/app\.example\.com\/flowline\/hooks\/acme\/lead-received\/\S+$/);
 
     const first = await app.fetch(signedRequest(url, WEBHOOK_KEY, "req-1"));
     expect(first.status).toBe(202);

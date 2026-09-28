@@ -13,8 +13,8 @@ import {
   type Step,
   type StepLocation,
   type WorkflowDoc,
-} from "@flowkit/core";
-import type { FlowkitLabels } from "../labels";
+} from "@flowline/core";
+import type { FlowlineLabels } from "../labels";
 import { type EditorStore, TRIGGER_KEY } from "../store/editor-store";
 import type { CanvasUiStore } from "./canvas-context";
 
@@ -90,7 +90,7 @@ export function insertLabel(
   doc: WorkflowDoc,
   manifest: Manifest,
   loc: StepLocation,
-  labels: FlowkitLabels,
+  labels: FlowlineLabels,
 ): string {
   const steps = stepIndex(doc);
   const nodes = nodeIndex(manifest);

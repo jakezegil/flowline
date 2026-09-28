@@ -1,4 +1,4 @@
-import { isSignal, loop } from "@flowkit/core";
+import { isSignal, loop } from "@flowline/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { fakeContext } from "../test/fake-context";

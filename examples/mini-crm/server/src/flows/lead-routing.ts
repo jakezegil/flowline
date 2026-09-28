@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { ref, tpl, type WorkflowDoc, workflow } from "@flowkit/core";
+import { ref, tpl, type WorkflowDoc, workflow } from "@flowline/core";
 import {
   and,
   callSubflowNode,
@@ -13,7 +13,7 @@ import {
   stopNode,
   switchNode,
   webhookTrigger,
-} from "@flowkit/nodes-builtin";
+} from "@flowline/nodes-builtin";
 import { assignOwner, getContact, requestApproval, sendEmail } from "../plugin";
 import { withStepNames } from "./names";
 

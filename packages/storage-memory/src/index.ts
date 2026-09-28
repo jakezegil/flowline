@@ -11,9 +11,9 @@ import type {
   WorkflowDoc,
   WorkflowSummary,
   WorkflowVersion,
-} from "@flowkit/core";
+} from "@flowline/core";
 import {
-  FlowkitStorageError,
+  FlowlineStorageError,
   type Lease,
   type NewRun,
   type NewRunEvent,
@@ -23,7 +23,7 @@ import {
   type StorageAdapter,
   stoppedAtOf,
   type WorkflowAuditEntry,
-} from "@flowkit/engine";
+} from "@flowline/engine";
 
 /** Package version. */
 export const VERSION = "0.1.0";
@@ -151,7 +151,7 @@ export function createMemoryStorage(): StorageAdapter {
    * Validate `patch.createChild` without writing. Returns whether the child must be inserted
    * (`false` when it already exists in the same tenant).
    *
-   * @throws {FlowkitStorageError} if the child id belongs to another tenant.
+   * @throws {FlowlineStorageError} if the child id belongs to another tenant.
    */
   const checkChild = (patch: RunPatch): boolean => {
     const child = patch.createChild;
@@ -159,7 +159,7 @@ export function createMemoryStorage(): StorageAdapter {
     const existing = runs.get(child.id);
     if (!existing) return true;
     if (existing.run.tenantId !== child.tenantId) {
-      throw new FlowkitStorageError(`Run id "${child.id}" already belongs to another tenant`);
+      throw new FlowlineStorageError(`Run id "${child.id}" already belongs to another tenant`);
     }
     return false;
   };
@@ -309,7 +309,7 @@ export function createMemoryStorage(): StorageAdapter {
       const existing = runs.get(run.id);
       if (existing) {
         if (existing.run.tenantId !== run.tenantId) {
-          throw new FlowkitStorageError(`Run id "${run.id}" already belongs to another tenant`);
+          throw new FlowlineStorageError(`Run id "${run.id}" already belongs to another tenant`);
         }
         return clone(existing.run);
       }

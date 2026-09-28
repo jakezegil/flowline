@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { TransformRuntime } from "@flowkit/core";
+import type { TransformRuntime } from "@flowline/core";
 import {
   newQuickJSWASMModule,
   type QuickJSContext,
@@ -33,7 +33,7 @@ export interface QuickjsRuntimeOptions {
  */
 const MAX_STACK_BYTES = 256 * 1024;
 const FILENAME = "transform.js";
-const INPUT_GLOBAL = "__flowkitInput";
+const INPUT_GLOBAL = "__flowlineInput";
 /**
  * Smallest memory limit applied. Below it QuickJS cannot even allocate its out-of-memory error
  * and throws `null`, which would be indistinguishable from user code throwing `null`.

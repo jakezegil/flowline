@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { Logger, RunEvent, RunEventType } from "@flowkit/core";
+import type { Logger, RunEvent, RunEventType } from "@flowline/core";
 import type { NewRunEvent, StorageAdapter } from "./storage";
 
 /** Event types after which a run emits nothing more (until a retry). */

@@ -1,6 +1,6 @@
 /**
  * A JSON Schema document (draft 2020-12), as produced by `z.toJSONSchema`.
- * Kept deliberately loose: Flowkit only ever reads well-known keys.
+ * Kept deliberately loose: Flowline only ever reads well-known keys.
  */
 export type JSONSchema = { [k: string]: unknown };
 
@@ -107,7 +107,7 @@ export type OutputSpec =
 
 /**
  * Editor hints attached to a field schema with {@link ui}. Carried in JSON Schema under the key
- * `"x-flowkit"` on the property schema.
+ * `"x-flowline"` on the property schema.
  */
 export interface UiMeta {
   /** Field label; defaults to a humanized property name. */
@@ -160,7 +160,7 @@ export interface UiMeta {
    *
    * - The field must be optional in its schema (`.optional()` or `.default()`), and `field` must
    *   name a sibling property; conditions must not form a cycle. The registry's manifest build
-   *   throws a `FlowkitDefinitionError` otherwise.
+   *   throws a `FlowlineDefinitionError` otherwise.
    * - Editor: a hidden field isn't rendered, but its stored value is kept, so switching back
    *   restores it.
    * - Validator: a hidden field is skipped (no `config.required`, no value checks).
@@ -201,7 +201,7 @@ export interface NodeManifest {
   name: string;
   /** Longer description. */
   description?: string;
-  /** A bundled icon name (`bundledIconNames`) or a `<FlowkitProvider icons>` key; else a box. */
+  /** A bundled icon name (`bundledIconNames`) or a `<FlowlineProvider icons>` key; else a box. */
   icon?: string;
   /** Step picker category. */
   category?: string;
@@ -264,7 +264,7 @@ export interface TriggerManifest {
   name: string;
   /** Longer description. */
   description?: string;
-  /** A bundled icon name (`bundledIconNames`) or a `<FlowkitProvider icons>` key; else a box. */
+  /** A bundled icon name (`bundledIconNames`) or a `<FlowlineProvider icons>` key; else a box. */
   icon?: string;
   /** How the trigger fires. */
   kind: TriggerKind;
@@ -282,7 +282,7 @@ export interface PluginManifest {
   id: string;
   /** Display name. */
   name: string;
-  /** A bundled icon name (`bundledIconNames`) or a `<FlowkitProvider icons>` key; else a box. */
+  /** A bundled icon name (`bundledIconNames`) or a `<FlowlineProvider icons>` key; else a box. */
   icon?: string;
   /** Longer description. */
   description?: string;

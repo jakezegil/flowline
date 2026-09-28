@@ -1,6 +1,6 @@
 /**
  * `SchemaForm`: renders a node's (or trigger's) config form from its JSON Schema and
- * `x-flowkit` editor hints, and dispatches each field to a control.
+ * `x-flowline` editor hints, and dispatches each field to a control.
  *
  * @module
  */
@@ -11,7 +11,7 @@ import {
   type JSONSchema,
   type ScopeEntry,
   type ValueExpr,
-} from "@flowkit/core";
+} from "@flowline/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { ChevronRight } from "lucide-react";
 import {
@@ -24,7 +24,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { EditorContext } from "../hooks";
-import { useFlowkit } from "../provider";
+import { useFlowline } from "../provider";
 import type { EditorState, EditorStore } from "../store/editor-store";
 import { ArrayField, MapField, ObjectField, UnionField } from "./fields/collections";
 import { AnyField, BooleanField, EnumField, NumberField, StringField } from "./fields/controls";
@@ -47,13 +47,13 @@ import { BUILTIN_WIDGETS } from "./widgets";
 type FieldInput = Omit<FieldProps, "schema"> & { schema: JSONSchema };
 
 /**
- * One config field, rendered by (in order): a widget registered on `<FlowkitProvider widgets>`
- * under `x-flowkit.widget`, a built-in widget of that name, or the control for its schema type.
+ * One config field, rendered by (in order): a widget registered on `<FlowlineProvider widgets>`
+ * under `x-flowline.widget`, a built-in widget of that name, or the control for its schema type.
  * Hidden fields render nothing.
  */
 export function Field(input: FieldInput): JSX.Element | null {
   const env = useFormEnv();
-  const { widgets } = useFlowkit();
+  const { widgets } = useFlowline();
   const schema = unwrapNullable(env.root, input.schema);
   const meta = metaOf(schema);
   if (meta.hidden) return null;
@@ -130,7 +130,7 @@ export function asObject(v: ValueExpr | undefined): Record<string, ValueExpr> | 
     : undefined;
 }
 
-/** A collapsible group of fields (`x-flowkit.group`). "Advanced" starts collapsed. */
+/** A collapsible group of fields (`x-flowline.group`). "Advanced" starts collapsed. */
 function FieldGroup({
   title,
   hasIssues,
@@ -148,20 +148,20 @@ function FieldGroup({
   }, [hasIssues]);
   const shown = open;
   return (
-    <section className="fk-group" data-open={shown ? "" : undefined}>
-      <h3 className="fk-group__title">
+    <section className="fl-group" data-open={shown ? "" : undefined}>
+      <h3 className="fl-group__title">
         <button
           type="button"
-          className="fk-group__toggle"
+          className="fl-group__toggle"
           aria-expanded={shown}
           aria-controls={id}
           onClick={() => setOpen(!shown)}
         >
-          <ChevronRight size={14} className="fk-group__chev" aria-hidden />
+          <ChevronRight size={14} className="fl-group__chev" aria-hidden />
           {title}
         </button>
       </h3>
-      <div id={id} className="fk-fields" hidden={!shown}>
+      <div id={id} className="fl-fields" hidden={!shown}>
         {children}
       </div>
     </section>
@@ -170,7 +170,7 @@ function FieldGroup({
 
 /**
  * The fields of an object schema, in declaration order: ungrouped fields first, then one
- * collapsible section per `x-flowkit.group`.
+ * collapsible section per `x-flowline.group`.
  */
 export function ObjectFields({
   schema,
@@ -221,7 +221,7 @@ export function ObjectFields({
     } else loose.push(el);
   }
   return (
-    <div className="fk-fields">
+    <div className="fl-fields">
       {loose}
       {[...groups].map(([title, g]) => (
         <FieldGroup key={title} title={title} hasIssues={g.issues}>
@@ -264,21 +264,21 @@ const NO_SAMPLES: Record<string, unknown> = {};
 const NO_SCOPE: ScopeEntry[] = [];
 
 /**
- * A config form generated from a JSON Schema with `x-flowkit` editor hints.
+ * A config form generated from a JSON Schema with `x-flowline` editor hints.
  *
  * Controls by schema: text fields take literal text mixed with reference pills; numbers,
  * booleans (a switch) and choices (`enum`) take a literal or, via the `{x}` toggle, a reference;
  * lists of objects are repeatable groups (add, remove, reorder); objects with properties are
  * fieldsets; string maps are key/value rows; discriminated unions (`oneOf` of objects with a
- * constant property, e.g. `type`) show a choice and then that variant's fields. `x-flowkit.widget`
- * selects a widget registered on `<FlowkitProvider widgets>`, else a built-in one (`rules`,
+ * constant property, e.g. `type`) show a choice and then that variant's fields. `x-flowline.widget`
+ * selects a widget registered on `<FlowlineProvider widgets>`, else a built-in one (`rules`,
  * `cases`, `fields`, `code`, `subflowSelect`, `subflowInput`, `secret`, `textarea`).
  * `hidden` fields aren't rendered, `refOnly` fields take a single reference and `literalOnly`
  * fields never take one. Issues show under their field: errors red, warnings amber.
  *
  * Inside a `<WorkflowEditor>` (or an {@link EditorContext}), the fields' data pickers offer the
  * values in scope of `stepId` with their samples; elsewhere pass `scope` and `samples`. Needs a
- * `<FlowkitProvider>` above it.
+ * `<FlowlineProvider>` above it.
  *
  * @example
  * <SchemaForm
@@ -336,7 +336,7 @@ export function SchemaForm(props: {
   return (
     <Tooltip.Provider delayDuration={300} skipDelayDuration={100}>
       <FormContext.Provider value={env}>
-        <div className="fk-form">
+        <div className="fl-form">
           <ObjectFields schema={schema} path="" value={value} onChange={onChange} />
         </div>
       </FormContext.Provider>

@@ -7,14 +7,14 @@ export function Toasts() {
   const dismiss = useCanvasUi((s) => s.dismissToast);
   const labels = useLabels();
   return (
-    <div className="fk-toasts" role="status" aria-live="polite">
+    <div className="fl-toasts" role="status" aria-live="polite">
       {toasts.map((t) => (
-        <div key={t.id} className="fk-toast">
+        <div key={t.id} className="fl-toast">
           <span>{t.message}</span>
           {t.action && (
             <button
               type="button"
-              className="fk-toast__action"
+              className="fl-toast__action"
               onClick={() => {
                 t.action?.run();
                 dismiss(t.id);
@@ -25,7 +25,7 @@ export function Toasts() {
           )}
           <button
             type="button"
-            className="fk-toast__close"
+            className="fl-toast__close"
             aria-label={labels.dismiss}
             onClick={() => dismiss(t.id)}
           >

@@ -22,11 +22,11 @@ export function NotFoundState({
   action?: NotFoundAction | null | undefined;
 }): JSX.Element {
   return (
-    <div className="fk-state" role="alert">
-      <p className="fk-state__title">{title}</p>
-      <p className="fk-state__detail">{detail}</p>
+    <div className="fl-state" role="alert">
+      <p className="fl-state__title">{title}</p>
+      <p className="fl-state__detail">{detail}</p>
       {action && (
-        <button type="button" className="fk-btn" onClick={action.onClick}>
+        <button type="button" className="fl-btn" onClick={action.onClick}>
           {action.label}
         </button>
       )}

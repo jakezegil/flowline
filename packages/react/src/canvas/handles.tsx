@@ -7,12 +7,12 @@ import { Handle, Position } from "@xyflow/react";
 export function NodeHandles() {
   return (
     <>
-      <Handle type="target" position={Position.Top} isConnectable={false} className="fk-handle" />
+      <Handle type="target" position={Position.Top} isConnectable={false} className="fl-handle" />
       <Handle
         type="source"
         position={Position.Bottom}
         isConnectable={false}
-        className="fk-handle"
+        className="fl-handle"
       />
     </>
   );

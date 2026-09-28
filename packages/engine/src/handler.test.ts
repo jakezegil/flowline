@@ -13,8 +13,8 @@ import {
   sensitive,
   suspend,
   type WorkflowDoc,
-} from "@flowkit/core";
-import { createMemoryStorage } from "@flowkit/storage-memory";
+} from "@flowline/core";
+import { createMemoryStorage } from "@flowline/storage-memory";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createEngine, type Engine, type EngineOptions } from "./engine";
@@ -157,7 +157,7 @@ function call(method: string, path: string, opts: CallOpts = {}, e: Engine = eng
   if (opts.body !== undefined) {
     init.body = typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
   }
-  return e.handler(new Request(`http://localhost/flowkit${path}`, init));
+  return e.handler(new Request(`http://localhost/flowline${path}`, init));
 }
 
 async function json<T = unknown>(res: Response | Promise<Response>): Promise<T> {
@@ -214,7 +214,7 @@ describe("routing and authorization", () => {
     expect(form.status).toBe(415);
     expect(await storage.listRuns("a", {})).toEqual([]);
     const bare = await engine.handler(
-      new Request("http://localhost/flowkit/workflows/wf/run", {
+      new Request("http://localhost/flowline/workflows/wf/run", {
         method: "POST",
         headers: { "x-tenant": "a", "content-type": "application/json; charset=utf-8" },
         body: JSON.stringify({ input: { name: "x" } }),
@@ -223,7 +223,7 @@ describe("routing and authorization", () => {
     expect(bare.status).toBe(202);
     // A no-cors fetch with an untyped Blob body sends no Content-Type at all.
     const untyped = await engine.handler(
-      new Request("http://localhost/flowkit/workflows/wf/run", {
+      new Request("http://localhost/flowline/workflows/wf/run", {
         method: "POST",
         headers: { "x-tenant": "a" },
         body: new Blob([JSON.stringify({ input: { name: "y" } })]),
@@ -232,7 +232,7 @@ describe("routing and authorization", () => {
     expect(untyped.status).toBe(415);
     const bodyless = await engine.handler(
       new Request(
-        `http://localhost/flowkit/runs/${(await storage.listRuns("a", {}))[0]?.id}/cancel`,
+        `http://localhost/flowline/runs/${(await storage.listRuns("a", {}))[0]?.id}/cancel`,
         {
           method: "POST",
           headers: { "x-tenant": "a" },
@@ -262,7 +262,7 @@ describe("routing and authorization", () => {
       },
     });
     const streamed = await engine.handler(
-      new Request("http://localhost/flowkit/workflows/validate", {
+      new Request("http://localhost/flowline/workflows/validate", {
         method: "POST",
         headers: { "x-tenant": "a", "content-type": "application/json" },
         body: stream,
@@ -375,7 +375,7 @@ describe("workflow management", () => {
     expect(body.issues.map((i) => i.code)).toContain("node.unknown");
     expect(await storage.getPublishedVersion("a", "bad")).toBeNull();
     await expect(engine.publish("a", "bad", 1, "u")).rejects.toMatchObject({
-      name: "FlowkitValidationError",
+      name: "FlowlineValidationError",
       issues: expect.arrayContaining([expect.objectContaining({ code: "node.unknown" })]),
     });
   });
@@ -578,7 +578,7 @@ describe("runs", () => {
     const e = makeEngine({}, broken);
     const res = await call("POST", `/runs/${runId}/retry`, {}, e);
     expect(res.status).toBe(500);
-    expect(logger.error).toHaveBeenCalledWith("flowkit handler error", { error: "db down" });
+    expect(logger.error).toHaveBeenCalledWith("flowline handler error", { error: "db down" });
   });
 
   it("maps cancel outcomes to 200, 202 and 409", async () => {
@@ -760,7 +760,7 @@ describe("webhooks", () => {
 
   const post = (path: string, body: string, headers: Record<string, string> = {}) =>
     engine.handler(
-      new Request(`http://localhost/flowkit${path}`, {
+      new Request(`http://localhost/flowline${path}`, {
         method: "POST",
         headers: { "content-type": "application/json", ...headers },
         body,
@@ -793,15 +793,15 @@ describe("webhooks", () => {
     const bad = createHmac("sha256", "other").update(body).digest("hex");
     expect((await post(`/hooks/a/hook/${slug}`, body)).status).toBe(401);
     expect(
-      (await post(`/hooks/a/hook/${slug}`, body, { "x-flowkit-signature": `sha256=${bad}` }))
+      (await post(`/hooks/a/hook/${slug}`, body, { "x-flowline-signature": `sha256=${bad}` }))
         .status,
     ).toBe(401);
     expect(
-      (await post(`/hooks/a/hook/${slug}`, body, { "x-flowkit-signature": "sha256=abc" })).status,
+      (await post(`/hooks/a/hook/${slug}`, body, { "x-flowline-signature": "sha256=abc" })).status,
     ).toBe(401);
     expect(await storage.listRuns("a", {})).toEqual([]);
     const ok = await post(`/hooks/a/hook/${slug}`, body, {
-      "x-flowkit-signature": `sha256=${good}`,
+      "x-flowline-signature": `sha256=${good}`,
     });
     expect(ok.status).toBe(202);
   });
@@ -818,7 +818,7 @@ describe("webhooks", () => {
     const body = JSON.stringify({ email: "a@b.c", which: "HOOK_KEY" });
     const sig = createHmac("sha256", "key-of-a").update(body).digest("hex");
     const res = await post(`/hooks/a/hook/${slug}`, body, {
-      "x-flowkit-signature": `sha256=${sig}`,
+      "x-flowline-signature": `sha256=${sig}`,
     });
     expect(res.status).toBe(401);
     expect(await storage.listRuns("a", {})).toEqual([]);
@@ -878,7 +878,7 @@ describe("webhooks", () => {
     const slug = (v.doc.trigger.config as { slug: string }).slug;
     const send = (body: unknown) =>
       e.handler(
-        new Request(`http://localhost/flowkit/hooks/a/inv/${slug}`, {
+        new Request(`http://localhost/flowline/hooks/a/inv/${slug}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(body),
@@ -998,7 +998,7 @@ describe("SSE stream", () => {
     try {
       const aborter = new AbortController();
       const res = await engine.handler(
-        new Request(`http://localhost/flowkit/runs/${runId}/stream`, {
+        new Request(`http://localhost/flowline/runs/${runId}/stream`, {
           headers: { "x-tenant": "a" },
           signal: aborter.signal,
         }),

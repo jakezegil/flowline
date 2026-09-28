@@ -1,14 +1,14 @@
 /**
- * The `StorageAdapter` conformance suite, exposed as `@flowkit/engine/conformance`. This is its
- * own entry point (separate from `@flowkit/engine/testing`) because it requires `vitest`
- * (an optional peer dependency) at import time; `@flowkit/engine/testing` must stay importable
+ * The `StorageAdapter` conformance suite, exposed as `@flowline/engine/conformance`. This is its
+ * own entry point (separate from `@flowline/engine/testing`) because it requires `vitest`
+ * (an optional peer dependency) at import time; `@flowline/engine/testing` must stay importable
  * without vitest installed.
  *
  * @module
  */
-import type { JournalEntry, RunEventType, WorkflowDoc } from "@flowkit/core";
+import type { JournalEntry, RunEventType, WorkflowDoc } from "@flowline/core";
 import { describe, expect, it } from "vitest";
-import { FlowkitStorageError } from "./errors";
+import { FlowlineStorageError } from "./errors";
 import type { Lease, NewRun, NewRunEvent, StorageAdapter } from "./storage";
 
 /** What a conformance factory returns: a fresh, empty adapter and an optional cleanup. */
@@ -75,7 +75,7 @@ async function claimOrFail(storage: StorageAdapter, now: number, workerId = "w1"
  *
  * @example
  * ```ts
- * import { runStorageConformance } from "@flowkit/engine/testing";
+ * import { runStorageConformance } from "@flowline/engine/testing";
  * runStorageConformance("memory", async () => ({ storage: createMemoryStorage() }));
  * ```
  *
@@ -328,11 +328,11 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect(await s.listEvents(T1, "r1")).toHaveLength(1);
       });
 
-      test("createRun with an id that exists in another tenant throws FlowkitStorageError", async (s) => {
+      test("createRun with an id that exists in another tenant throws FlowlineStorageError", async (s) => {
         const original = await s.createRun(newRun("r1"), [ev("r1", "run.started")], 100);
         await expect(
           s.createRun(newRun("r1", { tenantId: T2 }), [ev("r1", "run.started", 1, T2)], 200),
-        ).rejects.toThrow(FlowkitStorageError);
+        ).rejects.toThrow(FlowlineStorageError);
         expect(await s.getRun(T2, "r1")).toBeNull();
         expect(await s.getRun(T1, "r1")).toEqual(original);
         expect(await s.listEvents(T2, "r1")).toEqual([]);
@@ -920,7 +920,7 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
             [ev("parent", "step.started")],
             20,
           ),
-        ).rejects.toThrow(FlowkitStorageError);
+        ).rejects.toThrow(FlowlineStorageError);
         expect(await s.getRun(T1, "parent")).toEqual(before);
         expect(await s.listEvents(T1, "parent")).toEqual([]);
         expect(await s.getRun(T1, "taken")).toBeNull();

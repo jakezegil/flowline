@@ -5,7 +5,7 @@ import {
   type Manifest,
   type ScopeEntry,
   type ValueExpr,
-} from "@flowkit/core";
+} from "@flowline/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type JSX, useState } from "react";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
@@ -13,7 +13,7 @@ import builtin from "../../playground/builtin-manifest.json";
 import { editorView, typeInto } from "../../test/codemirror-dom";
 import { mockClient, setupDom } from "../../test/dom";
 import { fixtureDoc, manifest } from "../../test/fixtures";
-import { FlowkitProvider } from "../provider";
+import { FlowlineProvider } from "../provider";
 import { SchemaForm } from "./schema-form";
 
 beforeAll(setupDom);
@@ -63,14 +63,14 @@ function renderForm(
 ) {
   latest = props.initial ?? {};
   return render(
-    <FlowkitProvider client={client}>
+    <FlowlineProvider client={client}>
       <Form {...props} />
-    </FlowkitProvider>,
+    </FlowlineProvider>,
   );
 }
 
 /** The field frame around a control. */
-const fieldOf = (el: HTMLElement) => el.closest<HTMLElement>(".fk-f") as HTMLElement;
+const fieldOf = (el: HTMLElement) => el.closest<HTMLElement>(".fl-f") as HTMLElement;
 
 const mixed: JSONSchema = {
   type: "object",
@@ -78,18 +78,18 @@ const mixed: JSONSchema = {
     title: {
       type: "string",
       description: "Shown to the assignee",
-      "x-flowkit": { label: "Task title" },
+      "x-flowline": { label: "Task title" },
     },
-    notify: { type: "boolean", "x-flowkit": { label: "Notify owner" } },
-    retries: { type: "integer", "x-flowkit": { label: "Retries" } },
+    notify: { type: "boolean", "x-flowline": { label: "Notify owner" } },
+    retries: { type: "integer", "x-flowline": { label: "Retries" } },
     priority: { type: "string", enum: ["low", "normal", "high"], default: "normal" },
     region: {
       type: "string",
       enum: ["emea", "amer", "apac", "latam", "anz"],
-      "x-flowkit": { label: "Region" },
+      "x-flowline": { label: "Region" },
     },
-    internal: { type: "string", "x-flowkit": { hidden: true, label: "Internal" } },
-    template: { type: "string", "x-flowkit": { label: "Template", literalOnly: true } },
+    internal: { type: "string", "x-flowline": { hidden: true, label: "Internal" } },
+    template: { type: "string", "x-flowline": { label: "Template", literalOnly: true } },
   },
   required: ["title"],
 };
@@ -181,7 +181,7 @@ describe("SchemaForm", () => {
     const title = screen.getByRole("textbox", { name: "Task title" });
     fireEvent.focus(title);
     expect(screen.queryByRole("tree")).toBeNull();
-    expect(fieldOf(title).querySelector(".fk-ref__browse")).toBeNull();
+    expect(fieldOf(title).querySelector(".fl-ref__browse")).toBeNull();
   });
 
   test("issues show under their field, errors marked invalid", () => {
@@ -328,9 +328,9 @@ describe("SchemaForm references and JSON", () => {
       extra: {
         type: "object",
         additionalProperties: { type: "string" },
-        "x-flowkit": { label: "Extra", refOnly: true },
+        "x-flowline": { label: "Extra", refOnly: true },
       },
-      payload: { "x-flowkit": { label: "Payload" } },
+      payload: { "x-flowline": { label: "Payload" } },
     },
   };
 
@@ -362,7 +362,7 @@ describe("SchemaForm references and JSON", () => {
     const text = view.dom.textContent ?? "";
     expect(text).not.toContain("$ref");
     expect(text).not.toContain("$tpl");
-    expect(view.dom.querySelectorAll(".fk-ref-pill")).toHaveLength(2);
+    expect(view.dom.querySelectorAll(".fl-ref-pill")).toHaveLength(2);
     // Typing elsewhere keeps both references.
     act(() => {
       view.dispatch({ selection: { anchor: 1 } });
@@ -386,7 +386,7 @@ describe("SchemaForm references and JSON", () => {
         strategy: { enum: ["roundRobin", "team"], default: "roundRobin" },
         team: {
           enum: ["smb", "enterprise"],
-          "x-flowkit": {
+          "x-flowline": {
             label: "Team",
             enumLabels: { smb: "SMB" },
             showIf: { field: "strategy", equals: "team" },
@@ -418,10 +418,10 @@ describe("SchemaForm lists", () => {
   const listSchema: JSONSchema = {
     type: "object",
     properties: {
-      tags: { type: "array", items: { type: "string" }, "x-flowkit": { label: "Tags" } },
+      tags: { type: "array", items: { type: "string" }, "x-flowline": { label: "Tags" } },
       contacts: {
         type: "array",
-        "x-flowkit": { label: "Contacts" },
+        "x-flowline": { label: "Contacts" },
         items: {
           type: "object",
           properties: { name: { type: "string" }, vip: { type: "boolean" } },

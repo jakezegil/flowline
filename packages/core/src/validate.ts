@@ -850,7 +850,7 @@ function docInfo(doc: WorkflowDoc): DocInfo {
  * assignable type (mismatches are warnings); branch keys match declared branches; sub-flow
  * calls target a known (`ctx.subflows`), non-recursive workflow with a valid input mapping; the
  * doc's `output` mapping resolves in end-of-doc scope and, for a sub-flow, maps exactly its
- * declared output fields. Fields hidden by `x-flowkit.showIf` are skipped. Trigger config
+ * declared output fields. Fields hidden by `x-flowline.showIf` are skipped. Trigger config
  * may hold only literals.
  *
  * References into field-declared shapes (manual and sub-flow trigger inputs, a webhook body with

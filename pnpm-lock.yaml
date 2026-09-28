@@ -32,22 +32,22 @@ importers:
 
   examples/docs-check:
     devDependencies:
-      '@flowkit/core':
+      '@flowline/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@flowkit/engine':
+      '@flowline/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@flowkit/nodes-builtin':
+      '@flowline/nodes-builtin':
         specifier: workspace:*
         version: link:../../packages/nodes-builtin
-      '@flowkit/react':
+      '@flowline/react':
         specifier: workspace:*
         version: link:../../packages/react
-      '@flowkit/storage-memory':
+      '@flowline/storage-memory':
         specifier: workspace:*
         version: link:../../packages/storage-memory
-      '@flowkit/storage-postgres':
+      '@flowline/storage-postgres':
         specifier: workspace:*
         version: link:../../packages/storage-postgres
       '@hono/node-server':
@@ -83,16 +83,16 @@ importers:
 
   examples/headless:
     dependencies:
-      '@flowkit/core':
+      '@flowline/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@flowkit/engine':
+      '@flowline/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@flowkit/nodes-builtin':
+      '@flowline/nodes-builtin':
         specifier: workspace:*
         version: link:../../packages/nodes-builtin
-      '@flowkit/storage-memory':
+      '@flowline/storage-memory':
         specifier: workspace:*
         version: link:../../packages/storage-memory
       zod:
@@ -108,22 +108,22 @@ importers:
 
   examples/mini-crm:
     dependencies:
-      '@flowkit/core':
+      '@flowline/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@flowkit/engine':
+      '@flowline/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@flowkit/nodes-builtin':
+      '@flowline/nodes-builtin':
         specifier: workspace:*
         version: link:../../packages/nodes-builtin
-      '@flowkit/react':
+      '@flowline/react':
         specifier: workspace:*
         version: link:../../packages/react
-      '@flowkit/storage-memory':
+      '@flowline/storage-memory':
         specifier: workspace:*
         version: link:../../packages/storage-memory
-      '@flowkit/storage-postgres':
+      '@flowline/storage-postgres':
         specifier: workspace:*
         version: link:../../packages/storage-postgres
       '@hono/node-server':
@@ -196,10 +196,10 @@ importers:
 
   packages/engine:
     dependencies:
-      '@flowkit/core':
+      '@flowline/core':
         specifier: workspace:^
         version: link:../core
-      '@flowkit/nodes-builtin':
+      '@flowline/nodes-builtin':
         specifier: workspace:^
         version: link:../nodes-builtin
       cron-parser:
@@ -212,7 +212,7 @@ importers:
         specifier: 7.29.1
         version: 7.29.1
     devDependencies:
-      '@flowkit/storage-memory':
+      '@flowline/storage-memory':
         specifier: workspace:*
         version: link:../storage-memory
       vitest:
@@ -224,7 +224,7 @@ importers:
 
   packages/nodes-builtin:
     dependencies:
-      '@flowkit/core':
+      '@flowline/core':
         specifier: workspace:^
         version: link:../core
     devDependencies:
@@ -255,7 +255,7 @@ importers:
       '@codemirror/view':
         specifier: 6.43.11
         version: 6.43.11
-      '@flowkit/core':
+      '@flowline/core':
         specifier: workspace:^
         version: link:../core
       '@lezer/highlight':
@@ -289,7 +289,7 @@ importers:
         specifier: 5.0.15
         version: 5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.7.0(react@19.3.0))
     devDependencies:
-      '@flowkit/nodes-builtin':
+      '@flowline/nodes-builtin':
         specifier: workspace:*
         version: link:../nodes-builtin
       '@testing-library/react':
@@ -328,10 +328,10 @@ importers:
 
   packages/storage-memory:
     dependencies:
-      '@flowkit/core':
+      '@flowline/core':
         specifier: workspace:^
         version: link:../core
-      '@flowkit/engine':
+      '@flowline/engine':
         specifier: workspace:^
         version: link:../engine
     devDependencies:
@@ -344,10 +344,10 @@ importers:
 
   packages/storage-postgres:
     dependencies:
-      '@flowkit/core':
+      '@flowline/core':
         specifier: workspace:^
         version: link:../core
-      '@flowkit/engine':
+      '@flowline/engine':
         specifier: workspace:^
         version: link:../engine
     devDependencies:

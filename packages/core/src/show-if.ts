@@ -15,7 +15,7 @@ import {
 import { isRef, isTpl } from "./refs";
 import type { JSONSchema, Literal, ShowIf, UiMeta } from "./types";
 
-const UI_META_KEY = "x-flowkit";
+const UI_META_KEY = "x-flowline";
 
 const asList = (v: Literal | Literal[]): Literal[] => (Array.isArray(v) ? v : [v]);
 

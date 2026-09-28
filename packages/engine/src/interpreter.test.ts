@@ -6,7 +6,7 @@ import {
   type JournalEntry,
   type Step,
   type WorkflowDoc,
-} from "@flowkit/core";
+} from "@flowline/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { buildScope, nextAction } from "./interpreter";

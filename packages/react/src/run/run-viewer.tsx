@@ -1,4 +1,4 @@
-import type { Manifest, NodeManifest, RunDetail } from "@flowkit/core";
+import type { Manifest, NodeManifest, RunDetail } from "@flowline/core";
 import * as Popover from "@radix-ui/react-popover";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { Ban, CircleAlert, CircleStop, Hourglass, LoaderCircle, RotateCcw } from "lucide-react";
@@ -17,7 +17,7 @@ import { PortalContainerContext, type RunOverlay } from "../canvas/canvas-contex
 import { stepDisplayName } from "../canvas/step-card";
 import { WorkflowCanvas } from "../canvas/workflow-canvas";
 import { EditorContext, stepIndex, useEditorStore, useRun } from "../hooks";
-import { useFlowkit, useFlowkitAppearance } from "../provider";
+import { useFlowline, useFlowlineAppearance } from "../provider";
 import { createEditorStore, type EditorStore, TRIGGER_KEY } from "../store/editor-store";
 import { themeStyle } from "../theme";
 import { type NotFoundAction, NotFoundState } from "../ui/not-found";
@@ -30,7 +30,7 @@ import { StepInspector } from "./step-inspector";
 
 /** Loads the manifest once per client; `retry` loads it again after a failure. */
 function useManifest(): { manifest?: Manifest; error?: string; retry(): void } {
-  const { client } = useFlowkit();
+  const { client } = useFlowline();
   const [state, setState] = useState<{ manifest?: Manifest; error?: string }>({});
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
@@ -99,8 +99,8 @@ function RunBody({
   resumeAction?: ResumeActionProp | undefined;
   userName?: ((userId: string) => string | undefined) | undefined;
 }) {
-  const { labels, resolveIcon } = useFlowkitAppearance();
-  const { client } = useFlowkit();
+  const { labels, resolveIcon } = useFlowlineAppearance();
+  const { client } = useFlowline();
   const toast = useToast();
   const { run } = detail;
   const docKey = `${run.id}:${run.version}`;
@@ -242,7 +242,7 @@ function RunBody({
     return (
       <button
         type="button"
-        className={small ? "fk-btn fk-btn--sm" : "fk-btn"}
+        className={small ? "fl-btn fl-btn--sm" : "fl-btn"}
         onClick={() => setResumeOpen(true)}
       >
         {labels.resume}
@@ -256,39 +256,39 @@ function RunBody({
 
   return (
     <EditorContext.Provider value={store}>
-      <header className="fk-header fk-header--run">
-        <div className="fk-header__title">
+      <header className="fl-header fl-header--run">
+        <div className="fl-header__title">
           <RunStateChip state={state} size="lg" />
-          <h1 className="fk-run-title">
-            <span className="fk-run-title__name">{detail.doc.name}</span>
-            <span className="fk-version">{labels.version(run.version)}</span>
+          <h1 className="fl-run-title">
+            <span className="fl-run-title__name">{detail.doc.name}</span>
+            <span className="fl-version">{labels.version(run.version)}</span>
           </h1>
         </div>
-        <p className="fk-run-meta">
+        <p className="fl-run-meta">
           <span>
             <span title={labels.dateTime(run.createdAt)}>
               {labels.started(labels.relativeTime(run.createdAt - now))}
             </span>
           </span>
           <span>
-            <span className="fk-tabular">{labels.duration(Math.max(0, duration))}</span>
+            <span className="fl-tabular">{labels.duration(Math.max(0, duration))}</span>
           </span>
           <span>
             <span>{labels.origin(run.startedBy)}</span>
           </span>
         </p>
-        <div className="fk-header__actions">
+        <div className="fl-header__actions">
           {resumeControl("header", false)}
           {canCancel && <CancelButton busy={busy} onConfirm={() => void cancel()} />}
           {run.status === "failed" && (
             <button
               type="button"
-              className="fk-btn fk-btn--primary"
+              className="fl-btn fl-btn--primary"
               aria-disabled={busy !== null || undefined}
               onClick={() => busy === null && void retry()}
             >
               {busy === "retry" ? (
-                <LoaderCircle size={14} className="fk-spin" aria-hidden />
+                <LoaderCircle size={14} className="fl-spin" aria-hidden />
               ) : (
                 <RotateCcw size={14} aria-hidden />
               )}
@@ -453,7 +453,7 @@ function useStoreSelection(store: EditorStore): string | null {
 
 /** Cancel run, behind a small confirm: cancelling a live run can't be undone. */
 function CancelButton({ busy, onConfirm }: { busy: string | null; onConfirm(): void }) {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const container = useContext(PortalContainerContext);
   const [open, setOpen] = useState(false);
   const titleId = useId();
@@ -462,35 +462,35 @@ function CancelButton({ busy, onConfirm }: { busy: string | null; onConfirm(): v
       <Popover.Trigger asChild>
         <button
           type="button"
-          className="fk-btn fk-btn--danger"
+          className="fl-btn fl-btn--danger"
           aria-disabled={busy !== null || undefined}
         >
-          {busy === "cancel" && <LoaderCircle size={14} className="fk-spin" aria-hidden />}
+          {busy === "cancel" && <LoaderCircle size={14} className="fl-spin" aria-hidden />}
           {labels.cancelRun}
         </button>
       </Popover.Trigger>
       <Popover.Portal container={container}>
         <Popover.Content
-          className="fk-confirm"
+          className="fl-confirm"
           side="bottom"
           align="end"
           sideOffset={6}
           collisionPadding={12}
           aria-labelledby={titleId}
         >
-          <p id={titleId} className="fk-confirm__title">
+          <p id={titleId} className="fl-confirm__title">
             {labels.cancelRunConfirm}
           </p>
-          <p className="fk-confirm__body">{labels.cancelRunConfirmBody}</p>
-          <div className="fk-confirm__actions">
+          <p className="fl-confirm__body">{labels.cancelRunConfirmBody}</p>
+          <div className="fl-confirm__actions">
             <Popover.Close asChild>
-              <button type="button" className="fk-btn fk-btn--sm">
+              <button type="button" className="fl-btn fl-btn--sm">
                 {labels.keepRunning}
               </button>
             </Popover.Close>
             <button
               type="button"
-              className="fk-btn fk-btn--sm fk-btn--danger-solid"
+              className="fl-btn fl-btn--sm fl-btn--danger-solid"
               onClick={() => {
                 setOpen(false);
                 onConfirm();
@@ -526,22 +526,22 @@ function Banner({
 }) {
   return (
     <div
-      className="fk-banner"
+      className="fl-banner"
       data-tone={tone}
       data-redundant={redundant || undefined}
       role={tone === "danger" ? "alert" : "status"}
     >
-      <span className="fk-banner__icon">{icon}</span>
-      <div className="fk-banner__text">
-        <span className="fk-banner__title">{title}</span>
+      <span className="fl-banner__icon">{icon}</span>
+      <div className="fl-banner__text">
+        <span className="fl-banner__title">{title}</span>
         {detail && (
-          <span className="fk-banner__detail" title={detailTitle}>
+          <span className="fl-banner__detail" title={detailTitle}>
             {detail}
           </span>
         )}
       </div>
       {action && (
-        <button type="button" className="fk-btn fk-btn--sm fk-btn--ghost" onClick={action.run}>
+        <button type="button" className="fl-btn fl-btn--sm fl-btn--ghost" onClick={action.run}>
           {action.label}
         </button>
       )}
@@ -574,7 +574,7 @@ function RunCanvasAndInspector({
   resumeHint?: string;
   waitingStep?: string;
 }) {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const selection = useEditorStore((s) => s.selection);
   let name = "";
   let Icon: React.ComponentType<{ size?: number }> | undefined;
@@ -592,12 +592,12 @@ function RunCanvasAndInspector({
     decisionWait = node?.resume?.hostHandled === true;
   }
   return (
-    <div className="fk-editor__body">
-      <div className="fk-editor__canvas">
+    <div className="fl-editor__body">
+      <div className="fl-editor__canvas">
         <WorkflowCanvas store={store} readOnly overlay={overlay} />
       </div>
       {selection !== null && (
-        <aside className="fk-panel fk-panel--inspector" aria-label={labels.inspectorTabs}>
+        <aside className="fl-panel fl-panel--inspector" aria-label={labels.inspectorTabs}>
           <StepInspector
             // Reset tabs when a different step (or iteration) is inspected.
             key={`${selection}:${resolved.paths[selection] ?? ""}`}
@@ -624,7 +624,7 @@ function RunCanvasAndInspector({
  * the path it took and a stepper per loop that opens on the failed iteration; a header with the
  * run's status, version, start time, duration and origin, and Retry from failed step, Cancel run
  * and Resume… actions; and an inspector for the clicked step with Input, Output, Error and
- * Timeline tabs. Live runs update as their events arrive. Needs a `<FlowkitProvider>` and a sized
+ * Timeline tabs. Live runs update as their events arrive. Needs a `<FlowlineProvider>` and a sized
  * container.
  *
  * Resume… posts a callback body to the waiting step. When the step's node declares
@@ -666,7 +666,7 @@ export function RunViewer(props: {
   className?: string;
 }): JSX.Element {
   const { runId, onRetried, className, resumeAction, notFoundAction, userName } = props;
-  const { theme, labels } = useFlowkitAppearance();
+  const { theme, labels } = useFlowlineAppearance();
   const { detail, error, refresh } = useRun(runId);
   const { manifest, error: manifestError, retry: retryManifest } = useManifest();
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
@@ -696,12 +696,12 @@ export function RunViewer(props: {
     );
   } else if ((error && !detail) || manifestError) {
     content = (
-      <div className="fk-state" role="alert">
-        <p className="fk-state__title">{labels.loadRunFailed}</p>
-        <p className="fk-state__detail">{manifestError ?? errorText(error)}</p>
+      <div className="fl-state" role="alert">
+        <p className="fl-state__title">{labels.loadRunFailed}</p>
+        <p className="fl-state__detail">{manifestError ?? errorText(error)}</p>
         <button
           type="button"
-          className="fk-btn"
+          className="fl-btn"
           onClick={() => {
             if (manifestError) retryManifest();
             if (error) refresh();
@@ -713,16 +713,16 @@ export function RunViewer(props: {
     );
   } else {
     content = (
-      <div className="fk-state" role="status" aria-busy="true">
-        <span className="fk-skeleton" aria-hidden />
-        <p className="fk-state__detail">{labels.loadingRun}</p>
+      <div className="fl-state" role="status" aria-busy="true">
+        <span className="fl-skeleton" aria-hidden />
+        <p className="fl-state__detail">{labels.loadingRun}</p>
       </div>
     );
   }
   return (
     <div
-      className={className ? `fk-root fk-app fk-run ${className}` : "fk-root fk-app fk-run"}
-      data-fk-theme={theme.colorMode ?? "system"}
+      className={className ? `fl-root fl-app fl-run ${className}` : "fl-root fl-app fl-run"}
+      data-fl-theme={theme.colorMode ?? "system"}
       style={style}
     >
       <PortalContainerContext.Provider value={portal}>
@@ -730,7 +730,7 @@ export function RunViewer(props: {
           <ToasterProvider source="runViewer">{content}</ToasterProvider>
         </Tooltip.Provider>
       </PortalContainerContext.Provider>
-      <div ref={setPortal} className="fk-portal" />
+      <div ref={setPortal} className="fl-portal" />
     </div>
   );
 }

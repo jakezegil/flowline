@@ -2,11 +2,11 @@
  * `?page=picker` (or `/picker`): the reference input, data picker and code editor in isolation,
  * against a hand-made scope with samples. `&theme=light|dark`.
  */
-import type { ScopeEntry, ValueExpr } from "@flowkit/core";
-import type { FlowkitClient } from "@flowkit/core/client";
+import type { ScopeEntry, ValueExpr } from "@flowline/core";
+import type { FlowlineClient } from "@flowline/core/client";
 import { type JSX, type ReactNode, useMemo, useState } from "react";
 import { PortalContainerContext } from "../src/canvas/canvas-context";
-import { FlowkitProvider } from "../src/index";
+import { FlowlineProvider } from "../src/index";
 import { CodeEditor } from "../src/panel/code-editor";
 import { DataPicker } from "../src/panel/data-picker";
 import { RefTextInput } from "../src/panel/ref-text-input";
@@ -112,7 +112,7 @@ export const pickerSamples: Record<string, unknown> = {
   },
 };
 
-const client = {} as FlowkitClient;
+const client = {} as FlowlineClient;
 
 function Field(props: {
   label: string;
@@ -166,8 +166,8 @@ export function PickerPage(): JSX.Element {
   const invalid = useMemo(() => new Set(["steps.removedStep.id"]), []);
 
   return (
-    <FlowkitProvider client={client} theme={themeValue}>
-      <div className="fk-root pk" data-fk-theme={theme} data-theme={resolvedTheme}>
+    <FlowlineProvider client={client} theme={themeValue}>
+      <div className="fl-root pk" data-fl-theme={theme} data-theme={resolvedTheme}>
         <PortalContainerContext.Provider value={portal}>
           <main className="pk-main">
             <section className="pk-panel" aria-label="Reference inputs">
@@ -262,8 +262,8 @@ export function PickerPage(): JSX.Element {
             </section>
           </main>
         </PortalContainerContext.Provider>
-        <div ref={setPortal} className="fk-portal" />
+        <div ref={setPortal} className="fl-portal" />
       </div>
-    </FlowkitProvider>
+    </FlowlineProvider>
   );
 }

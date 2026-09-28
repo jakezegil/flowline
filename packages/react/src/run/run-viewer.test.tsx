@@ -1,4 +1,4 @@
-import type { Manifest, RunDetail, RunEvent } from "@flowkit/core";
+import type { Manifest, RunDetail, RunEvent } from "@flowline/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
@@ -13,7 +13,7 @@ import {
   runDetail,
   waitingRun,
 } from "../../test/run-fixtures";
-import { FlowkitProvider } from "../provider";
+import { FlowlineProvider } from "../provider";
 import { RunList } from "./run-list";
 import { RunViewer } from "./run-viewer";
 
@@ -42,11 +42,11 @@ function setup(
   });
   const onRetried = vi.fn();
   render(
-    <FlowkitProvider client={client}>
+    <FlowlineProvider client={client}>
       <div style={{ height: 800 }}>
         <RunViewer runId="r1" onRetried={onRetried} {...opts.props} />
       </div>
-    </FlowkitProvider>,
+    </FlowlineProvider>,
   );
   return {
     client,
@@ -62,7 +62,7 @@ function setup(
 }
 
 const card = (id: string) =>
-  document.querySelector<HTMLElement>(`.react-flow__node[data-id="step:${id}"] .fk-card`);
+  document.querySelector<HTMLElement>(`.react-flow__node[data-id="step:${id}"] .fl-card`);
 
 describe("RunViewer", () => {
   test("paints step statuses from the journal on a read-only canvas", async () => {
@@ -194,9 +194,9 @@ describe("RunViewer", () => {
     cleanup();
     t.client.getManifest.mockRejectedValueOnce(new Error("offline"));
     render(
-      <FlowkitProvider client={t.client}>
+      <FlowlineProvider client={t.client}>
         <RunViewer runId="r1" />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
     await waitFor(() => expect(card("load")).toBeTruthy());
@@ -221,9 +221,9 @@ describe("RunViewer", () => {
     cleanup();
     const back = vi.fn();
     const { unmount } = render(
-      <FlowkitProvider client={t.client}>
+      <FlowlineProvider client={t.client}>
         <RunViewer runId="nope" notFoundAction={{ label: "Back to runs", onClick: back }} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     expect(await screen.findByText("Run not found")).toBeTruthy();
     expect(screen.getByText(/There is no run with the ID “nope”/)).toBeTruthy();
@@ -233,9 +233,9 @@ describe("RunViewer", () => {
     unmount();
     // Without an action: just the message.
     render(
-      <FlowkitProvider client={t.client}>
+      <FlowlineProvider client={t.client}>
         <RunViewer runId="nope" />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     expect(await screen.findByText("Run not found")).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
@@ -246,9 +246,9 @@ describe("RunViewer", () => {
     t.client.getRun.mockRejectedValueOnce(httpError(500, { error: "boom" }));
     cleanup();
     render(
-      <FlowkitProvider client={t.client}>
+      <FlowlineProvider client={t.client}>
         <RunViewer runId="r1" />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     expect(await screen.findByText("Couldn't load this run.")).toBeTruthy();
   });
@@ -270,7 +270,7 @@ describe("RunViewer: stopping inside branches", () => {
 
   test("a stopped run has a banner naming the Stop step and its reason, and opens it", async () => {
     setup(approvalStoppedRun(), { manifest: approvalManifest() });
-    const banner = (await screen.findByText(/^Stopped at /)).closest(".fk-banner") as HTMLElement;
+    const banner = (await screen.findByText(/^Stopped at /)).closest(".fl-banner") as HTMLElement;
     expect(banner.dataset.tone).toBe("neutral");
     // The reason, then when it stopped (like the cancelled banner), with the date on hover.
     const detail = within(banner).getByText(/^No · (.+ ago|just now)$/);
@@ -458,7 +458,7 @@ describe("RunViewer: cancelled runs", () => {
       props: { userName: (id) => (id === "u_ava" ? "Ava Chen" : undefined) },
     });
     const title = await screen.findByText("Cancelled while waiting at Request approval");
-    const banner = title.closest(".fk-banner") as HTMLElement;
+    const banner = title.closest(".fl-banner") as HTMLElement;
     expect(banner.dataset.tone).toBe("neutral");
     expect(within(banner).getByText(/^By Ava Chen · 3 min(\.|utes)? ago$/)).toBeTruthy();
     fireEvent.click(within(banner).getByRole("button", { name: "Show step" }));
@@ -480,7 +480,7 @@ describe("RunViewer: cancelled runs", () => {
   test("without a step or actor it still says the run was cancelled, and when", async () => {
     const detail = runDetail("cancelled", {}, [ev("run.started"), ev("run.cancelled")]);
     setup(detail);
-    const banner = (await screen.findByText(/^Cancelled$/, { selector: ".fk-banner__title" }))
+    const banner = (await screen.findByText(/^Cancelled$/, { selector: ".fl-banner__title" }))
       .parentElement as HTMLElement;
     expect(within(banner).getByText(/ago|just now/)).toBeTruthy();
   });
@@ -503,12 +503,12 @@ describe("RunViewer: cancelled runs", () => {
       }),
     });
     render(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList onSelect={() => {}} pollMs={0} />
         <div style={{ height: 800 }}>
           <RunViewer runId="r1" />
         </div>
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     const list = await screen.findByRole("list", { name: "Runs" });
     expect(within(list).getByRole("button", { name: /Waiting/ })).toBeTruthy();
@@ -550,7 +550,7 @@ describe("RunViewer: timed waits", () => {
     setup(detail);
     const inspector = await screen.findByRole("complementary", { name: "Step details" });
     const callout = await within(inspector).findByText(/^Waiting until /, {
-      selector: ".fk-callout__text",
+      selector: ".fl-callout__text",
     });
     expect(callout.textContent).toMatch(/ · in a few seconds$/);
     expect(callout.textContent).not.toMatch(/just now/);
@@ -562,13 +562,13 @@ describe("RunViewer: tablet widths", () => {
     const { readFileSync } = await import("node:fs");
     const { resolve } = await import("node:path");
     const css = readFileSync(resolve(__dirname, "../styles.css"), "utf8");
-    const i = css.indexOf("@container fk-app (min-width: 561px) and (max-width: 720px)");
+    const i = css.indexOf("@container fl-app (min-width: 561px) and (max-width: 720px)");
     expect(i).toBeGreaterThan(-1);
     const block = css.slice(i, css.indexOf("@container", i + 10));
-    expect(block).toMatch(/\.fk-run \.fk-editor__body \{\s*flex-direction: row;/);
-    expect(block).toMatch(/\.fk-run \.fk-panel \{[^}]*width: 300px;[^}]*height: auto;/);
+    expect(block).toMatch(/\.fl-run \.fl-editor__body \{\s*flex-direction: row;/);
+    expect(block).toMatch(/\.fl-run \.fl-panel \{[^}]*width: 300px;[^}]*height: auto;/);
     expect(css).toMatch(
-      /\.fk-editor__body:has\(> \.fk-panel\) \.fk-controls\.react-flow__panel \{\s*margin-bottom: 30px;/,
+      /\.fl-editor__body:has\(> \.fl-panel\) \.fl-controls\.react-flow__panel \{\s*margin-bottom: 30px;/,
     );
   });
 });

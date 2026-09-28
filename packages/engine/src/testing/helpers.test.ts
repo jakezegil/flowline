@@ -9,7 +9,7 @@ import {
   secret,
   sensitive,
   type WorkflowDoc,
-} from "@flowkit/core";
+} from "@flowline/core";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import { runWorkflowInMemory, testNode } from "./index";
@@ -128,7 +128,7 @@ describe("runWorkflowInMemory", () => {
   it("rejects an invalid workflow", async () => {
     const bad = { ...doc, steps: [{ id: "x", type: "t.missing", config: {} }] };
     await expect(runWorkflowInMemory(bad, { plugins: [plugin] })).rejects.toMatchObject({
-      name: "FlowkitValidationError",
+      name: "FlowlineValidationError",
     });
   });
 

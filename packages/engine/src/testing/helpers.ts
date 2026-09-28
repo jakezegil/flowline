@@ -5,7 +5,7 @@
  */
 import {
   createRegistry,
-  type FlowkitServices,
+  type FlowlineServices,
   isSignal,
   type NodeContext,
   type NodeDefinition,
@@ -14,7 +14,7 @@ import {
   type RunDetail,
   type RunEvent,
   type WorkflowDoc,
-} from "@flowkit/core";
+} from "@flowline/core";
 import type { z } from "zod";
 import { createNodeContext } from "../context";
 import { createEngine, type EngineOptions } from "../engine";
@@ -55,13 +55,13 @@ export async function testNode<N extends NodeDefinition<any, any, any>>(
     stepPath: "test",
     attempt: 1,
     idempotencyKey: "test-idempotency-key",
-    services: {} as FlowkitServices,
+    services: {} as FlowlineServices,
     signal: new AbortController().signal,
     clock,
     scope: { trigger: undefined, steps: {}, run: { id: "test-run" } },
     callback: async ({ timeoutMs }) => ({
       token: "test-token",
-      resumeUrl: "http://localhost/flowkit/resume/test-token",
+      resumeUrl: "http://localhost/flowline/resume/test-token",
       expiresAt: clock() + timeoutMs,
     }),
   });
@@ -85,7 +85,7 @@ export interface RunWorkflowInMemoryOptions {
   /** The run's trigger input (for a webhook trigger, `{ body, headers }`). */
   trigger?: unknown;
   /** Host services exposed to handlers as `ctx.services`. */
-  services?: FlowkitServices;
+  services?: FlowlineServices;
   /** Base time source in epoch ms. Default `Date.now`. */
   clock?: () => number;
   /**
@@ -108,14 +108,14 @@ export interface RunWorkflowInMemoryOptions {
 
 /**
  * Run `doc` to the end on a fresh in-memory engine (with the built-in nodes plus `plugins`):
- * saves and publishes it (throwing `FlowkitValidationError` if it has errors), starts it with
+ * saves and publishes it (throwing `FlowlineValidationError` if it has errors), starts it with
  * `trigger` as input and drains it. Timers, retries and callback timeouts are reached by advancing
  * the engine clock (`clock`, default `Date.now`, plus the time skipped so far) to the next wake
  * time, so a `2d` delay completes at once. Stops early when the run waits on something only an
  * outside call can resume (a callback without timeout). Resolves the run as `getRunDetail` shows it
  * (sensitive values masked) and its events.
  *
- * Requires `@flowkit/storage-memory`, loaded lazily on first call so importing `testNode` alone
+ * Requires `@flowline/storage-memory`, loaded lazily on first call so importing `testNode` alone
  * never requires it.
  *
  * @example
@@ -137,7 +137,7 @@ export async function runWorkflowInMemory(
   const base = opts.clock ?? Date.now;
   let skipped = 0;
   const clock = () => base() + skipped;
-  const { createMemoryStorage } = await import("@flowkit/storage-memory");
+  const { createMemoryStorage } = await import("@flowline/storage-memory");
   const storage = createMemoryStorage();
   const secrets = opts.secrets;
   const engine = createEngine({

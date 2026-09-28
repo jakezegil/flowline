@@ -1,6 +1,6 @@
-import { createRegistry } from "@flowkit/core";
+import { createRegistry } from "@flowline/core";
 // Test-only: the package itself never imports nodes-builtin (the browser only sees the manifest).
-import { builtinPlugin } from "@flowkit/nodes-builtin";
+import { builtinPlugin } from "@flowline/nodes-builtin";
 import { Box } from "lucide-react";
 import { expect, test } from "vitest";
 import { bundledIconNames, resolveIconIn } from "./icons";

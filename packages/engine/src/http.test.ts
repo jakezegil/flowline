@@ -6,9 +6,9 @@ import {
   definePlugin,
   defineTrigger,
   type WorkflowDoc,
-} from "@flowkit/core";
-import { isPrivateAddress } from "@flowkit/nodes-builtin/ssrf";
-import { createMemoryStorage } from "@flowkit/storage-memory";
+} from "@flowline/core";
+import { isPrivateAddress } from "@flowline/nodes-builtin/ssrf";
+import { createMemoryStorage } from "@flowline/storage-memory";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createNodeContext } from "./context";
@@ -305,7 +305,7 @@ describe("redirects", () => {
     Cookie: "sid=1",
     Accept: "application/json",
     "Accept-Language": "en",
-    "User-Agent": "flowkit-test",
+    "User-Agent": "flowline-test",
     "Idempotency-Key": "idem-1",
   };
 
@@ -334,7 +334,7 @@ describe("redirects", () => {
     expect(landed).toMatchObject({
       accept: "application/json",
       "accept-language": "en",
-      "user-agent": "flowkit-test",
+      "user-agent": "flowline-test",
       "idempotency-key": "idem-1",
     });
   });

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  FlowkitDefinitionError,
+  FlowlineDefinitionError,
   type NodeDefinition,
   type PluginDefinition,
   type TriggerDefinition,
@@ -30,7 +30,7 @@ export interface Registry {
   /**
    * The JSON-serializable manifest of all plugins, nodes and triggers. Computed once and frozen.
    *
-   * @throws {@link FlowkitDefinitionError} when a schema can't be converted to JSON Schema, or
+   * @throws {@link FlowlineDefinitionError} when a schema can't be converted to JSON Schema, or
    * has an invalid `showIf` (a required conditional field, an unknown sibling, a cycle, or a
    * conditional `secret()` field or webhook signing secret).
    */
@@ -42,7 +42,7 @@ const PLUGIN_ID = /^[A-Za-z][A-Za-z0-9_-]*$/;
 /**
  * Create a registry from plugins.
  *
- * @throws {@link FlowkitDefinitionError} on an invalid or duplicate plugin ID, a duplicate node or
+ * @throws {@link FlowlineDefinitionError} on an invalid or duplicate plugin ID, a duplicate node or
  * trigger type (node and trigger types share one namespace), or a type that does not start with
  * `<pluginId>.`.
  */
@@ -60,13 +60,13 @@ export function createRegistry(plugins: PluginDefinition[]): Registry {
       !type.startsWith(`${pluginId}.`) ||
       type.length <= pluginId.length + 1
     ) {
-      throw new FlowkitDefinitionError(
+      throw new FlowlineDefinitionError(
         `${kind} type "${type}" in plugin "${pluginId}" must start with "${pluginId}."`,
       );
     }
     const existing = owner.get(type);
     if (existing !== undefined) {
-      throw new FlowkitDefinitionError(
+      throw new FlowlineDefinitionError(
         `Duplicate type "${type}" (already registered as ${existing})`,
       );
     }
@@ -75,12 +75,12 @@ export function createRegistry(plugins: PluginDefinition[]): Registry {
 
   for (const plugin of plugins) {
     if (typeof plugin.id !== "string" || !PLUGIN_ID.test(plugin.id)) {
-      throw new FlowkitDefinitionError(
+      throw new FlowlineDefinitionError(
         `Invalid plugin id "${plugin.id}": must match ${PLUGIN_ID} (no dots)`,
       );
     }
     if (pluginIds.has(plugin.id)) {
-      throw new FlowkitDefinitionError(`Duplicate plugin id "${plugin.id}"`);
+      throw new FlowlineDefinitionError(`Duplicate plugin id "${plugin.id}"`);
     }
     pluginIds.add(plugin.id);
     for (const def of plugin.nodes ?? []) {
@@ -160,7 +160,7 @@ function triggerManifest(plugin: string, def: TriggerDefinition<any, any>): Trig
   // The engine verifies webhook signatures with config `secret`; hiding it would skip the check.
   const props = config.properties as Record<string, unknown> | undefined;
   if (def.kind === "webhook" && props?.secret !== undefined && showIfOf(props.secret, config)) {
-    throw new FlowkitDefinitionError(
+    throw new FlowlineDefinitionError(
       `Invalid showIf in config schema of "${def.type}": "secret" is the webhook signing secret and can't have showIf`,
     );
   }
@@ -197,7 +197,7 @@ function toSchema(
       },
     }) as JSONSchema;
   } catch (cause) {
-    throw new FlowkitDefinitionError(
+    throw new FlowlineDefinitionError(
       `Cannot convert ${what} schema of "${type}" to JSON Schema: ${(cause as Error).message}`,
       { cause },
     );
@@ -207,7 +207,7 @@ function toSchema(
   if (io === "input") {
     const problems = showIfProblems(json);
     if (problems.length > 0) {
-      throw new FlowkitDefinitionError(
+      throw new FlowlineDefinitionError(
         `Invalid showIf in ${what} schema of "${type}": ${problems.join("; ")}`,
       );
     }
@@ -281,7 +281,7 @@ const subjectOf = (path: string, what: string, type: string) =>
   `${path ? `Field "${path}" of the ` : "The "}${what} schema of "${type}"`;
 
 /**
- * Throws a clear {@link FlowkitDefinitionError} when `root`, or any schema nested in it, is a
+ * Throws a clear {@link FlowlineDefinitionError} when `root`, or any schema nested in it, is a
  * zod 3 schema (or not a zod schema at all) instead of letting the converter crash on it.
  */
 function assertZod4Tree(root: unknown, type: string, what: string): void {
@@ -297,7 +297,7 @@ function assertZod4Tree(root: unknown, type: string, what: string): void {
 }
 
 /**
- * Throws when `root` holds a schema built by a different copy of zod whose flowkit metadata
+ * Throws when `root` holds a schema built by a different copy of zod whose flowline metadata
  * (`ui()`, `secret()`, `sensitive()`) the converter can't see, e.g. a `link:`ed package with its
  * own zod next to the host's older one. Without this, a secret field would silently lose its
  * literal-only and masking guarantees.
@@ -328,8 +328,8 @@ function assertReadableMeta(
     const emitted = version === CORE_ZOD_VERSION || visited.has(s);
     if (blank.has(s) || (own?.[UI_META_KEY] !== undefined && (!readable || !emitted))) {
       const field = path ? `field "${path}" of the ` : "";
-      throw new FlowkitDefinitionError(
-        `The ${field}${what} schema of "${type}" was built with a different copy of zod (${version}) than the one @flowkit/core uses (${CORE_ZOD_VERSION}), so flowkit can't read it or its metadata (ui(), secret(), sensitive()), and its secret/sensitive guarantees would be lost. ${ZOD_ADVICE}`,
+      throw new FlowlineDefinitionError(
+        `The ${field}${what} schema of "${type}" was built with a different copy of zod (${version}) than the one @flowline/core uses (${CORE_ZOD_VERSION}), so flowline can't read it or its metadata (ui(), secret(), sensitive()), and its secret/sensitive guarantees would be lost. ${ZOD_ADVICE}`,
       );
     }
     queue.push(...nestedSchemas(s, path));
@@ -338,7 +338,7 @@ function assertReadableMeta(
 
 /**
  * Zod places metadata of a `.nullable()`-wrapped schema on the non-null `anyOf` member. Move it up
- * to the property schema so the editor finds `"x-flowkit"` in one place. Genuine unions are left
+ * to the property schema so the editor finds `"x-flowline"` in one place. Genuine unions are left
  * alone: their members' metadata describes each variant.
  */
 function hoistUiMeta(node: unknown): void {

@@ -1,9 +1,9 @@
 {
-  "name": "@flowkit/react",
+  "name": "@flowline/react",
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
-  "description": "React Flow-based visual editor, run viewer and run list for Flowkit workflows.",
+  "description": "React Flow-based visual editor, run viewer and run list for Flowline workflows.",
   "keywords": [
     "workflow",
     "automation",
@@ -15,22 +15,22 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jakezegil/flowkit.git",
+    "url": "git+https://github.com/jakezegil/flowline.git",
     "directory": "packages/react"
   },
-  "homepage": "https://github.com/jakezegil/flowkit/tree/main/packages/react#readme",
-  "bugs": "https://github.com/jakezegil/flowkit/issues",
+  "homepage": "https://github.com/jakezegil/flowline/tree/main/packages/react#readme",
+  "bugs": "https://github.com/jakezegil/flowline/issues",
   "engines": {
     "node": ">=20.18.1"
   },
   "exports": {
     ".": {
-      "flowkit-source": "./src/index.ts",
+      "flowline-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./styles.css": {
-      "flowkit-source": "./src/styles.css",
+      "flowline-source": "./src/styles.css",
       "default": "./dist/styles.css"
     }
   },
@@ -57,7 +57,7 @@
     "screenshots": "node playground/screenshot.mjs"
   },
   "devDependencies": {
-    "@flowkit/nodes-builtin": "workspace:*",
+    "@flowline/nodes-builtin": "workspace:*",
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.6",
     "@types/react": "19.3.0",
@@ -77,7 +77,7 @@
     "@codemirror/language": "6.12.4",
     "@codemirror/state": "6.7.4",
     "@codemirror/view": "6.43.11",
-    "@flowkit/core": "workspace:^",
+    "@flowline/core": "workspace:^",
     "@lezer/highlight": "1.2.5",
     "@radix-ui/react-context-menu": "2.3.7",
     "@radix-ui/react-dialog": "1.1.23",

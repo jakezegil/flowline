@@ -5,8 +5,8 @@ import {
   defineTrigger,
   ui,
   type WorkflowDoc,
-} from "@flowkit/core";
-import { createMemoryStorage } from "@flowkit/storage-memory";
+} from "@flowline/core";
+import { createMemoryStorage } from "@flowline/storage-memory";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createEngine } from "./engine";

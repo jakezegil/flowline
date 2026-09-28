@@ -12,7 +12,7 @@ import {
   validateWorkflow,
   type WorkflowDoc,
   workflow,
-} from "@flowkit/core";
+} from "@flowline/core";
 import { describe, expect, it } from "vitest";
 import {
   and,
@@ -92,9 +92,9 @@ describe("builtinPlugin", () => {
     ];
     for (const [type, schema] of schemas) {
       for (const [key, prop] of Object.entries(
-        (schema.properties ?? {}) as Record<string, { "x-flowkit"?: { label?: string } }>,
+        (schema.properties ?? {}) as Record<string, { "x-flowline"?: { label?: string } }>,
       )) {
-        expect(prop["x-flowkit"]?.label, `${type}.${key}`).toEqual(expect.any(String));
+        expect(prop["x-flowline"]?.label, `${type}.${key}`).toEqual(expect.any(String));
       }
     }
   });
@@ -109,7 +109,7 @@ describe("builtinPlugin", () => {
           { id: "else", label: "Else" },
         ],
       },
-      input: { properties: { rules: { "x-flowkit": { widget: "rules" } } } },
+      input: { properties: { rules: { "x-flowline": { widget: "rules" } } } },
     });
     expect(node("core.switch")).toMatchObject({
       branches: {
@@ -119,11 +119,11 @@ describe("builtinPlugin", () => {
         labelKey: "label",
         append: [{ id: "default", label: "Default" }],
       },
-      input: { properties: { cases: { "x-flowkit": { widget: "cases" } } } },
+      input: { properties: { cases: { "x-flowline": { widget: "cases" } } } },
     });
     expect(node("core.forEach")).toMatchObject({
       branches: { kind: "loop", itemsField: "items", branch: "body" },
-      input: { properties: { items: { "x-flowkit": { refOnly: true } } } },
+      input: { properties: { items: { "x-flowline": { refOnly: true } } } },
     });
     expect(node("core.waitForCallback").branches).toEqual({
       kind: "static",
@@ -141,20 +141,20 @@ describe("builtinPlugin", () => {
       category: "Data",
       icon: "code",
       output: { kind: "fields", configPath: "outputFields" },
-      input: { properties: { code: { "x-flowkit": { widget: "code" } } } },
+      input: { properties: { code: { "x-flowline": { widget: "code" } } } },
     });
     expect(node("core.callSubflow")).toMatchObject({
       output: { kind: "subflow", configPath: "workflowId" },
       input: {
         properties: {
-          workflowId: { "x-flowkit": { widget: "subflowSelect" } },
-          input: { "x-flowkit": { widget: "subflowInput" } },
+          workflowId: { "x-flowline": { widget: "subflowSelect" } },
+          input: { "x-flowline": { widget: "subflowInput" } },
         },
       },
     });
     expect(trigger("core.webhook")).toMatchObject({
       payload: { kind: "webhook", configPath: "fields" },
-      config: { properties: { secret: { "x-flowkit": { secret: true } } } },
+      config: { properties: { secret: { "x-flowline": { secret: true } } } },
     });
     expect(trigger("core.manual").payload).toEqual({ kind: "fields", configPath: "fields" });
     expect(trigger("core.subflow").payload).toEqual({ kind: "fields", configPath: "input" });

@@ -1,4 +1,4 @@
-import type { RunEvent, RunEventType } from "@flowkit/core";
+import type { RunEvent, RunEventType } from "@flowline/core";
 import { describe, expect, it } from "vitest";
 import { runEventStream } from "./sse";
 import type { StorageAdapter } from "./storage";

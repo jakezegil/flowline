@@ -118,7 +118,7 @@ const CONSTRAINT_KEYS = [
 
 /**
  * True if `schema` accepts any value: `{}`, `true`, or a schema carrying only annotations
- * (`description`, `default`, `"x-flowkit"`, …). Undeclared node outputs and trigger payloads are `{}`.
+ * (`description`, `default`, `"x-flowline"`, …). Undeclared node outputs and trigger payloads are `{}`.
  */
 export function isAnySchema(schema: unknown): boolean {
   if (schema === true || schema === undefined) return true;
@@ -164,7 +164,7 @@ function deref(root: JSONSchema, schema: JSONSchema): JSONSchema {
     if (target === undefined) return {};
     const { $ref: _ignored, ...rest } = cur;
     const resolved = asSchema(target);
-    // Sibling keywords next to `$ref` (e.g. `description`, `"x-flowkit"`) are kept.
+    // Sibling keywords next to `$ref` (e.g. `description`, `"x-flowline"`) are kept.
     cur = Object.keys(rest).length === 0 ? resolved : { ...resolved, ...rest };
   }
   return cur;

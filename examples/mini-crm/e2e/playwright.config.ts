@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "playwright/test";
 
 /**
- * End-to-end tests of the mini CRM: `pnpm --filter @flowkit/example-mini-crm e2e`.
+ * End-to-end tests of the mini CRM: `pnpm --filter @flowline/example-mini-crm e2e`.
  *
  * Playwright starts its own server and web app on dedicated ports and never reuses a running one,
  * so a `pnpm dev` on the default ports doesn't interfere. Engine storage is in memory, so every
@@ -35,7 +35,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "pnpm exec tsx --conditions=flowkit-source server/src/index.ts",
+      command: "pnpm exec tsx --conditions=flowline-source server/src/index.ts",
       cwd: "..",
       url: `http://localhost:${SERVER_PORT}/api/demo`,
       reuseExistingServer: false,

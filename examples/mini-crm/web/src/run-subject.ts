@@ -10,9 +10,9 @@
  *
  * @module
  */
-import type { RunSummary } from "@flowkit/core/client";
+import type { RunSummary } from "@flowline/core/client";
 import { useCallback, useEffect, useState } from "react";
-import { flowkit } from "./api";
+import { flowline } from "./api";
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
@@ -147,7 +147,7 @@ export function createSubjectStore(options: SubjectStoreOptions): SubjectStore {
 }
 
 const store = createSubjectStore({
-  fetchTrigger: async (id) => (await flowkit.getRun(id)).run.trigger,
+  fetchTrigger: async (id) => (await flowline.getRun(id)).run.trigger,
 });
 
 /**

@@ -8,7 +8,7 @@ import {
   type NodeContext,
   UI_META_KEY,
   validateWorkflow,
-} from "@flowkit/core";
+} from "@flowline/core";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { httpRequest } from "./http";

@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { branch, defineNode, loop, stop, ui } from "@flowkit/core";
+import { branch, defineNode, loop, stop, ui } from "@flowline/core";
 import { z } from "zod";
 import { ConditionRulesSchema, evaluateRules, looseEquals } from "./rules";
 

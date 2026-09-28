@@ -73,7 +73,7 @@ function refOptions(context: CompletionContext): CompletionResult | null {
     return {
       label: nodeLabel(node),
       detail: node.typeLabel,
-      type: "fk-ref",
+      type: "fl-ref",
       boost: -i,
       node,
       ...(sampleText !== undefined ? { sampleText } : {}),
@@ -94,15 +94,15 @@ export function refAutocomplete(): Extension {
     override: [refOptions],
     icons: false,
     closeOnBlur: true,
-    tooltipClass: () => "fk-ref-complete",
-    optionClass: () => "fk-ref-option",
+    tooltipClass: () => "fl-ref-complete",
+    optionClass: () => "fl-ref-option",
     addToOptions: [
       {
         position: 20,
         render(completion, state) {
           const source = state.facet(refCompletionSource);
           const el = document.createElement("span");
-          el.className = "fk-ref-option__icon";
+          el.className = "fl-ref-option__icon";
           el.setAttribute("aria-hidden", "true");
           const node = (completion as RefCompletion).node;
           if (source && node) fillIcon(el, source.icon(node.entry.icon));
@@ -115,7 +115,7 @@ export function refAutocomplete(): Extension {
           const sample = (completion as RefCompletion).sampleText;
           if (sample === undefined || sample === "") return null;
           const el = document.createElement("span");
-          el.className = "fk-ref-option__sample";
+          el.className = "fl-ref-option__sample";
           el.textContent = sample;
           return el;
         },

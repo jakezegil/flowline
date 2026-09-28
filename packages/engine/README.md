@@ -1,6 +1,6 @@
-# @flowkit/engine
+# @flowline/engine
 
-The durable Flowkit workflow engine: `createEngine` interprets a published `WorkflowDoc` over a
+The durable Flowline workflow engine: `createEngine` interprets a published `WorkflowDoc` over a
 pluggable `StorageAdapter`, exposes an HTTP handler for the editor and run viewer, runs a worker
 that claims and executes steps, and records every step to a journal and audit trail. Retries,
 suspension (`delay`, `waitForCallback`, sub-flows), webhooks and cron schedules are all built in.
@@ -8,23 +8,23 @@ suspension (`delay`, `waitForCallback`, sub-flows), webhooks and cron schedules 
 ## Install
 
 ```sh
-pnpm add @flowkit/engine @flowkit/core zod@^4
-pnpm add @flowkit/storage-memory   # or @flowkit/storage-postgres
+pnpm add @flowline/engine @flowline/core zod@^4
+pnpm add @flowline/storage-memory   # or @flowline/storage-postgres
 ```
 
-`zod` 4 is a required peer dependency. Bring your own `StorageAdapter`: `@flowkit/storage-memory`
+`zod` 4 is a required peer dependency. Bring your own `StorageAdapter`: `@flowline/storage-memory`
 (for tests and prototypes) is an optional peer, used by `runWorkflowInMemory`;
-`@flowkit/storage-postgres` (for production) is a regular dependency, not a peer, and you just
-install it directly. `vitest` is an optional peer used only by `@flowkit/engine/conformance`;
-`@flowkit/engine/testing` never imports `vitest`, and loads `@flowkit/storage-memory` lazily so
+`@flowline/storage-postgres` (for production) is a regular dependency, not a peer, and you just
+install it directly. `vitest` is an optional peer used only by `@flowline/engine/conformance`;
+`@flowline/engine/testing` never imports `vitest`, and loads `@flowline/storage-memory` lazily so
 `testNode` alone works without it installed either.
 
 ## Usage
 
 ```ts
-import { createEngine } from "@flowkit/engine";
-import { createMemoryStorage } from "@flowkit/storage-memory";
-import { createRegistry } from "@flowkit/core";
+import { createEngine } from "@flowline/engine";
+import { createMemoryStorage } from "@flowline/storage-memory";
+import { createRegistry } from "@flowline/core";
 
 const registry = createRegistry([]); // your plugins; core.* builtins are added automatically
 
@@ -40,7 +40,7 @@ export const worker = engine.startWorker({ concurrency: 4 });
 ```
 
 See the [root README](../../README.md) for the full quick start (nodes, plugin, Postgres storage,
-HTTP mount, worker, publish, editor) and `docs/` for the design spec. `@flowkit/engine/testing`
-exports `runWorkflowInMemory` and `testNode`. `@flowkit/engine/conformance` exports
+HTTP mount, worker, publish, editor) and `docs/` for the design spec. `@flowline/engine/testing`
+exports `runWorkflowInMemory` and `testNode`. `@flowline/engine/conformance` exports
 `runStorageConformance`, a storage conformance suite for testing your own `StorageAdapter` — its
 own entry point because it requires `vitest`.

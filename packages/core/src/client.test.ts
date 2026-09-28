@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { RunEvent } from "./api-types";
-import { createClient, FlowkitHttpError } from "./client";
+import { createClient, FlowlineHttpError } from "./client";
 import type { WorkflowDoc } from "./types";
 
 interface Call {
@@ -202,11 +202,11 @@ describe("createClient requests", () => {
           ? new Response(null, { status: tc.status })
           : json(tc.response ?? { ok: true }, tc.status),
       );
-      const client = createClient({ baseUrl: "https://api.test/flowkit/", fetch });
+      const client = createClient({ baseUrl: "https://api.test/flowline/", fetch });
       const result = await tc.call(client);
       expect(calls).toHaveLength(1);
       expect(calls[0]!.method).toBe(tc.method);
-      expect(calls[0]!.url).toBe(`https://api.test/flowkit${tc.path}`);
+      expect(calls[0]!.url).toBe(`https://api.test/flowline${tc.path}`);
       expect(calls[0]!.body).toEqual(tc.body);
       // Every non-GET request declares JSON, bodyless ones too: the server refuses others (CSRF).
       if (tc.method !== "GET") expect(calls[0]!.headers["content-type"]).toBe("application/json");
@@ -218,13 +218,13 @@ describe("createClient requests", () => {
     const { fetch, calls } = stubFetch(() => json([]));
     let n = 0;
     const client = createClient({
-      baseUrl: "/flowkit",
+      baseUrl: "/flowline",
       fetch,
       headers: async () => ({ authorization: `Bearer ${++n}` }),
     });
     await client.listWorkflows();
     await client.listRuns();
-    expect(calls.map((c) => c.url)).toEqual(["/flowkit/workflows", "/flowkit/runs"]);
+    expect(calls.map((c) => c.url)).toEqual(["/flowline/workflows", "/flowline/runs"]);
     expect(calls.map((c) => c.headers.authorization)).toEqual(["Bearer 1", "Bearer 2"]);
     expect(calls[0]!.headers.accept).toBe("application/json");
   });
@@ -242,24 +242,24 @@ describe("createClient requests", () => {
 });
 
 describe("error mapping", () => {
-  test("non-2xx JSON → FlowkitHttpError with status, body and server error", async () => {
+  test("non-2xx JSON → FlowlineHttpError with status, body and server error", async () => {
     const body = { error: "workflow has errors", issues: [{ code: "ref.unresolved" }] };
     const { fetch } = stubFetch(() => json(body, 422));
     const client = createClient({ baseUrl: "https://api.test", fetch });
     const err = await client.publish("wf", 1).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(FlowkitHttpError);
+    expect(err).toBeInstanceOf(FlowlineHttpError);
     expect(err).toBeInstanceOf(Error);
-    const httpErr = err as FlowkitHttpError;
+    const httpErr = err as FlowlineHttpError;
     expect(httpErr.status).toBe(422);
     expect(httpErr.body).toEqual(body);
-    expect(httpErr.name).toBe("FlowkitHttpError");
+    expect(httpErr.name).toBe("FlowlineHttpError");
     expect(httpErr.message).toBe("POST /workflows/wf/publish failed (422): workflow has errors");
   });
 
   test("non-2xx text body is kept as text", async () => {
     const { fetch } = stubFetch(() => new Response("upstream down", { status: 502 }));
     const client = createClient({ baseUrl: "https://api.test", fetch });
-    const err = (await client.getRun("r1").catch((e: unknown) => e)) as FlowkitHttpError;
+    const err = (await client.getRun("r1").catch((e: unknown) => e)) as FlowlineHttpError;
     expect(err.status).toBe(502);
     expect(err.body).toBe("upstream down");
     expect(err.message).toBe("GET /runs/r1 failed (502)");

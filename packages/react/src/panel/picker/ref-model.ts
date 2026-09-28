@@ -15,9 +15,9 @@ import {
   type ScopeEntry,
   schemaAtPath,
   type ValueExpr,
-} from "@flowkit/core";
+} from "@flowline/core";
 import { refLabel } from "../../canvas/summary";
-import type { FlowkitLabels } from "../../labels";
+import type { FlowlineLabels } from "../../labels";
 import { shortType } from "./schema-tree";
 
 /** One chunk of a reference input's content. */
@@ -106,7 +106,7 @@ export function pillInfo(
   ref: string,
   scope: readonly ScopeEntry[],
   invalidRefs: ReadonlySet<string> | undefined,
-  labels: FlowkitLabels,
+  labels: FlowlineLabels,
 ): PillInfo {
   const stepName = (id: string) => scope.find((e) => e.kind === "step" && e.stepId === id)?.label;
   const label = refLabel(ref, stepName, labels);

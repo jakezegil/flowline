@@ -1,8 +1,8 @@
-import { type Issue, type WorkflowDoc, walkSteps } from "@flowkit/core";
+import { type Issue, type WorkflowDoc, walkSteps } from "@flowline/core";
 import { Plus, TriangleAlert } from "lucide-react";
 import { type JSX, useMemo, useState } from "react";
 import { useEditorStore, useIssues } from "../hooks";
-import { useFlowkitAppearance } from "../provider";
+import { useFlowlineAppearance } from "../provider";
 import { TRIGGER_KEY } from "../store/editor-store";
 import { Hint } from "../ui/primitives";
 
@@ -38,7 +38,7 @@ const PULSE_MS = 1600;
  * points out the "+" under the trigger and opens the step picker there.
  */
 export function IssuesPill(): JSX.Element | null {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const { issues, errors } = useIssues();
   const doc = useEditorStore((s) => s.doc);
   const selection = useEditorStore((s) => s.selection);
@@ -53,12 +53,12 @@ export function IssuesPill(): JSX.Element | null {
       <Hint content={issue.message}>
         <button
           type="button"
-          className="fk-issues"
+          className="fl-issues"
           data-tone={errors > 0 ? "danger" : "warning"}
           onClick={(e) => {
             const plus = e.currentTarget
-              .closest(".fk-editor")
-              ?.querySelector<HTMLElement>('.fk-add[data-insert-at="//0"]');
+              .closest(".fl-editor")
+              ?.querySelector<HTMLElement>('.fl-add[data-insert-at="//0"]');
             if (!plus) return;
             plus.dataset.pulse = "";
             setTimeout(() => delete plus.dataset.pulse, PULSE_MS);
@@ -81,7 +81,7 @@ export function IssuesPill(): JSX.Element | null {
     <Hint content={hint}>
       <button
         type="button"
-        className="fk-issues"
+        className="fl-issues"
         data-tone={errors > 0 ? "danger" : "warning"}
         aria-description={labels.showNextIssue}
         onClick={() => {

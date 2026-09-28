@@ -1,8 +1,8 @@
-import type { RunSummary } from "@flowkit/core";
+import type { RunSummary } from "@flowline/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockClient, setupDom } from "../../test/dom";
-import { FlowkitProvider } from "../provider";
+import { FlowlineProvider } from "../provider";
 import { publishRunChange } from "./run-changes";
 import { RunList } from "./run-list";
 
@@ -34,9 +34,9 @@ describe("RunList", () => {
     });
     const onSelect = vi.fn();
     render(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList workflowId="welcome" selectedRunId="r2" onSelect={onSelect} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     const list = await screen.findByRole("list", { name: "Runs" });
     const first = within(list).getByRole("button", { name: /Failed/ });
@@ -57,9 +57,9 @@ describe("RunList", () => {
   it("filters by status", async () => {
     const client = mockClient({ listRuns: vi.fn(async () => []) });
     render(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList onSelect={() => {}} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     await screen.findByText(/No runs yet/);
     fireEvent.click(screen.getByRole("button", { name: "Failed" }));
@@ -76,9 +76,9 @@ describe("RunList", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const client = mockClient({ listRuns: vi.fn(async () => [row("r1", "running")]) });
     render(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList onSelect={() => {}} pollMs={1000} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     await waitFor(() => expect(client.listRuns).toHaveBeenCalledTimes(1));
     await act(async () => {
@@ -91,9 +91,9 @@ describe("RunList", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const client = mockClient({ listRuns: vi.fn(async () => [row("r1", "running")]) });
     render(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList onSelect={() => {}} pollMs={1000} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     await waitFor(() => expect(client.listRuns).toHaveBeenCalledTimes(1));
     const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
@@ -120,15 +120,15 @@ describe("RunList", () => {
       ]),
     });
     render(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList workflowId="welcome" onSelect={() => {}} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     const list = await screen.findByRole("list", { name: "Runs" });
     const [stopped, completed] = within(list).getAllByRole("button");
-    expect(stopped?.querySelector(".fk-runs__status")?.textContent).toBe("Stopped");
+    expect(stopped?.querySelector(".fl-runs__status")?.textContent).toBe("Stopped");
     expect(stopped?.dataset.status).toBe("stopped");
-    expect(completed?.querySelector(".fk-runs__status")?.textContent).toBe("Completed");
+    expect(completed?.querySelector(".fl-runs__status")?.textContent).toBe("Completed");
   });
 
   it("across workflows, leaves out sub-flow runs and names each run's workflow", async () => {
@@ -150,9 +150,9 @@ describe("RunList", () => {
       ]),
     });
     render(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList onSelect={() => {}} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     const list = await screen.findByRole("list", { name: "Runs" });
     expect(client.listRuns).toHaveBeenCalledWith({ topLevel: true });
@@ -169,23 +169,23 @@ describe("RunList", () => {
   it("includeSubflowRuns lists sub-flow runs too; one workflow's list includes them by default", async () => {
     const client = mockClient({ listRuns: vi.fn(async () => []) });
     const { rerender } = render(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList onSelect={() => {}} includeSubflowRuns />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     await waitFor(() => expect(client.listRuns).toHaveBeenLastCalledWith({}));
     rerender(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList onSelect={() => {}} workflowId="get-contact" />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     await waitFor(() =>
       expect(client.listRuns).toHaveBeenLastCalledWith({ workflowId: "get-contact" }),
     );
     rerender(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList onSelect={() => {}} workflowId="get-contact" includeSubflowRuns={false} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     await waitFor(() =>
       expect(client.listRuns).toHaveBeenLastCalledWith({
@@ -201,9 +201,9 @@ describe("RunList", () => {
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValue([row("r1", "waiting")]);
     render(
-      <FlowkitProvider client={mockClient({ listRuns })}>
+      <FlowlineProvider client={mockClient({ listRuns })}>
         <RunList onSelect={() => {}} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     expect(await screen.findByText("Couldn't load runs.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -219,9 +219,9 @@ describe("RunList: stopped runs and narrow widths", () => {
   it("has a Stopped filter, and Completed leaves stopped runs out", async () => {
     const client = mockClient({ listRuns: vi.fn(async () => []) });
     render(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList onSelect={() => {}} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     await screen.findByText(/No runs yet/);
     fireEvent.click(screen.getByRole("button", { name: "Stopped" }));
@@ -247,7 +247,7 @@ describe("RunList: stopped runs and narrow widths", () => {
     const { readFileSync } = await import("node:fs");
     const { resolve } = await import("node:path");
     const css = readFileSync(resolve(__dirname, "../styles.css"), "utf8");
-    const rule = /\.fk-runs__filters \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    const rule = /\.fl-runs__filters \{([^}]*)\}/.exec(css)?.[1] ?? "";
     expect(rule).toMatch(/flex-wrap: wrap/);
     expect(rule).not.toMatch(/overflow-x/);
   });
@@ -258,9 +258,9 @@ describe("RunList: staying current", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const listRuns = vi.fn(async () => [row("r1", "running")]);
     render(
-      <FlowkitProvider client={mockClient({ listRuns })}>
+      <FlowlineProvider client={mockClient({ listRuns })}>
         <RunList onSelect={() => {}} pollMs={0} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     await screen.findByRole("list", { name: "Runs" });
     expect(listRuns).toHaveBeenCalledTimes(1);
@@ -275,9 +275,9 @@ describe("RunList: staying current", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const listRuns = vi.fn(async () => [row("r1", "running")]);
     render(
-      <FlowkitProvider client={mockClient({ listRuns })}>
+      <FlowlineProvider client={mockClient({ listRuns })}>
         <RunList onSelect={() => {}} pollMs={0} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     await screen.findByRole("list", { name: "Runs" });
     await act(async () => {
@@ -303,9 +303,9 @@ describe("RunList: staying current", () => {
       .mockResolvedValue([{ ...waiting, status: "cancelled" }]);
     const client = mockClient({ listRuns });
     render(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList onSelect={() => {}} pollMs={0} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     const list = await screen.findByRole("list", { name: "Runs" });
     expect(within(list).getByRole("button", { name: /Waiting/ })).toBeTruthy();
@@ -324,9 +324,9 @@ describe("RunList: staying current", () => {
       .mockResolvedValue([]);
     const client = mockClient({ listRuns });
     render(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList onSelect={() => {}} pollMs={0} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     await screen.findByText(/No runs yet/);
     fireEvent.click(screen.getByRole("button", { name: "Waiting" }));
@@ -341,12 +341,12 @@ describe("RunList: staying current", () => {
       listRuns: vi.fn(async () => [row("r1", "waiting"), row("r2", "waiting")]),
     });
     render(
-      <FlowkitProvider client={client}>
+      <FlowlineProvider client={client}>
         <RunList
           onSelect={() => {}}
           describeRun={(r) => (r.id === "r1" ? "ada@example.com" : undefined)}
         />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     const list = await screen.findByRole("list", { name: "Runs" });
     expect(within(list).getByRole("button", { name: /ada@example\.com/ })).toBeTruthy();

@@ -5,7 +5,7 @@
  * @module
  */
 
-import type { JSONSchema, ScopeEntry } from "@flowkit/core";
+import type { JSONSchema, ScopeEntry } from "@flowline/core";
 import { ChevronRight, CornerDownLeft, Plus, Search } from "lucide-react";
 import {
   type CSSProperties,
@@ -19,8 +19,8 @@ import {
   useState,
 } from "react";
 import type { IconComponent } from "../icons";
-import type { FlowkitLabels } from "../labels";
-import { useFlowkitAppearance } from "../provider";
+import type { FlowlineLabels } from "../labels";
+import { useFlowlineAppearance } from "../provider";
 import { nodeLabel } from "./picker/ref-completion";
 import {
   childNodes,
@@ -165,7 +165,7 @@ function initialExpanded(scope: ScopeEntry[], samples: Record<string, unknown>):
 /** @internal {@link DataPicker} plus hosting hooks. */
 export function DataPickerView(props: DataPickerViewProps): JSX.Element {
   const { scope, samples, onPick, filterType, onExit, searchRef, className } = props;
-  const { labels, resolveIcon } = useFlowkitAppearance();
+  const { labels, resolveIcon } = useFlowlineAppearance();
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => initialExpanded(scope, samples));
   const allRows = useRows(scope, samples, expanded, query, filterType);
@@ -293,8 +293,8 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
   const containerHint = active?.node.expandable;
 
   return (
-    <div id={props.id} className={className ? `fk-dp ${className}` : "fk-dp"}>
-      <div className="fk-dp__search">
+    <div id={props.id} className={className ? `fl-dp ${className}` : "fl-dp"}>
+      <div className="fl-dp__search">
         <Search size={14} aria-hidden />
         <input
           ref={searchRef}
@@ -320,16 +320,16 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
         />
       </div>
       {scope.length === 0 ? (
-        <p className="fk-dp__empty">{labels.noScope}</p>
+        <p className="fl-dp__empty">{labels.noScope}</p>
       ) : rows.length === 0 ? (
-        <p className="fk-dp__empty">{labels.noDataMatches(query)}</p>
+        <p className="fl-dp__empty">{labels.noDataMatches(query)}</p>
       ) : (
         <div
           ref={listRef}
           id={treeId}
           role="tree"
           aria-label={labels.dataPicker}
-          className="fk-dp__tree"
+          className="fl-dp__tree"
           // Clicking rows keeps focus where it is (the search box or the input being filled).
           onMouseDown={(e) => e.preventDefault()}
         >
@@ -350,16 +350,16 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
         </div>
       )}
       {allRows.length > rows.length && (
-        <p className="fk-dp__more" role="status">
+        <p className="fl-dp__more" role="status">
           {searching
             ? labels.moreMatches(rows.length, allRows.length)
             : labels.moreRows(rows.length, allRows.length)}
         </p>
       )}
-      <span id={keysId} className="fk-sr-only">
+      <span id={keysId} className="fl-sr-only">
         {labels.pickerKeysHint}
       </span>
-      <div className="fk-dp__foot" aria-hidden="true">
+      <div className="fl-dp__foot" aria-hidden="true">
         <span>
           <kbd>↑</kbd>
           <kbd>↓</kbd> {labels.keyNavigate}
@@ -404,7 +404,7 @@ function PickerRow(props: {
   onInsert(): void;
   onToggle(): void;
   icon: IconComponent | undefined;
-  labels: FlowkitLabels;
+  labels: FlowlineLabels;
 }): JSX.Element {
   const { id, row, active, onHover, onActivate, onInsert, onToggle, icon: Icon, labels } = props;
   const { node } = row;
@@ -428,16 +428,16 @@ function PickerRow(props: {
       aria-level={node.depth + 1}
       aria-selected={active}
       {...(node.expandable ? { "aria-expanded": row.open } : {})}
-      className={section ? "fk-dp__row fk-dp__row--section" : "fk-dp__row"}
+      className={section ? "fl-dp__row fl-dp__row--section" : "fl-dp__row"}
       data-active={active || undefined}
       data-disabled={(section && node.entry.disabled) || undefined}
       data-leaf={!node.expandable || undefined}
-      style={{ "--fk-dp-depth": node.depth } as CSSProperties}
+      style={{ "--fl-dp-depth": node.depth } as CSSProperties}
       onMouseMove={active ? undefined : onHover}
       onClick={onActivate}
     >
       <span
-        className="fk-dp__chevron"
+        className="fl-dp__chevron"
         data-open={row.open || undefined}
         aria-hidden="true"
         onClick={
@@ -453,31 +453,31 @@ function PickerRow(props: {
       </span>
       {section ? (
         <>
-          <span className="fk-dp__icon" aria-hidden="true">
+          <span className="fl-dp__icon" aria-hidden="true">
             {Icon && <Icon size={14} />}
           </span>
-          <span className="fk-dp__section">
-            <span className="fk-dp__section-name">{trigger ? labels.scopeTrigger : node.name}</span>
-            <span className="fk-dp__caption">{row.empty ? labels.noKnownFields : caption}</span>
+          <span className="fl-dp__section">
+            <span className="fl-dp__section-name">{trigger ? labels.scopeTrigger : node.name}</span>
+            <span className="fl-dp__caption">{row.empty ? labels.noKnownFields : caption}</span>
           </span>
         </>
       ) : (
         <>
-          <span className="fk-dp__name" data-index={node.firstItem || undefined}>
+          <span className="fl-dp__name" data-index={node.firstItem || undefined}>
             {node.firstItem ? (
               <>
-                <code>[0]</code> <span className="fk-dp__muted">{labels.firstItem}</span>
+                <code>[0]</code> <span className="fl-dp__muted">{labels.firstItem}</span>
               </>
             ) : (
               node.name
             )}
           </span>
           {sample !== undefined && sample !== "" && (
-            <span className="fk-dp__sample" title={sample}>
+            <span className="fl-dp__sample" title={sample}>
               {sample}
             </span>
           )}
-          <span className="fk-dp__type">{node.typeLabel}</span>
+          <span className="fl-dp__type">{node.typeLabel}</span>
         </>
       )}
       {node.expandable && row.pickable && (
@@ -485,7 +485,7 @@ function PickerRow(props: {
           type="button"
           tabIndex={-1}
           aria-hidden="true"
-          className="fk-dp__insert"
+          className="fl-dp__insert"
           title={labels.insertWhole(node.name)}
           onClick={(e) => {
             e.stopPropagation();

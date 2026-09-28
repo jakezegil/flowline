@@ -1,11 +1,11 @@
-import { findStep, type Manifest, type NodeManifest } from "@flowkit/core";
+import { findStep, type Manifest, type NodeManifest } from "@flowline/core";
 import * as Popover from "@radix-ui/react-popover";
 import { Command } from "cmdk";
 import { Search } from "lucide-react";
 import { type KeyboardEvent, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useEditorStore, useEditorStoreApi } from "../hooks";
-import { defaultLabels, type FlowkitLabels } from "../labels";
-import { useFlowkitAppearance } from "../provider";
+import { defaultLabels, type FlowlineLabels } from "../labels";
+import { useFlowlineAppearance } from "../provider";
 import { focusNode, nodeElement, nodeIdOf } from "./actions";
 import {
   type PickerRequest,
@@ -15,7 +15,7 @@ import {
   useLabels,
 } from "./canvas-context";
 
-/** Plugin ID of Flowkit's built-in nodes, listed under "Logic". */
+/** Plugin ID of Flowline's built-in nodes, listed under "Logic". */
 const CORE_PLUGIN = "core";
 
 interface PickerTab {
@@ -32,7 +32,7 @@ interface PickerGroup {
 /** Tabs: "All", "Logic" (built-in nodes), then one per other plugin that has nodes. */
 export function pickerTabs(
   manifest: Manifest,
-  labels: Pick<FlowkitLabels, "tabAll" | "tabLogic"> = defaultLabels,
+  labels: Pick<FlowlineLabels, "tabAll" | "tabLogic"> = defaultLabels,
 ): PickerTab[] {
   const withNodes = new Set(manifest.nodes.map((n) => n.plugin));
   const tabs: PickerTab[] = [{ id: "all", label: labels.tabAll }];
@@ -51,7 +51,7 @@ export function pickerGroups(
   manifest: Manifest,
   tab: string,
   exclude?: string,
-  labels: Pick<FlowkitLabels, "tabAll" | "tabLogic"> = defaultLabels,
+  labels: Pick<FlowlineLabels, "tabAll" | "tabLogic"> = defaultLabels,
 ): PickerGroup[] {
   const nodes = manifest.nodes.filter((n) => n.type !== exclude);
   if (tab === "all") {
@@ -181,7 +181,7 @@ export function StepPicker() {
   const manifest = useEditorStore((s) => s.manifest);
   const container = useContext(PortalContainerContext);
   const root = useContext(RootElementContext);
-  const { resolveIcon } = useFlowkitAppearance();
+  const { resolveIcon } = useFlowlineAppearance();
   const labels = useLabels();
   const idBase = useId();
   const tabId = (id: string) => `${idBase}-tab-${id}`;
@@ -227,7 +227,7 @@ export function StepPicker() {
     const again =
       req?.mode === "insert"
         ? root()?.querySelector<HTMLElement>(
-            `.fk-add[data-insert-at="${req.loc.parentId ?? ""}/${req.loc.branch ?? ""}/${req.loc.index}"]`,
+            `.fl-add[data-insert-at="${req.loc.parentId ?? ""}/${req.loc.branch ?? ""}/${req.loc.index}"]`,
           )
         : req?.mode === "replace"
           ? nodeElement(root(), nodeIdOf(req.stepId))
@@ -311,7 +311,7 @@ export function StepPicker() {
       <Popover.Anchor virtualRef={anchor} />
       <Popover.Portal container={container}>
         <Popover.Content
-          className="fk-picker"
+          className="fl-picker"
           side="bottom"
           align="center"
           sideOffset={8}
@@ -326,7 +326,7 @@ export function StepPicker() {
           }}
         >
           <Command label={labels.searchSteps} loop shouldFilter={false}>
-            <div className="fk-picker__search">
+            <div className="fl-picker__search">
               <Search size={14} aria-hidden />
               <Command.Input
                 autoFocus
@@ -338,7 +338,7 @@ export function StepPicker() {
               />
             </div>
             <div
-              className="fk-picker__tabs"
+              className="fl-picker__tabs"
               role="tablist"
               aria-label={labels.stepCategories}
               onKeyDown={onTabKey}
@@ -356,7 +356,7 @@ export function StepPicker() {
                   aria-selected={t.id === tab}
                   aria-controls={panelId}
                   tabIndex={t.id === tab ? 0 : -1}
-                  className="fk-picker__tab"
+                  className="fl-picker__tab"
                   onClick={() => setTab(t.id)}
                 >
                   {t.label}
@@ -364,15 +364,15 @@ export function StepPicker() {
               ))}
             </div>
             <div role="tabpanel" id={panelId} aria-labelledby={tabId(tab)}>
-              <Command.List className="fk-picker__list">
-                <Command.Empty className="fk-picker__empty">
+              <Command.List className="fl-picker__list">
+                <Command.Empty className="fl-picker__empty">
                   {labels.noMatches(query)}
                 </Command.Empty>
                 {shown.map((g) => (
                   <Command.Group
                     key={g.heading ?? ""}
                     heading={g.heading}
-                    className="fk-picker__group"
+                    className="fl-picker__group"
                   >
                     {g.nodes.map((n) => {
                       const Icon = resolveIcon(n.icon);
@@ -381,19 +381,19 @@ export function StepPicker() {
                           key={n.type}
                           value={n.type}
                           onSelect={() => pick(n.type)}
-                          className="fk-picker__item"
+                          className="fl-picker__item"
                         >
                           <span
-                            className="fk-picker__icon"
+                            className="fl-picker__icon"
                             data-tone={n.branches.kind === "none" ? "action" : "control"}
                             aria-hidden
                           >
                             <Icon size={16} />
                           </span>
-                          <span className="fk-picker__text">
-                            <span className="fk-picker__name">{n.name}</span>
+                          <span className="fl-picker__text">
+                            <span className="fl-picker__name">{n.name}</span>
                             {n.description && (
-                              <span className="fk-picker__desc">{n.description}</span>
+                              <span className="fl-picker__desc">{n.description}</span>
                             )}
                           </span>
                         </Command.Item>

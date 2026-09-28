@@ -1,10 +1,10 @@
-import type { JournalEntry, RunDetail, RunEvent, Step } from "@flowkit/core";
+import type { JournalEntry, RunDetail, RunEvent, Step } from "@flowline/core";
 import { Hourglass, Play, X, Zap } from "lucide-react";
 import { type JSX, type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
 import type { RunOverlay } from "../canvas/canvas-context";
 import { stepIndex } from "../hooks";
-import type { FlowkitLabels } from "../labels";
-import { useFlowkitAppearance } from "../provider";
+import type { FlowlineLabels } from "../labels";
+import { useFlowlineAppearance } from "../provider";
 import { TRIGGER_KEY } from "../store/editor-store";
 import { JsonTree } from "../ui/json-tree";
 import { useNow } from "../ui/primitives";
@@ -44,7 +44,7 @@ function inspect(
   key: string,
   path: string | undefined,
   overlay: RunOverlay,
-  labels: FlowkitLabels,
+  labels: FlowlineLabels,
   names: { step?: Step; name: string; icon: ReactNode },
 ): Inspected {
   const { run, events } = detail;
@@ -95,7 +95,7 @@ function inspect(
 /** One-line description of an audit event. */
 function eventDetail(
   e: RunEvent,
-  labels: FlowkitLabels,
+  labels: FlowlineLabels,
   now: number,
   decision: boolean,
   /** The wait this event started is still open, so its expiry means something. */
@@ -164,23 +164,23 @@ function Timeline({
   /** The step is still waiting: its last `run.suspended` shows when the wait expires. */
   waitOpen?: boolean;
 }) {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const now = useNow(30_000);
-  if (events.length === 0) return <p className="fk-empty">{labels.noEvents}</p>;
+  if (events.length === 0) return <p className="fl-empty">{labels.noEvents}</p>;
   const openWait = waitOpen ? events.findLast((e) => e.type === "run.suspended") : undefined;
   return (
-    <ol className="fk-timeline">
+    <ol className="fl-timeline">
       {events.map((e) => {
         const detail = eventDetail(e, labels, now, decision, e === openWait);
         const hasData = e.data !== undefined && e.data !== null;
         const head = (
           <>
-            <span className="fk-timeline__type">{labels.eventType[e.type]}</span>
+            <span className="fl-timeline__type">{labels.eventType[e.type]}</span>
             {showSteps && e.stepPath && (
-              <span className="fk-timeline__step">{stepName(e.stepPath)}</span>
+              <span className="fl-timeline__step">{stepName(e.stepPath)}</span>
             )}
             <time
-              className="fk-timeline__time"
+              className="fl-timeline__time"
               dateTime={new Date(e.at).toISOString()}
               title={labels.dateTime(e.at)}
             >
@@ -189,20 +189,20 @@ function Timeline({
           </>
         );
         return (
-          <li key={e.seq} className="fk-timeline__item" data-tone={EVENT_TONE[e.type] ?? "neutral"}>
-            <span className="fk-timeline__dot" aria-hidden />
-            <div className="fk-timeline__content">
+          <li key={e.seq} className="fl-timeline__item" data-tone={EVENT_TONE[e.type] ?? "neutral"}>
+            <span className="fl-timeline__dot" aria-hidden />
+            <div className="fl-timeline__content">
               {hasData ? (
-                <details className="fk-timeline__details">
-                  <summary className="fk-timeline__head">{head}</summary>
-                  {detail && <div className="fk-timeline__detail">{detail}</div>}
+                <details className="fl-timeline__details">
+                  <summary className="fl-timeline__head">{head}</summary>
+                  {detail && <div className="fl-timeline__detail">{detail}</div>}
                   <JsonTree value={e.data} />
                 </details>
               ) : (
-                <div className="fk-timeline__head">{head}</div>
+                <div className="fl-timeline__head">{head}</div>
               )}
               {hasData && detail && (
-                <div className="fk-timeline__detail fk-timeline__detail--peek">{detail}</div>
+                <div className="fl-timeline__detail fl-timeline__detail--peek">{detail}</div>
               )}
             </div>
           </li>
@@ -220,17 +220,17 @@ function StatusLine({
   status: RunOverlay["stepStatus"][string] | undefined;
   iteration?: string;
 }) {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   if (!status) return null;
   const parts = [labels.runStatus[status.status]];
   if (status.durationMs !== undefined) parts.push(labels.duration(status.durationMs));
   if (status.attempts !== undefined && status.attempts > 1)
     parts.push(labels.attempts(status.attempts));
   return (
-    <div className="fk-inspector__status" data-status={status.status}>
-      <span className="fk-inspector__dot" aria-hidden />
+    <div className="fl-inspector__status" data-status={status.status}>
+      <span className="fl-inspector__dot" aria-hidden />
       <span>{parts.join(" · ")}</span>
-      {iteration && <span className="fk-inspector__iter">{iteration}</span>}
+      {iteration && <span className="fl-inspector__iter">{iteration}</span>}
     </div>
   );
 }
@@ -265,7 +265,7 @@ export function StepInspector({
   /** The step's waits are decided in the host app: its timeline says "a decision", not "callback". */
   decisionWait?: boolean;
 }): JSX.Element {
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const step = stepIndex(detail.doc).get(selection);
   const info = inspect(detail, selection, path, overlay, labels, {
     ...(step ? { step } : {}),
@@ -334,13 +334,13 @@ export function StepInspector({
     body = has(info.input) ? (
       <JsonTree value={info.input} label={tabName.input} />
     ) : (
-      <p className="fk-empty">{dimmed ? labels.notTaken : labels.noInput}</p>
+      <p className="fl-empty">{dimmed ? labels.notTaken : labels.noInput}</p>
     );
   } else if (tab === "output") {
     body = has(info.output) ? (
       <JsonTree value={info.output} label={tabName.output} />
     ) : (
-      <p className="fk-empty">
+      <p className="fl-empty">
         {dimmed
           ? labels.notTaken
           : status?.status === "pending"
@@ -352,16 +352,16 @@ export function StepInspector({
     );
   } else if (tab === "error") {
     body = info.error ? (
-      <div className="fk-error-box">
-        <p className="fk-error-box__message">{info.error.message}</p>
+      <div className="fl-error-box">
+        <p className="fl-error-box__message">{info.error.message}</p>
         {info.error.code && (
-          <p className="fk-error-box__meta">
+          <p className="fl-error-box__meta">
             {labels.errorCode} <code>{info.error.code}</code>
           </p>
         )}
       </div>
     ) : (
-      <p className="fk-empty">{labels.noError}</p>
+      <p className="fl-empty">{labels.noError}</p>
     );
   } else {
     body = (
@@ -377,18 +377,18 @@ export function StepInspector({
   }
 
   return (
-    <div className="fk-inspector">
-      <div className="fk-panel__head">
-        <div className="fk-inspector__icon" aria-hidden>
+    <div className="fl-inspector">
+      <div className="fl-panel__head">
+        <div className="fl-inspector__icon" aria-hidden>
           {info.icon}
         </div>
-        <div className="fk-inspector__heading">
-          <h2 className="fk-panel__title">{info.title}</h2>
+        <div className="fl-inspector__heading">
+          <h2 className="fl-panel__title">{info.title}</h2>
           <StatusLine status={status} {...(info.iteration ? { iteration: info.iteration } : {})} />
         </div>
         <button
           type="button"
-          className="fk-icon-btn"
+          className="fl-icon-btn"
           aria-label={labels.closePanel}
           onClick={onClose}
         >
@@ -396,24 +396,24 @@ export function StepInspector({
         </button>
       </div>
       {waiting && (
-        <div className="fk-callout" data-tone="warning">
+        <div className="fl-callout" data-tone="warning">
           <Hourglass size={14} aria-hidden />
-          <span className="fk-callout__text">
+          <span className="fl-callout__text">
             {waiting}
             {pending?.hasCallback && resumeHint && (
-              <span className="fk-callout__hint">{resumeHint}</span>
+              <span className="fl-callout__hint">{resumeHint}</span>
             )}
           </span>
           {pending?.hasCallback && resumeSlot}
         </div>
       )}
       {dimmed && (
-        <p className="fk-callout" data-tone="muted">
+        <p className="fl-callout" data-tone="muted">
           {labels.notTaken}
         </p>
       )}
       <div
-        className="fk-tabs"
+        className="fl-tabs"
         role="tablist"
         aria-label={labels.inspectorTabs}
         onKeyDown={onTabKey}
@@ -430,19 +430,19 @@ export function StepInspector({
             aria-selected={tab === t}
             aria-controls={`${id}-panel`}
             tabIndex={tab === t ? 0 : -1}
-            className="fk-tab"
+            className="fl-tab"
             data-alert={(t === "error" && info.error !== undefined) || undefined}
             onClick={() => setTab(t)}
           >
             {tabName[t]}
             {t === "timeline" && info.events.length > 0 && (
-              <span className="fk-tab__count">{info.events.length}</span>
+              <span className="fl-tab__count">{info.events.length}</span>
             )}
           </button>
         ))}
       </div>
       <div
-        className="fk-inspector__body"
+        className="fl-inspector__body"
         role="tabpanel"
         id={`${id}-panel`}
         aria-labelledby={`${id}-${tab}`}

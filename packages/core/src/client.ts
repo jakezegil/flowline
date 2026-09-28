@@ -1,6 +1,6 @@
 /**
- * Isomorphic HTTP client for the Flowkit engine's HTTP handler, exported as
- * `@flowkit/core/client`. Uses the platform `fetch`; works in browsers, Node 22+, and edge runtimes.
+ * Isomorphic HTTP client for the Flowline engine's HTTP handler, exported as
+ * `@flowline/core/client`. Uses the platform `fetch`; works in browsers, Node 22+, and edge runtimes.
  *
  * @module
  */
@@ -22,8 +22,8 @@ import type { Issue } from "./validate";
 export type * from "./api-types";
 export type { Issue, Manifest, WorkflowDoc };
 
-/** Typed access to every route of the Flowkit HTTP handler. */
-export interface FlowkitClient {
+/** Typed access to every route of the Flowline HTTP handler. */
+export interface FlowlineClient {
   /**
    * The handler's base URL as given to {@link createClient} (without a trailing slash). The
    * editor uses it to show webhook URLs (`<baseUrl>/hooks/…`, resolved against the page's origin).
@@ -91,10 +91,10 @@ export interface FlowkitClient {
   subscribeRun(id: string, onEvent: (e: RunEvent) => void): () => void;
 }
 
-/** Thrown by {@link FlowkitClient} methods for non-2xx responses. */
-export class FlowkitHttpError extends Error {
+/** Thrown by {@link FlowlineClient} methods for non-2xx responses. */
+export class FlowlineHttpError extends Error {
   /** Error name, for `instanceof`-free checks across package copies. */
-  override readonly name = "FlowkitHttpError";
+  override readonly name = "FlowlineHttpError";
   /** HTTP status code. */
   readonly status: number;
   /** Parsed JSON response body, or the raw text when it is not JSON. */
@@ -116,7 +116,7 @@ export class FlowkitHttpError extends Error {
 
 /** Options for {@link createClient}. */
 export interface ClientOptions {
-  /** URL (absolute or same-origin relative) of the handler's base path, e.g. `"/flowkit"`. */
+  /** URL (absolute or same-origin relative) of the handler's base path, e.g. `"/flowline"`. */
   baseUrl: string;
   /** `fetch` implementation; defaults to the global `fetch`. */
   fetch?: typeof fetch;
@@ -221,19 +221,19 @@ class SseParser {
 }
 
 /**
- * Create a client for a Flowkit HTTP handler mounted at `baseUrl`.
+ * Create a client for a Flowline HTTP handler mounted at `baseUrl`.
  *
  * @example
  * ```ts
- * import { createClient } from "@flowkit/core/client";
+ * import { createClient } from "@flowline/core/client";
  * const client = createClient({
- *   baseUrl: "/flowkit",
+ *   baseUrl: "/flowline",
  *   headers: async () => ({ authorization: `Bearer ${await getToken()}` }),
  * });
  * const runs = await client.listRuns({ status: "failed" });
  * ```
  */
-export function createClient(opts: ClientOptions): FlowkitClient {
+export function createClient(opts: ClientOptions): FlowlineClient {
   const base = opts.baseUrl.replace(/\/+$/, "");
   // Resolve lazily and call unbound: browsers throw "Illegal invocation" for a detached `fetch`.
   const doFetch = (url: string, init: RequestInit) => (opts.fetch ?? globalThis.fetch)(url, init);
@@ -257,11 +257,11 @@ export function createClient(opts: ClientOptions): FlowkitClient {
     if (signal) init.signal = signal;
     const res = await doFetch(base + path, init);
     const parsed = await readBody(res);
-    if (!res.ok) throw new FlowkitHttpError(method, path, res.status, parsed);
+    if (!res.ok) throw new FlowlineHttpError(method, path, res.status, parsed);
     return parsed as T;
   }
 
-  const client: FlowkitClient = {
+  const client: FlowlineClient = {
     baseUrl: base,
     getManifest: () => request("GET", "/manifest"),
     listWorkflows: () => request("GET", "/workflows"),
@@ -341,7 +341,7 @@ export function createClient(opts: ClientOptions): FlowkitClient {
           if (last && TERMINAL_EVENTS.has(last.type)) return;
           if (detail.run.status !== undefined && TERMINAL_STATUSES.has(detail.run.status)) return;
         } catch (err) {
-          if (err instanceof FlowkitHttpError && !isRetryableStatus(err.status)) return;
+          if (err instanceof FlowlineHttpError && !isRetryableStatus(err.status)) return;
         }
         await sleep(POLL_INTERVAL_MS, signal);
       }

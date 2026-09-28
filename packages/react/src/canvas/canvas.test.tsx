@@ -1,4 +1,4 @@
-import { findStep } from "@flowkit/core";
+import { findStep } from "@flowline/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
@@ -59,7 +59,7 @@ function card(stepId: string): HTMLElement {
 const PLUS = /^Add (first step$|step (after|to) )/;
 
 function root(): HTMLElement {
-  return document.querySelector(".fk-root") as HTMLElement;
+  return document.querySelector(".fl-root") as HTMLElement;
 }
 
 /** The canvas node that has focus (`"trigger"`, `"step:<id>"`), if any. */
@@ -91,7 +91,7 @@ describe("WorkflowCanvas", () => {
     expect(within(card("load")).getByText("Load c_42")).toBeTruthy();
     expect(within(card("again")).getByText("Load contact › id")).toBeTruthy();
     // The whole summary is the tooltip, for when the card cuts it short (Minor 6).
-    const summary = card("again").querySelector(".fk-summary");
+    const summary = card("again").querySelector(".fl-summary");
     expect(summary?.getAttribute("title")).toBe(summary?.textContent);
   });
 
@@ -100,7 +100,7 @@ describe("WorkflowCanvas", () => {
     store = createEditorStore({ doc, manifest });
     const { unmount } = render(<WorkflowCanvas store={store} />);
     const unset = within(card("load")).getByText("No contact");
-    expect(unset.classList.contains("fk-pill")).toBe(false);
+    expect(unset.classList.contains("fl-pill")).toBe(false);
     expect(unset.dataset.kind).toBe("empty");
     unmount();
 
@@ -156,7 +156,7 @@ describe("WorkflowCanvas", () => {
   test("an empty branch shows an Add step placeholder that inserts into it", async () => {
     store = createEditorStore({ doc: branchyDoc(), manifest });
     render(<WorkflowCanvas store={store} />);
-    const placeholders = Array.from(document.querySelectorAll<HTMLElement>(".fk-placeholder"));
+    const placeholders = Array.from(document.querySelectorAll<HTMLElement>(".fl-placeholder"));
     expect(placeholders.map((b) => b.getAttribute("aria-label"))).toEqual([
       "Add step to Else of Condition",
       "Add step to Each item of For each",
@@ -188,7 +188,7 @@ describe("WorkflowCanvas", () => {
 
   test("context menu Delete removes the step, and the toast's Undo restores it", async () => {
     render(<WorkflowCanvas store={store} />);
-    fireEvent.contextMenu(card("email").querySelector(".fk-card") as HTMLElement);
+    fireEvent.contextMenu(card("email").querySelector(".fl-card") as HTMLElement);
     const menu = await screen.findByRole("menu");
     fireEvent.click(within(menu).getByText("Delete"));
     expect(findStep(store.getState().doc, "email")).toBeUndefined();
@@ -218,7 +218,7 @@ describe("WorkflowCanvas", () => {
     store = createEditorStore({ doc: branchyDoc(), manifest });
     render(<WorkflowCanvas store={store} />);
     act(() => store.getState().select("load"));
-    fireEvent.contextMenu(card("each").querySelector(".fk-card") as HTMLElement);
+    fireEvent.contextMenu(card("each").querySelector(".fl-card") as HTMLElement);
     // L19: right-clicking moves the open panel to the menu's step.
     expect(store.getState().selection).toBe("each");
     act(() => store.getState().select("load"));
@@ -252,12 +252,12 @@ describe("WorkflowCanvas", () => {
       manifest: m,
     });
     render(<WorkflowCanvas store={store} />);
-    const after = card("email").querySelector(".fk-card") as HTMLElement;
+    const after = card("email").querySelector(".fl-card") as HTMLElement;
     expect(after.hasAttribute("data-unreachable")).toBe(true);
     expect(after.textContent).toContain("Never runs: an earlier step ends the run");
-    expect(card("stop").querySelector(".fk-card")?.hasAttribute("data-unreachable")).toBe(false);
+    expect(card("stop").querySelector(".fl-card")?.hasAttribute("data-unreachable")).toBe(false);
     act(() => store.getState().removeStep("stop"));
-    expect(card("email").querySelector(".fk-card")?.hasAttribute("data-unreachable")).toBe(false);
+    expect(card("email").querySelector(".fl-card")?.hasAttribute("data-unreachable")).toBe(false);
   });
 
   test("L13: an event trigger's card shows its filters by label and option label", () => {
@@ -270,12 +270,12 @@ describe("WorkflowCanvas", () => {
           stage: {
             type: "string",
             enum: ["won", "lost"],
-            "x-flowkit": { enumLabels: { won: "Won" } },
+            "x-flowline": { enumLabels: { won: "Won" } },
           },
           minAmount: { type: "number" },
-          onlyChanges: { type: "boolean", "x-flowkit": { label: "Only on changes" } },
+          onlyChanges: { type: "boolean", "x-flowline": { label: "Only on changes" } },
           skipTests: { type: "boolean" },
-          apiKey: { type: "string", "x-flowkit": { secret: true } },
+          apiKey: { type: "string", "x-flowline": { secret: true } },
         },
       },
     };
@@ -298,7 +298,7 @@ describe("WorkflowCanvas", () => {
     });
     render(<WorkflowCanvas store={store} />);
     const summary = document.querySelector(
-      `.react-flow__node[data-id="trigger"] .fk-card__summary`,
+      `.react-flow__node[data-id="trigger"] .fl-card__summary`,
     );
     expect(summary?.textContent).toBe(
       "When contact.created happens · Stage: Won · Min amount: 5000 · Only on changes",
@@ -307,7 +307,7 @@ describe("WorkflowCanvas", () => {
 
   test("L19: right-click with no panel open doesn't open one", () => {
     render(<WorkflowCanvas store={store} />);
-    fireEvent.contextMenu(card("email").querySelector(".fk-card") as HTMLElement);
+    fireEvent.contextMenu(card("email").querySelector(".fl-card") as HTMLElement);
     expect(store.getState().selection).toBeNull();
   });
 
@@ -373,7 +373,7 @@ describe("WorkflowCanvas", () => {
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     render(<WorkflowCanvas store={store} />);
-    fireEvent.contextMenu(card("load").querySelector(".fk-card") as HTMLElement);
+    fireEvent.contextMenu(card("load").querySelector(".fl-card") as HTMLElement);
     fireEvent.click(within(await screen.findByRole("menu")).getByText("Copy reference"));
     expect(writeText).toHaveBeenCalledWith("{{steps.load}}");
     expect(await screen.findByText("Reference copied")).toBeTruthy();
@@ -381,7 +381,7 @@ describe("WorkflowCanvas", () => {
 
   test("Replace… opens the picker in replace mode and keeps the step's ID", async () => {
     render(<WorkflowCanvas store={store} />);
-    fireEvent.contextMenu(card("email").querySelector(".fk-card") as HTMLElement);
+    fireEvent.contextMenu(card("email").querySelector(".fl-card") as HTMLElement);
     fireEvent.click(within(await screen.findByRole("menu")).getByText("Replace…"));
     const picker = await screen.findByRole("dialog", { name: "Replace step" });
     // L29: the search box is named for what it does, not after the dialog.
@@ -565,7 +565,7 @@ describe("WorkflowCanvas", () => {
     expect(within(card("load")).getByRole("img", { name: "Edited since last test" })).toBeTruthy();
     act(() => store.getState().toggleDisabled("email"));
     expect(within(card("email")).getByText("Disabled")).toBeTruthy();
-    expect(card("email").querySelector(".fk-card")?.hasAttribute("data-disabled")).toBe(true);
+    expect(card("email").querySelector(".fl-card")?.hasAttribute("data-disabled")).toBe(true);
   });
 
   test("F2 renames inline; Enter saves", () => {
@@ -632,24 +632,24 @@ describe("WorkflowCanvas", () => {
   });
 
   test("applies the color mode and token overrides to the root", async () => {
-    const { FlowkitProvider } = await import("../provider");
+    const { FlowlineProvider } = await import("../provider");
     render(
-      <FlowkitProvider
+      <FlowlineProvider
         client={{} as never}
         theme={{ colorMode: "dark", tokens: { accent: "#0f766e", radius: "4px" } }}
       >
         <WorkflowCanvas store={store} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
-    expect(root().dataset.fkTheme).toBe("dark");
-    expect(root().style.getPropertyValue("--fk-accent")).toBe("#0f766e");
-    expect(root().style.getPropertyValue("--fk-radius")).toBe("4px");
+    expect(root().dataset.flTheme).toBe("dark");
+    expect(root().style.getPropertyValue("--fl-accent")).toBe("#0f766e");
+    expect(root().style.getPropertyValue("--fl-radius")).toBe("4px");
   });
 
   test("labels on the provider replace the UI text; unset labels stay English", async () => {
-    const { FlowkitProvider } = await import("../provider");
+    const { FlowlineProvider } = await import("../provider");
     render(
-      <FlowkitProvider
+      <FlowlineProvider
         client={{} as never}
         labels={{
           addStepAfter: (s: string) => `Schritt nach ${s} einfügen`,
@@ -660,7 +660,7 @@ describe("WorkflowCanvas", () => {
         }}
       >
         <WorkflowCanvas store={store} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     expect(screen.getByText("Auslöser")).toBeTruthy();
     const plus = screen.getAllByRole("button", { name: /^Schritt (hier|nach)/ });
@@ -692,13 +692,13 @@ describe("WorkflowCanvas", () => {
   });
 
   test("host icons override bundled ones by name; unknown names fall back", async () => {
-    const { FlowkitProvider } = await import("../provider");
+    const { FlowlineProvider } = await import("../provider");
     const { resolveIconIn } = await import("../icons");
     const Custom = () => <svg data-testid="custom-user" />;
     render(
-      <FlowkitProvider client={{} as never} icons={{ user: Custom }}>
+      <FlowlineProvider client={{} as never} icons={{ user: Custom }}>
         <WorkflowCanvas store={store} />
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     expect(within(card("load")).getByTestId("custom-user")).toBeTruthy();
     expect(resolveIconIn(undefined, "no-such-icon")).toBe(resolveIconIn(undefined, undefined));

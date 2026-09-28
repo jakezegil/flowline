@@ -7,7 +7,7 @@
 import {
   describeSubflowOutput,
   dropHiddenFields,
-  type FlowkitServices,
+  type FlowlineServices,
   hasErrors,
   type Issue,
   isSignal,
@@ -27,13 +27,13 @@ import {
   type WorkflowDoc,
   type WorkflowVersion,
   walkSteps,
-} from "@flowkit/core";
+} from "@flowline/core";
 import type { z } from "zod";
 import { createNodeContext } from "./context";
 import type { EngineCore } from "./engine";
 import {
   EngineNotFoundError,
-  FlowkitValidationError,
+  FlowlineValidationError,
   RetryableError,
   WorkflowExistsError,
 } from "./errors";
@@ -254,7 +254,7 @@ export function createWorkflows(core: EngineCore): Workflows {
 
     async saveWorkflow(tenantId, doc, actor, opts = {}) {
       const problem = docShapeProblem(doc);
-      if (problem) throw new FlowkitValidationError(problem, []);
+      if (problem) throw new FlowlineValidationError(problem, []);
       let saved = doc;
       if (registry.getTrigger(doc.trigger.type)?.kind === "webhook") {
         const current = doc.trigger.config.slug;
@@ -287,7 +287,7 @@ export function createWorkflows(core: EngineCore): Workflows {
         throw new EngineNotFoundError(`Workflow "${workflowId}" version ${version} not found`);
       const issues = await validate(tenantId, v.doc);
       if (hasErrors(issues)) {
-        throw new FlowkitValidationError(errorSummary(workflowId, issues), issues);
+        throw new FlowlineValidationError(errorSummary(workflowId, issues), issues);
       }
       const now = clock();
       await storage.publishVersion(tenantId, workflowId, version, now);
@@ -381,7 +381,7 @@ export function createWorkflows(core: EngineCore): Workflows {
           stepPath: step.id,
           attempt: 1,
           idempotencyKey: runId,
-          services: core.opts.services ?? ({} as FlowkitServices),
+          services: core.opts.services ?? ({} as FlowlineServices),
           ...(core.logger ? { logger: core.logger } : {}),
           signal: controller.signal,
           clock,

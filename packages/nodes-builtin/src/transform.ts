@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { defineNode, FatalError, fields, ui } from "@flowkit/core";
+import { defineNode, FatalError, fields, ui } from "@flowline/core";
 import { z } from "zod";
 
 /** Time limit of one transform evaluation, in ms. */

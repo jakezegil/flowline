@@ -8,7 +8,7 @@
  *
  * @module
  */
-import type { JournalEntry, Registry, ResolveScope, Step, WorkflowDoc } from "@flowkit/core";
+import type { JournalEntry, Registry, ResolveScope, Step, WorkflowDoc } from "@flowline/core";
 
 /** One enclosing block of a step: a branch block, or a loop iteration (with its item). */
 export type Frame = {

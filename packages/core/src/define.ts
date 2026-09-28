@@ -5,9 +5,9 @@ import type { BranchSpec, OutputSpec, TriggerKind } from "./types";
  * Thrown when a node, trigger, plugin or registry definition is invalid, or when the code-first
  * `workflow()` builder is misused (invalid or duplicate IDs, missing trigger).
  */
-export class FlowkitDefinitionError extends Error {
+export class FlowlineDefinitionError extends Error {
   /** Error name, for `instanceof`-free checks across package copies. */
-  override readonly name = "FlowkitDefinitionError";
+  override readonly name = "FlowlineDefinitionError";
 }
 
 /**
@@ -16,13 +16,13 @@ export class FlowkitDefinitionError extends Error {
  *
  * @example
  * ```ts
- * declare module "@flowkit/core" {
- *   interface FlowkitServices { db: Db }
+ * declare module "@flowline/core" {
+ *   interface FlowlineServices { db: Db }
  * }
  * ```
  */
 // biome-ignore lint/suspicious/noEmptyInterface: extended by hosts via declaration merging
-export interface FlowkitServices {}
+export interface FlowlineServices {}
 
 /** Why a suspended handler is being re-invoked (see `ctx.resume`). */
 export type ResumeInfo =
@@ -96,8 +96,8 @@ export interface NodeContext {
    * attempt is still running), and this key lets the external system deduplicate.
    */
   idempotencyKey: string;
-  /** Host services (see {@link FlowkitServices}). */
-  services: FlowkitServices;
+  /** Host services (see {@link FlowlineServices}). */
+  services: FlowlineServices;
   /** Run-scoped logger. */
   logger: Logger;
   /**
@@ -141,14 +141,14 @@ export interface NodeContext {
 
 /**
  * Tag key present on every signal object. Created with `Symbol.for` so signals from a duplicated
- * copy of `@flowkit/core` are still recognised.
+ * copy of `@flowline/core` are still recognised.
  */
-export const FLOWKIT_SIGNAL: unique symbol = Symbol.for("flowkit.signal") as never;
+export const FLOWLINE_SIGNAL: unique symbol = Symbol.for("flowline.signal") as never;
 
 /** Returned by a branching handler to choose the branch to run next. */
 export interface BranchSignal<O = unknown> {
   /** Signal tag. */
-  readonly [FLOWKIT_SIGNAL]: true;
+  readonly [FLOWLINE_SIGNAL]: true;
   /** Signal kind. */
   readonly kind: "branch";
   /** ID of the branch to take. */
@@ -160,7 +160,7 @@ export interface BranchSignal<O = unknown> {
 /** Returned by a handler to pause the run until a time or a callback. */
 export type SuspendSignal = {
   /** Signal tag. */
-  readonly [FLOWKIT_SIGNAL]: true;
+  readonly [FLOWLINE_SIGNAL]: true;
   /** Signal kind. */
   readonly kind: "suspend";
   /**
@@ -193,7 +193,7 @@ export type SuspendSignal = {
 /** Returned by a handler to end the run successfully without running further steps. */
 export interface StopSignal {
   /** Signal tag. */
-  readonly [FLOWKIT_SIGNAL]: true;
+  readonly [FLOWLINE_SIGNAL]: true;
   /** Signal kind. */
   readonly kind: "stop";
   /** Why the run stopped, recorded in the audit trail. */
@@ -203,7 +203,7 @@ export interface StopSignal {
 /** Returned by a handler to run another workflow as a sub-flow and wait for its result. */
 export interface SubflowSignal {
   /** Signal tag. */
-  readonly [FLOWKIT_SIGNAL]: true;
+  readonly [FLOWLINE_SIGNAL]: true;
   /** Signal kind. */
   readonly kind: "subflow";
   /** Workflow to run. */
@@ -218,7 +218,7 @@ export interface SubflowSignal {
  */
 export interface LoopSignal {
   /** Signal tag. */
-  readonly [FLOWKIT_SIGNAL]: true;
+  readonly [FLOWLINE_SIGNAL]: true;
   /** Signal kind. */
   readonly kind: "loop";
   /** The items to iterate, in order; each is `loop.item` for one run of the body. */
@@ -235,7 +235,7 @@ export type Signal =
 
 /** Choose branch `id`, producing `output` as the step's output. */
 export function branch<O = undefined>(id: string, output?: O): BranchSignal<O> {
-  return { [FLOWKIT_SIGNAL]: true, kind: "branch", branch: id, output: output as O };
+  return { [FLOWLINE_SIGNAL]: true, kind: "branch", branch: id, output: output as O };
 }
 
 /**
@@ -250,15 +250,15 @@ export function suspend(
 ): SuspendSignal {
   const hook = opts.afterCommit ? { afterCommit: opts.afterCommit } : {};
   return "until" in opts
-    ? { [FLOWKIT_SIGNAL]: true, kind: "suspend", until: opts.until, ...hook }
-    : { [FLOWKIT_SIGNAL]: true, kind: "suspend", callback: opts.callback, ...hook };
+    ? { [FLOWLINE_SIGNAL]: true, kind: "suspend", until: opts.until, ...hook }
+    : { [FLOWLINE_SIGNAL]: true, kind: "suspend", callback: opts.callback, ...hook };
 }
 
 /** End the run successfully, skipping all remaining steps. */
 export function stop(reason?: string): StopSignal {
   return reason === undefined
-    ? { [FLOWKIT_SIGNAL]: true, kind: "stop" }
-    : { [FLOWKIT_SIGNAL]: true, kind: "stop", reason };
+    ? { [FLOWLINE_SIGNAL]: true, kind: "stop" }
+    : { [FLOWLINE_SIGNAL]: true, kind: "stop", reason };
 }
 
 /**
@@ -267,7 +267,7 @@ export function stop(reason?: string): StopSignal {
  */
 export function invokeSubflow(opts: { workflowId: string; input: unknown }): SubflowSignal {
   return {
-    [FLOWKIT_SIGNAL]: true,
+    [FLOWLINE_SIGNAL]: true,
     kind: "subflow",
     workflowId: opts.workflowId,
     input: opts.input,
@@ -284,7 +284,7 @@ export function invokeSubflow(opts: { workflowId: string; input: unknown }): Sub
  * ```
  */
 export function loop(items: readonly unknown[]): LoopSignal {
-  return { [FLOWKIT_SIGNAL]: true, kind: "loop", items };
+  return { [FLOWLINE_SIGNAL]: true, kind: "loop", items };
 }
 
 /**
@@ -293,7 +293,7 @@ export function loop(items: readonly unknown[]): LoopSignal {
  */
 export function isSignal(v: unknown): v is Signal {
   return (
-    typeof v === "object" && v !== null && (v as Record<symbol, unknown>)[FLOWKIT_SIGNAL] === true
+    typeof v === "object" && v !== null && (v as Record<symbol, unknown>)[FLOWLINE_SIGNAL] === true
   );
 }
 
@@ -334,7 +334,7 @@ export interface NodeDefinition<I extends z.ZodObject = z.ZodObject, O = unknown
   name: string;
   /** Longer description. */
   description?: string;
-  /** A bundled icon name (`bundledIconNames`) or a `<FlowkitProvider icons>` key; else a box. */
+  /** A bundled icon name (`bundledIconNames`) or a `<FlowlineProvider icons>` key; else a box. */
   icon?: string;
   /** Step picker category. */
   category?: string;
@@ -402,7 +402,7 @@ const NAMESPACED_TYPE = /^[^.]+\.[^.].*$/;
 
 function assertNamespaced(kind: string, type: string): void {
   if (typeof type !== "string" || !NAMESPACED_TYPE.test(type)) {
-    throw new FlowkitDefinitionError(
+    throw new FlowlineDefinitionError(
       `${kind} type "${type}" must be namespaced as "<pluginId>.<name>"`,
     );
   }
@@ -413,7 +413,7 @@ function assertNamespaced(kind: string, type: string): void {
  * return value (including a {@link branch} output) is checked against the output schema's input
  * type. Declare `output` to get typed references and validation.
  *
- * @throws {@link FlowkitDefinitionError} if `type` has no namespace or both `output` and
+ * @throws {@link FlowlineDefinitionError} if `type` has no namespace or both `output` and
  * `dynamicOutput` are given.
  *
  * @example
@@ -440,7 +440,7 @@ export function defineNode<I extends z.ZodObject, O = unknown, R = O>(
 ): NodeDefinition<I, O, R> {
   assertNamespaced("Node", def.type);
   if (def.output !== undefined && def.dynamicOutput !== undefined) {
-    throw new FlowkitDefinitionError(
+    throw new FlowlineDefinitionError(
       `Node "${def.type}" declares both output and dynamicOutput; use one`,
     );
   }
@@ -460,7 +460,7 @@ export interface TriggerDefinition<C extends z.ZodObject = z.ZodObject, P = unkn
   name: string;
   /** Longer description. */
   description?: string;
-  /** A bundled icon name (`bundledIconNames`) or a `<FlowkitProvider icons>` key; else a box. */
+  /** A bundled icon name (`bundledIconNames`) or a `<FlowlineProvider icons>` key; else a box. */
   icon?: string;
   /** How the trigger fires. */
   kind: TriggerKind;
@@ -485,7 +485,7 @@ export interface TriggerDefinition<C extends z.ZodObject = z.ZodObject, P = unkn
 /**
  * Define a trigger type.
  *
- * @throws {@link FlowkitDefinitionError} if `type` has no namespace or both `payload` and
+ * @throws {@link FlowlineDefinitionError} if `type` has no namespace or both `payload` and
  * `dynamicPayload` are given.
  */
 export function defineTrigger<C extends z.ZodObject, P>(
@@ -493,7 +493,7 @@ export function defineTrigger<C extends z.ZodObject, P>(
 ): TriggerDefinition<C, P> {
   assertNamespaced("Trigger", def.type);
   if (def.payload !== undefined && def.dynamicPayload !== undefined) {
-    throw new FlowkitDefinitionError(
+    throw new FlowlineDefinitionError(
       `Trigger "${def.type}" declares both payload and dynamicPayload; use one`,
     );
   }
@@ -506,7 +506,7 @@ export interface PluginDefinition {
   id: string;
   /** Display name. */
   name: string;
-  /** A bundled icon name (`bundledIconNames`) or a `<FlowkitProvider icons>` key; else a box. */
+  /** A bundled icon name (`bundledIconNames`) or a `<FlowlineProvider icons>` key; else a box. */
   icon?: string;
   /** Longer description. */
   description?: string;

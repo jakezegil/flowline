@@ -1,10 +1,10 @@
 /**
  * The `crm` plugin: the mini CRM's own nodes and triggers. This is what a host app writes to put
- * its domain into Flowkit.
+ * its domain into Flowline.
  *
  * @module
  */
-import { definePlugin, type PluginDefinition } from "@flowkit/core";
+import { definePlugin, type PluginDefinition } from "@flowline/core";
 import type { CrmStore } from "../crm-store";
 import { requestApproval } from "./approval";
 import {
@@ -18,8 +18,8 @@ import { updateDeal } from "./deals";
 import { sendEmail } from "./email";
 import { contactCreated, dealUpdated } from "./triggers";
 
-declare module "@flowkit/core" {
-  interface FlowkitServices {
+declare module "@flowline/core" {
+  interface FlowlineServices {
     /** The mini CRM's store, available to handlers as `ctx.services.crm`. */
     crm: CrmStore;
   }

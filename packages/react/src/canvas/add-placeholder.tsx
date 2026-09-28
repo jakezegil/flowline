@@ -1,4 +1,4 @@
-import type { StepLocation } from "@flowkit/core";
+import type { StepLocation } from "@flowline/core";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Plus } from "lucide-react";
 import { memo } from "react";
@@ -34,7 +34,7 @@ export const AddPlaceholder = memo(function AddPlaceholder({ data }: NodeProps<P
     return (
       <>
         <NodeHandles />
-        <div className="fk-placeholder" data-readonly>
+        <div className="fl-placeholder" data-readonly>
           {labels.noSteps}
         </div>
       </>
@@ -45,7 +45,7 @@ export const AddPlaceholder = memo(function AddPlaceholder({ data }: NodeProps<P
       <NodeHandles />
       <button
         type="button"
-        className="fk-placeholder nodrag nopan"
+        className="fl-placeholder nodrag nopan"
         aria-label={name}
         data-active={active || undefined}
         onClick={(e) => {

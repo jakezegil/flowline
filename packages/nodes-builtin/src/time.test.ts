@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { FatalError, type NodeContext, RetryableError, type SuspendSignal } from "@flowkit/core";
+import { FatalError, type NodeContext, RetryableError, type SuspendSignal } from "@flowline/core";
 import { describe, expect, it } from "vitest";
 import { fakeContext, NOW } from "../test/fake-context";
 import { delayNode, MAX_DURATION_MS, parseDuration, waitForCallbackNode } from "./time";
@@ -219,7 +219,7 @@ describe("core.waitForCallback", () => {
       expect(headers.get("content-type")).toBe("application/json");
       expect(headers.get("idempotency-key")).toBe(keyFor("tok"));
       expect(JSON.parse(String(call?.init?.body))).toEqual({
-        resumeUrl: "https://x/flowkit/resume/tok",
+        resumeUrl: "https://x/flowline/resume/tok",
         expiresAt: NOW + DAY,
         runId: "run-7",
       });

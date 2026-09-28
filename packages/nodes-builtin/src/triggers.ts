@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { defineTrigger, fields, secret, ui } from "@flowkit/core";
+import { defineTrigger, fields, secret, ui } from "@flowline/core";
 import { z } from "zod";
 
 /** Five (or six, with seconds) space-separated cron fields. Full parsing happens when scheduling. */
@@ -57,7 +57,9 @@ export const webhookTrigger = defineTrigger({
       )
       .default([]),
     secret: ui(secret(), { label: "Signing secret" })
-      .describe("Verify the X-Flowkit-Signature header (HMAC-SHA256 of the body) with this secret.")
+      .describe(
+        "Verify the X-Flowline-Signature header (HMAC-SHA256 of the body) with this secret.",
+      )
       .optional(),
     dedupeHeader: ui(z.string(), { label: "Deduplication header", placeholder: "X-Request-Id" })
       .describe("Requests repeating this header's value start no new run.")

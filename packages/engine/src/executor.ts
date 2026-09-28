@@ -9,7 +9,7 @@ import {
   type CallbackHandle,
   collectRefs,
   dropHiddenFields,
-  type FlowkitServices,
+  type FlowlineServices,
   isRef,
   isSignal,
   isTpl,
@@ -25,7 +25,7 @@ import {
   secretExprPath,
   type ValueExpr,
   type WorkflowVersion,
-} from "@flowkit/core";
+} from "@flowline/core";
 import type { z } from "zod";
 import { createNodeContext, newCallbackToken, sha256Hex } from "./context";
 import type { EngineOptions } from "./engine";
@@ -193,9 +193,9 @@ export function createExecutor(opts: EngineOptions): Executor {
   const clock = opts.clock ?? Date.now;
   const leaseMs = opts.leaseMs ?? DEFAULT_LEASE_MS;
   const stepsPerClaim = opts.stepsPerClaim ?? DEFAULT_STEPS_PER_CLAIM;
-  // Hosts may augment FlowkitServices with required members; without `services` handlers
+  // Hosts may augment FlowlineServices with required members; without `services` handlers
   // still get an empty object.
-  const services = opts.services ?? ({} as FlowkitServices);
+  const services = opts.services ?? ({} as FlowlineServices);
   const hooks = opts.__testHooks;
   const http = createGuardedFetch({
     ...opts.http,

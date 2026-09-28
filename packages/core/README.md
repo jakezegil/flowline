@@ -1,6 +1,6 @@
-# @flowkit/core
+# @flowline/core
 
-Framework-agnostic core of [Flowkit](../../README.md): the workflow document model, `defineNode`
+Framework-agnostic core of [Flowline](../../README.md): the workflow document model, `defineNode`
 /`defineTrigger`/`definePlugin`, the registry that turns plugins into a JSON manifest, refs and
 templates, the tree helpers, and `validateWorkflow`. Pure and isomorphic — no Node built-ins, no
 server-only code — so it runs in the browser as well as on a server.
@@ -8,7 +8,7 @@ server-only code — so it runs in the browser as well as on a server.
 ## Install
 
 ```sh
-pnpm add @flowkit/core zod@^4
+pnpm add @flowline/core zod@^4
 ```
 
 `zod` 4 is a required peer dependency.
@@ -16,7 +16,7 @@ pnpm add @flowkit/core zod@^4
 ## Usage
 
 ```ts
-import { defineNode, ui, workflow, ref, createRegistry, definePlugin, defineTrigger } from "@flowkit/core";
+import { defineNode, ui, workflow, ref, createRegistry, definePlugin, defineTrigger } from "@flowline/core";
 import { z } from "zod";
 
 const loadContact = defineNode({
@@ -46,6 +46,6 @@ export const doc = workflow("welcome-contact")
   .build();
 ```
 
-`@flowkit/engine` interprets the resulting `WorkflowDoc`; `@flowkit/react` renders it from the
+`@flowline/engine` interprets the resulting `WorkflowDoc`; `@flowline/react` renders it from the
 manifest that `createRegistry` produces. See the [root README](../../README.md) for the full
 quick start and `docs/` for the design spec and plugin guide.

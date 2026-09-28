@@ -6,10 +6,10 @@
  *
  * @module
  */
-import { isRef, isTpl, type JSONSchema, type ScopeEntry, type ValueExpr } from "@flowkit/core";
+import { isRef, isTpl, type JSONSchema, type ScopeEntry, type ValueExpr } from "@flowline/core";
 import { CaseSensitive, ListPlus, Plus } from "lucide-react";
 import type { JSX } from "react";
-import { useFlowkitAppearance } from "../../provider";
+import { useFlowlineAppearance } from "../../provider";
 import { ItemActions, useItemKeys } from "../fields/collections";
 import { FieldShell, IssueNotes, Segmented } from "../fields/shell";
 import { type FieldProps, useFormEnv } from "../form-context";
@@ -152,7 +152,7 @@ function RuleRow({
   onRemove(): void;
 }): JSX.Element {
   const env = useFormEnv();
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const type = valueTypeOf(rule.left, env.scope);
   const allowed = OPS_BY_TYPE[type].filter((o) => ops.includes(o));
   const offered = allowed.includes(rule.op) ? allowed : [rule.op, ...allowed];
@@ -170,10 +170,10 @@ function RuleRow({
     onChange(next);
   };
   return (
-    <li className="fk-rule">
-      {join && <span className="fk-rule__join">{join}</span>}
-      <div className="fk-rule__card">
-        <div className="fk-rule__fields">
+    <li className="fl-rule">
+      {join && <span className="fl-rule__join">{join}</span>}
+      <div className="fl-rule__card">
+        <div className="fl-rule__fields">
           <RefTextInput
             value={rule.left}
             onChange={(v) => onChange({ ...rule, left: v ?? "" })}
@@ -184,9 +184,9 @@ function RuleRow({
             ariaLabel={`${name}: ${labels.ruleLeft}`}
             readOnly={env.readOnly}
           />
-          <div className="fk-rule__opline">
+          <div className="fl-rule__opline">
             <select
-              className="fk-input fk-select fk-rule__op"
+              className="fl-input fl-select fl-rule__op"
               aria-label={`${name}: ${labels.ruleOperator}`}
               value={rule.op}
               disabled={env.readOnly}
@@ -201,7 +201,7 @@ function RuleRow({
             {caseable && (
               <button
                 type="button"
-                className="fk-mini-btn fk-rule__case"
+                className="fl-mini-btn fl-rule__case"
                 aria-pressed={rule.caseSensitive === true}
                 aria-label={`${name}: ${labels.matchCase}`}
                 title={labels.matchCase}
@@ -265,7 +265,7 @@ function GroupEditor({
   onChange(g: Group): void;
 }): JSX.Element {
   const env = useFormEnv();
-  const { labels } = useFlowkitAppearance();
+  const { labels } = useFlowlineAppearance();
   const keys = useItemKeys(group.rules.length);
   const setRules = (rules: (Rule | Group)[]) => onChange({ ...group, rules });
   const move = (from: number, to: number) => {
@@ -281,9 +281,9 @@ function GroupEditor({
   };
   const join = labels.rulesJoin[group.combinator];
   return (
-    <div className="fk-rules" data-nested={nested ? "" : undefined}>
-      <div className="fk-rules__head">
-        <span className="fk-rules__match">{labels.rulesMatch}</span>
+    <div className="fl-rules" data-nested={nested ? "" : undefined}>
+      <div className="fl-rules__head">
+        <span className="fl-rules__match">{labels.rulesMatch}</span>
         <Segmented<Combinator>
           label={`${label}: ${labels.rulesMatch}`}
           options={[
@@ -296,9 +296,9 @@ function GroupEditor({
         />
       </div>
       {group.rules.length === 0 ? (
-        !nested && <p className="fk-empty-note">{labels.emptyRules}</p>
+        !nested && <p className="fl-empty-note">{labels.emptyRules}</p>
       ) : (
-        <ol className="fk-rules__list">
+        <ol className="fl-rules__list">
           {group.rules.map((r, i) => {
             const rulePath = `${path}.rules[${i}]`;
             const k = keys.keys[i];
@@ -306,9 +306,9 @@ function GroupEditor({
               const own = labels.itemTitle(labels.ruleGroup, i + 1);
               const name = nested ? `${label}, ${own}` : own;
               return (
-                <li key={k} className="fk-rule fk-rule--group">
-                  {i > 0 && <span className="fk-rule__join">{join}</span>}
-                  <div className="fk-rule__card fk-rule__card--group">
+                <li key={k} className="fl-rule fl-rule--group">
+                  {i > 0 && <span className="fl-rule__join">{join}</span>}
+                  <div className="fl-rule__card fl-rule__card--group">
                     <GroupEditor
                       group={asGroup(r as unknown as ValueExpr)}
                       path={rulePath}
@@ -348,10 +348,10 @@ function GroupEditor({
           })}
         </ol>
       )}
-      <div className="fk-rules__add">
+      <div className="fl-rules__add">
         <button
           type="button"
-          className="fk-add-btn"
+          className="fl-add-btn"
           disabled={env.readOnly}
           onClick={() => setRules([...group.rules, { ...NEW_RULE }])}
         >
@@ -361,7 +361,7 @@ function GroupEditor({
         {!nested && (
           <button
             type="button"
-            className="fk-add-btn"
+            className="fl-add-btn"
             disabled={env.readOnly}
             onClick={() =>
               setRules([

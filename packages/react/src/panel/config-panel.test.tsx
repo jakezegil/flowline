@@ -1,11 +1,11 @@
-import type { Manifest, WorkflowDoc } from "@flowkit/core";
+import type { Manifest, WorkflowDoc } from "@flowline/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import builtin from "../../playground/builtin-manifest.json";
 import { editorView, typeInto } from "../../test/codemirror-dom";
 import { mockClient, setupDom } from "../../test/dom";
 import { docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
-import { FlowkitProvider } from "../provider";
+import { FlowlineProvider } from "../provider";
 import { createEditorStore, TRIGGER_KEY } from "../store/editor-store";
 import { ConfigPanel } from "./config-panel";
 import { sampleText } from "./trigger-config";
@@ -37,9 +37,9 @@ function setup(
   });
   store.getState().select(opts.select ?? "email");
   const utils = render(
-    <FlowkitProvider client={client}>
+    <FlowlineProvider client={client}>
       <ConfigPanel store={store} {...(opts.onClose ? { onClose: opts.onClose } : {})} />
-    </FlowkitProvider>,
+    </FlowlineProvider>,
   );
   return { store, client, ...utils };
 }
@@ -92,14 +92,14 @@ describe("ConfigPanel for a step", () => {
     const store = createEditorStore({ doc: fixtureDoc(), manifest });
     store.getState().select("email");
     render(
-      <FlowkitProvider client={mockClient()}>
-        <div className="fk-app">
+      <FlowlineProvider client={mockClient()}>
+        <div className="fl-app">
           <button type="button" className="react-flow__node" data-id="step:email">
             node
           </button>
           <ConfigPanel store={store} />
         </div>
-      </FlowkitProvider>,
+      </FlowlineProvider>,
     );
     const to = screen.getByRole("textbox", { name: "To" });
     to.focus();
@@ -131,7 +131,7 @@ describe("ConfigPanel for a step", () => {
     const tab = screen.getByRole("tab", { name: /^Configure, \d+ issues?$/ });
     expect(tab.textContent).toMatch(/\d/);
     // `to` is required and flagged next to its field.
-    const to = screen.getByRole("textbox", { name: "To" }).closest(".fk-f") as HTMLElement;
+    const to = screen.getByRole("textbox", { name: "To" }).closest(".fl-f") as HTMLElement;
     expect(within(to).getByText(/is required/)).toBeTruthy();
   });
 
@@ -171,7 +171,7 @@ describe("ConfigPanel for the trigger", () => {
 
   test("the trigger's Test tab shows the store's test state, like the canvas", () => {
     const { store, container } = setup({ select: TRIGGER_KEY, manifest: withBuiltinTriggers });
-    const dot = () => container.querySelector(".fk-tab__dot")?.getAttribute("data-state");
+    const dot = () => container.querySelector(".fl-tab__dot")?.getAttribute("data-state");
     expect(dot()).toBeUndefined();
     act(() => store.getState().setSample(TRIGGER_KEY, { contactId: "c1" }));
     expect(dot()).toBe("tested");
@@ -203,13 +203,13 @@ describe("ConfigPanel for the trigger", () => {
         published: null,
       }),
     });
-    Object.assign(client, { baseUrl: "/api/flowkit" });
+    Object.assign(client, { baseUrl: "/api/flowline" });
     const { store } = setup({ doc, select: TRIGGER_KEY, manifest: withBuiltinTriggers, client });
     expect(screen.getByText("Save the workflow to generate its URL.")).toBeTruthy();
 
     act(() => store.getState().markSaved(2, saved));
     const url = (await screen.findByRole("textbox", { name: "Webhook URL" })) as HTMLInputElement;
-    expect(url.value).toBe(`${location.origin}/api/flowkit/hooks/acme/leads/k3v9`);
+    expect(url.value).toBe(`${location.origin}/api/flowline/hooks/acme/leads/k3v9`);
     expect(screen.getByRole("button", { name: "Copy URL" })).toBeTruthy();
   });
 
@@ -290,7 +290,7 @@ describe("ConfigPanel for the trigger", () => {
     expect(screen.queryByText(/Not a declared output field/)).toBeNull();
     // Each output says its declared type.
     const helps = Array.from(
-      document.querySelectorAll(".fk-output .fk-f__help"),
+      document.querySelectorAll(".fl-output .fl-f__help"),
       (p) => p.textContent,
     );
     expect(helps).toEqual(

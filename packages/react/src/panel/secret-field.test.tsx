@@ -2,12 +2,12 @@
  * `secret()` fields are literal-only (ruling 68): the manifest carries `literalOnly`, the form
  * offers no reference toggle, and a stored reference shows the validator's issue.
  */
-import type { Issue, JSONSchema, Manifest, ValueExpr } from "@flowkit/core";
+import type { Issue, JSONSchema, Manifest, ValueExpr } from "@flowline/core";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 import builtin from "../../playground/builtin-manifest.json";
 import { mockClient, setupDom } from "../../test/dom";
-import { FlowkitProvider } from "../provider";
+import { FlowlineProvider } from "../provider";
 import { SchemaForm } from "./schema-form";
 
 beforeAll(setupDom);
@@ -22,7 +22,7 @@ type Props = { schema: JSONSchema; value: Record<string, ValueExpr>; issues?: Is
 function renderForm({ schema, value, issues = [] }: Props) {
   const client = mockClient({ listSecrets: async () => ["API_TOKEN"] });
   return render(
-    <FlowkitProvider client={client}>
+    <FlowlineProvider client={client}>
       <SchemaForm
         schema={schema}
         value={value}
@@ -32,16 +32,16 @@ function renderForm({ schema, value, issues = [] }: Props) {
         scope={[]}
         samples={{}}
       />
-    </FlowkitProvider>,
+    </FlowlineProvider>,
   );
 }
 
-const fieldOf = (el: HTMLElement) => el.closest<HTMLElement>(".fk-f") as HTMLElement;
+const fieldOf = (el: HTMLElement) => el.closest<HTMLElement>(".fl-f") as HTMLElement;
 
 describe("secret fields", () => {
   test("the manifest marks every built-in secret field literal-only", () => {
     const text = JSON.stringify(core);
-    const secrets = [...text.matchAll(/"x-flowkit":\{[^{}]*"secret":true[^{}]*\}/g)];
+    const secrets = [...text.matchAll(/"x-flowline":\{[^{}]*"secret":true[^{}]*\}/g)];
     expect(secrets.length).toBeGreaterThan(0);
     for (const [meta] of secrets) expect(meta).toContain('"literalOnly":true');
   });
