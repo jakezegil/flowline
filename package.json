@@ -9,13 +9,15 @@
   },
   "scripts": {
     "test": "vitest run",
+    "test:scripts": "vitest run --root scripts",
     "typecheck": "pnpm -r typecheck",
     "lint": "biome check .",
     "build": "pnpm -r build",
     "format": "biome format --write .",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "pnpm build && pnpm -r publish --access public --tag next --no-git-checks"
+    "release": "pnpm build && node scripts/release.mjs publish",
+    "release:dry-run": "pnpm build && node scripts/release.mjs publish --dry-run"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.13",
