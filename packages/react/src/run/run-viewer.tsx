@@ -210,6 +210,9 @@ function RunBody({
     const reason = out?.reason ?? (run.output as { reason?: unknown } | undefined)?.reason;
     return typeof reason === "string" && reason !== "" ? reason : undefined;
   })();
+  /** When the Stop step ended the run: its `run.completed` event (or the run's last update). */
+  const stoppedTime =
+    detail.events.findLast((e) => e.type === "run.completed")?.at ?? run.updatedAt;
   const cancelled = run.status === "cancelled" ? cancellation(detail) : undefined;
   const pending = waitingPath ? detail.run.journal[waitingPath] : undefined;
   const expiresAt = pending?.status === "suspended" ? pending.pending?.expiresAt : undefined;
@@ -315,13 +318,20 @@ function RunBody({
           tone="neutral"
           icon={<CircleStop size={16} aria-hidden />}
           title={labels.stoppedAt(nameOf(stoppedStep))}
-          {...(stopReason ? { detail: stopReason } : {})}
+          detail={[stopReason, labels.relativeTime(stoppedTime - now)].filter(Boolean).join(" · ")}
+          detailTitle={labels.dateTime(stoppedTime)}
           action={{ label: labels.showStep, run: () => store.getState().select(stoppedStep) }}
         />
       )}
       {cancelled && (
         <Banner
-          redundant={cancelled.stepId !== undefined && selection === cancelled.stepId}
+          // The inspector says "Cancelled" but not who or why: keep the banner when it says more.
+          redundant={
+            cancelled.stepId !== undefined &&
+            selection === cancelled.stepId &&
+            cancelled.by === undefined &&
+            cancelled.reason === undefined
+          }
           tone="neutral"
           icon={<Ban size={16} aria-hidden />}
           title={

@@ -309,13 +309,25 @@ export type { RunChange };
  * it to refresh data of your own that depends on runs, e.g. a count of pending approvals. Needs a
  * `<FlowkitProvider>`.
  *
+ * `previous` is the status this app last saw the run in, or `undefined` the first time it sees
+ * the run (a viewer opening it): compare the two to react only to real transitions.
+ *
  * @example
- * useRunChanges(() => approvals.reload());
+ * useRunChanges((run, previous) => {
+ *   if (previous !== undefined && (previous === "waiting") !== (run.status === "waiting")) {
+ *     approvals.reload();
+ *   }
+ * });
  */
-export function useRunChanges(listener: (run: RunChange) => void): void {
+export function useRunChanges(
+  listener: (run: RunChange, previous: RunChange["status"] | undefined) => void,
+): void {
   const client = useContext(FlowkitClientContext);
   if (!client) throw new Error("useRunChanges must be used inside <FlowkitProvider>");
   const ref = useRef(listener);
   ref.current = listener;
-  useEffect(() => subscribeRunChanges(client, (run) => ref.current(run)), [client]);
+  useEffect(
+    () => subscribeRunChanges(client, (run, previous) => ref.current(run, previous)),
+    [client],
+  );
 }

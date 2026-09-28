@@ -255,6 +255,7 @@ describe("RunList: stopped runs and narrow widths", () => {
 
 describe("RunList: staying current", () => {
   it("reloads when the window regains focus", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const listRuns = vi.fn(async () => [row("r1", "running")]);
     render(
       <FlowkitProvider client={mockClient({ listRuns })}>
@@ -263,8 +264,35 @@ describe("RunList: staying current", () => {
     );
     await screen.findByRole("list", { name: "Runs" });
     expect(listRuns).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
     fireEvent.focus(window);
     await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(2));
+  });
+
+  it("loads once when coming back to the tab fires both visibilitychange and focus", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const listRuns = vi.fn(async () => [row("r1", "running")]);
+    render(
+      <FlowkitProvider client={mockClient({ listRuns })}>
+        <RunList onSelect={() => {}} pollMs={0} />
+      </FlowkitProvider>,
+    );
+    await screen.findByRole("list", { name: "Runs" });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      fireEvent.focus(window);
+    });
+    expect(listRuns).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    fireEvent.focus(window);
+    expect(listRuns).toHaveBeenCalledTimes(3);
   });
 
   it("updates a row at once when a viewer of the same client sees the run change", async () => {

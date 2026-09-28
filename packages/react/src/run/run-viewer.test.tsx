@@ -272,7 +272,9 @@ describe("RunViewer: stopping inside branches", () => {
     setup(approvalStoppedRun(), { manifest: approvalManifest() });
     const banner = (await screen.findByText(/^Stopped at /)).closest(".fk-banner") as HTMLElement;
     expect(banner.dataset.tone).toBe("neutral");
-    expect(within(banner).getByText("No")).toBeTruthy();
+    // The reason, then when it stopped (like the cancelled banner), with the date on hover.
+    const detail = within(banner).getByText(/^No · (.+ ago|just now)$/);
+    expect(detail.getAttribute("title")).toBeTruthy();
     // The Stop step is opened, like a failed or waiting step.
     const inspector = await screen.findByRole("complementary", { name: "Step details" });
     await waitFor(() =>
@@ -365,6 +367,35 @@ describe("RunViewer: resuming", () => {
     expect(timeline.textContent).not.toMatch(/Waiting for callback/);
   });
 
+  test("a wait's timeline shows its expiry only while it is still open", async () => {
+    const withExpiry = (d: RunDetail): RunDetail => ({
+      ...d,
+      events: d.events.map((e) =>
+        e.type === "run.suspended"
+          ? { ...e, data: { callback: true, expiresAt: Date.now() + 3 * 86_400_000 } }
+          : e,
+      ),
+    });
+    const timelineText = async () => {
+      const inspector = await screen.findByRole("complementary", { name: "Step details" });
+      fireEvent.click(within(inspector).getByRole("tab", { name: /^Timeline/ }));
+      return within(inspector).getByRole("tabpanel", { name: /^Timeline/ }).textContent;
+    };
+    const manifest = approvalManifest({ hostHandled: true, hint: "Decide it." });
+    setup(withExpiry(approvalWaitingRun()), { manifest });
+    expect(await timelineText()).toMatch(/Waiting for a decision · expires/);
+    cleanup();
+
+    const cancelled = withExpiry(approvalWaitingRun());
+    cancelled.run = { ...cancelled.run, status: "cancelled" };
+    cancelled.events = [...cancelled.events, ev("run.cancelled", "size/if/approval")];
+    setup(cancelled, { manifest });
+    fireEvent.click(await screen.findByRole("button", { name: "Show step" }));
+    const text = await timelineText();
+    expect(text).toMatch(/Waiting for a decision/);
+    expect(text).not.toMatch(/· expires/);
+  });
+
   test("a declared body schema: the form starts empty, and a body must match it", async () => {
     const t = setup(approvalWaitingRun(), {
       manifest: approvalManifest({
@@ -433,6 +464,8 @@ describe("RunViewer: cancelled runs", () => {
     fireEvent.click(within(banner).getByRole("button", { name: "Show step" }));
     const inspector = await screen.findByRole("complementary", { name: "Step details" });
     expect(within(inspector).getByRole("heading", { name: "Request approval" })).toBeTruthy();
+    // The inspector does not say who cancelled: narrow screens keep the banner for it.
+    expect(banner.hasAttribute("data-redundant")).toBe(false);
     // Nothing after the cancelled wait will run: those steps read Skipped, not "Not run yet".
     expect(card("last")?.dataset.run).toBe("skipped");
   });

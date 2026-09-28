@@ -14,12 +14,19 @@ export type RunChange = Pick<
   "id" | "workflowId" | "status" | "updatedAt" | "createdAt" | "stoppedAt"
 >;
 
-type Listener = (run: RunChange) => void;
+/**
+ * Hears a run change. `previous` is the status last published for the run, `undefined` when this
+ * app had not seen it before (e.g. a viewer's first load of it).
+ */
+type Listener = (run: RunChange, previous: RunChange["status"] | undefined) => void;
+
+/** Most runs a bus remembers; the least recently published are forgotten first. */
+const MAX_SEEN = 1000;
 
 interface Bus {
   listeners: Set<Listener>;
-  /** Last published status key per run ID. */
-  seen: Map<string, string>;
+  /** Last published status key and status per run ID, least recently published first. */
+  seen: Map<string, { key: string; status: RunChange["status"] }>;
 }
 
 const buses = new WeakMap<FlowkitClient, Bus>();
@@ -49,10 +56,12 @@ export function publishRunChange(
   const bus = busOf(client);
   const key = keyOf(run);
   const last = bus.seen.get(run.id);
-  if (last === key) return;
-  bus.seen.set(run.id, key);
+  if (last?.key === key) return;
+  bus.seen.delete(run.id);
+  bus.seen.set(run.id, { key, status: run.status });
+  if (bus.seen.size > MAX_SEEN) bus.seen.delete(bus.seen.keys().next().value as string);
   if (last === undefined && opts.onlyIfKnown) return;
-  for (const l of [...bus.listeners]) l(run);
+  for (const l of [...bus.listeners]) l(run, last?.status);
 }
 
 /** Subscribe to `client`'s run status changes; returns the unsubscribe function. @internal */

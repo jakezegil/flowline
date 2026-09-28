@@ -98,6 +98,8 @@ function eventDetail(
   labels: FlowkitLabels,
   now: number,
   decision: boolean,
+  /** The wait this event started is still open, so its expiry means something. */
+  open: boolean,
 ): string | undefined {
   const d = (e.data ?? {}) as Record<string, unknown>;
   const err = d.error as { message?: string } | string | undefined;
@@ -121,7 +123,7 @@ function eventDetail(
       if (d.callback === true) {
         const exp = typeof d.expiresAt === "number" ? d.expiresAt : undefined;
         return (decision ? labels.waitingForDecision : labels.waitingForCallback)(
-          exp ? labels.relativeTime(exp - now) : undefined,
+          exp && open ? labels.relativeTime(exp - now) : undefined,
         );
       }
       if (typeof d.until === "number") return labels.waitingUntil(labels.dateTime(d.until));
@@ -151,6 +153,7 @@ function Timeline({
   showSteps,
   stepName,
   decision = false,
+  waitOpen = false,
 }: {
   events: RunEvent[];
   runStart: number;
@@ -158,14 +161,17 @@ function Timeline({
   stepName(path: string): string;
   /** The step waits on a person's decision (it has a resume hint): say so, not "callback". */
   decision?: boolean;
+  /** The step is still waiting: its last `run.suspended` shows when the wait expires. */
+  waitOpen?: boolean;
 }) {
   const { labels } = useFlowkitAppearance();
   const now = useNow(30_000);
   if (events.length === 0) return <p className="fk-empty">{labels.noEvents}</p>;
+  const openWait = waitOpen ? events.findLast((e) => e.type === "run.suspended") : undefined;
   return (
     <ol className="fk-timeline">
       {events.map((e) => {
-        const detail = eventDetail(e, labels, now, decision);
+        const detail = eventDetail(e, labels, now, decision, e === openWait);
         const hasData = e.data !== undefined && e.data !== null;
         const head = (
           <>
@@ -365,6 +371,7 @@ export function StepInspector({
         showSteps={info.isTrigger}
         stepName={stepName}
         decision={!info.isTrigger && (decisionWait || resumeHint !== undefined)}
+        waitOpen={pending !== undefined || (info.isTrigger && detail.run.status === "waiting")}
       />
     );
   }

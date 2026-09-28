@@ -22,6 +22,8 @@ const FILTERS: (RunFilter | undefined)[] = [
 
 /** Debounce (ms) between a run change and the reload it triggers. */
 const CHANGE_RELOAD_MS = 100;
+/** A focus or visibility reload this soon after another load is skipped. */
+const REFOCUS_COALESCE_MS = 250;
 
 /** The `listRuns` filter of a tab: "Completed" leaves out stopped runs, which have their own. */
 function filterOf(tab: RunFilter | undefined): { status?: RunStatus; stopped?: boolean } {
@@ -70,7 +72,9 @@ function useRunList(
       rowsRef.current = next;
       setState(next);
     };
+    let startedAt = Number.NEGATIVE_INFINITY;
     const load = () => {
+      startedAt = Date.now();
       const request = ++latest;
       client
         .listRuns({
@@ -98,7 +102,8 @@ function useRunList(
     // Polls skip while the page is hidden; coming back (or focusing the window) reloads at once.
     const hidden = () => typeof document !== "undefined" && document.hidden;
     const timer = pollMs > 0 ? setInterval(() => !hidden() && load(), pollMs) : undefined;
-    const onVisible = () => !hidden() && load();
+    // Returning to the tab fires `visibilitychange` and `focus` together: load once for both.
+    const onVisible = () => !hidden() && Date.now() - startedAt >= REFOCUS_COALESCE_MS && load();
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
     const unsubscribe = subscribeRunChanges(client, (run) => {

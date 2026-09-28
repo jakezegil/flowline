@@ -367,7 +367,9 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
       }
       if (method === "POST" && n === 3 && action === "cancel") {
         await existingRun(tenantId, id);
-        const outcome = await engine.cancelRun(tenantId, id, { by: userId });
+        // Without authorize() nobody is signed in: record no actor, not the "anonymous" stand-in.
+        const by = core.opts.authorize ? { by: userId } : {};
+        const outcome = await engine.cancelRun(tenantId, id, by);
         if (outcome === "finished") return json(409, { error: "finished" });
         return json(outcome === "cancelled" ? 200 : 202, { status: outcome });
       }
