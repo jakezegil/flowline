@@ -73,13 +73,33 @@ export interface WebhookDelivery {
   body: Uint8Array;
 }
 
+/** One `emit` match that could not start a run: reported, never thrown. */
+export interface EmitRejection {
+  /** The workflow whose trigger rejected the delivery. */
+  workflowId: string;
+  /** Its published version. */
+  version: number;
+  /** Why, e.g. `Event "deal.updated" for workflow "deal-won": field "deal.amount" expected number`. */
+  message: string;
+  /** The validation issues (`code: "config.invalid"` for payload problems). */
+  issues: Issue[];
+}
+
+/** The outcome of {@link Triggers.emit}. */
+export interface EmitResult {
+  /** IDs of the runs this call started, in workflow ID order. */
+  started: string[];
+  /** Matches that could not start, in workflow ID order. Empty when everything started or deduped. */
+  rejected: EmitRejection[];
+}
+
 /** @internal The trigger side of the engine. */
 export interface Triggers {
   emit(
     event: string,
     payload: unknown,
     opts: { tenantId: string; dedupeKey?: string },
-  ): Promise<string[]>;
+  ): Promise<EmitResult>;
   start(opts: {
     tenantId: string;
     workflowId: string;
@@ -170,36 +190,72 @@ export function createTriggers(core: EngineCore): Triggers {
 
   return {
     async emit(event, payload, { tenantId, dedupeKey }) {
-      const matches: { v: WorkflowVersion; payload: unknown; key: string | undefined }[] = [];
-      for (const v of await storage.listPublished({ tenantId })) {
-        const def = registry.getTrigger(v.doc.trigger.type);
-        if (def?.kind !== "event") continue;
-        if ((def.event ?? visibleTriggerConfig(registry, v.doc).event) !== event) continue;
+      const versions = (await storage.listPublished({ tenantId }))
+        .filter((v) => {
+          const def = registry.getTrigger(v.doc.trigger.type);
+          if (def?.kind !== "event") return false;
+          return (def.event ?? visibleTriggerConfig(registry, v.doc).event) === event;
+        })
+        .sort((a, b) => (a.workflowId < b.workflowId ? -1 : 1));
+
+      const started: string[] = [];
+      const rejected: EmitRejection[] = [];
+
+      /** Report `err` as one workflow's rejected delivery: never throws, never starts a run. */
+      const reject = (v: WorkflowVersion, err: unknown): void => {
+        const message = err instanceof FlowlineValidationError ? err.message : errorMessage(err);
+        const issues =
+          err instanceof FlowlineValidationError ? err.issues : [payloadIssue(message)];
+        rejected.push({ workflowId: v.workflowId, version: v.version, message, issues });
+        core.triggerEvent({
+          type: "trigger.rejected",
+          at: clock(),
+          tenantId,
+          workflowId: v.workflowId,
+          version: v.version,
+          source: { kind: "event", event },
+          message,
+          issues,
+        });
+      };
+
+      for (const v of versions) {
+        // A trigger config that no longer parses is skipped (warned above), not rejected: it isn't
+        // a delivery problem.
         const t = triggerOf(v);
         if (!t) continue;
-        // Validation throws before any run is created.
-        const value = await payloadFor(v, payload, `Event "${event}"`);
-        let key = dedupeKey;
+
+        let value: unknown;
         try {
-          if (t.def.filter && !t.def.filter({ config: t.config, payload: value })) continue;
-          key ??= t.def.dedupeKey?.({ config: t.config, payload: value });
+          value = await payloadFor(v, payload, `Event "${event}"`);
         } catch (err) {
-          core.logger?.error("trigger filter or dedupeKey threw", {
-            workflowId: v.workflowId,
-            error: errorMessage(err),
-          });
+          reject(v, err);
           continue;
         }
-        matches.push({ v, payload: value, key });
-      }
-      matches.sort((a, b) => (a.v.workflowId < b.v.workflowId ? -1 : 1));
-      const started: string[] = [];
-      for (const m of matches) {
-        const key = m.key === undefined ? undefined : `event:${m.v.workflowId}:${event}:${m.key}`;
-        const r = await launch(m.v, m.payload, { kind: "event", event }, key);
+
+        let skip = false;
+        try {
+          skip = t.def.filter !== undefined && !t.def.filter({ config: t.config, payload: value });
+        } catch (err) {
+          reject(v, new Error(`filter threw: ${errorMessage(err)}`));
+          continue;
+        }
+        if (skip) continue;
+
+        let key = dedupeKey;
+        try {
+          key ??= t.def.dedupeKey?.({ config: t.config, payload: value });
+        } catch (err) {
+          reject(v, new Error(`dedupeKey threw: ${errorMessage(err)}`));
+          continue;
+        }
+
+        const namespacedKey =
+          key === undefined ? undefined : `event:${v.workflowId}:${event}:${key}`;
+        const r = await launch(v, value, { kind: "event", event }, namespacedKey);
         if (r.created) started.push(r.runId);
       }
-      return started;
+      return { started, rejected };
     },
 
     async start({ tenantId, workflowId, input, dedupeKey, startedBy }) {

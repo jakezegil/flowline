@@ -139,20 +139,20 @@ describe("showIf in trigger config", () => {
   it("filter and dedupeKey never see hidden fields", async () => {
     // stage and key are hidden (only: false): no filtering, no dedupe key.
     const hidden = await setup({ only: false, stage: "won", key: "fixed" });
-    expect(await hidden.emit("lost")).toHaveLength(1);
-    expect(await hidden.emit("lost")).toHaveLength(1);
+    expect((await hidden.emit("lost")).started).toHaveLength(1);
+    expect((await hidden.emit("lost")).started).toHaveLength(1);
     expect(await hidden.runs()).toHaveLength(2);
 
     const shown = await setup({ only: true, stage: "won", key: "fixed" });
-    expect(await shown.emit("lost")).toEqual([]);
-    expect(await shown.emit("won")).toHaveLength(1);
-    expect(await shown.emit("won")).toEqual([]); // deduplicated by key "fixed"
+    expect((await shown.emit("lost")).started).toEqual([]);
+    expect((await shown.emit("won")).started).toHaveLength(1);
+    expect((await shown.emit("won")).started).toEqual([]); // deduplicated by key "fixed"
     expect(await shown.runs()).toHaveLength(1);
   });
 
   it("a hidden value that fails its schema doesn't disable the trigger", async () => {
     const { emit, runs } = await setup({ only: false, stage: "nope", key: "x" });
-    expect(await emit("lost")).toHaveLength(1);
+    expect((await emit("lost")).started).toHaveLength(1);
     expect(await runs()).toHaveLength(1);
   });
 });

@@ -34,7 +34,8 @@ import { createHandler } from "./handler";
 import { entryAt } from "./interpreter";
 import { createRunBus } from "./sse";
 import type { NewRunEvent, Run, RunPatch, StorageAdapter } from "./storage";
-import { createTriggers } from "./triggers";
+import { publishTriggerEvent, type TriggerEvent } from "./trigger-events";
+import { createTriggers, type EmitResult } from "./triggers";
 import { startWorker, type Worker, type WorkerOptions } from "./worker";
 import { createWorkflows } from "./workflows";
 
@@ -64,6 +65,12 @@ export interface EngineOptions {
   transform?: TransformRuntime;
   /** Called with every event after it was persisted. Errors thrown here are logged and ignored. */
   onEvent?: (e: NewRunEvent) => void;
+  /**
+   * Called with every trigger-level outcome that has no run to attach to (a rejected or deduped
+   * delivery, a poll result). Errors thrown here are logged and ignored. `trigger.rejected` and
+   * `poll.failed` are also logged at `warn`.
+   */
+  onTriggerEvent?: (e: TriggerEvent) => void;
   /** Time source in epoch ms. Default `Date.now`. */
   clock?: () => number;
   /** Public origin used to build callback URLs, e.g. `"https://app.example.com"`. */
@@ -247,16 +254,20 @@ export interface Engine {
   /**
    * Start a run of every published workflow of the tenant whose `event` trigger listens to `event`
    * (a plugin trigger's `event`, or `config.event` of `core.event`) and whose `filter` accepts the
-   * payload. The payload is validated against each trigger's payload schema first: if it is
-   * invalid for any of them, a {@link FlowlineValidationError} is thrown and no run is created.
-   * With a dedupe key (`opts.dedupeKey`, else the trigger's `dedupeKey()`), at most one run per
-   * workflow and key is ever started. Resolves the IDs of the runs this call started.
+   * payload. Each match is evaluated independently: an invalid payload, or a `filter` or
+   * `dedupeKey` that throws, produces one {@link EmitRejection} for that workflow (reported in
+   * `rejected`, logged at `warn`, and passed to `onTriggerEvent` as `trigger.rejected`) without
+   * affecting the other matches. `emit` itself never throws for a rejected match; storage errors
+   * still propagate. With a dedupe key (`opts.dedupeKey`, else the trigger's `dedupeKey()`), at
+   * most one run per workflow and key is ever started. Resolves the IDs of the runs this call
+   * started (`started`) and the matches that could not start (`rejected`), both in workflow ID
+   * order.
    */
   emit(
     event: string,
     payload: unknown,
     opts: { tenantId: string; dedupeKey?: string },
-  ): Promise<string[]>;
+  ): Promise<EmitResult>;
   /**
    * Start a run of the workflow's published version with `input` (default `{}`) as the trigger
    * payload, validated against the trigger's declared fields or payload schema (a
@@ -348,6 +359,8 @@ export interface EngineCore {
   ): NewRunEvent;
   /** Report persisted events to `onEvent` and the run bus. */
   publish(events: NewRunEvent[]): void;
+  /** Report a trigger-level outcome (see {@link TriggerEvent}) to `onTriggerEvent` and the logger. */
+  triggerEvent(e: TriggerEvent): void;
 }
 
 /** The host registry with the built-in `core` plugin in front, unless disabled or already there. */
@@ -486,6 +499,7 @@ export function createEngine(options: EngineOptions): Engine {
     ...(opts.logger ? { logger: opts.logger } : {}),
     event: runEvent,
     publish: executor.publish,
+    triggerEvent: (e) => publishTriggerEvent(core, e),
   };
   const triggers = createTriggers(core);
   const workflows = createWorkflows(core);
