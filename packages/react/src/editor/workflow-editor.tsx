@@ -1,7 +1,8 @@
-import type { WorkflowDoc } from "@flowkit/core";
+import type { ValidationContext, WorkflowDoc } from "@flowkit/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { type JSX, type ReactNode, useEffect, useMemo, useState } from "react";
+import { type JSX, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { PortalContainerContext } from "../canvas/canvas-context";
+import { focusedKey } from "../canvas/keyboard";
 import { WorkflowCanvas } from "../canvas/workflow-canvas";
 import { EditorContext, useEditorStore } from "../hooks";
 import { ConfigPanel } from "../panel/config-panel";
@@ -15,9 +16,22 @@ import { EditorHeader } from "./header";
 
 export { blankDoc } from "./editor-load";
 
-/** Warns before leaving the page while there are unsaved changes. */
-function useUnsavedGuard(store: EditorStore) {
+/**
+ * Warns before leaving the page while there are unsaved changes, and tells the host whenever
+ * that changes (for its own router's guard).
+ */
+function useUnsavedGuard(
+  store: EditorStore,
+  onDirtyChange: ((dirty: boolean) => void) | undefined,
+) {
   const dirty = useEditorStore((s) => s.dirty);
+  const notify = useRef(onDirtyChange);
+  notify.current = onDirtyChange;
+  useEffect(() => {
+    notify.current?.(dirty);
+  }, [dirty]);
+  // Unmounting (leaving the editor) leaves nothing unsaved behind to guard.
+  useEffect(() => () => notify.current?.(false), []);
   useEffect(() => {
     if (!dirty) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -34,23 +48,26 @@ function useUnsavedGuard(store: EditorStore) {
 function EditorBody({
   store,
   renderPanel,
+  onDirtyChange,
 }: {
   store: EditorStore;
   renderPanel?: (store: EditorStore) => ReactNode;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { labels } = useFlowkitAppearance();
   const selection = useEditorStore((s) => s.selection);
-  useUnsavedGuard(store);
+  useUnsavedGuard(store, onDirtyChange);
   return (
     <div className="fk-editor__body">
       <div
         className="fk-editor__canvas"
         onKeyDownCapture={(e) => {
-          // Enter on a canvas node opens its panel: move focus there so the keyboard follows.
-          if (e.key !== "Enter" || e.metaKey || e.ctrlKey || e.altKey) return;
+          // Enter or Space on a canvas card opens its panel: move focus there so the keyboard
+          // follows.
+          if ((e.key !== "Enter" && e.key !== " ") || e.metaKey || e.ctrlKey || e.altKey) return;
           const target = e.target as HTMLElement;
           if (target.closest("button, input, textarea, select, [contenteditable='true']")) return;
-          if (store.getState().selection === null) return;
+          if (focusedKey(target) === undefined && store.getState().selection === null) return;
           const body = e.currentTarget.parentElement;
           requestAnimationFrame(() =>
             body?.querySelector<HTMLElement>(".fk-panel [data-autofocus]")?.focus(),
@@ -79,6 +96,10 @@ function EditorBody({
  * workflow) and is created by its first save, which never overwrites an existing workflow (it
  * fails with "already exists" instead).
  *
+ * Leaving the page (reload, closing the tab) with unsaved changes asks the browser to confirm.
+ * Navigation inside your app is yours to guard: `onDirtyChange` says when there are unsaved
+ * changes, so your router can block leaving until the user confirms (see the example).
+ *
  * @example
  * <div style={{ height: "100vh" }}>
  *   <WorkflowEditor
@@ -87,6 +108,23 @@ function EditorBody({
  *     onRunStarted={(runId) => navigate(`/runs/${runId}`)}
  *   />
  * </div>
+ *
+ * @example
+ * // Guarding in-app navigation with React Router (a data router, for `useBlocker`):
+ * const [dirty, setDirty] = useState(false);
+ * const blocker = useBlocker(dirty);
+ * return (
+ *   <>
+ *     <WorkflowEditor workflowId={id} onDirtyChange={setDirty} />
+ *     {blocker.state === "blocked" && (
+ *       <ConfirmDialog
+ *         title="Leave without saving?"
+ *         onConfirm={() => blocker.proceed()}
+ *         onCancel={() => blocker.reset()}
+ *       />
+ *     )}
+ *   </>
+ * );
  */
 export function WorkflowEditor(props: {
   workflowId: string;
@@ -105,12 +143,25 @@ export function WorkflowEditor(props: {
    * browser's previous page), when there is one.
    */
   notFoundAction?: EditorNotFoundAction;
+  /**
+   * The engine's outbound network policy (its `http` settings), so URL fields warn about the
+   * hosts it will block, as publishing does. By default private and loopback hosts warn. Read
+   * once per load.
+   */
+  network?: ValidationContext["network"];
   /** Called after a successful publish with the published version. */
   onPublish?(version: number): void;
   /** Called after every successful save with the new version. */
   onSaved?(version: number): void;
   /** Called with the new run's ID after "Run" starts one. */
   onRunStarted?(runId: string): void;
+  /**
+   * Called whenever the editor gains or loses unsaved changes (edits since the last save), and
+   * with `false` when it unmounts. Use it to guard your app's own navigation: block route
+   * changes while it's `true` and ask the user to confirm (the editor already guards reloads
+   * and closing the tab with `beforeunload`).
+   */
+  onDirtyChange?(dirty: boolean): void;
   /** Rendered at the start of the header, e.g. a back link. */
   headerLeft?: ReactNode;
   /**
@@ -122,7 +173,12 @@ export function WorkflowEditor(props: {
 }): JSX.Element {
   const { workflowId, initialDoc, className, headerLeft, renderPanel } = props;
   const { theme, labels } = useFlowkitAppearance();
-  const { state, retry, startNew } = useEditorLoad(workflowId, initialDoc, props.create);
+  const { state, retry, startNew } = useEditorLoad(
+    workflowId,
+    initialDoc,
+    props.create,
+    props.network,
+  );
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
   const style = useMemo(() => themeStyle(theme.tokens), [theme.tokens]);
   const callbacks = {
@@ -136,7 +192,11 @@ export function WorkflowEditor(props: {
     content = (
       <EditorContext.Provider value={state.store}>
         <EditorHeader headerLeft={headerLeft} callbacks={callbacks} />
-        <EditorBody store={state.store} {...(renderPanel ? { renderPanel } : {})} />
+        <EditorBody
+          store={state.store}
+          {...(renderPanel ? { renderPanel } : {})}
+          {...(props.onDirtyChange ? { onDirtyChange: props.onDirtyChange } : {})}
+        />
       </EditorContext.Provider>
     );
   } else if (state.status === "notFound") {

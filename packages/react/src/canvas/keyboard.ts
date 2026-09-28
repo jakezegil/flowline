@@ -1,6 +1,8 @@
 /**
- * Canvas keyboard shortcuts. Arrow keys move the selection in tree order (never nudge cards);
- * shortcuts are ignored while typing in inputs, editors and open menus.
+ * Canvas keyboard shortcuts. Arrow keys move focus only, from the focused card (else the selected
+ * one) in tree order, never nudging cards and never opening a panel; Enter or Space opens (selects)
+ * the focused card; shortcuts act on the focused card, whether or not its panel is open.
+ * Shortcuts are ignored while typing in inputs, editors and open menus.
  *
  * @module
  */
@@ -49,6 +51,17 @@ function ownsKey(target: EventTarget | null, key: string): boolean {
   if (control === null || control.classList.contains("react-flow__node")) return false;
   if (!ARROWS.has(key)) return true;
   return control.hasAttribute("aria-haspopup") || control.getAttribute("role") !== null;
+}
+
+/**
+ * The selection key ({@link TRIGGER_KEY} or a step ID) of the canvas card an event comes from, or
+ * `undefined` when it doesn't come from a card.
+ */
+export function focusedKey(target: EventTarget | null): string | undefined {
+  if (!(target instanceof Element)) return undefined;
+  const id = target.closest(".react-flow__node")?.getAttribute("data-id");
+  if (id === "trigger") return TRIGGER_KEY;
+  return id?.startsWith("step:") ? id.slice(5) : undefined;
 }
 
 /** Selection keys (step IDs and {@link TRIGGER_KEY}) in pre-order, from the layout's node order. */
@@ -112,10 +125,10 @@ export interface KeyboardDeps {
 /**
  * Handles a keydown on the canvas root. Returns `true` when the key was a canvas shortcut.
  *
- * ↑/↓ previous/next in tree order · ←/→ neighbouring branch column · Enter open selection ·
- * Delete/Backspace delete (with an undo toast) · ⌘Z/⇧⌘Z undo/redo · ⌘C/⌘V copy/paste after ·
- * ⌘D duplicate · ⌘K add step after the selection · F2 rename · Esc deselect. Read-only canvases
- * only navigate.
+ * ↑/↓ focus previous/next in tree order · ←/→ neighbouring branch column · Enter or Space open the
+ * focused card · Delete/Backspace delete (with an undo toast) · ⌘Z/⇧⌘Z undo/redo · ⌘C/⌘V
+ * copy/paste after · ⌘D duplicate · ⌘K add step after (⇧⌘K before) · F2 rename · Esc deselect. Keys act on the
+ * focused card, else the selection. Read-only canvases only navigate.
  */
 export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   if (e.defaultPrevented || isEditableTarget(e.target)) return false;
@@ -125,34 +138,39 @@ export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   const { store, ui } = deps;
   const state = store.getState();
   const { readOnly } = ui.getState();
-  const selection = state.selection;
-  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  // The card keys act on: the focused one (panel open or not), else the selected one.
+  const active = deps.root()?.ownerDocument.activeElement ?? null;
+  const selection =
+    focusedKey(e.target) ??
+    (deps.root()?.contains(active) ? focusedKey(active) : undefined) ??
+    state.selection;
+  const key = e.key.length === 1 && e.key !== " " ? e.key.toLowerCase() : e.key;
   const stepSelected = selection !== null && selection !== TRIGGER_KEY;
-  const select = (id: string | undefined) => {
+  /** Arrow keys: focus moves, the selection (and its open panel) stays; Enter opens. */
+  const moveTo = (id: string | undefined) => {
     if (id === undefined) return;
-    state.select(id);
-    focusNode(deps.root(), id);
+    nodeElement(deps.root(), nodeIdOf(id))?.focus({ preventScroll: true });
   };
 
   if (!mod && !e.altKey && (key === "ArrowUp" || key === "ArrowDown")) {
     const order = treeOrder(deps.layout().nodes);
     const at = selection === null ? -1 : order.indexOf(selection);
     const next = at === -1 ? 0 : at + (key === "ArrowDown" ? 1 : -1);
-    select(order[Math.max(0, Math.min(order.length - 1, next))]);
+    moveTo(order[Math.max(0, Math.min(order.length - 1, next))]);
     return true;
   }
   if (!mod && !e.altKey && (key === "ArrowLeft" || key === "ArrowRight")) {
     if (!stepSelected) return false;
     const { nodes, edges } = deps.layout();
-    select(siblingColumnStep(store, nodes, edges, selection, key === "ArrowLeft" ? -1 : 1));
+    moveTo(siblingColumnStep(store, nodes, edges, selection, key === "ArrowLeft" ? -1 : 1));
     return true;
   }
-  if (key === "Enter" && !mod && selection !== null) {
+  if ((key === "Enter" || key === " ") && !mod && selection !== null) {
     state.select(selection);
     deps.onStepClick?.(selection);
     return true;
   }
-  if (key === "Escape" && selection !== null) {
+  if (key === "Escape" && state.selection !== null) {
     state.select(null);
     return true;
   }
@@ -188,7 +206,12 @@ export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   }
   if (key === "k") {
     const anchor = selection ? nodeElement(deps.root(), nodeIdOf(selection)) : null;
-    ui.getState().openPicker({ mode: "insert", loc: locationAfter(store, selection) }, anchor);
+    // ⇧⌘K adds before the focused step (the only way to the top of a branch from the keyboard).
+    const at = e.shiftKey && stepSelected ? findStep(state.doc, selection)?.location : undefined;
+    ui.getState().openPicker(
+      { mode: "insert", loc: at ?? locationAfter(store, selection) },
+      anchor,
+    );
     return true;
   }
   return false;

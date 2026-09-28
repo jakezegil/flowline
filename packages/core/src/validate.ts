@@ -1,3 +1,4 @@
+import { blockedUrlProblem, emailProblem, unreachableSteps } from "./design-checks";
 import { isValidStepId, RESERVED_STEP_IDS } from "./ids";
 import {
   asSchema,
@@ -57,6 +58,9 @@ export type IssueCode =
   | "subflow.recursive"
   | "secret.unknown"
   | "output.unknown"
+  | "config.format"
+  | "network.blocked"
+  | "step.unreachable"
   | "doc.empty";
 
 /** One problem found by {@link validateWorkflow}. */
@@ -83,6 +87,9 @@ const WARNING_CODES = new Set<IssueCode>([
   "doc.empty",
   "config.empty",
   "secret.unknown",
+  "config.format",
+  "network.blocked",
+  "step.unreachable",
 ]);
 
 const KIND_WORDS: Record<Kind, string> = {
@@ -122,6 +129,8 @@ interface Reporter {
   plain?: boolean;
   /** The tenant's secret names ({@link ValidationContext.secrets}), when known. */
   secrets?: ReadonlySet<string>;
+  /** The engine's network policy ({@link ValidationContext.network}). */
+  network?: ValidationContext["network"];
 }
 
 interface DocInfo {
@@ -161,9 +170,26 @@ function uiMeta(schema: JSONSchema | undefined): UiMeta | undefined {
   return typeof meta === "object" && meta !== null ? (meta as UiMeta) : undefined;
 }
 
-function labelOf(schema: JSONSchema | undefined, key: string): string {
+const ACRONYMS = new Set(["id", "url", "uri", "api", "http", "json", "html", "ip", "sms"]);
+
+/**
+ * A field's name in messages: its label, else its title, else the key in words, as the editor
+ * labels it (`"firstName"` → `"First name"`, `"api_key"` → `"API key"`).
+ */
+function labelOf(schema: JSONSchema | undefined, key: string, plain = false): string {
   const label = uiMeta(schema)?.label;
-  return typeof label === "string" && label !== "" ? label : key;
+  if (typeof label === "string" && label !== "") return label;
+  if (typeof schema?.title === "string" && schema.title !== "") return schema.title;
+  // Plain JSON checks (a webhook body) answer an API caller, who knows the keys, not labels.
+  if (plain) return key;
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .map((w) => (ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w.toLowerCase()))
+    .join(" ");
+  return words === "" ? key : words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function joinPath(prefix: string, key: string): string {
@@ -417,6 +443,7 @@ function checkValue(r: Reporter, value: unknown, schema: JSONSchema, f: FieldCtx
     checkRef(r, value.$ref, isAnySchema(s) ? undefined : carryDefs(f.root, s), f);
     return;
   }
+  designChecks(r, value, s, meta, f);
   if (meta?.refOnly) {
     report(
       r,
@@ -452,6 +479,27 @@ function checkValue(r: Reporter, value: unknown, schema: JSONSchema, f: FieldCtx
     }
   }
   checkLiteralValue(r, value, s, f);
+}
+
+/**
+ * Warnings about values that pass the schema but won't work at run time: an email field that
+ * isn't one address, an outbound URL the engine's network policy blocks.
+ */
+function designChecks(
+  r: Reporter,
+  value: unknown,
+  s: JSONSchema,
+  meta: UiMeta | undefined,
+  f: FieldCtx,
+): void {
+  if (s.format === "email") {
+    const problem = emailProblem(value);
+    if (problem) report(r, "config.format", `"${f.label}" ${problem}`, f.path);
+  }
+  if (meta?.outboundUrl === true) {
+    const problem = blockedUrlProblem(value, r.network);
+    if (problem) report(r, "network.blocked", `"${f.label}" ${problem}`, f.path);
+  }
 }
 
 /** Checks a value that is not a reference or template against its (dereferenced) schema. */
@@ -615,7 +663,7 @@ function checkObject(
     const f: FieldCtx = {
       root: propRoot,
       path: joinPath(prefix, key),
-      label: labelOf(declared, key),
+      label: labelOf(declared, key, r.plain),
     };
     const value = obj[key];
     if (isEmptyValue(value, propRoot, propSchema)) {
@@ -635,7 +683,12 @@ function checkObject(
   if (Array.isArray(oneOf)) checkOneOfRequired(r, obj, props, root, prefix, oneOf);
   for (const key of required) {
     if (!Object.hasOwn(props, key) && isEmptyValue(obj[key], root, {})) {
-      report(r, "config.required", `"${key}" is required`, joinPath(prefix, key));
+      report(
+        r,
+        "config.required",
+        `"${labelOf(undefined, key, r.plain)}" is required`,
+        joinPath(prefix, key),
+      );
     }
   }
   const extra = schema.additionalProperties;
@@ -676,7 +729,8 @@ function checkOneOfRequired(
   if (first === undefined) return;
   const propSchema = (k: string) => (Object.hasOwn(props, k) ? asSchema(props[k]) : {});
   const isSet = (k: string) => !isEmptyValue(obj[k], root, propSchema(k));
-  const name = (g: string[]) => g.map((k) => `"${labelOf(propSchema(k), k)}"`).join(" and ");
+  const name = (g: string[]) =>
+    g.map((k) => `"${labelOf(propSchema(k), k, r.plain)}"`).join(" and ");
   const set = valid.filter((g) => g.every(isSet));
   if (set.length === 0) {
     report(r, "config.required", `Set ${orList(valid.map(name))}`, joinPath(prefix, first));
@@ -765,6 +819,14 @@ function checkStep(
   for (const push of subflowIssues) push();
 }
 
+function stepTypeOf(doc: WorkflowDoc, id: string): string | undefined {
+  let type: string | undefined;
+  walkSteps(doc, (step) => {
+    if (type === undefined && step.id === id) type = step.type;
+  });
+  return type;
+}
+
 function docInfo(doc: WorkflowDoc): DocInfo {
   const ids = new Set<string>();
   const order = new Map<string, number>();
@@ -817,6 +879,7 @@ export function validateWorkflow(
     ancestors: [],
     doc: info,
     ...(ctx.secrets ? { secrets: new Set(ctx.secrets) } : {}),
+    ...(ctx.network ? { network: ctx.network } : {}),
   };
 
   if (doc.steps.length === 0) report(base, "doc.empty", "This workflow has no steps");
@@ -863,6 +926,19 @@ export function validateWorkflow(
     guarded(r, undefined, () => checkStep(r, doc, step, m, ctx));
     return undefined;
   });
+
+  for (const group of unreachableSteps(doc, manifest)) {
+    const n = group.stepIds.length;
+    const ender = idx.nodes.get(stepTypeOf(doc, group.endsAt) ?? "");
+    const how = ender?.endsRun
+      ? "the run always ends here"
+      : "every path through this step ends the run";
+    report(
+      { ...base, stepId: group.endsAt },
+      "step.unreachable",
+      `${n === 1 ? "1 step" : `${n} steps`} after this can never run: ${how}`,
+    );
+  }
 
   // Output declarations hidden by showIf don't count, as at run time.
   const declared = trigger

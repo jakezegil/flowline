@@ -338,7 +338,21 @@ export interface NodeDefinition<I extends z.ZodObject = z.ZodObject, O = unknown
   icon?: string;
   /** Step picker category. */
   category?: string;
-  /** Template rendered against config for the step card, e.g. `"Load {{contactId}}"`. */
+  /**
+   * Extra step picker search terms (synonyms), e.g. `["wait", "sleep"]` for a delay. The picker
+   * ranks name matches first, then these and the category; it doesn't search descriptions.
+   */
+  keywords?: string[];
+  /**
+   * The step always ends the run (as Stop does): the validator warns that steps after it can
+   * never run, and the canvas draws no path out of it.
+   */
+  endsRun?: boolean;
+  /**
+   * Template rendered against config for the step card, e.g. `"Load {{contactId}}"`. Choices
+   * show by their option label. `{{#key}}…{{/key}}` is an optional section, shown only while
+   * `key` is set (and not hidden by `showIf`): `"{{strategy}}{{#team}} · {{team}}{{/team}}"`.
+   */
   summary?: string;
   /** Config schema. Use {@link ui} to add editor hints. */
   input: I;

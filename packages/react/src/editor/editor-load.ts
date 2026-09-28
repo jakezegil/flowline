@@ -13,7 +13,7 @@ import { useFlowkit, useFlowkitAppearance } from "../provider";
 import { defaultConfig } from "../store/commands";
 import { createEditorStore, type EditorStore } from "../store/editor-store";
 import type { NotFoundAction } from "../ui/not-found";
-import { errorText, httpStatus } from "../ui/primitives";
+import { errorText, httpStatus, isNetworkError } from "../ui/primitives";
 
 /** A new workflow: a manual trigger (else the first trigger in the manifest) and no steps. */
 export function blankDoc(id: string, manifest: Manifest, labels: FlowkitLabels): WorkflowDoc {
@@ -39,6 +39,7 @@ export type EditorLoadState =
  *
  * - `create`: a new workflow; the server isn't asked for it, and the draft starts from
  *   `initialDoc`, else a blank manual workflow. The first save creates it.
+ * - `network`: the engine's outbound policy, for URL fields' design-time warnings.
  * - Otherwise the workflow is loaded. If there is none (404) it starts from `initialDoc` when
  *   given, else the state is `notFound`; `startNew()` then switches to create mode.
  */
@@ -46,6 +47,7 @@ export function useEditorLoad(
   workflowId: string,
   initialDoc: WorkflowDoc | undefined,
   create = false,
+  network?: ValidationContext["network"],
 ): { state: EditorLoadState; retry(): void; startNew(): void } {
   const { client } = useFlowkit();
   const { labels } = useFlowkitAppearance();
@@ -54,7 +56,7 @@ export function useEditorLoad(
   // Create mode chosen after a not-found, for this workflow ID only.
   const [createdId, setCreatedId] = useState<string | undefined>(undefined);
   const creating = create || createdId === workflowId;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: initialDoc and labels are read once per load; changing them must not recreate the store.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: initialDoc, network and labels are read once per load; changing them must not recreate the store.
   useEffect(() => {
     let active = true;
     setState({ status: "loading" });
@@ -74,6 +76,7 @@ export function useEditorLoad(
         subflows: Object.fromEntries(
           subflows.map((s) => [s.id, { name: s.name, input: s.input, output: s.output }]),
         ),
+        ...(network ? { network } : {}),
       };
       const doc = detail?.latest.doc ?? initialDoc ?? blankDoc(workflowId, manifest, labels);
       const store = createEditorStore({ doc, manifest, ctx });
@@ -84,7 +87,12 @@ export function useEditorLoad(
       return { status: "ready", store };
     })().then(
       (next) => active && setState(next),
-      (err: unknown) => active && setState({ status: "error", message: errorText(err) }),
+      (err: unknown) =>
+        active &&
+        setState({
+          status: "error",
+          message: isNetworkError(err) ? labels.serverUnreachable : errorText(err),
+        }),
     );
     return () => {
       active = false;

@@ -5,6 +5,7 @@
  * @module
  */
 import {
+  describeSubflowOutput,
   dropHiddenFields,
   type FlowkitServices,
   hasErrors,
@@ -130,21 +131,32 @@ export function createWorkflows(core: EngineCore): Workflows {
   };
 
   const listSubflows = async (tenantId: string): Promise<SubflowInfo[]> => {
-    const triggers = new Map(registry.manifest().triggers.map((t) => [t.type, t]));
-    const out: SubflowInfo[] = [];
+    const manifest = registry.manifest();
+    const triggers = new Map(manifest.triggers.map((t) => [t.type, t]));
+    const declared: SubflowInfo[] = [];
+    const docs = new Map<string, WorkflowDoc>();
     for (const v of await storage.listPublished({ tenantId })) {
       const t = triggers.get(v.doc.trigger.type);
       if (t?.kind !== "subflow") continue;
       // Declarations hidden by showIf don't exist for callers.
       const config = dropHiddenFields(v.doc.trigger.config, t.config);
       const trigger = { ...v.doc.trigger, config: config as typeof v.doc.trigger.config };
-      out.push({
+      docs.set(v.workflowId, v.doc);
+      declared.push({
         id: v.workflowId,
         name: v.doc.name,
         input: payloadSchemaFor(t, trigger),
         output: subflowOutputSchema(t, trigger) ?? {},
       });
     }
+    // Declared `object`/`array` outputs get the shape of what the mapping puts there, so callers
+    // can browse into them. References into other sub-flows resolve against their declarations.
+    const plain = Object.fromEntries(declared.map((s) => [s.id, s]));
+    const out = declared.map((s) => {
+      const doc = docs.get(s.id);
+      const output = doc ? describeSubflowOutput(doc, manifest, { subflows: plain }) : undefined;
+      return output ? { ...s, output } : s;
+    });
     return out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   };
 
@@ -169,8 +181,19 @@ export function createWorkflows(core: EngineCore): Workflows {
     for (const s of await listSubflows(tenantId)) {
       subflows[s.id] = { name: s.name, input: s.input, output: s.output };
     }
+    const net = core.opts.http;
+    const network =
+      net?.allowPrivateNetworks !== undefined || net?.allowHosts !== undefined
+        ? {
+            ...(net.allowPrivateNetworks !== undefined
+              ? { allowPrivateNetworks: net.allowPrivateNetworks }
+              : {}),
+            ...(net.allowHosts !== undefined ? { allowHosts: net.allowHosts } : {}),
+          }
+        : undefined;
     return validateWorkflow(doc, registry.manifest(), {
       subflows,
+      ...(network ? { network } : {}),
       ...(await secretNames(tenantId)),
     });
   };

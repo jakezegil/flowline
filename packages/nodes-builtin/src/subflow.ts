@@ -17,6 +17,7 @@ export const callSubflowNode = defineNode({
     "Run another workflow with the input you map, wait for it to finish and use its output.",
   icon: "workflow",
   category: "Sub-flows",
+  keywords: ["subflow", "call", "workflow", "reuse"],
   summary: "Run sub-flow {{workflowId}}",
   input: z.object({
     workflowId: ui(z.string().min(1, "Choose a sub-flow"), {

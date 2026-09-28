@@ -165,7 +165,7 @@ interface StepMenuProps {
 export function StepContextMenu({ children, ...props }: StepMenuProps & { children: ReactNode }) {
   const container = useContext(PortalContainerContext);
   return (
-    <ContextMenu.Root modal={false}>
+    <ContextMenu.Root modal={false} onOpenChange={(open) => open && props.actions.target()}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal container={container}>
         <ContextMenu.Content className="fk-menu" collisionPadding={8} aria-label="Step actions">

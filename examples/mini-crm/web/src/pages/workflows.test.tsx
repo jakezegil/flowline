@@ -13,7 +13,7 @@ vi.mock("../api", async (importOriginal) => ({
   flowkit: { saveWorkflow: (doc: WorkflowDoc) => saveWorkflow(doc) },
 }));
 
-const { NewWorkflowDialog, defaultTrigger, triggersFor } = await import("./workflows");
+const { NewWorkflowDialog, defaultTrigger, slugify, triggersFor } = await import("./workflows");
 
 const trigger = (type: string, name: string, kind: string, config: object = {}) =>
   ({ type, name, kind, description: `${name} trigger`, config }) as Manifest["triggers"][number];
@@ -128,5 +128,17 @@ describe("New workflow dialog", () => {
       trigger: { type: "core.subflow", config: { input: [], output: [] } },
       steps: [],
     });
+  });
+});
+
+describe("slugify (L16)", () => {
+  it("cuts a long name at a word boundary, never mid-word", () => {
+    expect(slugify("Big deal alert!")).toBe("big-deal-alert");
+    const id = slugify("Notify the account owner when an enterprise deal moves to negotiation");
+    expect(id).toBe("notify-the-account-owner-when-an-enterprise-deal");
+    expect(id.length).toBeLessThanOrEqual(48);
+    expect(slugify("x".repeat(60))).toBe("x".repeat(48));
+    // Exactly 48 with the next word right after: kept whole.
+    expect(slugify(`${"a".repeat(48)} b`)).toBe("a".repeat(48));
   });
 });

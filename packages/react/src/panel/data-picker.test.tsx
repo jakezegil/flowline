@@ -20,7 +20,14 @@ describe("DataPicker", () => {
       .getAllByRole("treeitem")
       .filter((r) => r.getAttribute("aria-level") === "1")
       .map((r) => r.querySelector(".fk-dp__section-name")?.textContent);
-    expect(sections).toEqual(["For each tag", "Deal updated", "Fetch orders", "Load contact"]);
+    expect(sections).toEqual(["For each tag", "Trigger", "Fetch orders", "Load contact"]);
+  });
+
+  test("L4: the trigger is headed like its pills, with its own name as the caption", () => {
+    render(<DataPicker scope={scope} samples={samples} onPick={() => {}} />);
+    const trigger = screen.getAllByRole("treeitem")[0] as HTMLElement;
+    expect(trigger.querySelector(".fk-dp__section-name")?.textContent).toBe("Trigger");
+    expect(trigger.querySelector(".fk-dp__caption")?.textContent).toBe("Deal updated");
   });
 
   test("shows fields with types and sample values", () => {
@@ -74,12 +81,27 @@ describe("DataPicker", () => {
     if (!tags) throw new Error("no tags row");
     fireEvent.click(within(tags).getByTitle("Insert all of tags"));
     expect(onPick).toHaveBeenLastCalledWith("steps.load.tags", "string[]");
-    fireEvent.click(tags);
+    fireEvent.click(tags.querySelector(".fk-dp__chevron") as HTMLElement);
     const first = screen
       .getAllByRole("treeitem")
       .find((r) => r.textContent?.includes("First item"));
     fireEvent.click(first as HTMLElement);
     expect(onPick).toHaveBeenLastCalledWith("steps.load.tags[0]", "string");
+  });
+
+  test("M13: clicking a list or object field inserts it; its chevron opens it", () => {
+    const onPick = vi.fn();
+    render(<DataPicker scope={scope} samples={samples} onPick={onPick} />);
+    openLoad();
+    const tags = screen.getAllByRole("treeitem").find((r) => r.textContent?.startsWith("tags"));
+    if (!tags) throw new Error("no tags row");
+    fireEvent.click(tags);
+    expect(onPick).toHaveBeenLastCalledWith("steps.load.tags", "string[]");
+    expect(tags.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(tags.querySelector(".fk-dp__chevron") as HTMLElement);
+    expect(onPick).toHaveBeenCalledTimes(1);
+    const reopened = screen.getAllByRole("treeitem").find((r) => r.textContent?.startsWith("tags"));
+    expect(reopened?.getAttribute("aria-expanded")).toBe("true");
   });
 
   test("works from the keyboard: arrows move, Right expands, Enter picks", async () => {

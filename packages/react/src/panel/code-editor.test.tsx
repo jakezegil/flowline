@@ -66,7 +66,7 @@ describe("CodeEditor", () => {
     expect(completeAt("x")).toContain("loop");
   });
 
-  test("Escape closes completions without reaching an enclosing handler", async () => {
+  test("Escape closes completions and never reaches an enclosing handler", async () => {
     const outer = vi.fn();
     render(
       // biome-ignore lint/a11y/noStaticElementInteractions: test harness
@@ -81,9 +81,10 @@ describe("CodeEditor", () => {
     fireEvent.keyDown(content, { key: "Escape", keyCode: 27 });
     expect(currentCompletions(view.state)).toHaveLength(0);
     expect(outer).not.toHaveBeenCalled();
-    // Nothing left to close: Escape goes on to the enclosing panel.
+    // M5: nothing left to close, Escape only releases Tab (the hint's "Escape, then Tab"); it
+    // still doesn't close the enclosing panel.
     fireEvent.keyDown(content, { key: "Escape", keyCode: 27 });
-    expect(outer).toHaveBeenCalledTimes(1);
+    expect(outer).not.toHaveBeenCalled();
   });
 
   test("is labelled for screen readers and can be read-only", () => {

@@ -1,4 +1,4 @@
-import { allStepIds, findStep, type Step, type WorkflowDoc } from "@flowkit/core";
+import { allStepIds, findStep, type Issue, type Step, type WorkflowDoc } from "@flowkit/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { branchyDoc, docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
 import { createEditorStore, type EditorStore } from "./editor-store";
@@ -228,6 +228,17 @@ describe("duplicate / copy / paste", () => {
     walk(doc.steps);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toHaveLength(6);
+  });
+
+  test('L17: a duplicate is named "<name> (copy)", then "(copy 2)"', () => {
+    const store = storeFor();
+    const a = store.getState().duplicateStep("email");
+    expect(findStep(store.getState().doc, a)?.step.name).toBe("Send email (copy)");
+    const b = store.getState().duplicateStep("email");
+    expect(findStep(store.getState().doc, b)?.step.name).toBe("Send email (copy 2)");
+    const c = store.getState().duplicateStep(a);
+    expect(findStep(store.getState().doc, c)?.step.name).toBe("Send email (copy 3)");
+    expect(findStep(store.getState().doc, "email")?.step.name).toBeUndefined();
   });
 
   test("paste inserts a fresh-id copy each time, rewriting refs within the subtree", () => {
@@ -533,6 +544,64 @@ describe("replaceStep", () => {
     );
   });
 
+  test("L25: a generated ID follows the new type, with references rewritten; a chosen one stays", () => {
+    const store = storeFor(
+      docWith([
+        step("loadContact", "crm.loadContact", {}),
+        step("email", "crm.sendEmail", { to: { $ref: "steps.loadContact.email" }, subject: "Hi" }),
+      ]),
+    );
+    store.getState().select("loadContact");
+    store.getState().replaceStep("loadContact", "crm.sendEmail");
+    const { doc, selection } = store.getState();
+    expect(doc.steps.map((s) => s.id)).toEqual(["sendEmail", "email"]);
+    expect(selection).toBe("sendEmail");
+    expect(findStep(doc, "email")?.step.config.to).toEqual({ $ref: "steps.sendEmail.email" });
+    // "email" wasn't generated from crm.sendEmail's name: it's kept.
+    store.getState().replaceStep("email", "crm.loadContact");
+    expect(store.getState().doc.steps.map((s) => s.id)).toEqual(["sendEmail", "email"]);
+    store.getState().undo();
+    store.getState().undo();
+    expect(store.getState().doc.steps.map((s) => s.id)).toEqual(["loadContact", "email"]);
+  });
+
+  test("I2: code reading the step is rewritten, or keeps the ID when it reads steps dynamically", () => {
+    const base = manifest.nodes.find((n) => n.type === "crm.sendEmail");
+    if (!base) throw new Error("no sendEmail");
+    const withCode = {
+      ...manifest,
+      nodes: [
+        ...manifest.nodes,
+        {
+          ...base,
+          type: "t.code",
+          name: "Code",
+          input: {
+            type: "object",
+            properties: { code: { type: "string", "x-flowkit": { widget: "code" } } },
+          },
+        },
+      ],
+    };
+    const make = (code: string) =>
+      createEditorStore({
+        doc: docWith([
+          step("loadContact", "crm.loadContact", {}),
+          step("calc", "t.code", { code }),
+        ]),
+        manifest: withCode,
+      });
+    const store = make("return { a: steps.loadContact.email, b: steps['loadContact'].name };");
+    store.getState().replaceStep("loadContact", "crm.sendEmail");
+    expect(store.getState().doc.steps.map((s) => s.id)).toEqual(["sendEmail", "calc"]);
+    expect(findStep(store.getState().doc, "calc")?.step.config.code).toBe(
+      "return { a: steps.sendEmail.email, b: steps['sendEmail'].name };",
+    );
+    const dynamic = make("const k = 'loadContact'; return { a: steps[k].email };");
+    dynamic.getState().replaceStep("loadContact", "crm.sendEmail");
+    expect(dynamic.getState().doc.steps.map((s) => s.id)).toEqual(["loadContact", "calc"]);
+  });
+
   test("replacing with the same type is a no-op", () => {
     const store = storeFor();
     store.getState().setConfig("load", "contactId", "c1");
@@ -721,5 +790,50 @@ describe("setOutput", () => {
     expect(s().doc.output).toBeUndefined();
     expect(s().canUndo).toBe(false);
     expect(s().dirty).toBe(false);
+  });
+});
+
+describe("server issues (M7)", () => {
+  const rejected = [
+    {
+      code: "config.invalid",
+      severity: "error",
+      message: "Approver is required",
+      stepId: "email",
+      field: "to",
+    },
+    { code: "subflow.unknown", severity: "error", message: "Rejected by the server" },
+    { code: "config.invalid", severity: "error", message: "Bad filter", field: "trigger.stage" },
+  ] satisfies Issue[];
+
+  test("show with the editor's own issues until what they're about changes", () => {
+    const store = storeFor();
+    const own = store.getState().issues.length;
+    store.getState().setServerIssues([...rejected]);
+    expect(store.getState().issues).toHaveLength(own + 3);
+    expect(store.getState().issues).toContainEqual(
+      expect.objectContaining({ stepId: "email", field: "to" }),
+    );
+    // Editing another step drops the workflow-level issue only.
+    store.getState().setConfig("load", "contactId", "c1");
+    const after = store.getState().issues;
+    expect(after.some((i) => i.message === "Approver is required")).toBe(true);
+    expect(after.some((i) => i.message === "Bad filter")).toBe(true);
+    expect(after.some((i) => i.message === "Rejected by the server")).toBe(false);
+    // Editing the step drops its issue; the trigger's goes with a trigger edit.
+    store.getState().setConfig("email", "subject", "New");
+    expect(store.getState().issues.some((i) => i.message === "Approver is required")).toBe(false);
+    store.getState().setTriggerConfig("stage", "won");
+    expect(store.getState().issues).toHaveLength(own);
+  });
+
+  test("duplicates of the editor's own issues aren't shown twice; a new doc clears them", () => {
+    const store = storeFor();
+    const [first] = store.getState().issues;
+    store.getState().setServerIssues(first ? [first] : []);
+    expect(store.getState().issues).toEqual(storeFor().getState().issues);
+    store.getState().setServerIssues([...rejected]);
+    store.getState().replaceDoc(fixtureDoc());
+    expect(store.getState().issues).toEqual(storeFor().getState().issues);
   });
 });

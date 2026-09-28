@@ -1,6 +1,6 @@
 import { acceptCompletion, currentCompletions } from "@codemirror/autocomplete";
 import { deleteCharBackward, redo, undo } from "@codemirror/commands";
-import type { ValueExpr } from "@flowkit/core";
+import type { ScopeEntry, ValueExpr } from "@flowkit/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -439,5 +439,273 @@ describe("RefTextInput", () => {
     expect(outer).not.toHaveBeenCalled();
     fireEvent.keyDown(content, { key: "Escape", keyCode: 27 });
     expect(outer).toHaveBeenCalledTimes(1);
+  });
+
+  test("L10: Browse data has its own icon, not the {} of Edit as JSON", () => {
+    render(
+      <RefTextInput
+        ariaLabel="Subject"
+        scope={scope}
+        samples={samples}
+        value={undefined}
+        onChange={() => {}}
+      />,
+    );
+    const browse = screen.getByRole("button", { name: "Browse data", hidden: true });
+    expect(browse.querySelector("svg")?.getAttribute("class")).toContain("lucide-variable");
+  });
+
+  describe("I1: the field's type decides what a click inserts", () => {
+    const dealScope: ScopeEntry[] = [
+      {
+        refBase: "trigger",
+        kind: "trigger",
+        label: "Deal won",
+        schema: {
+          type: "object",
+          properties: {
+            deal: {
+              type: "object",
+              properties: { title: { type: "string" }, amount: { type: "number" } },
+            },
+            tags: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+      { refBase: "steps.fetch", kind: "step", stepId: "fetch", label: "Fetch", schema: {} },
+    ];
+    const dealSamples = {
+      __trigger: { deal: { title: "Big", amount: 5 }, tags: ["a"] },
+      fetch: { body: { total: 3 }, status: 200 },
+    };
+    const row = (name: string) =>
+      screen.getAllByRole("treeitem").find((r) => r.textContent?.startsWith(name));
+
+    test("a text field: clicking deal opens it instead of inserting it", async () => {
+      const { onChange } = setup({
+        scope: dealScope,
+        samples: dealSamples,
+        schema: { type: "string" },
+      });
+      focus();
+      await screen.findByRole("tree");
+      pickRow("deal");
+      expect(onChange).not.toHaveBeenCalled();
+      expect(row("deal")?.getAttribute("aria-expanded")).toBe("true");
+      // An any-typed row whose sample is an object opens too.
+      pickRow("body");
+      expect(onChange).not.toHaveBeenCalled();
+      pickRow("title");
+      expect(onChange).toHaveBeenLastCalledWith({ $ref: "trigger.deal.title" });
+    });
+
+    test("a number field takes a text or number leaf but not a list", async () => {
+      const { onChange } = setup({
+        scope: dealScope,
+        samples: dealSamples,
+        schema: { type: "number" },
+      });
+      focus();
+      await screen.findByRole("tree");
+      pickRow("tags");
+      expect(onChange).not.toHaveBeenCalled();
+      pickRow("status");
+      expect(onChange).toHaveBeenLastCalledWith({ $ref: "steps.fetch.status" });
+    });
+
+    test("a JSON (any-typed) field inserts deal whole", async () => {
+      const { onChange } = setup({ scope: dealScope, samples: dealSamples, schema: {} });
+      focus();
+      await screen.findByRole("tree");
+      pickRow("deal");
+      expect(onChange).toHaveBeenLastCalledWith({ $ref: "trigger.deal" });
+    });
+
+    test("a list field inserts a list, and a text sample doesn't pass for one", async () => {
+      const { onChange } = setup({
+        scope: dealScope,
+        samples: dealSamples,
+        schema: { type: "array", items: { type: "string" } },
+        singlePill: true,
+      });
+      focus();
+      await screen.findByRole("tree");
+      // Only rows that are (or lead to) a list are offered.
+      expect(row("status")).toBeUndefined();
+      pickRow("tags");
+      expect(onChange).toHaveBeenLastCalledWith({ $ref: "trigger.tags" });
+    });
+  });
+
+  describe("I4: Tab moves on from a picker field, never back into it", () => {
+    function form() {
+      render(
+        <div className="fk-app">
+          <div className="fk-panel">
+            <input aria-label="Before" />
+            <RefTextInput
+              ariaLabel="Subject"
+              scope={scope}
+              samples={samples}
+              value={undefined}
+              onChange={() => {}}
+            />
+            <input aria-label="Timeout" />
+          </div>
+        </div>,
+      );
+    }
+    const docked = () =>
+      vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+        this: Element,
+      ) {
+        if (this.classList.contains("fk-panel")) return DOMRect.fromRect({ x: 800, width: 400 });
+        if (this.classList.contains("fk-app")) return DOMRect.fromRect({ x: 0, width: 1200 });
+        return DOMRect.fromRect({ x: 816, y: 200, width: 368, height: 32 });
+      });
+
+    for (const mode of ["inline", "docked"] as const) {
+      test(`${mode}: the search box isn't a Tab stop; Tab and Shift+Tab in it leave the field`, async () => {
+        const rects = mode === "docked" ? docked() : undefined;
+        try {
+          form();
+          focus();
+          const search = await screen.findByRole("combobox", { name: "Search data" });
+          expect(search.tabIndex).toBe(-1);
+          expect(Boolean(search.closest(".fk-ref-inline"))).toBe(mode === "inline");
+          search.focus();
+          fireEvent.keyDown(search, { key: "Tab" });
+          expect(document.activeElement).toBe(screen.getByLabelText("Timeout"));
+          expect(screen.queryByRole("tree")).toBeNull();
+
+          focus();
+          const again = await screen.findByRole("combobox", { name: "Search data" });
+          again.focus();
+          fireEvent.keyDown(again, { key: "Tab", shiftKey: true });
+          expect(document.activeElement).toBe(screen.getByLabelText("Before"));
+          expect(screen.queryByRole("tree")).toBeNull();
+        } finally {
+          rects?.mockRestore();
+        }
+      });
+
+      test(`${mode}: between ref fields, Tab and Shift+Tab reach the neighbouring editors`, async () => {
+        const rects = mode === "docked" ? docked() : undefined;
+        // Chrome reports tabIndex -1 for CodeMirror's contenteditable (no tabindex attribute).
+        const tabIndex = vi
+          .spyOn(HTMLElement.prototype, "tabIndex", "get")
+          .mockImplementation(function (this: HTMLElement) {
+            if (this.classList.contains("cm-content")) return -1;
+            const attr = this.getAttribute("tabindex");
+            if (attr !== null) return Number(attr);
+            return /^(INPUT|BUTTON|SELECT|TEXTAREA|A)$/.test(this.tagName) ? 0 : -1;
+          });
+        const field = (label: string) => (
+          <RefTextInput
+            ariaLabel={label}
+            scope={scope}
+            samples={samples}
+            value={undefined}
+            onChange={() => {}}
+          />
+        );
+        try {
+          render(
+            <div className="fk-app">
+              <div className="fk-panel">
+                {field("To")}
+                {field("Subject")}
+                {/* A Radix focus guard, as a portaled popover adds: never a destination. */}
+                {/* biome-ignore lint/a11y/noNoninteractiveTabindex: Radix's guards are tabbable spans */}
+                <span data-radix-focus-guard="" tabIndex={0} />
+                {field("Body")}
+              </div>
+            </div>,
+          );
+          const content = (label: string) =>
+            document.querySelector(`.cm-content[aria-label="${label}"]`) as HTMLElement;
+          const openSubject = async () => {
+            act(() => {
+              fireEvent.focus(content("Subject"));
+            });
+            const search = await screen.findByRole("combobox", { name: "Search data" });
+            search.focus();
+            return search;
+          };
+          fireEvent.keyDown(await openSubject(), { key: "Tab" });
+          expect(document.activeElement).toBe(content("Body"));
+          act(() => {
+            fireEvent.blur(content("Body"), { relatedTarget: null });
+          });
+          fireEvent.keyDown(await openSubject(), { key: "Tab", shiftKey: true });
+          expect(document.activeElement).toBe(content("To"));
+        } finally {
+          tabIndex.mockRestore();
+          rects?.mockRestore();
+        }
+      });
+    }
+  });
+
+  describe("placement (H1): the picker never covers the next field", () => {
+    function form() {
+      render(
+        <div className="fk-app">
+          <div className="fk-panel">
+            <RefTextInput
+              ariaLabel="Subject"
+              scope={scope}
+              samples={samples}
+              value={undefined}
+              onChange={() => {}}
+            />
+            <input aria-label="Timeout" />
+          </div>
+        </div>,
+      );
+    }
+
+    test("without room beside the panel it opens inline, before the next field", async () => {
+      form();
+      focus();
+      const tree = await screen.findByRole("tree");
+      const inline = tree.closest(".fk-ref-inline");
+      expect(inline).toBeTruthy();
+      expect(inline?.closest(".fk-ref-field")).toBeTruthy();
+      const next = screen.getByLabelText("Timeout");
+      // In the flow of the form, above the next field: it pushes it down rather than covering it.
+      expect(inline?.compareDocumentPosition(next) ?? 0).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      // Pressing inside the picker keeps focus in the field.
+      const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+      inline?.querySelector(".fk-dp__foot")?.dispatchEvent(press);
+      expect(press.defaultPrevented).toBe(true);
+      // Moving to another field closes it.
+      const content = document.querySelector(".cm-content") as HTMLElement;
+      act(() => {
+        fireEvent.blur(content, { relatedTarget: next });
+      });
+      expect(screen.queryByRole("tree")).toBeNull();
+    });
+
+    test("with room beside the panel it docks to the panel's left edge", async () => {
+      const rects = vi
+        .spyOn(Element.prototype, "getBoundingClientRect")
+        .mockImplementation(function (this: Element) {
+          if (this.classList.contains("fk-panel")) return DOMRect.fromRect({ x: 800, width: 400 });
+          if (this.classList.contains("fk-app")) return DOMRect.fromRect({ x: 0, width: 1200 });
+          return DOMRect.fromRect({ x: 816, y: 200, width: 368, height: 32 });
+        });
+      try {
+        form();
+        focus();
+        const tree = await screen.findByRole("tree");
+        const popover = tree.closest(".fk-ref-popover");
+        expect(popover?.hasAttribute("data-docked")).toBe(true);
+        expect(document.querySelector(".fk-ref-inline")).toBeNull();
+        expect(popover?.closest(".fk-panel")).toBeNull();
+      } finally {
+        rects.mockRestore();
+      }
+    });
   });
 });

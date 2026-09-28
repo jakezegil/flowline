@@ -219,6 +219,27 @@ a new workflow instead:
 - `notFoundAction` replaces the not-found button: your own `{ label, onClick }` (e.g. back to
   your list), `"create"` for "Create this workflow", or `null` for none.
 
+Reloading or closing the tab with unsaved changes asks the browser to confirm. Navigation inside
+your app is your router's, so guard it with `onDirtyChange`, which reports whether there are
+unsaved changes. With React Router (a data router, for `useBlocker`):
+
+```tsx nocheck
+const [dirty, setDirty] = useState(false);
+const blocker = useBlocker(dirty);
+// …
+<WorkflowEditor workflowId={id} onDirtyChange={setDirty} />
+{blocker.state === "blocked" && (
+  <ConfirmLeave onLeave={() => blocker.proceed()} onStay={() => blocker.reset()} />
+)}
+```
+
+The mini-crm example does this in `web/src/pages/workflow-edit.tsx`. The editor doesn't keep a
+local draft to recover after a reload: workflow configs can hold customer data, which shouldn't
+sit in `localStorage`. Save often instead.
+
+If your engine allows private networks or restricts outbound hosts, pass the same policy as
+`network` (`{ allowPrivateNetworks, allowHosts }`), so URL fields warn exactly where publishing will.
+
 The editor and viewer add a few hundred KB of JavaScript (CodeMirror and React Flow). Load the
 editor route lazily, with `React.lazy(() => import("./WorkflowPage"))`, so the rest of your app
 doesn't wait for it.

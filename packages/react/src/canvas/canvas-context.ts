@@ -64,7 +64,7 @@ export type PickerRequest =
   | { mode: "insert"; loc: StepLocation }
   | { mode: "replace"; stepId: string };
 
-/** A transient notice with an optional action (e.g. "Step deleted · Undo"). */
+/** A transient notice with an optional action (e.g. "Deleted “Send email” · Undo"). */
 export interface Toast {
   id: number;
   message: string;

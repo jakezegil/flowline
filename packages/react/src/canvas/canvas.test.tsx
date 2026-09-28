@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { branchyDoc, docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
 import * as hooks from "../hooks";
-import { createEditorStore, type EditorStore, TRIGGER_KEY } from "../store/editor-store";
+import { createEditorStore, type EditorStore } from "../store/editor-store";
 import type { RunOverlay, RunStepStatus } from "./canvas-context";
 import { WorkflowCanvas } from "./workflow-canvas";
 
@@ -55,8 +55,16 @@ function card(stepId: string): HTMLElement {
   return node;
 }
 
+/** The "+" buttons on edges, named by where they insert. */
+const PLUS = /^Add (first step$|step (after|to) )/;
+
 function root(): HTMLElement {
   return document.querySelector(".fk-root") as HTMLElement;
+}
+
+/** The canvas node that has focus (`"trigger"`, `"step:<id>"`), if any. */
+function focused(): string | null | undefined {
+  return document.activeElement?.closest(".react-flow__node")?.getAttribute("data-id");
 }
 
 describe("WorkflowCanvas", () => {
@@ -82,6 +90,9 @@ describe("WorkflowCanvas", () => {
     render(<WorkflowCanvas store={store} />);
     expect(within(card("load")).getByText("Load c_42")).toBeTruthy();
     expect(within(card("again")).getByText("Load contact › id")).toBeTruthy();
+    // The whole summary is the tooltip, for when the card cuts it short (Minor 6).
+    const summary = card("again").querySelector(".fk-summary");
+    expect(summary?.getAttribute("title")).toBe(summary?.textContent);
   });
 
   test('an unset value reads "No <label>" without a pill; an all-unset summary shows the description', () => {
@@ -107,9 +118,15 @@ describe("WorkflowCanvas", () => {
 
   test('clicking "+" opens the step picker and picking inserts the step there', async () => {
     render(<WorkflowCanvas store={store} />);
-    const plusButtons = screen.getAllByRole("button", { name: "Add step here" });
-    // trigger→load, load→email, email→end
-    expect(plusButtons).toHaveLength(3);
+    const plusButtons = screen.getAllByRole("button", { name: PLUS });
+    // trigger→load, load→email, email→end, each named by where it inserts (M4)
+    expect(plusButtons.map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Add step after the trigger",
+      "Add step after Load contact",
+      "Add step after Send email",
+    ]);
+    // Out of the tab order: they'd all come before the cards.
+    expect(plusButtons.map((b) => b.tabIndex)).toEqual([-1, -1, -1]);
     fireEvent.click(plusButtons[1] as HTMLElement);
     const picker = await screen.findByRole("dialog", { name: "Add step" });
     expect(within(picker).getByRole("tab", { name: "All" })).toBeTruthy();
@@ -127,7 +144,7 @@ describe("WorkflowCanvas", () => {
 
   test("the picker filters by search and Enter inserts the highlighted step", async () => {
     render(<WorkflowCanvas store={store} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Add step here" })[2] as HTMLElement);
+    fireEvent.click(screen.getAllByRole("button", { name: PLUS })[2] as HTMLElement);
     const picker = await screen.findByRole("dialog", { name: "Add step" });
     const input = within(picker).getByRole("combobox");
     fireEvent.change(input, { target: { value: "each" } });
@@ -139,8 +156,13 @@ describe("WorkflowCanvas", () => {
   test("an empty branch shows an Add step placeholder that inserts into it", async () => {
     store = createEditorStore({ doc: branchyDoc(), manifest });
     render(<WorkflowCanvas store={store} />);
-    const placeholders = screen.getAllByRole("button", { name: "Add step" });
-    expect(placeholders).toHaveLength(2); // cond.else, each.body
+    const placeholders = Array.from(document.querySelectorAll<HTMLElement>(".fk-placeholder"));
+    expect(placeholders.map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Add step to Else of Condition",
+      "Add step to Each item of For each",
+    ]);
+    // Placeholders stay in the tab order (they're cards of their own).
+    expect(placeholders[0]?.tabIndex).toBe(0);
     fireEvent.click(placeholders[0] as HTMLElement);
     fireEvent.click(within(await screen.findByRole("dialog")).getByText("Send email"));
     const cond = findStep(store.getState().doc, "cond")?.step;
@@ -170,7 +192,7 @@ describe("WorkflowCanvas", () => {
     const menu = await screen.findByRole("menu");
     fireEvent.click(within(menu).getByText("Delete"));
     expect(findStep(store.getState().doc, "email")).toBeUndefined();
-    const toast = await screen.findByText("Step deleted");
+    const toast = await screen.findByText("Deleted “Send email”");
     fireEvent.click(
       within(toast.parentElement as HTMLElement).getByRole("button", { name: "Undo" }),
     );
@@ -190,6 +212,131 @@ describe("WorkflowCanvas", () => {
     act(() => store.getState().select("each"));
     fireEvent.keyDown(root(), { key: "Delete" });
     expect(store.getState().selection).toBe("cond");
+  });
+
+  test("M6: deleting another step from its menu keeps the panel's step; the store never selects a missing step", async () => {
+    store = createEditorStore({ doc: branchyDoc(), manifest });
+    render(<WorkflowCanvas store={store} />);
+    act(() => store.getState().select("load"));
+    fireEvent.contextMenu(card("each").querySelector(".fk-card") as HTMLElement);
+    // L19: right-clicking moves the open panel to the menu's step.
+    expect(store.getState().selection).toBe("each");
+    act(() => store.getState().select("load"));
+    fireEvent.keyDown(card("each"), { key: "Delete" });
+    expect(findStep(store.getState().doc, "each")).toBeUndefined();
+    expect(store.getState().selection).toBe("load");
+    act(() => store.getState().select("each"));
+    expect(store.getState().selection).toBeNull();
+    // Undoing an insert removes the step the insert selected: the selection goes with it.
+    const id = store.getState().insertStep({ parentId: null, index: 0 }, "crm.sendEmail");
+    expect(store.getState().selection).toBe(id);
+    act(() => store.getState().undo());
+    expect(store.getState().selection).toBeNull();
+  });
+
+  test("M8: steps after a Stop are dimmed and say they never run", () => {
+    const email = manifest.nodes.find((n) => n.type === "crm.sendEmail");
+    const stop = {
+      ...(email as NonNullable<typeof email>),
+      type: "logic.stop",
+      name: "Stop",
+      endsRun: true,
+      summary: undefined,
+    };
+    const m = { ...manifest, nodes: [...manifest.nodes, stop] };
+    store = createEditorStore({
+      doc: docWith([
+        step("stop", "logic.stop", {}),
+        step("email", "crm.sendEmail", { subject: "Hi" }),
+      ]),
+      manifest: m,
+    });
+    render(<WorkflowCanvas store={store} />);
+    const after = card("email").querySelector(".fk-card") as HTMLElement;
+    expect(after.hasAttribute("data-unreachable")).toBe(true);
+    expect(after.textContent).toContain("Never runs: an earlier step ends the run");
+    expect(card("stop").querySelector(".fk-card")?.hasAttribute("data-unreachable")).toBe(false);
+    act(() => store.getState().removeStep("stop"));
+    expect(card("email").querySelector(".fk-card")?.hasAttribute("data-unreachable")).toBe(false);
+  });
+
+  test("L13: an event trigger's card shows its filters by label and option label", () => {
+    const [created, ...rest] = manifest.triggers;
+    const trigger = {
+      ...(created as NonNullable<typeof created>),
+      config: {
+        type: "object",
+        properties: {
+          stage: {
+            type: "string",
+            enum: ["won", "lost"],
+            "x-flowkit": { enumLabels: { won: "Won" } },
+          },
+          minAmount: { type: "number" },
+          onlyChanges: { type: "boolean", "x-flowkit": { label: "Only on changes" } },
+          skipTests: { type: "boolean" },
+          apiKey: { type: "string", "x-flowkit": { secret: true } },
+        },
+      },
+    };
+    const doc = fixtureDoc();
+    store = createEditorStore({
+      doc: {
+        ...doc,
+        trigger: {
+          ...doc.trigger,
+          config: {
+            stage: "won",
+            minAmount: 5000,
+            apiKey: "KEY",
+            onlyChanges: true,
+            skipTests: false,
+          },
+        },
+      },
+      manifest: { ...manifest, triggers: [trigger, ...rest] },
+    });
+    render(<WorkflowCanvas store={store} />);
+    const summary = document.querySelector(
+      `.react-flow__node[data-id="trigger"] .fk-card__summary`,
+    );
+    expect(summary?.textContent).toBe(
+      "When contact.created happens · Stage: Won · Min amount: 5000 · Only on changes",
+    );
+  });
+
+  test("L19: right-click with no panel open doesn't open one", () => {
+    render(<WorkflowCanvas store={store} />);
+    fireEvent.contextMenu(card("email").querySelector(".fk-card") as HTMLElement);
+    expect(store.getState().selection).toBeNull();
+  });
+
+  test("M4: keys act on the focused card: Enter or Space opens it, arrows go on from it, ⌘D duplicates it with the panel closed", () => {
+    const onStepClick = vi.fn();
+    render(<WorkflowCanvas store={store} onStepClick={onStepClick} />);
+    const ids = () => store.getState().doc.steps.map((s) => s.id);
+    fireEvent.keyDown(card("email"), { key: "d", ctrlKey: true });
+    expect(ids()).toEqual(["load", "email", "sendEmail"]);
+    expect(store.getState().selection).toBeNull();
+    fireEvent.keyDown(card("load"), { key: "ArrowDown" });
+    // Minor 8: arrows move focus, not the selection (no panel opens on the way).
+    expect(focused()).toBe("step:email");
+    expect(store.getState().selection).toBeNull();
+    fireEvent.keyDown(card("load"), { key: " " });
+    expect(store.getState().selection).toBe("load");
+    expect(onStepClick).toHaveBeenLastCalledWith("load");
+    act(() => store.getState().select(null));
+    fireEvent.keyDown(card("email"), { key: "Enter" });
+    expect(store.getState().selection).toBe("email");
+  });
+
+  test("M4: ⇧⌘K adds a step before the focused card", async () => {
+    store = createEditorStore({ doc: branchyDoc(), manifest });
+    render(<WorkflowCanvas store={store} />);
+    fireEvent.keyDown(card("email"), { key: "k", ctrlKey: true, shiftKey: true });
+    fireEvent.click(within(await screen.findByRole("dialog")).getByText("Switch"));
+    const cond = findStep(store.getState().doc, "cond")?.step;
+    expect(cond?.branches?.if?.map((s) => s.type)).toEqual(["logic.switch", "crm.sendEmail"]);
   });
 
   test("the kebab menu offers the same actions, including tree-aware paste", async () => {
@@ -237,13 +384,15 @@ describe("WorkflowCanvas", () => {
     fireEvent.contextMenu(card("email").querySelector(".fk-card") as HTMLElement);
     fireEvent.click(within(await screen.findByRole("menu")).getByText("Replace…"));
     const picker = await screen.findByRole("dialog", { name: "Replace step" });
+    // L29: the search box is named for what it does, not after the dialog.
+    expect(within(picker).getByRole("combobox", { name: "Search steps" })).toBeTruthy();
     // The current type isn't offered.
     expect(within(picker).queryByText("Send email")).toBeNull();
     fireEvent.click(within(picker).getByText("Load contact"));
     expect(findStep(store.getState().doc, "email")?.step.type).toBe("crm.loadContact");
   });
 
-  test("ArrowDown/ArrowUp move the selection in tree order; ←/→ switch branch columns", () => {
+  test("ArrowDown/ArrowUp move focus in tree order; ←/→ switch branch columns; Enter opens", () => {
     const doc = branchyDoc();
     (doc.steps[1] as (typeof doc.steps)[number]).branches = {
       if: [step("email", "crm.sendEmail", { to: "a", subject: "b" })],
@@ -253,19 +402,22 @@ describe("WorkflowCanvas", () => {
     render(<WorkflowCanvas store={store} />);
     const key = (k: string) => fireEvent.keyDown(root(), { key: k });
     key("ArrowDown");
-    expect(store.getState().selection).toBe(TRIGGER_KEY);
+    expect(focused()).toBe("trigger");
     key("ArrowDown");
-    expect(store.getState().selection).toBe("load");
+    expect(focused()).toBe("step:load");
     key("ArrowDown");
     key("ArrowDown");
-    expect(store.getState().selection).toBe("email");
+    expect(focused()).toBe("step:email");
     key("ArrowRight");
-    expect(store.getState().selection).toBe("other");
+    expect(focused()).toBe("step:other");
     key("ArrowRight");
-    expect(store.getState().selection).toBe("other");
+    expect(focused()).toBe("step:other");
     key("ArrowLeft");
-    expect(store.getState().selection).toBe("email");
+    expect(focused()).toBe("step:email");
     key("ArrowUp");
+    expect(focused()).toBe("step:cond");
+    expect(store.getState().selection).toBeNull();
+    key("Enter");
     expect(store.getState().selection).toBe("cond");
     key("Escape");
     expect(store.getState().selection).toBeNull();
@@ -303,7 +455,7 @@ describe("WorkflowCanvas", () => {
     const onStepClick = vi.fn();
     render(<WorkflowCanvas store={store} onStepClick={onStepClick} />);
     act(() => store.getState().select("load"));
-    (screen.getAllByRole("button", { name: "Add step here" })[1] as HTMLElement).focus();
+    (screen.getAllByRole("button", { name: PLUS })[1] as HTMLElement).focus();
     await user.keyboard("{Enter}");
     expect(await screen.findByRole("dialog", { name: "Add step" })).toBeTruthy();
     expect(onStepClick).not.toHaveBeenCalled();
@@ -315,7 +467,7 @@ describe("WorkflowCanvas", () => {
     act(() => store.getState().select("email"));
     fireEvent.keyDown(root(), { key: "Delete" });
     expect(store.getState().selection).toBe("load");
-    const toast = await screen.findByText("Step deleted");
+    const toast = await screen.findByText("Deleted “Send email”");
     // Focus moves to the neighbour on the next frame; wait so it doesn't steal focus back.
     await waitFor(() => expect(document.activeElement).toBe(card("load")));
     within(toast.parentElement as HTMLElement)
@@ -340,21 +492,32 @@ describe("WorkflowCanvas", () => {
     await user.keyboard(finish);
     await waitFor(() => expect(document.activeElement).toBe(card("load")));
     await user.keyboard("{ArrowDown}");
-    expect(store.getState().selection).toBe("email");
+    expect(focused()).toBe("step:email");
   });
 
   test('Esc in the picker returns focus to its "+", and arrow keys still work', async () => {
     const user = userEvent.setup();
     render(<WorkflowCanvas store={store} />);
     act(() => store.getState().select("load"));
-    const plus = screen.getAllByRole("button", { name: "Add step here" })[1] as HTMLElement;
+    const plus = screen.getAllByRole("button", { name: PLUS })[1] as HTMLElement;
     await user.click(plus);
     await screen.findByRole("dialog", { name: "Add step" });
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(plus));
     await user.keyboard("{ArrowDown}");
-    expect(store.getState().selection).toBe("email");
+    expect(focused()).toBe("step:email");
+  });
+
+  test("L20: Esc after ⌘K returns focus to the card it was pressed on", async () => {
+    const user = userEvent.setup();
+    render(<WorkflowCanvas store={store} />);
+    card("email").focus();
+    fireEvent.keyDown(card("email"), { key: "k", ctrlKey: true });
+    await screen.findByRole("dialog", { name: "Add step" });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(card("email")));
   });
 
   test("⌘K opens the picker to insert after the selected step", async () => {
@@ -372,7 +535,7 @@ describe("WorkflowCanvas", () => {
   test("readOnly hides add buttons, placeholders' actions and menus, and blocks edits", () => {
     store = createEditorStore({ doc: branchyDoc(), manifest });
     render(<WorkflowCanvas store={store} readOnly />);
-    expect(screen.queryAllByRole("button", { name: "Add step here" })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: PLUS })).toHaveLength(0);
     expect(screen.queryAllByRole("button", { name: "Add step" })).toHaveLength(0);
     expect(screen.getAllByText("No steps")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: /^Actions for/ })).toBeNull();
@@ -382,7 +545,7 @@ describe("WorkflowCanvas", () => {
     expect(store.getState().doc.steps).toHaveLength(3);
     // Navigation still works.
     fireEvent.keyDown(root(), { key: "ArrowDown" });
-    expect(store.getState().selection).toBe("cond");
+    expect(focused()).toBe("step:cond");
   });
 
   test("an invalid step shows a badge whose label lists its issues", () => {
@@ -489,7 +652,8 @@ describe("WorkflowCanvas", () => {
       <FlowkitProvider
         client={{} as never}
         labels={{
-          addStepHere: "Schritt hier einfügen",
+          addStepAfter: (s: string) => `Schritt nach ${s} einfügen`,
+          addStepAfterTrigger: () => "Schritt hier einfügen",
           addStep: "Schritt hinzufügen",
           tabAll: "Alle",
           triggerTag: "Auslöser",
@@ -499,7 +663,7 @@ describe("WorkflowCanvas", () => {
       </FlowkitProvider>,
     );
     expect(screen.getByText("Auslöser")).toBeTruthy();
-    const plus = screen.getAllByRole("button", { name: "Schritt hier einfügen" });
+    const plus = screen.getAllByRole("button", { name: /^Schritt (hier|nach)/ });
     expect(plus).toHaveLength(3);
     fireEvent.click(plus[0] as HTMLElement);
     const picker = await screen.findByRole("dialog", { name: "Schritt hinzufügen" });
@@ -509,7 +673,7 @@ describe("WorkflowCanvas", () => {
 
   test("picker tabs use a roving tabindex and control the list's tabpanel", async () => {
     render(<WorkflowCanvas store={store} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Add step here" })[0] as HTMLElement);
+    fireEvent.click(screen.getAllByRole("button", { name: PLUS })[0] as HTMLElement);
     const picker = await screen.findByRole("dialog", { name: "Add step" });
     const [all, second] = within(picker).getAllByRole("tab") as [HTMLElement, HTMLElement];
     expect(all.textContent).toBe("All");

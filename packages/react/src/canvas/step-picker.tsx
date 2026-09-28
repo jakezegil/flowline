@@ -6,8 +6,9 @@ import { type KeyboardEvent, useContext, useEffect, useId, useMemo, useRef, useS
 import { useEditorStore, useEditorStoreApi } from "../hooks";
 import { defaultLabels, type FlowkitLabels } from "../labels";
 import { useFlowkitAppearance } from "../provider";
-import { focusNode } from "./actions";
+import { focusNode, nodeElement, nodeIdOf } from "./actions";
 import {
+  type PickerRequest,
   PortalContainerContext,
   RootElementContext,
   useCanvasUi,
@@ -68,6 +69,99 @@ export function pickerGroups(
   return [...groups].map(([heading, list]) => ({ ...(heading ? { heading } : {}), nodes: list }));
 }
 
+/** Lower-case words of a text, split at spaces, punctuation and camelCase (`crm.sendEmail`). */
+function wordsOf(text: string): string[] {
+  return text
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+/**
+ * How well a node matches a picker search: higher is better, `0` for no match. Every query word
+ * must start a word of the node's name, keywords, category, plugin name or type (or, from three
+ * letters, occur inside the name). The name counts most: an exact name wins, then a name that
+ * starts with the query, then one containing it as words; keywords and the category come next,
+ * the plugin and type last. A word of four letters or more one typo away from a name or keyword
+ * word (or its start) still matches, below any exact match. Descriptions aren't searched (their
+ * many words match almost anything).
+ */
+/**
+ * Whether `a` and `b` are at most one typo apart: one letter added, dropped, changed, or two
+ * neighbours swapped ("emial" and "email").
+ */
+function oneTypo(a: string, b: string): boolean {
+  if (a === b) return true;
+  const la = a.length;
+  const lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  let i = 0;
+  while (i < la && i < lb && a[i] === b[i]) i++;
+  if (la === lb) {
+    // Changed letter, or swapped neighbours.
+    if (a.slice(i + 1) === b.slice(i + 1)) return true;
+    return a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2);
+  }
+  // Added or dropped letter.
+  return la > lb ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+}
+
+/** Whether token `t` (four letters or more) is one typo from a word of `words` or its start. */
+function nearly(t: string, words: readonly string[]): boolean {
+  if (t.length < 4) return false;
+  return words.some(
+    (w) =>
+      oneTypo(t, w) ||
+      oneTypo(t, w.slice(0, t.length)) ||
+      (w.length > t.length && oneTypo(t, w.slice(0, t.length + 1))),
+  );
+}
+
+export function stepMatchScore(node: NodeManifest, query: string, pluginName = ""): number {
+  const q = query.trim().toLowerCase().replace(/\s+/g, " ");
+  if (q === "") return 1;
+  const name = node.name.toLowerCase();
+  const nameWords = wordsOf(node.name);
+  const keywordWords = [...(node.keywords ?? []), node.category ?? ""].flatMap(wordsOf);
+  const otherWords = [...wordsOf(pluginName), ...wordsOf(node.type)];
+  let score = 0;
+  for (const t of wordsOf(q)) {
+    if (nameWords.includes(t)) score += 30;
+    else if (nameWords.some((w) => w.startsWith(t))) score += 20;
+    else if (t.length >= 3 && name.includes(t)) score += 10;
+    else if (keywordWords.some((w) => w.startsWith(t))) score += 8;
+    else if (otherWords.some((w) => w.startsWith(t))) score += 3;
+    // Typo tolerance, below every exact match: "emial" still finds Send email.
+    else if (nearly(t, nameWords)) score += 5;
+    else if (nearly(t, keywordWords)) score += 2;
+    else return 0;
+  }
+  if (score === 0) return 0;
+  if (name === q) score += 1000;
+  else if (name.startsWith(q)) score += 500;
+  else if (` ${name}`.includes(` ${q}`)) score += 200;
+  // The query names the category or a keyword (or is one typo from one).
+  const names = (k: string) => k.startsWith(q) || nearly(q, [k]);
+  if (node.category && names(node.category.toLowerCase())) score += 40;
+  if ((node.keywords ?? []).some((k) => names(k.toLowerCase()))) score += 40;
+  return score;
+}
+
+/** The nodes of `groups` matching `query`, best first (ties keep their order). */
+export function rankSteps(
+  groups: PickerGroup[],
+  query: string,
+  pluginName: (plugin: string) => string = () => "",
+): NodeManifest[] {
+  return groups
+    .flatMap((g) => g.nodes)
+    .map((node, i) => ({ node, i, score: stepMatchScore(node, query, pluginName(node.plugin)) }))
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .map((r) => r.node);
+}
+
 /** A zero-size rectangle at the top center of `el` (fallback anchor when there's no target). */
 function topCenterOf(el: HTMLElement | null): DOMRect {
   const r = el?.getBoundingClientRect();
@@ -106,8 +200,10 @@ export function StepPicker() {
   const picked = useRef(false);
   const interactedOutside = useRef(false);
   const lastAnchor = useRef<HTMLElement | null>(null);
+  const lastRequest = useRef<PickerRequest | undefined>(undefined);
   useEffect(() => {
     if (picker) {
+      lastRequest.current = picker.request;
       setTab("all");
       setQuery("");
       picked.current = false;
@@ -123,6 +219,21 @@ export function StepPicker() {
     const el = lastAnchor.current;
     if (el?.isConnected) {
       el.focus({ preventScroll: true });
+      return;
+    }
+    // The opener was re-rendered away: its replacement (the "+" at the same spot, or the card
+    // being replaced), else the selected card.
+    const req = lastRequest.current;
+    const again =
+      req?.mode === "insert"
+        ? root()?.querySelector<HTMLElement>(
+            `.fk-add[data-insert-at="${req.loc.parentId ?? ""}/${req.loc.branch ?? ""}/${req.loc.index}"]`,
+          )
+        : req?.mode === "replace"
+          ? nodeElement(root(), nodeIdOf(req.stepId))
+          : null;
+    if (again) {
+      again.focus({ preventScroll: true });
       return;
     }
     const selection = store.getState().selection;
@@ -144,6 +255,13 @@ export function StepPicker() {
   const pluginName = useMemo(
     () => new Map(manifest.plugins.map((p) => [p.id, p.name])),
     [manifest],
+  );
+  // Searching lists the matches best first, across the tab's sections.
+  const searching = query.trim() !== "";
+  const shown = useMemo<PickerGroup[]>(
+    () =>
+      searching ? [{ nodes: rankSteps(groups, query, (id) => pluginName.get(id) ?? "") }] : groups,
+    [searching, groups, query, pluginName],
   );
 
   const pick = (type: string) => {
@@ -207,11 +325,12 @@ export function StepPicker() {
             restoreFocus();
           }}
         >
-          <Command label={title} loop>
+          <Command label={labels.searchSteps} loop shouldFilter={false}>
             <div className="fk-picker__search">
               <Search size={14} aria-hidden />
               <Command.Input
                 autoFocus
+                aria-label={labels.searchSteps}
                 value={query}
                 onValueChange={setQuery}
                 onKeyDown={onInputKey}
@@ -249,7 +368,7 @@ export function StepPicker() {
                 <Command.Empty className="fk-picker__empty">
                   {labels.noMatches(query)}
                 </Command.Empty>
-                {groups.map((g) => (
+                {shown.map((g) => (
                   <Command.Group
                     key={g.heading ?? ""}
                     heading={g.heading}
@@ -261,12 +380,6 @@ export function StepPicker() {
                         <Command.Item
                           key={n.type}
                           value={n.type}
-                          keywords={[
-                            n.name,
-                            n.description ?? "",
-                            n.category ?? "",
-                            pluginName.get(n.plugin) ?? "",
-                          ]}
                           onSelect={() => pick(n.type)}
                           className="fk-picker__item"
                         >

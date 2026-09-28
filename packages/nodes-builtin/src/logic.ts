@@ -18,10 +18,11 @@ export const conditionNode = defineNode({
   description: "Take the If path when the conditions match, and the Else path when they don't.",
   icon: "split",
   category: "Logic",
-  summary: "If conditions match",
+  keywords: ["if", "else", "condition", "branch", "filter"],
+  summary: "If {{rules}}",
   input: z.object({
     rules: ui(ConditionRulesSchema, { label: "Conditions", widget: "rules" }).describe(
-      'Text compares ignoring case unless Match case is on. Dates and times are UTC unless they include an offset. "Is in" takes a list or comma-separated text.',
+      'Text compares ignoring case unless Match case is on. Dates and times are UTC unless they include an offset. "Is one of" takes a list or comma-separated text.',
     ),
   }),
   output: z.object({ matched: z.boolean() }),
@@ -40,8 +41,9 @@ export const conditionNode = defineNode({
 
 const SwitchCase = z.object({
   id: ui(z.string().regex(BRANCH_ID, "Use letters, digits, - and _ only"), { label: "ID" }),
-  label: ui(z.string(), { label: "Label", placeholder: "Gold customers" }),
-  value: ui(z.unknown(), { label: "Value", placeholder: "gold" }),
+  // Labelled as the cases editor shows them, so messages name what the user sees.
+  label: ui(z.string(), { label: "Case name", placeholder: "Gold customers" }),
+  value: ui(z.unknown(), { label: "Matches", placeholder: "gold" }),
 });
 
 /**
@@ -55,6 +57,7 @@ export const switchNode = defineNode({
     "Compare a value with each case in order and take the path of the first match, or Default when none match.",
   icon: "route",
   category: "Logic",
+  keywords: ["case", "route", "branch", "match"],
   summary: "Route by {{value}}",
   input: z.object({
     value: ui(z.unknown(), { label: "Value to match" }).describe(
@@ -114,6 +117,7 @@ export const forEachNode = defineNode({
     "Run the steps inside the loop once for every item in a list, one item at a time. Inside, use Loop item and Loop index.",
   icon: "repeat",
   category: "Logic",
+  keywords: ["loop", "iterate", "each", "list"],
   summary: "For each item in {{items}}",
   input: z.object({
     items: ui(z.array(z.unknown()), { label: "List", refOnly: true }).describe(
@@ -136,6 +140,8 @@ export const stopNode = defineNode({
   description: "End the run here as a success. No later steps run.",
   icon: "circle-stop",
   category: "Logic",
+  keywords: ["end", "exit", "halt", "finish"],
+  endsRun: true,
   summary: "Stop the run",
   input: z.object({
     reason: ui(z.string(), {

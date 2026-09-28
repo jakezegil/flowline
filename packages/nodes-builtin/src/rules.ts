@@ -72,7 +72,7 @@ export const RuleSchema = z.object({
   op: ui(z.enum(RULE_OPS), { label: "Operator" }),
   right: ui(z.unknown(), { label: "Compare with" })
     .describe(
-      'Numbers and text compare loosely ("5" equals 5). Dates and times are UTC unless they include an offset. For "is in", give a list or comma-separated text.',
+      'Numbers and text compare loosely ("5" equals 5). Dates and times are UTC unless they include an offset. For "is one of", give a list or comma-separated text.',
     )
     .optional(),
   caseSensitive: ui(z.boolean(), { label: "Match case" })
