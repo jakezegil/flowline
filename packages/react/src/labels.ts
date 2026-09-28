@@ -74,6 +74,48 @@ export interface FlowkitLabels {
   /** A list value, e.g. "3 items". */
   items(n: number): string;
 
+  // Data picker, reference inputs and code editor
+  /** Accessible name of the data picker. */
+  dataPicker: string;
+  searchData: string;
+  /** The data picker when nothing is in scope. */
+  noScope: string;
+  noDataMatches(query: string): string;
+  /** Section caption of the trigger, a step and the enclosing loop. */
+  scopeTrigger: string;
+  scopeStep: string;
+  scopeLoop: string;
+  /** Caption on a disabled step's section: its output is empty at runtime. */
+  scopeDisabled: string;
+  /** A section whose output shape isn't known yet (no schema, no sample). */
+  noKnownFields: string;
+  /** The `[0]` row under a list. */
+  firstItem: string;
+  /** Hover button on an object or list row that inserts all of it. */
+  insertWhole(name: string): string;
+  /** Key hints in the picker footer. */
+  keyNavigate: string;
+  keyInsert: string;
+  keyExpand: string;
+  keyInsertWhole: string;
+  /** Tooltip label before a sample value. */
+  sampleValue: string;
+  /** Accessible name of a pill: "Load contact › email (string)". */
+  refPill(label: string, type: string): string;
+  /** Accessible name and tooltip of a reference that no longer resolves. */
+  refStale(label: string): string;
+  staleRefHint: string;
+  /** Screen-reader help of a reference input. */
+  refInputHint(multiline: boolean): string;
+  /** Screen-reader help of a single-reference input. */
+  refPickHint: string;
+  /** The placeholder of a single-reference input. */
+  pickValue: string;
+  /** The button inside a reference input that opens the picker. */
+  browseData: string;
+  /** Screen-reader help of the code editor. */
+  codeEditorHint: string;
+
   // Edges and placeholders
   /** The "+" buttons on connections. */
   addStepHere: string;
@@ -337,6 +379,33 @@ export const defaultLabels: FlowkitLabels = {
   refRunId: "Run ID",
   noValue,
   items: (n) => (n === 1 ? "1 item" : `${n} items`),
+
+  dataPicker: "Insert data",
+  searchData: "Search data",
+  noScope: "No data yet — add a step above or configure the trigger.",
+  noDataMatches: (query) => `No data matches “${query}”.`,
+  scopeTrigger: "Trigger",
+  scopeStep: "Step",
+  scopeLoop: "Loop",
+  scopeDisabled: "Disabled · empty at runtime",
+  noKnownFields: "No fields known yet. Test this step to see its output.",
+  firstItem: "First item",
+  insertWhole: (name) => `Insert all of ${name}`,
+  keyNavigate: "navigate",
+  keyInsert: "insert",
+  keyExpand: "expand",
+  keyInsertWhole: "insert all",
+  sampleValue: "Sample",
+  refPill: (label, type) => `${label} (${type})`,
+  refStale: (label) => `${label}: not available here`,
+  staleRefHint: "This reference points at data that isn't available to this step anymore.",
+  refInputHint: (multiline) =>
+    `Type {{ to insert data, or press ${multiline ? "Alt+Down arrow" : "Down arrow"} to browse it.`,
+  refPickHint: "Press Down arrow to choose a value. Backspace clears it.",
+  pickValue: "Choose a value…",
+  browseData: "Browse data",
+  codeEditorHint:
+    "Type steps. or trigger. for suggestions. Press Escape, then Tab, to leave the editor.",
 
   addStepHere: "Add step here",
   addStep: "Add step",
