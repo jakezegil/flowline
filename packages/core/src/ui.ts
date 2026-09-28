@@ -1,33 +1,5 @@
 import { z } from "zod";
-import { isRef, isTpl } from "./refs";
-import type { FieldDecl, JSONSchema, Literal, ShowIf, UiMeta } from "./types";
-
-const asList = (v: Literal | Literal[]): Literal[] => (Array.isArray(v) ? v : [v]);
-
-/**
- * Whether a field with {@link UiMeta.showIf} `cond` applies, given its object's `values` and the
- * object schema's `properties` (for the sibling's `default`). No condition: `true`. The editor
- * renders, and the validator checks, only fields that apply.
- *
- * @example
- * isFieldShown({ field: "bodyType", notEquals: "none" }, { bodyType: "json" }); // true
- */
-export function isFieldShown(
-  cond: ShowIf | undefined,
-  values: Record<string, unknown> | undefined,
-  properties?: Record<string, unknown>,
-): boolean {
-  if (!cond || typeof cond !== "object" || typeof cond.field !== "string") return true;
-  let value = values?.[cond.field];
-  if (value === undefined) {
-    const prop = properties?.[cond.field];
-    if (typeof prop === "object" && prop !== null) value = (prop as JSONSchema).default;
-  }
-  if (isRef(value) || isTpl(value)) return true;
-  if (cond.equals !== undefined) return asList(cond.equals).some((v) => v === value);
-  if (cond.notEquals !== undefined) return !asList(cond.notEquals).some((v) => v === value);
-  return value !== undefined && value !== null && value !== "" && value !== false;
-}
+import type { FieldDecl, UiMeta } from "./types";
 
 /** JSON Schema / Zod metadata key under which {@link UiMeta} travels. */
 export const UI_META_KEY = "x-flowkit";

@@ -94,6 +94,13 @@ export {
 export { createRegistry, type Registry } from "./registry";
 export { availableScope, type ScopeEntry, type ValidationContext } from "./scope";
 export {
+  dropHiddenFields,
+  hiddenFields,
+  isFieldShown,
+  showIfOf,
+  showIfProblems,
+} from "./show-if";
+export {
   allStepIds,
   duplicateStep,
   FlowkitTreeError,
@@ -129,5 +136,5 @@ export type {
   ValueExpr,
   WorkflowDoc,
 } from "./types";
-export { fields, isFieldShown, secret, sensitive, UI_META_KEY, ui } from "./ui";
+export { fields, secret, sensitive, UI_META_KEY, ui } from "./ui";
 export { checkJson, hasErrors, type Issue, type IssueCode, validateWorkflow } from "./validate";

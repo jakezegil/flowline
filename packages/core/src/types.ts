@@ -149,8 +149,17 @@ export interface UiMeta {
   enumLabels?: Record<string, string>;
   /**
    * Show the field only while a sibling field (a property of the same object) has certain values.
-   * Hidden fields keep their value but aren't rendered, and the validator skips them (no
-   * `config.required`, no value checks), since they don't apply. See {@link ShowIf}.
+   * See {@link ShowIf}.
+   *
+   * - The field must be optional in its schema (`.optional()` or `.default()`), and `field` must
+   *   name a sibling property; conditions must not form a cycle. The registry's manifest build
+   *   throws a `FlowkitDefinitionError` otherwise.
+   * - Editor: a hidden field isn't rendered, but its stored value is kept, so switching back
+   *   restores it.
+   * - Validator: a hidden field is skipped (no `config.required`, no value checks).
+   * - Engine: the values of hidden fields are dropped before the input is parsed and the handler
+   *   runs. Visibility is evaluated on the resolved config, so a sibling holding a reference is
+   *   judged by the value it resolved to. A handler never sees a hidden field.
    */
   showIf?: ShowIf;
 }
@@ -159,8 +168,9 @@ export interface UiMeta {
  * Condition of {@link UiMeta.showIf}, on the sibling property `field`. The sibling's value is its
  * config value, else its schema `default`. With `equals`, the field shows while the sibling equals
  * one of the values; with `notEquals`, while it equals none of them; with neither, while it is set
- * (not `undefined`, `null`, `""` or `false`). A sibling holding a reference or template can't be
- * known in advance, so the field shows.
+ * (not `undefined`, `null`, `""` or `false`). In the editor and validator, a sibling holding a
+ * reference or template can't be known in advance, so the field shows; the engine decides on the
+ * resolved value. A sibling that is itself hidden counts as unset (its default is not used).
  *
  * @example
  * ui(z.unknown(), { label: "Body", showIf: { field: "bodyType", notEquals: "none" } })

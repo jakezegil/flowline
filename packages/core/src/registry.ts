@@ -5,6 +5,7 @@ import {
   type PluginDefinition,
   type TriggerDefinition,
 } from "./define";
+import { showIfProblems } from "./show-if";
 import type {
   JSONSchema,
   Manifest,
@@ -25,7 +26,12 @@ export interface Registry {
   /** Look up a trigger definition by type. */
   // biome-ignore lint/suspicious/noExplicitAny: definitions of any config/payload types
   getTrigger(type: string): TriggerDefinition<any, any> | undefined;
-  /** The JSON-serializable manifest of all plugins, nodes and triggers. Computed once and frozen. */
+  /**
+   * The JSON-serializable manifest of all plugins, nodes and triggers. Computed once and frozen.
+   *
+   * @throws {@link FlowkitDefinitionError} when a schema can't be converted to JSON Schema, or
+   * has an invalid `showIf` (a required conditional field, an unknown sibling, or a cycle).
+   */
   manifest(): Manifest;
 }
 
@@ -175,6 +181,14 @@ function toSchema(
     );
   }
   hoistUiMeta(json);
+  if (io === "input") {
+    const problems = showIfProblems(json);
+    if (problems.length > 0) {
+      throw new FlowkitDefinitionError(
+        `Invalid showIf in ${what} schema of "${type}": ${problems.join("; ")}`,
+      );
+    }
+  }
   return json;
 }
 

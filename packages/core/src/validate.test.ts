@@ -610,7 +610,9 @@ describe("validateWorkflow", () => {
       name: "Body",
       input: z.object({
         kind: z.enum(["none", "json"]).default("none"),
-        body: ui(z.string().min(1), { showIf: { field: "kind", notEquals: "none" } }),
+        body: ui(z.string().min(1), { showIf: { field: "kind", notEquals: "none" } }).optional(),
+        // Shown while `body` is set, so hidden whenever `body` is hidden (a chain).
+        note: ui(z.string(), { showIf: { field: "body" } }).optional(),
       }),
       run: () => ({}),
     });
@@ -618,10 +620,12 @@ describe("validateWorkflow", () => {
     const at = (config: Step["config"]) =>
       validateWorkflow(docWith([step("b", "x.body", config)]), m);
     expect(at({})).toEqual([]);
-    expect(at({ kind: "none", body: { $ref: "steps.ghost" } })).toEqual([]);
-    expect(at({ kind: "json" })).toEqual([issue({ code: "config.required", field: "body" })]);
+    expect(at({ kind: "none", body: { $ref: "steps.ghost" }, note: 5 })).toEqual([]);
+    const fieldsOf = (issues: Issue[]) => issues.map((i) => i.field);
+    expect(fieldsOf(at({ kind: "json", body: 5 }))).toEqual(["body"]);
+    expect(fieldsOf(at({ kind: "json", body: "x", note: 5 }))).toEqual(["note"]);
     // A reference in the sibling can't be known in advance: the field applies.
-    expect(codes(at({ kind: { $ref: "trigger.kind" } }))).toContain("config.required");
+    expect(fieldsOf(at({ kind: { $ref: "trigger.kind" }, body: 5 }))).toContain("body");
   });
 
   test("disabled steps are validated with warnings; refs to them warn", () => {

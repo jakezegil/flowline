@@ -24,9 +24,10 @@ import {
   type ValidationContext,
   walkScope,
 } from "./scope";
+import { hiddenFields } from "./show-if";
 import { walkSteps } from "./tree";
 import type { JSONSchema, Manifest, NodeManifest, Step, UiMeta, WorkflowDoc } from "./types";
-import { isFieldShown, UI_META_KEY } from "./ui";
+import { UI_META_KEY } from "./ui";
 
 /** Machine-readable kind of a validation {@link Issue}. */
 export type IssueCode =
@@ -603,10 +604,11 @@ function checkObject(
     unknown
   >;
   const required = new Set(Array.isArray(schema.required) ? (schema.required as string[]) : []);
+  // A field whose `showIf` doesn't hold doesn't apply: it isn't required or checked.
+  const hidden = hiddenFields(obj, schema, root);
   for (const [key, rawDeclared] of Object.entries(props)) {
+    if (hidden.has(key)) continue;
     const declared = asSchema(rawDeclared);
-    // A field whose `showIf` doesn't hold doesn't apply: it isn't required or checked.
-    if (!isFieldShown(uiMeta(declared)?.showIf, obj, props)) continue;
     const override = overrides[key];
     const propSchema = override ?? declared;
     const propRoot = override ?? root;

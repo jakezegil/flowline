@@ -244,3 +244,53 @@ test("a node's resume declaration reaches the manifest with its body as JSON Sch
   // Nodes without one have no `resume` key.
   expect(createRegistry([crm]).manifest().nodes[0]).not.toHaveProperty("resume");
 });
+
+describe("showIf definitions", () => {
+  const build = (input: z.ZodObject) =>
+    createRegistry([
+      definePlugin({
+        id: "x",
+        name: "X",
+        nodes: [defineNode({ type: "x.n", name: "N", input, run: () => ({}) })],
+      }),
+    ]).manifest();
+
+  test("sound conditions pass, including nested objects and defaults", () => {
+    expect(() =>
+      build(
+        z.object({
+          kind: z.enum(["a", "b"]).default("a"),
+          body: ui(z.string(), { showIf: { field: "kind", equals: "b" } }).optional(),
+          opts: z.object({
+            on: z.boolean().optional(),
+            level: ui(z.number(), { showIf: { field: "on" } }).default(1),
+          }),
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  test("a required conditional field, an unknown sibling and a cycle are rejected", () => {
+    expect(() =>
+      build(z.object({ k: z.string(), body: ui(z.string(), { showIf: { field: "k" } }) })),
+    ).toThrow(/"body" has showIf but is required/);
+    expect(() =>
+      build(
+        z.object({
+          opts: z.object({ c: ui(z.string(), { showIf: { field: "typo" } }).optional() }),
+        }),
+      ),
+    ).toThrow(/Invalid showIf in input schema of "x.n": "opts.c" has showIf on "typo"/);
+    expect(() =>
+      build(
+        z.object({
+          d: ui(z.string(), { showIf: { field: "e" } }).optional(),
+          e: ui(z.string(), { showIf: { field: "d" } }).optional(),
+        }),
+      ),
+    ).toThrow(/cycle: d → e → d/);
+    expect(() =>
+      build(z.object({ d: ui(z.string(), { showIf: { field: "d" } }).optional() })),
+    ).toThrow(FlowkitDefinitionError);
+  });
+});
