@@ -442,6 +442,13 @@ describe("runs", () => {
     expect(await json<unknown[]>(call("GET", "/runs?limit=1"))).toHaveLength(1);
     expect((await call("GET", "/runs?status=bogus")).status).toBe(400);
     expect((await call("GET", "/runs?limit=-3")).status).toBe(400);
+    // topLevel=true is passed on to storage; anything but true/false is refused.
+    const listRuns = vi.spyOn(storage, "listRuns");
+    expect(await json<unknown[]>(call("GET", "/runs?topLevel=true"))).toHaveLength(2);
+    expect(listRuns).toHaveBeenLastCalledWith("a", { topLevel: true });
+    await call("GET", "/runs?topLevel=false");
+    expect(listRuns).toHaveBeenLastCalledWith("a", {});
+    expect((await call("GET", "/runs?topLevel=yes")).status).toBe(400);
   });
 
   it("returns run detail without the callback token and with sensitive values masked", async () => {

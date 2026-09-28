@@ -15,16 +15,17 @@ export {
   RetryableError,
 } from "./errors";
 export { buildScope, type Frame, type NextAction, nextAction } from "./interpreter";
-export type {
-  Lease,
-  NewRun,
-  NewRunEvent,
-  ResumeEvent,
-  Run,
-  RunPatch,
-  StorageAdapter,
-  WaitReason,
-  WorkflowAuditEntry,
+export {
+  type Lease,
+  type NewRun,
+  type NewRunEvent,
+  type ResumeEvent,
+  type Run,
+  type RunPatch,
+  type StorageAdapter,
+  stoppedAtOf,
+  type WaitReason,
+  type WorkflowAuditEntry,
 } from "./storage";
 export { type QuickjsRuntimeOptions, quickjsRuntime } from "./transform/quickjs";
 export type { Worker, WorkerOptions } from "./worker";

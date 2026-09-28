@@ -382,6 +382,59 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect((await s.listRuns(T1, { limit: 2 })).map((r) => r.id)).toEqual(["r4", "r3"]);
       });
 
+      test("listRuns with topLevel leaves out sub-flow runs", async (s) => {
+        await s.createRun(newRun("r1"), [], 10);
+        await s.createRun(
+          newRun("r2", {
+            startedBy: { kind: "subflow", parentRunId: "r1", parentStepPath: "call" },
+            parent: { runId: "r1", stepPath: "call" },
+          }),
+          [],
+          20,
+        );
+        await s.createRun(newRun("r3", { startedBy: { kind: "webhook" } }), [], 30);
+        expect((await s.listRuns(T1, {})).map((r) => r.id)).toEqual(["r3", "r2", "r1"]);
+        expect((await s.listRuns(T1, { topLevel: true })).map((r) => r.id)).toEqual(["r3", "r1"]);
+        expect((await s.listRuns(T1, { topLevel: true, limit: 1 })).map((r) => r.id)).toEqual([
+          "r3",
+        ]);
+      });
+
+      test("listRuns gives stoppedAt for runs a Stop step ended", async (s) => {
+        const stop = {
+          status: "done",
+          output: { stopped: true },
+          at: 2,
+          startedAt: 2,
+          attempts: 1,
+        };
+        await s.createRun(
+          newRun("stopped", {
+            status: "completed",
+            output: { stoppedAt: "cond/if/halt", reason: "No" },
+            journal: { cond: done({}), "cond/if/halt": stop as JournalEntry },
+          }),
+          [],
+          10,
+        );
+        // A plain completed run, and one whose output merely looks like a stop.
+        await s.createRun(newRun("plain", { status: "completed", output: { ok: 1 } }), [], 20);
+        await s.createRun(
+          newRun("lookalike", {
+            status: "completed",
+            output: { stoppedAt: "a" },
+            journal: { a: done({ stopped: false }) },
+          }),
+          [],
+          30,
+        );
+        const rows = await s.listRuns(T1, {});
+        const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+        expect(byId.stopped?.stoppedAt).toBe("cond/if/halt");
+        expect(byId.plain).not.toHaveProperty("stoppedAt");
+        expect(byId.lookalike).not.toHaveProperty("stoppedAt");
+      });
+
       test("listRuns defaults to 50 rows", async (s) => {
         for (let i = 0; i < 55; i++) {
           await s.createRun(newRun(`r${String(i).padStart(2, "0")}`), [], i);

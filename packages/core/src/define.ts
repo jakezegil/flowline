@@ -349,6 +349,26 @@ export interface NodeDefinition<I extends z.ZodObject = z.ZodObject, O = unknown
   retry?: Partial<RetryPolicy>;
   /** Handler wall-clock limit in ms, enforced via `ctx.signal`. Default `300_000`. */
   timeoutMs?: number;
+  /**
+   * For nodes that wait on a callback: how the wait is resumed. The run viewer validates its
+   * resume form against `body`, and with `hostHandled` shows `hint` instead of the form (use it
+   * when your app resumes the wait itself, e.g. from an approvals page).
+   *
+   * @example
+   * resume: {
+   *   body: z.object({ decision: z.enum(["approved", "rejected"]) }),
+   *   hostHandled: true,
+   *   hint: "Approve or reject it in Approvals.",
+   * }
+   */
+  resume?: {
+    /** Schema of the callback body the handler reads from `ctx.resume.body`. */
+    body?: z.ZodType;
+    /** The host app resumes this wait; the run viewer offers no raw resume form. */
+    hostHandled?: boolean;
+    /** Where or how to resume it, shown in the run viewer. */
+    hint?: string;
+  };
   /** The handler. Receives validated input; returns output or a signal. */
   run(args: { input: z.infer<I>; ctx: NodeContext }): Promise<NodeResult<R>> | NodeResult<R>;
 }

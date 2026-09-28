@@ -18,7 +18,7 @@ import { z } from "zod";
 import { createEngine, type EngineOptions } from "./engine";
 import { FatalError, RetryableError } from "./errors";
 import { createExecutor } from "./executor";
-import type { StorageAdapter } from "./storage";
+import { type StorageAdapter, stoppedAtOf } from "./storage";
 
 const TENANT = "t1";
 
@@ -577,6 +577,9 @@ describe("executor: branches and loops", () => {
     });
     expect(run.journal.after).toBeUndefined();
     expect(calls.after).toBeUndefined();
+    // The enclosing block keeps its `branched` entry (it never finished); summaries say stopped.
+    expect(run.journal.cond?.status).toBe("branched");
+    expect(stoppedAtOf(run)).toBe("cond/if/halt");
     const types = (await events(id)).map((e) => e.type);
     expect(types).toContain("run.stopped");
     expect(types).not.toContain("run.completed");

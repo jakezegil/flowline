@@ -162,6 +162,20 @@ export interface RunPatch {
   createChild?: NewRun;
 }
 
+/**
+ * The path of the Stop step that ended `run` early, or `undefined` when it didn't stop: the run
+ * is `completed`, its output is `{ stoppedAt }` and the step at that path journaled a stop
+ * (`{ stopped: true }` output). Adapters use it to fill {@link RunSummary.stoppedAt}.
+ */
+export function stoppedAtOf(run: Pick<Run, "status" | "output" | "journal">): string | undefined {
+  if (run.status !== "completed") return undefined;
+  const at = (run.output as { stoppedAt?: unknown } | null | undefined)?.stoppedAt;
+  if (typeof at !== "string" || !Object.hasOwn(run.journal, at)) return undefined;
+  const entry = run.journal[at];
+  const out = entry?.status === "done" ? (entry.output as { stopped?: unknown } | null) : null;
+  return out?.stopped === true ? at : undefined;
+}
+
 /** An event to append; storage assigns `id` and `seq`. */
 export type NewRunEvent = Omit<RunEvent, "id" | "seq">;
 
@@ -279,11 +293,13 @@ export interface StorageAdapter {
 
   /**
    * Summaries of the tenant's runs, newest first (`createdAt` descending, then `id` descending),
-   * optionally filtered by workflow and/or status, at most `limit` rows (default 50).
+   * optionally filtered by workflow and/or status, at most `limit` rows (default 50). `topLevel`
+   * leaves out sub-flow runs (`startedBy.kind === "subflow"`). A summary carries `stoppedAt` when
+   * {@link stoppedAtOf} gives one.
    */
   listRuns(
     tenantId: string,
-    f: { workflowId?: string; status?: RunStatus; limit?: number },
+    f: { workflowId?: string; status?: RunStatus; topLevel?: boolean; limit?: number },
   ): Promise<RunSummary[]>;
 
   /**

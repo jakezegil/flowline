@@ -125,6 +125,15 @@ function nodeManifest(plugin: string, def: NodeDefinition<any, any>): NodeManife
     input: toSchema(def.input, "input", def.type, "input"),
     output,
     branches: def.branches ? structuredClone(def.branches) : { kind: "none" },
+    resume: def.resume
+      ? compact({
+          body: def.resume.body
+            ? toSchema(def.resume.body, "input", def.type, "resume body")
+            : undefined,
+          hostHandled: def.resume.hostHandled,
+          hint: def.resume.hint,
+        })
+      : undefined,
   });
 }
 

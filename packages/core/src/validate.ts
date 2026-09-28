@@ -103,6 +103,8 @@ interface Reporter {
   current: Step | undefined;
   ancestors: readonly Step[];
   doc: DocInfo;
+  /** Plain JSON ({@link checkJson}): `$ref`/`$tpl` objects are ordinary data, not expressions. */
+  plain?: boolean;
 }
 
 interface DocInfo {
@@ -357,6 +359,10 @@ function checkValue(r: Reporter, value: unknown, schema: JSONSchema, f: FieldCtx
   const s = derefSchema(f.root, schema);
   const meta = uiMeta(schema) ?? uiMeta(s);
 
+  if (r.plain) {
+    checkLiteralValue(r, value, s, f);
+    return;
+  }
   if (isRef(value) || isTpl(value)) {
     if (meta?.literalOnly) {
       report(r, "config.invalid", `"${f.label}" doesn't accept references`, f.path);
@@ -391,6 +397,11 @@ function checkValue(r: Reporter, value: unknown, schema: JSONSchema, f: FieldCtx
     return;
   }
 
+  checkLiteralValue(r, value, s, f);
+}
+
+/** Checks a value that is not a reference or template against its (dereferenced) schema. */
+function checkLiteralValue(r: Reporter, value: unknown, s: JSONSchema, f: FieldCtx): void {
   if (s.not !== undefined && isAnySchema(s.not)) {
     report(r, "config.invalid", `"${f.label}" is not allowed here`, f.path);
     return;
@@ -787,6 +798,41 @@ export function validateWorkflow(
     }
   }
   return issues;
+}
+
+/**
+ * Checks a plain JSON value (e.g. a callback body) against a JSON Schema with the same rules the
+ * validator applies to literal config: types, `enum`/`const`, lengths, ranges, patterns, required
+ * and unknown properties, nested objects and arrays. `$ref`/`$tpl` objects are treated as data.
+ *
+ * @param label Names the value in messages about the value itself (default `"Value"`).
+ * @returns One message per problem, e.g. `"decision" must be one of: "approved", "rejected"`;
+ * empty when the value matches.
+ *
+ * @example
+ * checkJson({ decision: "maybe" }, { type: "object", properties: { decision: { enum: ["yes"] } } });
+ * // ['"decision" must be one of: "yes"']
+ */
+export function checkJson(value: unknown, schema: JSONSchema, label = "Value"): string[] {
+  const r: Reporter = {
+    issues: [],
+    stepId: undefined,
+    disabled: false,
+    refRoots: "any",
+    visible: [],
+    current: undefined,
+    ancestors: [],
+    doc: { ids: new Set(), order: new Map(), topLevel: new Set() },
+    plain: true,
+  };
+  const f: FieldCtx = { root: schema, path: "", label };
+  const s = derefSchema(schema, schema);
+  if (value === undefined) {
+    if (!isAnySchema(s)) report(r, "config.required", `"${label}" is required`);
+  } else {
+    guarded(r, f, () => checkValue(r, value, schema, f));
+  }
+  return r.issues.map((i) => i.message);
 }
 
 /** True if any issue is an `error` (which blocks publishing). */

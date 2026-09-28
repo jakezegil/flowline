@@ -272,9 +272,21 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
     if (first === "runs") {
       if (method === "GET" && n === 1) {
         const q = url.searchParams;
-        const filter: { workflowId?: string; status?: RunStatus; limit?: number } = {};
+        const filter: {
+          workflowId?: string;
+          status?: RunStatus;
+          topLevel?: boolean;
+          limit?: number;
+        } = {};
         const workflowId = q.get("workflowId");
         if (workflowId) filter.workflowId = workflowId;
+        const topLevel = q.get("topLevel");
+        if (topLevel !== null) {
+          if (topLevel !== "true" && topLevel !== "false") {
+            throw new HttpError(400, "topLevel must be true or false");
+          }
+          if (topLevel === "true") filter.topLevel = true;
+        }
         const status = q.get("status");
         if (status) {
           if (!RUN_STATUSES.has(status)) throw new HttpError(400, `Unknown status "${status}"`);

@@ -21,6 +21,7 @@ import {
   type Run,
   type RunPatch,
   type StorageAdapter,
+  stoppedAtOf,
   type WorkflowAuditEntry,
 } from "@flowkit/engine";
 
@@ -110,6 +111,8 @@ function toSummary(run: Run): RunSummary {
     startedBy: clone(run.startedBy),
   };
   if (run.error) summary.error = clone(run.error);
+  const stoppedAt = stoppedAtOf(run);
+  if (stoppedAt !== undefined) summary.stoppedAt = stoppedAt;
   return summary;
 }
 
@@ -324,7 +327,8 @@ export function createMemoryStorage(): StorageAdapter {
           (r) =>
             r.tenantId === tenantId &&
             (f.workflowId === undefined || r.workflowId === f.workflowId) &&
-            (f.status === undefined || r.status === f.status),
+            (f.status === undefined || r.status === f.status) &&
+            (f.topLevel !== true || r.startedBy.kind !== "subflow"),
         )
         .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
         .slice(0, limit)

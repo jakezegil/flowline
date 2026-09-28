@@ -59,6 +59,13 @@ export const requestApproval = defineNode({
     decision: z.enum(["approved", "rejected"]),
     timedOut: z.boolean(),
   }),
+  // Decided in the CRM's Approvals page (which checks who may decide), not by posting a body
+  // from the run viewer.
+  resume: {
+    body: z.object({ decision: z.enum(["approved", "rejected"]) }),
+    hostHandled: true,
+    hint: "Approve or reject it in Approvals.",
+  },
   branches: {
     kind: "static",
     branches: [

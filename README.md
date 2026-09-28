@@ -346,6 +346,11 @@ export const requestApproval = defineNode({
   by the API. `POST <basePath>/resume/:token` is the public resume route: the token is the
   credential. The authorized `POST <basePath>/runs/:id/resume` route (`engine.resumeRun`) is the
   ops path, used by the run viewer.
+- Declare how a waiting node is resumed with `resume` on its definition. `resume.body` is a Zod
+  schema for the callback body: the run viewer's Resume dialog starts empty and checks the body
+  against it. `resume.hostHandled: true` (with an optional `hint`) means your app resumes it, for
+  example from an approvals page: the viewer shows the hint instead of Resume…. Hosts can also
+  hide or replace the action with `<RunViewer resumeAction={…}>`.
 - `core.waitForCallback` has an optional `notify: { url }`. Once the wait is committed, the engine
   POSTs `{ resumeUrl, expiresAt, runId }` to that URL, with redirects refused.
 

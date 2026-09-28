@@ -44,10 +44,14 @@ export interface FlowkitClient {
   testStep(req: TestStepRequest): Promise<TestStepResponse>;
   /** `POST /workflows/:id/run` — start a manual run of the published version. */
   runWorkflow(id: string, input?: unknown): Promise<{ runId: string }>;
-  /** `GET /runs` — runs, optionally filtered. */
+  /**
+   * `GET /runs` — runs, optionally filtered. `topLevel: true` leaves out runs started by a
+   * sub-flow step (`startedBy.kind === "subflow"`).
+   */
   listRuns(filter?: {
     workflowId?: string;
     status?: RunStatus;
+    topLevel?: boolean;
     limit?: number;
   }): Promise<RunSummary[]>;
   /** `GET /runs/:id` — run with journal, events and pinned doc. */
@@ -266,6 +270,7 @@ export function createClient(opts: ClientOptions): FlowkitClient {
       const params = new URLSearchParams();
       if (filter.workflowId !== undefined) params.set("workflowId", filter.workflowId);
       if (filter.status !== undefined) params.set("status", filter.status);
+      if (filter.topLevel === true) params.set("topLevel", "true");
       if (filter.limit !== undefined) params.set("limit", String(filter.limit));
       const qs = params.toString();
       return request("GET", `/runs${qs ? `?${qs}` : ""}`);

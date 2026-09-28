@@ -11,7 +11,8 @@
  * - `POST /workflows/validate` body {@link WorkflowDoc} → `Issue[]`
  * - `POST /workflows/:id/test-step` body {@link TestStepRequest} → {@link TestStepResponse}
  * - `POST /workflows/:id/run` body {@link RunWorkflowRequest} → {@link RunStartedResponse}
- * - `GET  /runs?workflowId&status&limit` → {@link RunSummary}[]
+ * - `GET  /runs?workflowId&status&topLevel&limit` → {@link RunSummary}[] (`topLevel=true` leaves
+ *   out sub-flow runs)
  * - `GET  /runs/:id` → {@link RunDetail}
  * - `POST /runs/:id/retry` → {@link RunStartedResponse} (409 when the run is not failed)
  * - `POST /runs/:id/cancel` → 200 cancelled, 202 cancellation requested, 409 `{ error: "finished" }`
@@ -176,6 +177,11 @@ export interface RunSummary {
   error?: RunError;
   /** What started the run. */
   startedBy: RunOrigin;
+  /**
+   * For a run that a Stop step (`core.stop`) ended early: the path of that step. The run's
+   * `status` is `completed`; this tells it apart from a run that reached its end.
+   */
+  stoppedAt?: string;
 }
 
 /** Types of audit events recorded for a run. */

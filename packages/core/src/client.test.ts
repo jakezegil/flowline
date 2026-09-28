@@ -132,6 +132,12 @@ describe("createClient requests", () => {
       method: "GET",
       path: "/runs?workflowId=wf&status=failed&limit=10",
     },
+    {
+      name: "listRuns top-level only",
+      call: (c) => c.listRuns({ topLevel: true, limit: 5 }),
+      method: "GET",
+      path: "/runs?topLevel=true&limit=5",
+    },
     { name: "getRun", call: (c) => c.getRun("r1"), method: "GET", path: "/runs/r1" },
     {
       name: "retryRun",

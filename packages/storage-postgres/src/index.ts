@@ -132,6 +132,7 @@ function toSummary(row: Row): RunSummary {
     startedBy: row.started_by,
   };
   if (row.error !== null) summary.error = row.error;
+  if (typeof row.stopped_at === "string") summary.stoppedAt = row.stopped_at;
   return summary;
 }
 
@@ -581,8 +582,14 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
       const where = [`tenant_id = ${p.add(tenantId)}`];
       if (f.workflowId !== undefined) where.push(`workflow_id = ${p.add(f.workflowId)}`);
       if (f.status !== undefined) where.push(`status = ${p.add(f.status)}`);
+      if (f.topLevel === true) where.push(`started_by->>'kind' IS DISTINCT FROM 'subflow'`);
+      // stopped_at: see `stoppedAtOf` (computed here so the journal isn't read out).
       const { rows } = await pool.query(
-        `SELECT id, workflow_id, version, status, created_at, updated_at, error, started_by
+        `SELECT id, workflow_id, version, status, created_at, updated_at, error, started_by,
+           CASE WHEN status = 'completed' AND jsonb_typeof(output->'stoppedAt') = 'string'
+             AND journal->(output->>'stoppedAt')->>'status' = 'done'
+             AND journal->(output->>'stoppedAt')->'output'->'stopped' = 'true'::jsonb
+           THEN output->>'stoppedAt' END AS stopped_at
          FROM ${s}.runs WHERE ${where.join(" AND ")}
          ORDER BY created_at DESC, id COLLATE "C" DESC LIMIT ${p.add(f.limit ?? 50)}`,
         p.values,
