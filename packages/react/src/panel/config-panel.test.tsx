@@ -92,9 +92,9 @@ describe("ConfigPanel for a step", () => {
     render(
       <FlowkitProvider client={mockClient()}>
         <div className="fk-app">
-          <div className="react-flow__node" data-id="step:email" tabIndex={0}>
+          <button type="button" className="react-flow__node" data-id="step:email">
             node
-          </div>
+          </button>
           <ConfigPanel store={store} />
         </div>
       </FlowkitProvider>,
