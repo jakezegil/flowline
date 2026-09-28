@@ -123,6 +123,20 @@ describe("SchemaForm", () => {
     expect("region" in latest).toBe(false);
   });
 
+  test("arrow keys in a segmented control check the next option and move focus to it", () => {
+    renderForm({ schema: mixed });
+    const normal = screen.getByRole("radio", { name: "Normal" });
+    normal.focus();
+    fireEvent.keyDown(normal, { key: "ArrowRight" });
+    const high = screen.getByRole("radio", { name: "High" });
+    expect(latest.priority).toBe("high");
+    expect(document.activeElement).toBe(high);
+    expect(high.tabIndex).toBe(0);
+    fireEvent.keyDown(high, { key: "Home" });
+    expect(latest.priority).toBe("low");
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Low" }));
+  });
+
   test("a number that isn't one is flagged and not written", () => {
     renderForm({ schema: mixed, initial: { retries: 2 } });
     fireEvent.change(screen.getByLabelText("Retries"), { target: { value: "1.5" } });

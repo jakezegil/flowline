@@ -178,10 +178,12 @@ export function Segmented<T extends string | number | boolean>(props: {
   id?: string;
 }): JSX.Element {
   const index = props.options.findIndex((o) => o.value === props.value);
-  const move = (delta: number) => {
-    const n = props.options.length;
-    const next = props.options[((index === -1 ? 0 : index) + delta + n) % n];
-    if (next) props.onChange(next.value);
+  // Arrow keys check the next option and move focus with it (the APG radio group pattern).
+  const select = (group: HTMLElement, to: number) => {
+    const next = props.options[to];
+    if (!next) return;
+    props.onChange(next.value);
+    group.querySelectorAll<HTMLElement>("[role=radio]")[to]?.focus();
   };
   return (
     <div
@@ -190,13 +192,21 @@ export function Segmented<T extends string | number | boolean>(props: {
       aria-label={props.label}
       id={props.id}
       onKeyDown={(e) => {
-        if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-          e.preventDefault();
-          move(1);
-        } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-          e.preventDefault();
-          move(-1);
-        }
+        const n = props.options.length;
+        const at = index === -1 ? 0 : index;
+        const to =
+          e.key === "ArrowRight" || e.key === "ArrowDown"
+            ? (at + 1) % n
+            : e.key === "ArrowLeft" || e.key === "ArrowUp"
+              ? (at - 1 + n) % n
+              : e.key === "Home"
+                ? 0
+                : e.key === "End"
+                  ? n - 1
+                  : undefined;
+        if (to === undefined || props.disabled) return;
+        e.preventDefault();
+        select(e.currentTarget, to);
       }}
     >
       {props.options.map((o, i) => {
