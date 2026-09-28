@@ -3,10 +3,11 @@ import type { FlowkitClient } from "@flowkit/core/client";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { fixtureDoc, manifest } from "../test/fixtures";
+import { docWith, fixtureDoc, manifest, step } from "../test/fixtures";
 import {
   EditorContext,
   FlowkitClientContext,
+  unreachableIds,
   useDataPicker,
   useIssues,
   useRun,
@@ -161,4 +162,15 @@ describe("useRun", () => {
     await waitFor(() => expect(result.current.error?.message).toBe("boom"));
     expect(result.current.detail).toBeDefined();
   });
+});
+
+test("Minor 10: unreachable steps follow the manifest, not only the doc", () => {
+  const doc = docWith([step("a", "crm.sendEmail", {}), step("b", "crm.loadContact", {})]);
+  expect(unreachableIds(doc, manifest).size).toBe(0);
+  const ending = {
+    ...manifest,
+    nodes: manifest.nodes.map((n) => (n.type === "crm.sendEmail" ? { ...n, endsRun: true } : n)),
+  };
+  expect([...unreachableIds(doc, ending)]).toEqual(["b"]);
+  expect(unreachableIds(doc, manifest).size).toBe(0);
 });

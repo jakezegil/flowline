@@ -9,6 +9,8 @@ import {
   branchesFor,
   findStep,
   type Manifest,
+  type NodeManifest,
+  type Step,
   type StepLocation,
   type WorkflowDoc,
 } from "@flowkit/core";
@@ -48,9 +50,41 @@ export function locationAfter(store: EditorStore, selection: string | null): Ste
     : { parentId, branch, index: index + 1 };
 }
 
+const stepIndexes = new WeakMap<WorkflowDoc, Map<string, Step>>();
+const nodeIndexes = new WeakMap<Manifest, Map<string, NodeManifest>>();
+
+/** Every step of `doc` by ID, built once per doc (every "+" of the canvas asks). */
+function stepIndex(doc: WorkflowDoc): Map<string, Step> {
+  let index = stepIndexes.get(doc);
+  if (!index) {
+    const built = new Map<string, Step>();
+    const walk = (list: Step[]) => {
+      for (const step of list) {
+        built.set(step.id, step);
+        for (const branch of Object.values(step.branches ?? {})) walk(branch);
+      }
+    };
+    walk(doc.steps);
+    index = built;
+    stepIndexes.set(doc, index);
+  }
+  return index;
+}
+
+/** The manifest's nodes by type, built once per manifest. */
+function nodeIndex(manifest: Manifest): Map<string, NodeManifest> {
+  let index = nodeIndexes.get(manifest);
+  if (!index) {
+    index = new Map(manifest.nodes.map((n) => [n.type, n]));
+    nodeIndexes.set(manifest, index);
+  }
+  return index;
+}
+
 /**
  * The accessible name of a "+" (or empty-branch placeholder) inserting at `loc`: after the step
- * before it, else at the top of its branch, else under the trigger.
+ * before it, else at the top of its branch, else under the trigger. Lookups go through indexes
+ * built once per doc and manifest, so labelling every "+" stays linear in the workflow's size.
  */
 export function insertLabel(
   doc: WorkflowDoc,
@@ -58,10 +92,12 @@ export function insertLabel(
   loc: StepLocation,
   labels: FlowkitLabels,
 ): string {
+  const steps = stepIndex(doc);
+  const nodes = nodeIndex(manifest);
   const nameOf = (id: string) => {
-    const step = findStep(doc, id)?.step;
+    const step = steps.get(id);
     if (!step) return id;
-    return step.name ?? manifest.nodes.find((n) => n.type === step.type)?.name ?? step.id;
+    return step.name ?? nodes.get(step.type)?.name ?? step.id;
   };
   if (loc.parentId === null) {
     const before = doc.steps[loc.index - 1];
@@ -69,11 +105,11 @@ export function insertLabel(
       ? labels.addStepAfter(nameOf(before.id))
       : labels.addStepAfterTrigger(doc.steps.length === 0);
   }
-  const parent = findStep(doc, loc.parentId)?.step;
+  const parent = steps.get(loc.parentId);
   if (!parent) return labels.addStepHere;
   const before = parent.branches?.[loc.branch ?? ""]?.[loc.index - 1];
   if (before) return labels.addStepAfter(nameOf(before.id));
-  const m = manifest.nodes.find((n) => n.type === parent.type);
+  const m = nodes.get(parent.type);
   const branch =
     m?.branches.kind === "loop"
       ? labels.eachItem

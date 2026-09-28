@@ -93,18 +93,23 @@ export function stepIndex(doc: WorkflowDoc): Map<string, Step> {
   return idx;
 }
 
-const unreachableIndexes = new WeakMap<WorkflowDoc, Set<string>>();
+const unreachableIndexes = new WeakMap<WorkflowDoc, WeakMap<Manifest, Set<string>>>();
 
 /**
  * IDs of the steps of `doc` that can never run (after a Stop, or after a block whose every branch
- * ends the run), built once per doc snapshot.
+ * ends the run), built once per doc snapshot and manifest (which says which nodes end the run).
  * @internal
  */
 export function unreachableIds(doc: WorkflowDoc, manifest: Manifest): Set<string> {
-  let ids = unreachableIndexes.get(doc);
+  let byManifest = unreachableIndexes.get(doc);
+  if (!byManifest) {
+    byManifest = new WeakMap();
+    unreachableIndexes.set(doc, byManifest);
+  }
+  let ids = byManifest.get(manifest);
   if (!ids) {
     ids = new Set(unreachableSteps(doc, manifest).flatMap((g) => g.stepIds));
-    unreachableIndexes.set(doc, ids);
+    byManifest.set(manifest, ids);
   }
   return ids;
 }
