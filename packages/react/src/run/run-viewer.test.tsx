@@ -200,12 +200,17 @@ describe("RunViewer", () => {
     await waitFor(() => expect(card("load")).toBeTruthy());
   });
 
-  test("a stopped run reads as stopped", async () => {
-    const detail = runDetail("completed", {}, [
-      { ...waitingRun().events[0], seq: 5, type: "run.stopped" } as RunEvent,
-    ]);
-    setup(detail);
+  test("a stopped run reads as stopped, from its stoppedAt (not its events)", async () => {
+    setup(runDetail("completed", {}, [], { stoppedAt: "halt" }));
     expect(await screen.findByText("Stopped")).toBeTruthy();
+    cleanup();
+    // A run.stopped event alone (e.g. a trimmed or partial event list) doesn't decide it.
+    setup(
+      runDetail("completed", {}, [
+        { ...waitingRun().events[0], seq: 5, type: "run.stopped" } as RunEvent,
+      ]),
+    );
+    expect(await screen.findByText("Completed")).toBeTruthy();
   });
 
   test("a run that doesn't exist shows Run not found with the host's action, not Try again", async () => {
@@ -250,12 +255,37 @@ describe("RunViewer", () => {
 describe("RunViewer: stopping inside branches", () => {
   test("a run a Stop ended inside two blocks shows them and the steps before as done", async () => {
     setup(approvalStoppedRun(), { manifest: approvalManifest() });
-    await waitFor(() => expect(card("halt")?.dataset.run).toBe("done"));
+    await waitFor(() => expect(card("halt")?.dataset.run).toBe("stopped"));
+    expect(
+      within(card("halt") as HTMLElement).getAllByText("Stopped the run").length,
+    ).toBeGreaterThan(0);
     expect(card("size")?.dataset.run).toBe("done");
     expect(card("approval")?.dataset.run).toBe("done");
     expect(card("load")?.dataset.run).toBe("done");
     expect(card("after_halt")?.dataset.run).toBe("pending");
     expect(screen.getByText("Stopped")).toBeTruthy();
+  });
+
+  test("a stopped run has a banner naming the Stop step and its reason, and opens it", async () => {
+    setup(approvalStoppedRun(), { manifest: approvalManifest() });
+    const banner = (await screen.findByText(/^Stopped at /)).closest(".fk-banner") as HTMLElement;
+    expect(banner.dataset.tone).toBe("neutral");
+    expect(within(banner).getByText("No")).toBeTruthy();
+    // The Stop step is opened, like a failed or waiting step.
+    const inspector = await screen.findByRole("complementary", { name: "Step details" });
+    await waitFor(() =>
+      expect(within(inspector).getAllByText("Stopped the run").length).toBeGreaterThan(0),
+    );
+    expect(within(banner).getByRole("button", { name: "Show step" })).toBeTruthy();
+  });
+
+  test("a run cancelled while waiting shows the wait as Cancelled", async () => {
+    const detail = approvalWaitingRun();
+    detail.run = { ...detail.run, status: "cancelled" };
+    setup(detail, { manifest: approvalManifest() });
+    await waitFor(() => expect(card("approval")?.dataset.run).toBe("cancelled"));
+    expect(card("size")?.dataset.run).toBe("cancelled");
+    expect(screen.queryByRole("button", { name: "Resume…" })).toBeNull();
   });
 
   test("a block with a waiting child reads as waiting", async () => {

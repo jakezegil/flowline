@@ -3,22 +3,33 @@ import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useFlowkit, useFlowkitAppearance } from "../provider";
 import { themeStyle } from "../theme";
 import { errorText, useNow } from "../ui/primitives";
-import { isTerminal, useRunStateName } from "./run-status";
+import { displayState, isTerminal, useRunStateName } from "./run-status";
 import { useWorkflowNames } from "./use-workflow-names";
 
-const FILTERS: (RunStatus | undefined)[] = [
+/** A filter tab: a run status, or "stopped" (completed by a Stop step). */
+type RunFilter = RunStatus | "stopped";
+
+const FILTERS: (RunFilter | undefined)[] = [
   undefined,
   "running",
   "waiting",
   "failed",
   "completed",
+  "stopped",
   "cancelled",
 ];
+
+/** The `listRuns` filter of a tab: "Completed" leaves out stopped runs, which have their own. */
+function filterOf(tab: RunFilter | undefined): { status?: RunStatus; stopped?: boolean } {
+  if (tab === "stopped") return { status: "completed", stopped: true };
+  if (tab === "completed") return { status: "completed", stopped: false };
+  return tab ? { status: tab } : {};
+}
 
 /** Loads `listRuns` for a filter and reloads it every `pollMs` while mounted. */
 function useRunList(
   workflowId: string | undefined,
-  status: RunStatus | undefined,
+  status: RunFilter | undefined,
   topLevel: boolean,
   pollMs: number,
 ) {
@@ -36,7 +47,7 @@ function useRunList(
       client
         .listRuns({
           ...(workflowId !== undefined ? { workflowId } : {}),
-          ...(status !== undefined ? { status } : {}),
+          ...filterOf(status),
           ...(topLevel ? { topLevel } : {}),
         })
         .then(
@@ -71,7 +82,7 @@ function useRunList(
 /**
  * A compact, live list of runs, newest first: status (a run a Stop step ended reads "Stopped"),
  * when it started, how long it took, what started it, and the workflow version. Filter tabs
- * narrow it by status; it refreshes every `pollMs` (5 seconds by default). Across all workflows
+ * narrow it by status ("Completed" and "Stopped" are separate); it refreshes every `pollMs` (5 seconds by default). Across all workflows
  * it names each run's workflow and leaves out sub-flow runs (see `includeSubflowRuns`). Pair it
  * with `<RunViewer>`. Needs a `<FlowkitProvider>`.
  *
@@ -97,7 +108,7 @@ export function RunList(props: {
   const includeSubflowRuns = props.includeSubflowRuns ?? workflowId !== undefined;
   const { theme, labels } = useFlowkitAppearance();
   const stateName = useRunStateName();
-  const [status, setStatus] = useState<RunStatus | undefined>(undefined);
+  const [status, setStatus] = useState<RunFilter | undefined>(undefined);
   const { runs, error, retry } = useRunList(workflowId, status, !includeSubflowRuns, pollMs);
   const names = useWorkflowNames(
     useMemo(() => runs?.map((r) => r.workflowId) ?? [], [runs]),
@@ -129,7 +140,7 @@ export function RunList(props: {
   } else if (runs.length === 0) {
     body = (
       <div className="fk-runs__state">
-        <p>{status ? labels.noRunsWithStatus(labels.runState[status]) : labels.noRuns}</p>
+        <p>{status ? labels.noRunsWithStatus(stateName(status)) : labels.noRuns}</p>
       </div>
     );
   } else {
@@ -137,8 +148,7 @@ export function RunList(props: {
       <ul className="fk-runs__rows" aria-label={labels.runs}>
         {runs.map((r) => {
           const end = isTerminal(r.status) ? r.updatedAt : now;
-          const state =
-            r.status === "completed" && r.stoppedAt !== undefined ? "stopped" : r.status;
+          const state = displayState(r);
           return (
             <li key={r.id}>
               <button
@@ -193,7 +203,7 @@ export function RunList(props: {
             {...(f ? { "data-status": f } : {})}
             onClick={() => setStatus(f)}
           >
-            {f ? labels.runState[f] : labels.allRuns}
+            {f ? stateName(f) : labels.allRuns}
           </button>
         ))}
       </fieldset>

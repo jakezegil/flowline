@@ -6,18 +6,21 @@
  * - `GET  /manifest` → `Manifest`
  * - `GET  /workflows` → {@link WorkflowSummary}[]
  * - `GET  /workflows/:id` → {@link WorkflowDetail}
- * - `PUT  /workflows/:id` body {@link WorkflowDoc} → {@link WorkflowVersion}
+ * - `PUT  /workflows/:id?create=true` body {@link WorkflowDoc} → {@link WorkflowVersion} (with
+ *   `create=true`, only for a new workflow: 409 `{ code: "workflow_exists" }` otherwise)
  * - `POST /workflows/:id/publish` body {@link PublishRequest} → 2xx (422 `{ issues }` when invalid)
  * - `POST /workflows/validate` body {@link WorkflowDoc} → `Issue[]`
  * - `POST /workflows/:id/test-step` body {@link TestStepRequest} → {@link TestStepResponse}
  * - `POST /workflows/:id/run` body {@link RunWorkflowRequest} → {@link RunStartedResponse}
- * - `GET  /runs?workflowId&status&topLevel&limit` → {@link RunSummary}[] (`topLevel=true` leaves
- *   out sub-flow runs)
+ * - `GET  /runs?workflowId&status&topLevel&stopped&limit` → {@link RunSummary}[] (`topLevel=true`
+ *   leaves out sub-flow runs; `stopped=true|false` keeps only, or leaves out, runs a Stop ended)
  * - `GET  /runs/:id` → {@link RunDetail}
  * - `POST /runs/:id/retry` → {@link RunStartedResponse} (409 when the run is not failed)
  * - `POST /runs/:id/cancel` → 200 cancelled, 202 cancellation requested, 409 `{ error: "finished" }`
  * - `POST /runs/:id/resume?step=<stepPath>` body = callback body → 202 (410 `{ error: "gone" }`
- *   when not waiting on a callback, or, with `step`, not waiting at that step)
+ *   when not waiting on a callback, or, with `step`, not waiting at that step; 409
+ *   `{ code: "resume_host_handled" | "resume_unverifiable" }`; 400 when the body doesn't match
+ *   the node's `resume.body`)
  * - `GET  /runs/:id/stream?after=<seq>` → `text/event-stream` of `event: run`, `id: <seq>`,
  *   `data: <RunEvent JSON>` frames; ends once the run's latest event is
  *   `run.completed|failed|cancelled|stopped` (a retried run's earlier `run.failed` does not end it)
@@ -312,7 +315,9 @@ export interface ApiErrorBody {
   issues?: unknown[];
   /**
    * Machine-readable reason, where one is defined: `"resume_host_handled"` (409 from
-   * `POST /runs/:id/resume` for a step the host app resumes itself).
+   * `POST /runs/:id/resume` for a step the host app resumes itself), `"resume_unverifiable"` (409:
+   * the waiting step's node or version is missing) or `"workflow_exists"` (409 from
+   * `PUT /workflows/:id?create=true`).
    */
   code?: string;
 }

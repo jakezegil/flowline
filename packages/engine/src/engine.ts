@@ -27,6 +27,7 @@ import {
   EngineNotFoundError,
   FlowkitValidationError,
   ResumeHostHandledError,
+  ResumeUnverifiableError,
 } from "./errors";
 import { cancelPatch, createExecutor, TERMINAL } from "./executor";
 import { createHandler } from "./handler";
@@ -140,8 +141,12 @@ export interface Engine {
    * `ctx.resume = { kind: "callback", body }`. Tokens are single use: resolves `"gone"` when the
    * token is unknown, already used, expired, or its run is no longer waiting.
    *
+   * The token is a bearer capability: it resumes the wait even when the node declares
+   * `resume.hostHandled`. Never hand out the token of a step only your app may decide.
+   *
    * @throws {FlowkitValidationError} (rejects, resuming nothing) when the waiting step's node
    * declares `resume.body` and `body` doesn't match it.
+   * @throws {ResumeUnverifiableError} when the waiting step can't be checked.
    */
   resume(token: string, body: unknown): Promise<"resumed" | "gone">;
   /**
@@ -159,6 +164,8 @@ export interface Engine {
    * `body` doesn't match it.
    * @throws {ResumeHostHandledError} with `opts.refuseHostHandled`, when the waiting step's node
    * declares `resume.hostHandled`.
+   * @throws {ResumeUnverifiableError} when the waiting step can't be checked (its version, step
+   * or node type is missing).
    */
   resumeRun(
     tenantId: string,
@@ -255,9 +262,18 @@ export interface Engine {
    * without a slug (`trigger.config.slug`) keeps the previous version's slug, or gets a new random
    * one: its URL is `<basePath>/hooks/<tenantId>/<workflowId>/<slug>`.
    *
+   * With `opts.create`, saves only a workflow that doesn't exist yet (as version 1): an editor
+   * creating a new workflow never overwrites an existing one under the same ID.
+   *
    * @throws {@link FlowkitValidationError} if `doc` is not a structurally valid document.
+   * @throws {@link WorkflowExistsError} with `opts.create`, if the workflow already exists.
    */
-  saveWorkflow(tenantId: string, doc: WorkflowDoc, actor: string): Promise<WorkflowVersion>;
+  saveWorkflow(
+    tenantId: string,
+    doc: WorkflowDoc,
+    actor: string,
+    opts?: { create?: boolean },
+  ): Promise<WorkflowVersion>;
   /**
    * Publish a saved version (after validating it) and audit it (`published`).
    *
@@ -404,12 +420,19 @@ export function createEngine(options: EngineOptions): Engine {
    * `resume.body`.
    */
   const checkResume = async (run: Run, body: unknown, refuseHostHandled: boolean) => {
+    // Fails closed: a wait that can't be traced to its node's declaration isn't resumed.
     const path = run.currentStep;
-    if (path === undefined) return;
+    const unverifiable = (what: string) =>
+      new ResumeUnverifiableError(`Run "${run.id}" can't be resumed: ${what}`);
+    if (path === undefined) throw unverifiable("it has no waiting step");
     const v = await storage.getWorkflowVersion(run.tenantId, run.workflowId, run.version);
+    if (!v) throw unverifiable(`version ${run.version} of "${run.workflowId}" is missing`);
     const stepId = path.slice(path.lastIndexOf("/") + 1);
-    const step = v ? findStep(v.doc, stepId)?.step : undefined;
-    const spec = step ? opts.registry.getNode(step.type)?.resume : undefined;
+    const step = findStep(v.doc, stepId)?.step;
+    if (!step) throw unverifiable(`step "${stepId}" is not in its workflow`);
+    const node = opts.registry.getNode(step.type);
+    if (!node) throw unverifiable(`node type "${step.type}" is not registered`);
+    const spec = node.resume;
     if (!spec) return;
     if (refuseHostHandled && spec.hostHandled) {
       throw new ResumeHostHandledError(

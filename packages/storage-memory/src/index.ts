@@ -211,21 +211,30 @@ export function createMemoryStorage(): StorageAdapter {
     return false;
   };
 
+  const saveVersion = (tenantId: string, doc: WorkflowDoc, actor: string, now: number) => {
+    const key = wfKey(tenantId, doc.id);
+    const list = versions.get(key) ?? [];
+    const version: WorkflowVersion = {
+      workflowId: doc.id,
+      tenantId,
+      version: list.length + 1,
+      doc: clone(doc),
+      createdBy: actor,
+      createdAt: now,
+    };
+    list.push(version);
+    versions.set(key, list);
+    return clone(version);
+  };
+
   return {
-    async saveWorkflowVersion(tenantId: string, doc: WorkflowDoc, actor: string, now: number) {
-      const key = wfKey(tenantId, doc.id);
-      const list = versions.get(key) ?? [];
-      const version: WorkflowVersion = {
-        workflowId: doc.id,
-        tenantId,
-        version: list.length + 1,
-        doc: clone(doc),
-        createdBy: actor,
-        createdAt: now,
-      };
-      list.push(version);
-      versions.set(key, list);
-      return clone(version);
+    async saveWorkflowVersion(tenantId, doc, actor, now) {
+      return saveVersion(tenantId, doc, actor, now);
+    },
+
+    async createWorkflowVersion(tenantId, doc, actor, now) {
+      if ((versions.get(wfKey(tenantId, doc.id))?.length ?? 0) > 0) return null;
+      return saveVersion(tenantId, doc, actor, now);
     },
 
     async getWorkflowVersion(tenantId, workflowId, version) {
@@ -328,7 +337,8 @@ export function createMemoryStorage(): StorageAdapter {
             r.tenantId === tenantId &&
             (f.workflowId === undefined || r.workflowId === f.workflowId) &&
             (f.status === undefined || r.status === f.status) &&
-            (f.topLevel !== true || r.startedBy.kind !== "subflow"),
+            (f.topLevel !== true || r.startedBy.kind !== "subflow") &&
+            (f.stopped === undefined || (stoppedAtOf(r) !== undefined) === f.stopped),
         )
         .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
         .slice(0, limit)

@@ -178,7 +178,10 @@ export interface ResumeSpec {
   body?: JSONSchema;
   /**
    * The wait is decided in the host app (an approvals page, a signed endpoint), not by posting a
-   * raw body: the run viewer shows {@link ResumeSpec.hint} instead of its resume form.
+   * raw body: the run viewer shows {@link ResumeSpec.hint} instead of its resume form, and the
+   * generic `POST /runs/:id/resume` route refuses it (409 `resume_host_handled`). The public
+   * token route still resumes it, since a callback token is a bearer capability: never expose the
+   * token or resume URL of such a step.
    */
   hostHandled?: boolean;
   /** Where or how to resume, shown in the run viewer, e.g. "Approve or reject it in Approvals." */

@@ -1,4 +1,4 @@
-import type { RunEvent, RunStatus } from "@flowkit/core";
+import type { RunStatus, RunSummary } from "@flowkit/core";
 import { Ban, Check, CircleStop, Clock, LoaderCircle, X } from "lucide-react";
 import type { JSX } from "react";
 import { useFlowkitAppearance } from "../provider";
@@ -11,15 +11,17 @@ export function isTerminal(status: RunStatus): boolean {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 
-/** The display state of a run with these events. */
+/**
+ * The display state of a run (a summary or a run detail's `run`): "stopped" when a Stop step
+ * ended it (`stoppedAt`, the same derivation for RunList and RunViewer).
+ */
 export function displayState(
-  status: RunStatus,
-  events: RunEvent[] | undefined,
+  run: Pick<RunSummary, "status" | "stoppedAt">,
   cancelling = false,
 ): RunDisplayState {
-  if (cancelling && !isTerminal(status)) return "cancelling";
-  if (status === "completed" && events?.some((e) => e.type === "run.stopped")) return "stopped";
-  return status;
+  if (cancelling && !isTerminal(run.status)) return "cancelling";
+  if (run.status === "completed" && run.stoppedAt !== undefined) return "stopped";
+  return run.status;
 }
 
 const ICON = {

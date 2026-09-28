@@ -1,5 +1,5 @@
 import type { WorkflowDetail, WorkflowDoc } from "@flowkit/core";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { httpError, mockClient, setupDom } from "../../test/dom";
@@ -49,8 +49,24 @@ describe("WorkflowEditor: missing and new workflows", () => {
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 
-  test("the default action, Create this workflow, opens a blank draft with that ID", async () => {
-    const { client } = setup(null);
+  test("by default it offers Go back (to the previous page), not Create", async () => {
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const length = vi.spyOn(window.history, "length", "get").mockReturnValue(3);
+    setup(null);
+    fireEvent.click(await screen.findByRole("button", { name: "Go back" }));
+    expect(back).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Create this workflow" })).toBeNull();
+    cleanup();
+    // Nowhere to go back to: no action.
+    length.mockReturnValue(1);
+    setup(null);
+    expect(await screen.findByText("Workflow not found")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+    vi.restoreAllMocks();
+  });
+
+  test('notFoundAction="create" offers Create this workflow: a blank draft under that ID', async () => {
+    const { client } = setup(null, { notFoundAction: "create" });
     fireEvent.click(await screen.findByRole("button", { name: "Create this workflow" }));
     const name = (await nameField()) as HTMLInputElement;
     expect(name.value).toBe("Untitled workflow");
@@ -60,7 +76,27 @@ describe("WorkflowEditor: missing and new workflows", () => {
     client.saveWorkflow.mockImplementation(async (doc: WorkflowDoc) => detail(doc).latest);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText("Draft · v2");
-    expect(client.saveWorkflow).toHaveBeenCalledWith(expect.objectContaining({ id: "leads" }));
+    // The first save creates it (only if the ID is still free).
+    expect(client.saveWorkflow).toHaveBeenCalledWith(expect.objectContaining({ id: "leads" }), {
+      create: true,
+    });
+    // Later saves are ordinary new versions.
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(client.saveWorkflow).toHaveBeenCalledTimes(2));
+    expect(client.saveWorkflow).toHaveBeenLastCalledWith(expect.objectContaining({ id: "leads" }));
+  });
+
+  test("create mode never overwrites a workflow that exists: the save fails with a conflict", async () => {
+    const { client } = setup(null, { create: true });
+    await nameField();
+    client.saveWorkflow.mockRejectedValue(
+      httpError(409, { error: 'Workflow "leads" already exists', code: "workflow_exists" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/Couldn't save\..*already exists/)).toBeTruthy();
+    expect(client.saveWorkflow).toHaveBeenCalledWith(expect.anything(), { create: true });
+    // Still an unsaved draft: nothing was written.
+    expect(screen.getByText("Draft")).toBeTruthy();
   });
 
   test("the host's action replaces it; null offers none", async () => {

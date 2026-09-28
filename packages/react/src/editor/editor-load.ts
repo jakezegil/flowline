@@ -12,6 +12,7 @@ import type { FlowkitLabels } from "../labels";
 import { useFlowkit, useFlowkitAppearance } from "../provider";
 import { defaultConfig } from "../store/commands";
 import { createEditorStore, type EditorStore } from "../store/editor-store";
+import type { NotFoundAction } from "../ui/not-found";
 import { errorText, httpStatus } from "../ui/primitives";
 
 /** A new workflow: a manual trigger (else the first trigger in the manifest) and no steps. */
@@ -94,4 +95,23 @@ export function useEditorLoad(
     retry: () => setAttempt((n) => n + 1),
     startNew: () => setCreatedId(workflowId),
   };
+}
+
+/** `WorkflowEditor`'s `notFoundAction`: the host's action, `"create"`, or `null` for none. */
+export type EditorNotFoundAction = NotFoundAction | "create" | null | undefined;
+
+/**
+ * The button of the editor's not-found state. By default "Go back" (to the browser's previous
+ * page, when there is one): a mistyped link must not be one click away from creating a workflow
+ * under the typo. `"create"` opts into "Create this workflow" (`startNew`).
+ */
+export function notFoundActionFor(
+  action: EditorNotFoundAction,
+  labels: FlowkitLabels,
+  startNew: () => void,
+): NotFoundAction | null {
+  if (action === "create") return { label: labels.createWorkflow, onClick: startNew };
+  if (action !== undefined) return action;
+  if (typeof window === "undefined" || window.history.length <= 1) return null;
+  return { label: labels.goBack, onClick: () => window.history.back() };
 }

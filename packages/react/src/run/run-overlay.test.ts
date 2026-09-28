@@ -6,6 +6,7 @@ import {
   approvalWaitingRun,
   ev,
   failedLoopRun,
+  loopStoppedRun,
   runDetail,
   waitingRun,
 } from "../../test/run-fixtures";
@@ -135,7 +136,9 @@ describe("runs that stop or wait inside nested blocks", () => {
     // Both blocks ran and chose a branch; the Stop inside them ended the run.
     expect(o.stepStatus.size).toEqual({ status: "done", durationMs: 3000, attempts: 1 });
     expect(o.stepStatus.approval).toEqual({ status: "done", durationMs: 2900, attempts: 1 });
-    expect(o.stepStatus.halt?.status).toBe("done");
+    // The Stop step itself reads as having stopped the run.
+    expect(o.stepStatus.halt).toEqual({ status: "stopped", attempts: 1 });
+    expect(resolveRun(approvalStoppedRun(), approvalManifest(), {}).focusStepId).toBe("halt");
     // What came after the Stop never ran; the untaken branches are dimmed.
     expect(o.stepStatus.after_halt?.status).toBe("pending");
     expect(o.stepStatus.last?.status).toBe("pending");
@@ -153,10 +156,34 @@ describe("runs that stop or wait inside nested blocks", () => {
     expect(resolveRun(approvalWaitingRun(), approvalManifest(), {}).focusStepId).toBe("approval");
   });
 
-  test("a cancelled run doesn't mark its unfinished blocks done", () => {
+  test("a run cancelled while waiting: the wait and its blocks read Cancelled, not Waiting", () => {
     const detail = { ...approvalWaitingRun() };
     detail.run = { ...detail.run, status: "cancelled" };
-    expect(buildRunOverlay(detail, approvalManifest(), {}).stepStatus.size?.status).toBe("pending");
+    const o = buildRunOverlay(detail, approvalManifest(), {});
+    expect(o.stepStatus.approval?.status).toBe("cancelled");
+    expect(o.stepStatus.size?.status).toBe("cancelled");
+    expect(o.stepStatus.last?.status).toBe("pending");
+    expect(resolveRun(detail, approvalManifest(), {}).focusStepId).toBeUndefined();
+  });
+
+  test("a failed run's leftover wait isn't shown as waiting either", () => {
+    const detail = { ...approvalWaitingRun() };
+    detail.run = { ...detail.run, status: "failed" };
+    expect(buildRunOverlay(detail, approvalManifest(), {}).stepStatus.approval?.status).toBe(
+      "pending",
+    );
+  });
+
+  test("a Stop inside a forEach body: the loop is done and counts only the iterations reached", () => {
+    const o = buildRunOverlay(loopStoppedRun(), manifest, {});
+    expect(o.stepStatus.each?.status).toBe("done");
+    expect(o.stepStatus.tag?.status).toBe("stopped");
+    expect(o.loopIteration.each).toMatchObject({ index: 0, count: 1 });
+    expect(o.stepStatus.off?.status).toBe("skipped");
+    // A choice beyond what ran is clamped to the iterations reached.
+    expect(buildRunOverlay(loopStoppedRun(), manifest, { each: 2 }).loopIteration.each?.index).toBe(
+      0,
+    );
   });
 });
 

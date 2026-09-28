@@ -179,6 +179,20 @@ export function stoppedAtOf(run: Pick<Run, "status" | "output" | "journal">): st
 /** An event to append; storage assigns `id` and `seq`. */
 export type NewRunEvent = Omit<RunEvent, "id" | "seq">;
 
+/** Filter of {@link StorageAdapter.listRuns}. */
+export interface ListRunsFilter {
+  /** Only runs of this workflow. */
+  workflowId?: string;
+  /** Only runs in this state. */
+  status?: RunStatus;
+  /** Leave out sub-flow runs. */
+  topLevel?: boolean;
+  /** `true`: only runs a Stop step ended; `false`: leave those out. */
+  stopped?: boolean;
+  /** At most this many rows (default 50). */
+  limit?: number;
+}
+
 /**
  * The event appended atomically with a resume ({@link StorageAdapter.resumeByToken},
  * {@link StorageAdapter.resumeRun}). Storage completes it with the resumed run's `runId` and
@@ -232,6 +246,18 @@ export interface StorageAdapter {
     actor: string,
     now: number,
   ): Promise<WorkflowVersion>;
+
+  /**
+   * Like {@link StorageAdapter.saveWorkflowVersion}, but only for a workflow that has no version
+   * yet: saves `doc` as version 1, or returns `null` (writing nothing) when the workflow exists.
+   * Of concurrent calls for one workflow, exactly one creates it.
+   */
+  createWorkflowVersion(
+    tenantId: string,
+    doc: WorkflowDoc,
+    actor: string,
+    now: number,
+  ): Promise<WorkflowVersion | null>;
 
   /** A specific version, or `null` if it does not exist. */
   getWorkflowVersion(
@@ -301,13 +327,11 @@ export interface StorageAdapter {
   /**
    * Summaries of the tenant's runs, newest first (`createdAt` descending, then `id` descending),
    * optionally filtered by workflow and/or status, at most `limit` rows (default 50). `topLevel`
-   * leaves out sub-flow runs (`startedBy.kind === "subflow"`). A summary carries `stoppedAt` when
-   * {@link stoppedAtOf} gives one.
+   * leaves out sub-flow runs (`startedBy.kind === "subflow"`). `stopped: true` keeps only runs a
+   * Stop step ended ({@link stoppedAtOf}), `stopped: false` leaves them out. A summary carries
+   * `stoppedAt` when {@link stoppedAtOf} gives one. Filters apply before `limit`.
    */
-  listRuns(
-    tenantId: string,
-    f: { workflowId?: string; status?: RunStatus; topLevel?: boolean; limit?: number },
-  ): Promise<RunSummary[]>;
+  listRuns(tenantId: string, f: ListRunsFilter): Promise<RunSummary[]>;
 
   /**
    * Atomically lease one runnable run (across all tenants), or return `null` if none is eligible.

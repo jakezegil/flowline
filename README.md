@@ -354,6 +354,10 @@ export const requestApproval = defineNode({
   from an approvals page: `POST <basePath>/runs/:id/resume` answers 409 with
   `code: "resume_host_handled"`, and the viewer shows the hint instead of Resume…. Your own code
   still resumes it with `engine.resumeRun` (only the generic route passes `refuseHostHandled`).
+  The public token route (`POST <basePath>/resume/:token`, `engine.resume`) resumes it too: a
+  callback token is a bearer capability, so never expose the token or `resumeUrl` of a
+  host-handled step. A resume the engine can't check (the pinned version, the step or its node
+  type is missing) is refused with 409 `resume_unverifiable`.
   Hosts can also hide or replace the viewer's action with `<RunViewer resumeAction={…}>`.
 - `core.waitForCallback` has an optional `notify: { url }`. Once the wait is committed, the engine
   POSTs `{ resumeUrl, expiresAt, runId }` to that URL, with redirects refused.

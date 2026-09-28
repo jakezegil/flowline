@@ -209,6 +209,9 @@
     border-color: var(--fk-border-strong);
     box-shadow: none;
   }
+  .fk-card[data-run="cancelled"] {
+    opacity: 0.8;
+  }
   .fk-card[data-run="failed"] {
     border-color: color-mix(in srgb, var(--fk-danger) 60%, var(--fk-border));
   }
@@ -1716,6 +1719,9 @@
   .fk-banner[data-tone="warning"] {
     --fk-tone: var(--fk-warning);
   }
+  .fk-banner[data-tone="neutral"] {
+    --fk-tone: var(--fk-text-muted);
+  }
   .fk-banner__icon {
     display: flex;
     flex: none;
@@ -2159,9 +2165,16 @@
     border-width: 0 0 1px;
     flex: none;
     gap: 4px;
-    flex-wrap: wrap;
+    /* One row that scrolls sideways when narrow, instead of wrapping onto two. */
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
     padding: 10px 10px 8px;
     border-bottom: 1px solid var(--fk-border);
+  }
+  .fk-runs__filters::-webkit-scrollbar {
+    display: none;
   }
   .fk-runs__filter {
     flex: none;

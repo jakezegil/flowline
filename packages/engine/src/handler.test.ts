@@ -318,6 +318,25 @@ describe("workflow management", () => {
     expect(detail).toMatchObject({ latest: { version: 1 }, published: null });
   });
 
+  it("with ?create=true saves only a workflow that doesn't exist yet (409 workflow_exists)", async () => {
+    const created = await call("PUT", "/workflows/wf?create=true", { body: manualDoc("wf") });
+    expect(created.status).toBe(200);
+    expect(await created.json()).toMatchObject({ version: 1 });
+    const again = await call("PUT", "/workflows/wf?create=true", {
+      body: { ...manualDoc("wf"), name: "Blank" },
+    });
+    expect(again.status).toBe(409);
+    expect(await again.json()).toMatchObject({ code: "workflow_exists" });
+    expect((await storage.getLatestVersion("a", "wf"))?.version).toBe(1);
+    // Without it, a save is the next version as before.
+    expect(
+      await json<{ version: number }>(call("PUT", "/workflows/wf", { body: manualDoc("wf") })),
+    ).toMatchObject({ version: 2 });
+    expect(
+      (await call("PUT", "/workflows/wf?create=maybe", { body: manualDoc("wf") })).status,
+    ).toBe(400);
+  });
+
   it("rejects a save whose body id differs from the URL", async () => {
     const res = await call("PUT", "/workflows/other", { body: manualDoc("wf") });
     expect(res.status).toBe(400);
@@ -472,6 +491,11 @@ describe("runs", () => {
     await call("GET", "/runs?topLevel=false");
     expect(listRuns).toHaveBeenLastCalledWith("a", {});
     expect((await call("GET", "/runs?topLevel=yes")).status).toBe(400);
+    await call("GET", "/runs?status=completed&stopped=false");
+    expect(listRuns).toHaveBeenLastCalledWith("a", { status: "completed", stopped: false });
+    await call("GET", "/runs?stopped=true");
+    expect(listRuns).toHaveBeenLastCalledWith("a", { stopped: true });
+    expect((await call("GET", "/runs?stopped=1")).status).toBe(400);
   });
 
   it("returns run detail without the callback token and with sensitive values masked", async () => {

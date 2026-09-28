@@ -66,3 +66,26 @@ export class ResumeHostHandledError extends Error {
   /** Machine-readable code, also sent by the HTTP handler. */
   readonly code = "resume_host_handled";
 }
+
+/**
+ * A resume was refused because the engine could not check it against the waiting step's
+ * declaration: the run's pinned version, the waiting step or its node type is missing. The check
+ * fails closed. The HTTP handler answers 409 with `code: "resume_unverifiable"`.
+ */
+export class ResumeUnverifiableError extends Error {
+  /** Error name, for `instanceof`-free checks across package copies. */
+  override readonly name: string = "ResumeUnverifiableError";
+  /** Machine-readable code, also sent by the HTTP handler. */
+  readonly code = "resume_unverifiable";
+}
+
+/**
+ * `saveWorkflow` with `create` found that the workflow already exists; nothing was saved. The
+ * HTTP handler answers 409 with `code: "workflow_exists"`.
+ */
+export class WorkflowExistsError extends Error {
+  /** Error name, for `instanceof`-free checks across package copies. */
+  override readonly name: string = "WorkflowExistsError";
+  /** Machine-readable code, also sent by the HTTP handler. */
+  readonly code = "workflow_exists";
+}

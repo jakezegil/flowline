@@ -30,10 +30,15 @@ import {
 import type { z } from "zod";
 import { createNodeContext } from "./context";
 import type { EngineCore } from "./engine";
-import { EngineNotFoundError, FlowkitValidationError, RetryableError } from "./errors";
+import {
+  EngineNotFoundError,
+  FlowkitValidationError,
+  RetryableError,
+  WorkflowExistsError,
+} from "./errors";
 import { createGuardedFetch, type GuardedFetch } from "./http";
 import { redactBySchema } from "./redact";
-import type { Run } from "./storage";
+import { type Run, stoppedAtOf } from "./storage";
 import { DEFAULT_BASE_PATH, errorMessage, isPlainObject } from "./util";
 
 const WORKFLOW_ID = /^[a-z0-9][a-z0-9-_]*$/;
@@ -88,7 +93,12 @@ function newSlug(): string {
 
 /** @internal The editor-facing API of an engine. */
 export interface Workflows {
-  saveWorkflow(tenantId: string, doc: WorkflowDoc, actor: string): Promise<WorkflowVersion>;
+  saveWorkflow(
+    tenantId: string,
+    doc: WorkflowDoc,
+    actor: string,
+    opts?: { create?: boolean },
+  ): Promise<WorkflowVersion>;
   publish(tenantId: string, workflowId: string, version: number, actor: string): Promise<void>;
   validate(tenantId: string, doc: WorkflowDoc): Promise<Issue[]>;
   listSubflows(tenantId: string): Promise<SubflowInfo[]>;
@@ -176,6 +186,8 @@ export function createWorkflows(core: EngineCore): Workflows {
     if (run.output !== undefined) view.output = run.output;
     if (run.wakeAt !== undefined) view.wakeAt = run.wakeAt;
     if (run.parent !== undefined) view.parent = run.parent;
+    const stoppedAt = stoppedAtOf(run);
+    if (stoppedAt !== undefined) view.stoppedAt = stoppedAt;
     return view;
   };
 
@@ -183,7 +195,7 @@ export function createWorkflows(core: EngineCore): Workflows {
     listSubflows,
     validate,
 
-    async saveWorkflow(tenantId, doc, actor) {
+    async saveWorkflow(tenantId, doc, actor, opts = {}) {
       const problem = docShapeProblem(doc);
       if (problem) throw new FlowkitValidationError(problem, []);
       let saved = doc;
@@ -197,7 +209,10 @@ export function createWorkflows(core: EngineCore): Workflows {
         }
       }
       const now = clock();
-      const v = await storage.saveWorkflowVersion(tenantId, saved, actor, now);
+      const v = opts.create
+        ? await storage.createWorkflowVersion(tenantId, saved, actor, now)
+        : await storage.saveWorkflowVersion(tenantId, saved, actor, now);
+      if (!v) throw new WorkflowExistsError(`Workflow "${doc.id}" already exists`);
       await storage.appendWorkflowAudit({
         tenantId,
         workflowId: v.workflowId,

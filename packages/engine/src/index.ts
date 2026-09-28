@@ -13,11 +13,14 @@ export {
   FlowkitStorageError,
   FlowkitValidationError,
   ResumeHostHandledError,
+  ResumeUnverifiableError,
   RetryableError,
+  WorkflowExistsError,
 } from "./errors";
 export { buildScope, type Frame, type NextAction, nextAction } from "./interpreter";
 export {
   type Lease,
+  type ListRunsFilter,
   type NewRun,
   type NewRunEvent,
   type ResumeEvent,

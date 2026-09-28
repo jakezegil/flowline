@@ -263,8 +263,34 @@ export function approvalStoppedRun(): RunDetail {
         "size/if/approval/rejected/halt": done(4100, 4200, { stopped: true, reason: "No" }),
       },
       [ev("run.started"), ev("run.stopped", "size/if/approval/rejected/halt")],
-      { output: { stoppedAt: "size/if/approval/rejected/halt", reason: "No" } },
+      {
+        output: { stoppedAt: "size/if/approval/rejected/halt", reason: "No" },
+        stoppedAt: "size/if/approval/rejected/halt",
+      },
     ),
     doc: approvalDoc(),
   };
+}
+
+/** A Stop ended the run in the first iteration of {@link runDoc}'s loop (of three items). */
+export function loopStoppedRun(): RunDetail {
+  return runDetail(
+    "completed",
+    {
+      load: done(1000, 1182, { id: "c1", tags: ["x", "y", "z"] }),
+      cond: done(1200, 1204, { matched: true }, { branch: "if" }),
+      "cond/if/email": done(1210, 1500, { messageId: "m1" }),
+      each: {
+        status: "looping",
+        items: ["x", "y", "z"],
+        results: [],
+        startedAt: 1600,
+        at: 1601,
+        attempts: 1,
+      },
+      "each/body[0]/tag": done(1610, 1700, { stopped: true, reason: "Enough" }),
+    },
+    [ev("run.started"), ev("run.stopped", "each/body[0]/tag")],
+    { output: { stoppedAt: "each/body[0]/tag", reason: "Enough" }, stoppedAt: "each/body[0]/tag" },
+  );
 }

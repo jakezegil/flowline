@@ -1,7 +1,7 @@
 import type { Manifest, NodeManifest, RunDetail } from "@flowkit/core";
 import * as Popover from "@radix-ui/react-popover";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { CircleAlert, Hourglass, LoaderCircle, RotateCcw } from "lucide-react";
+import { CircleAlert, CircleStop, Hourglass, LoaderCircle, RotateCcw } from "lucide-react";
 import {
   type JSX,
   type ReactNode,
@@ -137,7 +137,7 @@ function RunBody({
   useEffect(() => {
     if (terminal) setCancelling(false);
   }, [terminal]);
-  const state = displayState(run.status, detail.events, cancelling);
+  const state = displayState(run, cancelling);
   const now = useNow(1000, !terminal);
   const waitingPath = callbackStep(detail);
 
@@ -198,6 +198,16 @@ function RunBody({
     return m && count ? labels.iterationOf(Number(m[1]) + 1, count) : undefined;
   })();
   const waitingStep = waitingPath ? stepIdOfEntry(waitingPath) : undefined;
+  const stoppedStep =
+    state === "stopped" && run.stoppedAt ? stepIdOfEntry(run.stoppedAt) : undefined;
+  /** The Stop step's reason, from its journal entry (or the run output). */
+  const stopReason = (() => {
+    if (!run.stoppedAt) return undefined;
+    const out = (run.journal[run.stoppedAt] as { output?: { reason?: unknown } } | undefined)
+      ?.output;
+    const reason = out?.reason ?? (run.output as { reason?: unknown } | undefined)?.reason;
+    return typeof reason === "string" && reason !== "" ? reason : undefined;
+  })();
   const pending = waitingPath ? detail.run.journal[waitingPath] : undefined;
   const expiresAt = pending?.status === "suspended" ? pending.pending?.expiresAt : undefined;
   const waitingType = waitingStep ? stepIndex(detail.doc).get(waitingStep)?.type : undefined;
@@ -294,6 +304,16 @@ function RunBody({
           {...(failedStep
             ? { action: { label: labels.showStep, run: () => store.getState().select(failedStep) } }
             : {})}
+        />
+      )}
+      {stoppedStep && (
+        <Banner
+          redundant={selection === stoppedStep}
+          tone="neutral"
+          icon={<CircleStop size={16} aria-hidden />}
+          title={labels.stoppedAt(nameOf(stoppedStep))}
+          {...(stopReason ? { detail: stopReason } : {})}
+          action={{ label: labels.showStep, run: () => store.getState().select(stoppedStep) }}
         />
       )}
       {waitingStep && !cancelling && (
@@ -426,7 +446,7 @@ function Banner({
 }: {
   /** Hidden on narrow screens, where the inspector repeats it. */
   redundant?: boolean;
-  tone: "danger" | "warning";
+  tone: "danger" | "warning" | "neutral";
   icon: ReactNode;
   title: string;
   detail?: string;

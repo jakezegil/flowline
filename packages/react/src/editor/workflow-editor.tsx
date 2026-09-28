@@ -8,9 +8,9 @@ import { EditorContext, useEditorStore, useStep } from "../hooks";
 import { useFlowkitAppearance } from "../provider";
 import { type EditorStore, TRIGGER_KEY } from "../store/editor-store";
 import { themeStyle } from "../theme";
-import { type NotFoundAction, NotFoundState } from "../ui/not-found";
+import { NotFoundState } from "../ui/not-found";
 import { ToasterProvider } from "../ui/toaster";
-import { useEditorLoad } from "./editor-load";
+import { type EditorNotFoundAction, notFoundActionFor, useEditorLoad } from "./editor-load";
 import { EditorHeader } from "./header";
 
 export { blankDoc } from "./editor-load";
@@ -107,7 +107,8 @@ function EditorBody({
  * Loads the manifest, callable sub-flows and the workflow by ID. A workflow that doesn't exist
  * starts from `initialDoc` if given, else shows "Workflow not found" with `notFoundAction`. Pass
  * `create` for a new workflow: it isn't fetched, starts from `initialDoc` (or a blank manual
- * workflow) and is created by its first save.
+ * workflow) and is created by its first save, which never overwrites an existing workflow (it
+ * fails with "already exists" instead).
  *
  * @example
  * <div style={{ height: "100vh" }}>
@@ -124,15 +125,17 @@ export function WorkflowEditor(props: {
   initialDoc?: WorkflowDoc;
   /**
    * A new workflow: don't load it (no request for an ID that isn't there yet), start a draft
-   * from `initialDoc` or a blank manual workflow. The first save creates it.
+   * from `initialDoc` or a blank manual workflow. The first save creates it, only if the ID is
+   * still free: it never overwrites an existing workflow.
    */
   create?: boolean;
   /**
-   * The action offered when the workflow doesn't exist (and there is no `initialDoc`), e.g.
-   * back to your list. By default "Create this workflow", which opens a new draft with this ID;
-   * `null` offers none.
+   * The action offered when the workflow doesn't exist (and there is no `initialDoc`): your own
+   * (e.g. back to your list), `"create"` for "Create this workflow" (a new draft under this ID;
+   * only where a mistyped ID can't be the cause), or `null` for none. By default "Go back" (the
+   * browser's previous page), when there is one.
    */
-  notFoundAction?: NotFoundAction | null;
+  notFoundAction?: EditorNotFoundAction;
   /** Called after a successful publish with the published version. */
   onPublish?(version: number): void;
   /** Called after every successful save with the new version. */
@@ -172,11 +175,7 @@ export function WorkflowEditor(props: {
       <NotFoundState
         title={labels.workflowNotFound}
         detail={labels.workflowNotFoundDetail(workflowId)}
-        action={
-          props.notFoundAction === undefined
-            ? { label: labels.createWorkflow, onClick: startNew }
-            : props.notFoundAction
-        }
+        action={notFoundActionFor(props.notFoundAction, labels, startNew)}
       />
     );
   } else if (state.status === "error") {

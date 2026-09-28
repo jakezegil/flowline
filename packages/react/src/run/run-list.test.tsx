@@ -213,3 +213,41 @@ describe("RunList", () => {
     ).toBeTruthy();
   });
 });
+
+describe("RunList: stopped runs and narrow widths", () => {
+  it("has a Stopped filter, and Completed leaves stopped runs out", async () => {
+    const client = mockClient({ listRuns: vi.fn(async () => []) });
+    render(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} />
+      </FlowkitProvider>,
+    );
+    await screen.findByText(/No runs yet/);
+    fireEvent.click(screen.getByRole("button", { name: "Stopped" }));
+    await waitFor(() =>
+      expect(client.listRuns).toHaveBeenLastCalledWith({
+        status: "completed",
+        stopped: true,
+        topLevel: true,
+      }),
+    );
+    expect(await screen.findByText("No stopped runs.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Completed" }));
+    await waitFor(() =>
+      expect(client.listRuns).toHaveBeenLastCalledWith({
+        status: "completed",
+        stopped: false,
+        topLevel: true,
+      }),
+    );
+  });
+
+  it("keeps the filter chips on one row that scrolls sideways", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const css = readFileSync(resolve(__dirname, "../styles.css"), "utf8");
+    const rule = /\.fk-runs__filters \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/flex-wrap: nowrap/);
+    expect(rule).toMatch(/overflow-x: auto/);
+  });
+});

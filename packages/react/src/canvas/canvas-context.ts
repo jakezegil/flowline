@@ -16,7 +16,19 @@ import { notifyHost } from "../ui/toaster";
 
 /** Per-step run state shown on the canvas in run mode. */
 export interface RunStepStatus {
-  status: "done" | "failed" | "running" | "waiting" | "skipped" | "pending";
+  /**
+   * `stopped`: the Stop step that ended the run. `cancelled`: the run was cancelled while this
+   * step (or a step inside this block) was waiting.
+   */
+  status:
+    | "done"
+    | "failed"
+    | "running"
+    | "waiting"
+    | "skipped"
+    | "pending"
+    | "stopped"
+    | "cancelled";
   durationMs?: number;
   attempts?: number;
 }

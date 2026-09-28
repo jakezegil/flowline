@@ -585,6 +585,31 @@ describe("executor: branches and loops", () => {
     expect(types).not.toContain("run.completed");
   });
 
+  it("stops the run from inside a forEach body", async () => {
+    const id = await startRun(
+      wf([
+        step(
+          "each",
+          "test.forEach",
+          { items: { $ref: "trigger.list" } },
+          { branches: { body: [step("halt", "test.stop", { reason: "first item" })] } },
+        ),
+        step("after", "test.echo"),
+      ]),
+      { list: ["a", "b", "c"] },
+    );
+    await makeEngine().drain();
+    const run = await getRun(id);
+    expect(run.status).toBe("completed");
+    expect(stoppedAtOf(run)).toBe("each/body[0]/halt");
+    expect(run.journal.each?.status).toBe("looping");
+    expect(run.journal["each/body[1]/halt"]).toBeUndefined();
+    expect(run.journal.after).toBeUndefined();
+    // The run detail says where it stopped, like the run summaries.
+    const detail = await makeEngine().getRunDetail(TENANT, id);
+    expect(detail?.run.stoppedAt).toBe("each/body[0]/halt");
+  });
+
   it("skips disabled steps and continues", async () => {
     const id = await startRun(
       wf([step("a", "test.echo", {}, { disabled: true }), step("b", "test.echo")]),

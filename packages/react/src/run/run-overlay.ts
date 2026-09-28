@@ -19,8 +19,8 @@ export interface ResolvedRun {
   /** Journal path of every step at the chosen iterations (also for steps that never ran). */
   paths: Record<string, string>;
   /**
-   * The step worth opening first: the one that failed the run, else the one it's waiting on.
-   * `undefined` when neither applies.
+   * The step worth opening first: the one that failed the run, the one it's waiting on, or the
+   * Stop step that ended it. `undefined` when none applies.
    */
   focusStepId?: string;
 }
@@ -124,6 +124,7 @@ export function resolveRun(
     }
     switch (e.status) {
       case "done":
+        if (path === run.stoppedAt) return { status: "stopped", attempts: e.attempts };
         return { status: "done", durationMs: e.at - e.startedAt, attempts: e.attempts };
       case "failed":
         // A failed entry of a live run is waiting for its next attempt.
@@ -131,6 +132,9 @@ export function resolveRun(
           ? { status: "running", attempts: e.attempts }
           : { status: "failed", durationMs: e.at - e.startedAt, attempts: e.attempts };
       case "suspended":
+        // The journal keeps the wait after a cancel (or any other end): it isn't waiting now.
+        if (run.status === "cancelled") return { status: "cancelled", attempts: e.attempts };
+        if (!runActive) return { status: "pending", attempts: e.attempts };
         return { status: "waiting", attempts: e.attempts };
       case "skipped":
         return { status: "skipped" };
@@ -140,6 +144,9 @@ export function resolveRun(
         if (worst === "failed" && !runActive) return { status: "failed", attempts: e.attempts };
         if (worst === "waiting" && run.status === "waiting") {
           return { status: "waiting", attempts: e.attempts };
+        }
+        if (worst === "waiting" && run.status === "cancelled") {
+          return { status: "cancelled", attempts: e.attempts };
         }
         if (runActive) return { status: "running", attempts: e.attempts };
         // A completed run left it unfinished: a Stop step inside it ended the run. The block
@@ -175,6 +182,8 @@ export function resolveRun(
       lastReached = Math.max(lastReached, i);
       if (journal[k]?.status === "failed") failed.add(i);
     }
+    // A Stop inside the body ended the run mid-loop: only the iterations it reached count.
+    if (e?.status === "looping" && run.status === "completed") count = lastReached + 1;
     count = Math.max(count, lastReached + 1);
     const failedIndices = [...failed].sort((a, b) => a - b);
     const fallback = failedIndices[0] ?? (lastReached >= 0 ? lastReached : count - 1);
@@ -240,6 +249,8 @@ export function resolveRun(
       idAt(keys.find((k) => journal[k]?.status === "failed" && !isBlock(k)));
   } else if (run.status === "waiting") {
     focusStepId = idAt(keys.find((k) => journal[k]?.status === "suspended"));
+  } else if (run.status === "completed" && run.stoppedAt !== undefined) {
+    focusStepId = idAt(run.stoppedAt);
   }
 
   const overlay: RunOverlay = { stepStatus, takenEdges, loopIteration, dimmedSteps };

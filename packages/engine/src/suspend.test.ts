@@ -17,6 +17,7 @@ import {
   FatalError,
   FlowkitValidationError,
   ResumeHostHandledError,
+  ResumeUnverifiableError,
   RetryableError,
 } from "./errors";
 import { createExecutor } from "./executor";
@@ -482,6 +483,39 @@ describe("resume declarations", () => {
     expect(await engine.resume("unknown", null)).toBe("gone");
     now += 20_000;
     expect(await engine.resume((await getRun(id)).callbackToken as string, null)).toBe("gone");
+  });
+
+  it("fails closed when the waiting step can't be checked", async () => {
+    const id = await startRun(wf([approve("a")]));
+    await makeEngine().drain();
+    const { callbackToken } = await getRun(id);
+    const token = callbackToken as string;
+
+    // The node type is no longer registered.
+    const bare = createEngine({ registry: createRegistry([]), storage, clock });
+    await expect(bare.resumeRun(TENANT, id, { ok: true }, "u1")).rejects.toThrow(
+      ResumeUnverifiableError,
+    );
+    await expect(bare.resume(token, { ok: true })).rejects.toMatchObject({
+      code: "resume_unverifiable",
+    });
+
+    // The pinned version, or the step in it, is missing.
+    const engine = makeEngine();
+    const real = storage.getWorkflowVersion.bind(storage);
+    storage.getWorkflowVersion = async () => null;
+    await expect(engine.resume(token, { ok: true })).rejects.toThrow(/version 1 of "wf"/);
+    storage.getWorkflowVersion = async (...args) => {
+      const v = await real(...args);
+      return v && { ...v, doc: { ...v.doc, steps: [] } };
+    };
+    await expect(engine.resumeRun(TENANT, id, { ok: true }, "u1")).rejects.toThrow(
+      /step "a" is not in its workflow/,
+    );
+    storage.getWorkflowVersion = real;
+
+    expect((await getRun(id)).status).toBe("waiting");
+    expect(await engine.resume(token, { ok: true })).toBe("resumed");
   });
 
   it("nodes without a declaration take any body", async () => {

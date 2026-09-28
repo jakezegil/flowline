@@ -120,10 +120,14 @@ export function EditorHeader({
    * saves as the first half of Publish: silently, leaving the "publish" busy state in place.
    */
   const save = async (inPublish = false): Promise<number | null> => {
-    const doc = store.getState().doc;
+    const { doc, savedVersion } = store.getState();
     if (!inPublish) setBusy("save");
     try {
-      const v = await client.saveWorkflow(doc);
+      // A draft never saved (a new workflow) is created, never written over an existing one.
+      const v =
+        savedVersion === null
+          ? await client.saveWorkflow(doc, { create: true })
+          : await client.saveWorkflow(doc);
       store.getState().markSaved(v.version, doc);
       cb.current.onSaved?.(v.version);
       if (!inPublish) toast({ message: labels.saved(v.version), tone: "success" });

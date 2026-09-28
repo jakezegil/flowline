@@ -191,6 +191,14 @@ or times out, it is retried, up to 3 tries. If it finally fails, the engine reco
 `step.afterCommitFailed` and the run keeps waiting. The resume URL never enters the journal, so
 `afterCommit` is the only place where you can hand it out.
 
+Declare how the wait is resumed with `resume` on the node. `resume.body` is a Zod schema that
+the engine checks every callback body against (400 on a mismatch, nothing resumed).
+`resume.hostHandled: true` says your app resumes it, for example from an approvals page that
+checks who may decide by calling `engine.resumeRun`. The generic `POST /runs/:id/resume` route
+then answers 409 and the run viewer shows `resume.hint` instead of its Resume form. The token
+is still a bearer capability: `POST /resume/:token` resumes a host-handled wait too. So for such
+a step, never hand out `cb.token` or `cb.resumeUrl`; resume it by run ID instead.
+
 ## Triggers
 
 ```ts file=triggers.ts

@@ -114,6 +114,25 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect((await s.getLatestVersion(T1, "a"))?.version).toBe(10);
       });
 
+      test("createWorkflowVersion creates version 1 only for a new workflow", async (s) => {
+        const created = await s.createWorkflowVersion(T1, doc("a"), "u1", 10);
+        expect(created).toMatchObject({ workflowId: "a", version: 1, createdBy: "u1" });
+        expect(await s.createWorkflowVersion(T1, doc("a", "manual", "Other"), "u2", 20)).toBeNull();
+        expect((await s.getLatestVersion(T1, "a"))?.doc.name).toBe(doc("a").name);
+        // Per tenant, and an existing workflow saved the normal way counts too.
+        expect(await s.createWorkflowVersion(T2, doc("a"), "u1", 30)).toMatchObject({ version: 1 });
+        await s.saveWorkflowVersion(T1, doc("b"), "u1", 40);
+        expect(await s.createWorkflowVersion(T1, doc("b"), "u1", 50)).toBeNull();
+      });
+
+      test("concurrent createWorkflowVersion calls: exactly one creates", async (s) => {
+        const results = await Promise.all(
+          Array.from({ length: 5 }, (_, i) => s.createWorkflowVersion(T1, doc("a"), `u${i}`, i)),
+        );
+        expect(results.filter((r) => r !== null)).toHaveLength(1);
+        expect((await s.getLatestVersion(T1, "a"))?.version).toBe(1);
+      });
+
       test("versions are immutable", async (s) => {
         const input = doc("a");
         const saved = await s.saveWorkflowVersion(T1, input, "u1", 10);
@@ -433,6 +452,12 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect(byId.stopped?.stoppedAt).toBe("cond/if/halt");
         expect(byId.plain).not.toHaveProperty("stoppedAt");
         expect(byId.lookalike).not.toHaveProperty("stoppedAt");
+        // The stopped filter, applied before the limit.
+        const ids = async (f: { stopped: boolean; limit?: number }) =>
+          (await s.listRuns(T1, { status: "completed", ...f })).map((r) => r.id);
+        expect(await ids({ stopped: true })).toEqual(["stopped"]);
+        expect(await ids({ stopped: true, limit: 1 })).toEqual(["stopped"]);
+        expect(await ids({ stopped: false })).toEqual(["lookalike", "plain"]);
       });
 
       test("listRuns defaults to 50 rows", async (s) => {
