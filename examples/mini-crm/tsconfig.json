@@ -3,5 +3,5 @@
   "compilerOptions": {
     "types": ["node", "vite/client"]
   },
-  "include": ["server/src", "web/src", "web/vite.config.ts", "vitest.config.ts"]
+  "include": ["server/src", "web/src", "web/vite.config.ts", "vitest.config.ts", "e2e"]
 }
