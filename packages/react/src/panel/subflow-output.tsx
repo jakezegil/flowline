@@ -1,25 +1,34 @@
 /**
- * A sub-flow's output mapping (`doc.output`) in the trigger panel: one reference field per
- * declared output field, drawing on the scope at the end of the workflow.
+ * A sub-flow's output mapping (`doc.output`) in the trigger panel: a {@link SchemaForm} over the
+ * declared output fields, drawing on the scope at the end of the workflow.
  *
  * @module
  */
 import {
   availableScope,
+  type FieldDecl,
+  fieldsToJsonSchema,
   type Issue,
+  type JSONSchema,
   type ScopeEntry,
   subflowOutputFields,
+  UI_META_KEY,
   type ValueExpr,
+  type WorkflowDoc,
 } from "@flowkit/core";
 import { X } from "lucide-react";
 import { type JSX, useMemo } from "react";
 import { useEditorStore } from "../hooks";
 import { useFlowkitAppearance } from "../provider";
+import { TRIGGER_KEY } from "../store/editor-store";
 import { FieldShell } from "./fields/shell";
 import { RefTextInput } from "./ref-text-input";
 import { invalidRefsIn } from "./schema";
+import { SchemaForm } from "./schema-form";
 
 const OUTPUT_PREFIX = "output.";
+const NO_OUTPUT: Record<string, ValueExpr> = {};
+const NO_DECLS: FieldDecl[] = [];
 
 /** Issues of the output mapping, with `field` relative to it (`"output.x"` → `"x"`). */
 export function outputIssues(issues: readonly Issue[]): Issue[] {
@@ -48,25 +57,54 @@ export function useHasOutputMapping(): boolean {
 }
 
 /**
- * The output mapping editor: each output field declared by the sub-flow trigger (config
- * `"output"`) takes text and reference pills from the trigger and top-level steps. Mapped keys
- * that aren't declared are listed with a remove button. Issues show under their output.
+ * The form schema of the declared outputs: each field's own type, so numbers, booleans and text
+ * get their typed controls (with the `{x}` toggle for a reference). Objects and lists take any
+ * value, a reference or JSON, since a declaration says nothing about their shape. Labels are the
+ * field names, as callers see them.
+ */
+function outputFormSchema(declared: FieldDecl[], typeLabel: (d: FieldDecl) => string): JSONSchema {
+  const base = fieldsToJsonSchema(declared);
+  const props = base.properties as Record<string, JSONSchema>;
+  for (const d of declared) {
+    const typed = props[d.name] ?? {};
+    const loose = d.type === "object" || d.type === "array";
+    props[d.name] = {
+      ...(loose ? (d.description === undefined ? {} : { description: d.description }) : typed),
+      [UI_META_KEY]: { label: d.name, ...(loose ? { placeholder: typeLabel(d) } : {}) },
+    };
+  }
+  return base;
+}
+
+/**
+ * The output mapping editor: a form over the output fields declared by the sub-flow trigger
+ * (config `"output"`), each taking a literal of its type or references to the trigger and
+ * top-level steps. Mapped keys that aren't declared are listed with a remove button. Issues show
+ * under their output.
  */
 export function SubflowOutput(): JSX.Element {
   const { labels } = useFlowkitAppearance();
-  const doc = useEditorStore((s) => s.doc);
+  const trigger = useEditorStore((s) => s.doc.trigger);
+  const steps = useEditorStore((s) => s.doc.steps);
+  const output = useEditorStore((s) => s.doc.output) ?? NO_OUTPUT;
   const manifest = useEditorStore((s) => s.manifest);
   const ctx = useEditorStore((s) => s.ctx);
   const samples = useEditorStore((s) => s.samples);
   const allIssues = useEditorStore((s) => s.issues);
   const setOutput = useEditorStore((s) => s.setOutput);
-  const trigger = manifest.triggers.find((t) => t.type === doc.trigger.type);
-  const declared = subflowOutputFields(trigger, doc.trigger) ?? [];
-  const output: Record<string, ValueExpr> = doc.output ?? {};
+  const triggerManifest = manifest.triggers.find((t) => t.type === trigger.type);
+  const declared = useMemo(
+    () => subflowOutputFields(triggerManifest, trigger) ?? NO_DECLS,
+    [triggerManifest, trigger],
+  );
   // The mapping is evaluated when the run finishes: the trigger and top-level steps are in scope.
-  const scope = useMemo<ScopeEntry[]>(
-    () => availableScope(doc, null, manifest, ctx),
-    [doc, manifest, ctx],
+  const scope = useMemo<ScopeEntry[]>(() => {
+    const doc = { id: "", name: "", trigger, steps } as WorkflowDoc;
+    return availableScope(doc, null, manifest, ctx);
+  }, [trigger, steps, manifest, ctx]);
+  const schema = useMemo(
+    () => outputFormSchema(declared, (d) => labels.fieldTypes[d.type]),
+    [declared, labels],
   );
   const invalidRefs = useMemo(() => invalidRefsIn(output, scope), [output, scope]);
   const issues = useMemo(() => outputIssues(allIssues), [allIssues]);
@@ -85,25 +123,17 @@ export function SubflowOutput(): JSX.Element {
         {declared.length === 0 && extra.length === 0 && (
           <p className="fk-empty-note">{labels.outputMappingEmpty}</p>
         )}
-        {declared.map((d) => (
-          <FieldShell
-            key={d.name}
-            label={d.name}
-            required={d.required === true}
-            {...(d.description ? { description: d.description } : {})}
-            issues={issuesOf(issues, d.name)}
-            aside={<span className="fk-output__type">{labels.fieldTypes[d.type]}</span>}
-          >
-            <RefTextInput
-              value={output[d.name]}
-              onChange={(v) => setOutput(d.name, v)}
-              scope={scope}
-              samples={samples}
-              invalidRefs={invalidRefs}
-              ariaLabel={labels.outputValue(d.name)}
-            />
-          </FieldShell>
-        ))}
+        {declared.length > 0 && (
+          <SchemaForm
+            schema={schema}
+            value={output}
+            onChange={setOutput}
+            stepId={TRIGGER_KEY}
+            issues={issues}
+            scope={scope}
+            samples={samples}
+          />
+        )}
         {extra.map((key) => (
           <FieldShell
             key={key}

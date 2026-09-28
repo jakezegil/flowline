@@ -232,10 +232,13 @@ const TEXT_SAMPLES: [RegExp, string][] = [
   [/name/, "Ada Lovelace"],
 ];
 
+/** An ID suffix as its own word: `contactId`, `contactID`, `contact_id`. */
+const ID_SUFFIX = /(?<=[a-z0-9])I[dD]$|[_\s-][iI][dD]$/;
+
 /** A plausible string for a field named `key`, e.g. `lastName` → `"Lovelace"`. */
 export function sampleText(key: string): string {
   const k = key.replace(/[\s_-]+/g, "").toLowerCase();
-  if (/id$/i.test(key) && k.length > 2) return `${k.slice(0, -2)}_123`;
+  if (ID_SUFFIX.test(key) && k.length > 2) return `${k.slice(0, -2)}_123`;
   if (k === "id") return "item_123";
   for (const [re, text] of TEXT_SAMPLES) if (re.test(k)) return text;
   return key ? `${key} text` : "text";

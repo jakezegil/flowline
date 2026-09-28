@@ -3622,10 +3622,6 @@
   .fk-output {
     padding-top: 2px;
   }
-  .fk-output__type {
-    font-size: 11px;
-    color: var(--fk-text-muted);
-  }
   .fk-output .fk-icon-btn {
     width: 24px;
     height: 24px;

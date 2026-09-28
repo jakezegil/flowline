@@ -8,6 +8,7 @@ import { docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
 import { FlowkitProvider } from "../provider";
 import { createEditorStore, TRIGGER_KEY } from "../store/editor-store";
 import { ConfigPanel } from "./config-panel";
+import { sampleText } from "./trigger-config";
 
 beforeAll(setupDom);
 beforeEach(() => localStorage.clear());
@@ -273,6 +274,8 @@ describe("ConfigPanel for the trigger", () => {
           output: [
             { name: "email", type: "string", required: true },
             { name: "score", type: "number" },
+            { name: "vip", type: "boolean" },
+            { name: "contact", type: "object" },
           ],
         },
       },
@@ -283,13 +286,32 @@ describe("ConfigPanel for the trigger", () => {
     expect(screen.getByText('"email" is required')).toBeTruthy();
     expect(screen.getByText(/Not a declared output field/)).toBeTruthy();
 
-    act(() => typeInto(editorView("Output email"), "a@b.c"));
+    act(() => typeInto(editorView("email"), "a@b.c"));
     expect(store.getState().doc.output).toEqual({ stale: "x", email: "a@b.c" });
     expect(screen.queryByText('"email" is required')).toBeNull();
 
+    // Typed outputs take literals of their type (numbers, booleans), not only text.
+    fireEvent.change(screen.getByRole("textbox", { name: "score" }), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("switch", { name: "vip" }));
+    expect(store.getState().doc.output).toMatchObject({ score: 5, vip: true });
+    expect(store.getState().issues.filter((i) => i.field?.startsWith("output."))).toEqual([]);
+    // Objects take a reference (or JSON), drawn from the end-of-workflow scope.
+    expect(editorView("contact")).toBeTruthy();
+
     fireEvent.click(screen.getByRole("button", { name: "Remove output stale" }));
-    expect(store.getState().doc.output).toEqual({ email: "a@b.c" });
+    expect(store.getState().doc.output).not.toHaveProperty("stale");
     act(() => store.getState().undo());
-    expect(store.getState().doc.output).toEqual({ stale: "x", email: "a@b.c" });
+    expect(store.getState().doc.output).toHaveProperty("stale", "x");
+  });
+});
+
+describe("sampleText", () => {
+  test("an id suffix must be its own word", () => {
+    expect(sampleText("contactId")).toBe("contact_123");
+    expect(sampleText("contact_id")).toBe("contact_123");
+    expect(sampleText("dealID")).toBe("deal_123");
+    for (const key of ["paid", "valid", "guid", "android"]) {
+      expect(sampleText(key)).not.toMatch(/_123$/);
+    }
   });
 });
