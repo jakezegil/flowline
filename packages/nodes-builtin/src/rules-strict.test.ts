@@ -23,6 +23,7 @@ import {
   isTrue,
   loosely,
   lt,
+  lte,
   neq,
   notContains,
   or,
@@ -31,6 +32,10 @@ import {
   strictEquals,
   strictly,
 } from "./rules";
+
+/** 05:00Z by instant, yet after {@link UTC_6H} by text. */
+const OFFSET_10H = "2026-01-31T10:00:00+05:00";
+const UTC_6H = "2026-01-31T06:00:00Z";
 
 const MODES = ["loose", "strict"] as const satisfies readonly CompareMode[];
 
@@ -105,6 +110,29 @@ describe("§6.3 operator table", () => {
     ["gt gte lt lte: ISO date vs non-date text by code point", lt("2026-01-01", "zzz"), true, true],
     ["gt gte lt lte: text by code point", lt("apple", "banana"), true, true],
     ["gt gte lt lte: text by code point, case", lt("Zebra", "apple"), true, true],
+    // Instant order disagrees with text order: +05:00 10:00 is 05:00Z, before 06:00Z.
+    ["gt gte lt lte: ISO by instant, not text (gt)", gt(OFFSET_10H, UTC_6H), false, false],
+    ["gt gte lt lte: ISO by instant, not text (gte)", gte(OFFSET_10H, UTC_6H), false, false],
+    ["gt gte lt lte: ISO by instant, not text (lt)", lt(OFFSET_10H, UTC_6H), true, true],
+    ["gt gte lt lte: ISO by instant, not text (lte)", lte(OFFSET_10H, UTC_6H), true, true],
+    // Date-only is midnight UTC: the same instant, though the text is a prefix (so sorts first).
+    [
+      "gt gte lt lte: ISO date-only vs date-time by instant (gte)",
+      gte("2026-01-31", "2026-01-31T00:00:00Z"),
+      true,
+      true,
+    ],
+    [
+      "gt gte lt lte: ISO date-only vs date-time by instant (lt)",
+      lt("2026-01-31", "2026-01-31T00:00:00Z"),
+      false,
+      false,
+    ],
+    // Code points, not UTF-16 code units: U+1F600 (surrogates D83D DE00) sorts after U+FF01.
+    ["gt gte lt lte: text by code point, astral (lt)", lt("\u{1F600}", "！"), false, false],
+    ["gt gte lt lte: text by code point, astral (gt)", gt("\u{1F600}", "！"), true, true],
+    ["gt gte lt lte: text by code point, equal", gte("a\u{1F600}", "a\u{1F600}"), true, true],
+    ["gt gte lt lte: text by code point, prefix", lt("a", "a\u{1F600}"), true, true],
     ["gt gte lt lte: null is false", gt(null, 0), false, false],
     ["gt gte lt lte: undefined is false", lt(undefined, 5), false, false],
     ["gt gte lt lte: booleans are not ordered", gt(true, false), false, false],
@@ -194,6 +222,8 @@ describe("§6.4 value-pair examples", () => {
     ['5 lt "10"', lt(5, "10"), true, false],
     ['"5" lt "10"', lt("5", "10"), true, false],
     ['"2026-02-01" gt "2026-01-31T09:00Z"', gt("2026-02-01", "2026-01-31T09:00Z"), true, true],
+    [`"${OFFSET_10H}" gt "${UTC_6H}"`, gt(OFFSET_10H, UTC_6H), false, false],
+    [`"${OFFSET_10H}" lt "${UTC_6H}"`, lt(OFFSET_10H, UTC_6H), true, true],
     ["null gt 0", gt(null, 0), false, false],
     ['"Hello world" contains "hello"', contains("Hello world", "hello"), true, false],
     ['12345 contains "23"', contains(12345, "23"), true, false],

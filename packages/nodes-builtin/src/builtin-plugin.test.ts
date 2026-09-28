@@ -201,6 +201,9 @@ describe("createBuiltinPlugin({ operators })", () => {
     expect(() => createBuiltinPlugin({ operators: [isUnassigned, isUnassigned] })).toThrow(
       FlowlineDefinitionError,
     );
+    expect(() => createBuiltinPlugin({ operators: [isUnassigned, isUnassigned] })).toThrow(
+      /"isUnassigned"/,
+    );
     expect(() => createBuiltinPlugin({ operators: [{ ...isUnassigned, id: "contains" }] })).toThrow(
       FlowlineDefinitionError,
     );

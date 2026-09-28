@@ -285,19 +285,50 @@ function asBoolean(v: unknown): boolean | undefined {
   return undefined;
 }
 
+/** Sign of `a - b` for two numbers: `-1`, `0` or `1` (`NaN` when either is `NaN`). */
+const compareNumbers = (a: number, b: number): number =>
+  a < b ? -1 : a > b ? 1 : a === b ? 0 : Number.NaN;
+
 /**
- * Two numbers, two dates or two strings that can be ordered, as a pair of comparable keys;
- * `undefined` when the values can't be ordered (so every ordering operator is false).
+ * Order of two strings by Unicode code point (not UTF-16 code unit, which would sort an astral
+ * character such as an emoji before `U+E000`-`U+FFFF`): `-1`, `0` or `1`.
  */
-function orderable(a: unknown, b: unknown): [number, number] | [string, string] | undefined {
+function compareText(a: string, b: string): number {
+  const ia = a[Symbol.iterator]();
+  const ib = b[Symbol.iterator]();
+  for (;;) {
+    const ca = ia.next();
+    const cb = ib.next();
+    if (ca.done || cb.done) return ca.done && cb.done ? 0 : ca.done ? -1 : 1;
+    if (ca.value !== cb.value) {
+      return compareNumbers(ca.value.codePointAt(0) ?? 0, cb.value.codePointAt(0) ?? 0);
+    }
+  }
+}
+
+/**
+ * How `a` orders against `b` in `"loose"` mode (`-1`, `0` or `1`): as numbers (numeric text
+ * included), then as ISO dates by instant, then as text by code point; `undefined` when the
+ * values can't be ordered (so every ordering operator is false).
+ */
+function looseOrder(a: unknown, b: unknown): number | undefined {
   const na = asNumber(a);
   const nb = asNumber(b);
-  if (na !== undefined && nb !== undefined) return [na, nb];
+  if (na !== undefined && nb !== undefined) return compareNumbers(na, nb);
   const ta = asTimestamp(a);
   const tb = asTimestamp(b);
-  if (ta !== undefined && tb !== undefined) return [ta, tb];
-  if (typeof a === "string" && typeof b === "string") return [a, b];
+  if (ta !== undefined && tb !== undefined) return compareNumbers(ta, tb);
+  if (typeof a === "string" && typeof b === "string") return compareText(a, b);
   return undefined;
+}
+
+/** An ordering operator applied to an order from {@link looseOrder} or `strictOrder`. */
+function ordered(op: Rule["op"], order: number | undefined): boolean {
+  if (order === undefined) return false;
+  if (op === "gt") return order > 0;
+  if (op === "gte") return order >= 0;
+  if (op === "lt") return order < 0;
+  return op === "lte" && order <= 0;
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
@@ -363,7 +394,8 @@ export function looseEquals(a: unknown, b: unknown, opts: EqualsOptions = {}): b
  * Equality of `"strict"` mode: `===` for primitives (so `NaN` never equals itself, and `-0`
  * equals `0`), arrays deeply by index, plain objects deeply by own keys (key order doesn't
  * matter); anything else (dates, class instances) is not equal. `null` and `undefined` are
- * different values.
+ * different values. A value always equals itself: the `===` shortcut also covers the same `Date`
+ * or instance, so equality stays reflexive (resolved workflow values are JSON anyway).
  */
 export function strictEquals(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -430,15 +462,8 @@ function evaluateLoose({ left, op, right, caseSensitive = false }: Rule): boolea
     case "gt":
     case "gte":
     case "lt":
-    case "lte": {
-      const pair = orderable(left, right);
-      if (!pair) return false;
-      const [a, b] = pair;
-      if (op === "gt") return a > b;
-      if (op === "gte") return a >= b;
-      if (op === "lt") return a < b;
-      return a <= b;
-    }
+    case "lte":
+      return ordered(op, looseOrder(left, right));
     case "contains":
       return containsValue(left, right, caseSensitive);
     case "notContains":
@@ -466,15 +491,15 @@ function evaluateLoose({ left, op, right, caseSensitive = false }: Rule): boolea
 }
 
 /**
- * Two numbers, or two strings (by instant when both are ISO dates, else by code unit), as a pair
- * of comparable keys; `undefined` for any other pair.
+ * How `a` orders against `b` in `"strict"` mode (`-1`, `0` or `1`): two numbers numerically, two
+ * strings by instant when both are ISO dates, else by code point; `undefined` for any other pair.
  */
-function strictOrderable(a: unknown, b: unknown): [number, number] | [string, string] | undefined {
-  if (typeof a === "number" && typeof b === "number") return [a, b];
+function strictOrder(a: unknown, b: unknown): number | undefined {
+  if (typeof a === "number" && typeof b === "number") return compareNumbers(a, b);
   if (typeof a !== "string" || typeof b !== "string") return undefined;
   const ta = asTimestamp(a);
   const tb = asTimestamp(b);
-  return ta !== undefined && tb !== undefined ? [ta, tb] : [a, b];
+  return ta !== undefined && tb !== undefined ? compareNumbers(ta, tb) : compareText(a, b);
 }
 
 /** `"strict"` contains: a case-sensitive substring of text, or an item `strictEquals` `right`. */
@@ -510,15 +535,8 @@ function evaluateStrict({ left, op, right }: Rule): boolean {
     case "gt":
     case "gte":
     case "lt":
-    case "lte": {
-      const pair = strictOrderable(left, right);
-      if (!pair) return false;
-      const [a, b] = pair;
-      if (op === "gt") return a > b;
-      if (op === "gte") return a >= b;
-      if (op === "lt") return a < b;
-      return a <= b;
-    }
+    case "lte":
+      return ordered(op, strictOrder(left, right));
     case "startsWith":
     case "endsWith":
       if (typeof left !== "string" || typeof right !== "string") return false;
@@ -573,7 +591,7 @@ function evaluateGroup(g: RuleGroup, compare: CompareMode, operators: Operators)
  * - `eq`/`neq` compare loosely (see {@link looseEquals}): `"5"` equals `5`, `true` equals
  *   `"true"`, ISO dates by instant.
  * - `gt`/`gte`/`lt`/`lte` compare numbers (numeric text included), then ISO dates as timestamps,
- *   then text alphabetically; any other pair is not ordered and never matches.
+ *   then text by Unicode code point; any other pair is not ordered and never matches.
  * - Dates and date-times are UTC unless they include an offset, whatever the server's time zone.
  * - `contains`/`notContains` look for a substring in text or an item in a list. `in` checks that
  *   `left` is an item of list `right`, or of comma-separated text `right` (`"won, lost"`).
@@ -587,7 +605,7 @@ function evaluateGroup(g: RuleGroup, compare: CompareMode, operators: Operators)
  *
  * - `eq`/`neq` use {@link strictEquals}; `null` and a missing value are different.
  * - `gt`/`gte`/`lt`/`lte` compare two numbers, or two strings (by instant when both are ISO
- *   dates, else by code unit).
+ *   dates, else by Unicode code point).
  * - `contains` looks for a substring when both sides are text, or for an item that
  *   `strictEquals` `right` in list `left`; `notContains` is its opposite. `startsWith`/`endsWith`
  *   need two strings; `in` needs list `right`.
