@@ -60,7 +60,7 @@ export function useHasOutputMapping(): boolean {
  * The form schema of the declared outputs: each field's own type, so numbers, booleans and text
  * get their typed controls (with the `{x}` toggle for a reference). Objects and lists take any
  * value, a reference or JSON, since a declaration says nothing about their shape. Labels are the
- * field names, as callers see them.
+ * field names, as callers see them; each help line starts with the declared type.
  */
 function outputFormSchema(declared: FieldDecl[], typeLabel: (d: FieldDecl) => string): JSONSchema {
   const base = fieldsToJsonSchema(declared);
@@ -68,9 +68,12 @@ function outputFormSchema(declared: FieldDecl[], typeLabel: (d: FieldDecl) => st
   for (const d of declared) {
     const typed = props[d.name] ?? {};
     const loose = d.type === "object" || d.type === "array";
+    const type = typeLabel(d);
     props[d.name] = {
-      ...(loose ? (d.description === undefined ? {} : { description: d.description }) : typed),
-      [UI_META_KEY]: { label: d.name, ...(loose ? { placeholder: typeLabel(d) } : {}) },
+      ...(loose ? {} : typed),
+      // The declared type leads the help line: typed controls don't say "Text" or "Date".
+      description: d.description ? `${type} · ${d.description}` : type,
+      [UI_META_KEY]: { label: d.name },
     };
   }
   return base;

@@ -272,7 +272,7 @@ describe("ConfigPanel for the trigger", () => {
         config: {
           fields: [{ name: "contactId", type: "string", required: true }],
           output: [
-            { name: "email", type: "string", required: true },
+            { name: "email", type: "string", required: true, description: "Where to write" },
             { name: "score", type: "number" },
             { name: "vip", type: "boolean" },
             { name: "contact", type: "object" },
@@ -285,6 +285,14 @@ describe("ConfigPanel for the trigger", () => {
     expect(screen.getByText("Output values")).toBeTruthy();
     expect(screen.getByText('"email" is required')).toBeTruthy();
     expect(screen.getByText(/Not a declared output field/)).toBeTruthy();
+    // Each output says its declared type.
+    const helps = Array.from(
+      document.querySelectorAll(".fk-output .fk-f__help"),
+      (p) => p.textContent,
+    );
+    expect(helps).toEqual(
+      expect.arrayContaining(["Text · Where to write", "Number", "True / false", "Object"]),
+    );
 
     act(() => typeInto(editorView("email"), "a@b.c"));
     expect(store.getState().doc.output).toEqual({ stale: "x", email: "a@b.c" });
