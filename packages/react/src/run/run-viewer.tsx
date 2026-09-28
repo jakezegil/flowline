@@ -192,6 +192,8 @@ function RunBody({
     try {
       const { runId: next } = await client.retryRun(run.id);
       toast({ message: labels.retryStarted, tone: "success" });
+      // A retry continues the same run: reload it, which also resumes listening to it.
+      refresh();
       onRetried?.(next);
     } catch (err) {
       toast({ message: labels.retryFailed(errorText(err)), tone: "danger" });

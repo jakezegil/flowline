@@ -19,13 +19,17 @@ export interface WorkerOptions {
 
 /** A started worker. */
 export interface Worker {
-  /** Stop claiming new runs; resolves once in-flight claims and schedule ticks have finished. */
+  /**
+   * Stop claiming new runs and abort in-flight `afterCommit` hooks (recorded as
+   * `step.afterCommitFailed`); resolves once in-flight claims and schedule ticks have finished.
+   */
   stop(): Promise<void>;
 }
 
 /** @internal What the worker drives. */
 export interface WorkerDeps {
-  runOnce(workerId: string): Promise<boolean>;
+  /** Claim and advance one run; `stop` aborts when the worker stops. */
+  runOnce(workerId: string, stop: AbortSignal): Promise<boolean>;
   tickSchedules(): Promise<number>;
   defaultWorkerId: string;
   logger?: Logger;
@@ -38,6 +42,8 @@ export function startWorker(deps: WorkerDeps, opts: WorkerOptions = {}): Worker 
   const scheduleEveryMs = Math.max(1, opts.scheduleEveryMs ?? 15_000);
   const base = opts.workerId ?? deps.defaultWorkerId;
   let stopped = false;
+  /** Aborted by `stop()`: cuts in-flight `afterCommit` hooks short. */
+  const stopping = new AbortController();
   const wakers = new Set<() => void>();
 
   /** Sleep `ms`, cut short by `stop()`. */
@@ -70,7 +76,7 @@ export function startWorker(deps: WorkerDeps, opts: WorkerOptions = {}): Worker 
       }
       let claimed = false;
       try {
-        claimed = await deps.runOnce(workerId);
+        claimed = await deps.runOnce(workerId, stopping.signal);
       } catch (err) {
         report("worker claim failed", err);
       }
@@ -86,6 +92,7 @@ export function startWorker(deps: WorkerDeps, opts: WorkerOptions = {}): Worker 
   return {
     async stop() {
       stopped = true;
+      stopping.abort();
       for (const wake of [...wakers]) wake();
       await Promise.all(loops);
     },

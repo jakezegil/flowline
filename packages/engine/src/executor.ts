@@ -33,6 +33,7 @@ import { buildScope, childSteps, entryAt, type NextAction, nextAction } from "./
 import { redactBySchema } from "./redact";
 import type { Lease, NewRunEvent, Run, RunPatch } from "./storage";
 import { startSubflow, subflowOutputProblem } from "./subflow";
+import { DEFAULT_BASE_PATH, errorMessage } from "./util";
 
 const DEFAULT_LEASE_MS = 30_000;
 const DEFAULT_STEPS_PER_CLAIM = 100;
@@ -41,7 +42,6 @@ const DEFAULT_RETRY: RetryPolicy = { max: 3, backoff: "exponential", initialMs: 
 const MAX_BACKOFF_MS = 3_600_000;
 /** Consecutive `renewLease` rejections tolerated before the claim is abandoned. */
 const MAX_RENEWAL_ERRORS = 3;
-const DEFAULT_BASE_PATH = "/flowkit";
 /** Tries of a suspension's `afterCommit` hook (e.g. a callback notification). */
 const AFTER_COMMIT_ATTEMPTS = 3;
 /** Delay before the first `afterCommit` retry, doubling after each. */
@@ -139,10 +139,6 @@ function retryPolicy(node: AnyNode): RetryPolicy {
 
 function isFatal(err: unknown): boolean {
   return err instanceof Error && err.name === "FatalError";
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 function errorCode(err: unknown): string | undefined {
