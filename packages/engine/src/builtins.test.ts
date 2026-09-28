@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
@@ -523,7 +524,10 @@ describe("built-ins over HTTP", () => {
   let server: Server;
   let base: string;
   let received: Received[];
-  let statuses: number[];
+  /** Responses to give, in order: a status, or a redirect; then 200. */
+  let statuses: (number | { status: number; location: string })[];
+  /** Runs when a request arrives, before it is answered. */
+  let onRequest: (() => Promise<void>) | undefined;
 
   beforeAll(async () => {
     server = createServer((req, res) => {
@@ -532,9 +536,15 @@ describe("built-ins over HTTP", () => {
       req.on("data", (chunk: string) => {
         body += chunk;
       });
-      req.on("end", () => {
+      req.on("end", async () => {
         received.push({ method: req.method, headers: req.headers, body });
-        res.writeHead(statuses.shift() ?? 200, { "content-type": "application/json" });
+        await onRequest?.();
+        const next = statuses.shift() ?? 200;
+        if (typeof next === "number") {
+          res.writeHead(next, { "content-type": "application/json" });
+        } else {
+          res.writeHead(next.status, { location: next.location });
+        }
         res.end('{"ok":true}');
       });
     });
@@ -552,6 +562,7 @@ describe("built-ins over HTTP", () => {
   beforeEach(() => {
     received = [];
     statuses = [];
+    onRequest = undefined;
     emitted = [];
     local = createEngine({
       registry: createRegistry([testPlugin]),
@@ -603,19 +614,28 @@ describe("built-ins over HTTP", () => {
     /** Everything a run leaks to the audit trail: journal, stored events and emitted events. */
     const audit = async (id: string) =>
       JSON.stringify([(await getRun(id)).journal, await storage.listEvents(TENANT, id), emitted]);
+    const eventTypes = async (id: string) =>
+      (await storage.listEvents(TENANT, id)).map((e) => e.type);
+    const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
-    it("POSTs the resume URL once, and the posted URL resumes the run", async () => {
+    it("POSTs the resume URL once the token is stored, and the posted URL resumes the run", async () => {
       const id = await start(doc({ url: `${base}/hooks` }));
+      const storedAtPost: unknown[] = [];
+      onRequest = async () => {
+        const run = await getRun(id);
+        storedAtPost.push({ status: run.status, token: run.callbackToken });
+      };
       await local.drain();
       const waiting = await getRun(id);
       expect(waiting).toMatchObject({ status: "waiting", waitReason: "callback" });
       const token = waiting.callbackToken as string;
+      expect(storedAtPost).toEqual([{ status: "waiting", token }]);
 
       expect(received).toHaveLength(1);
       const [post] = received;
       expect(post?.method).toBe("POST");
       expect(post?.headers["content-type"]).toBe("application/json");
-      expect(post?.headers["idempotency-key"]).toMatch(/^[0-9a-f]{64}$/);
+      expect(post?.headers["idempotency-key"]).toBe(sha256(`${id}:wait:${token}`));
       expect(JSON.parse(post?.body ?? "")).toEqual({
         resumeUrl: `https://crm.example/flowkit/resume/${token}`,
         expiresAt: now + DAY,
@@ -633,50 +653,103 @@ describe("built-ins over HTTP", () => {
       expect(await audit(id)).not.toContain(token);
     });
 
-    it("retries a failed notify under the step's retry policy, with a fresh token", async () => {
-      statuses = [503];
+    it.each([
+      ["a 5xx", 503],
+      ["a 408", 408],
+      ["a 429", 429],
+    ])("retries %s inline with the same URL and key", async (_, status) => {
+      statuses = [status];
       const id = await start(doc({ url: `${base}/hooks` }));
       await local.drain();
-      const retrying = await getRun(id);
-      expect(retrying).toMatchObject({ status: "waiting", waitReason: "retry", attempt: 2 });
-      expect(retrying.callbackToken ?? null).toBeNull();
-      const firstToken = String(JSON.parse(received[0]?.body ?? "").resumeUrl)
-        .split("/")
-        .pop() as string;
-      expect(firstToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      const waiting = await getRun(id);
+      expect(waiting).toMatchObject({ status: "waiting", waitReason: "callback", attempt: 1 });
+      expect(received).toHaveLength(2);
+      expect(received[1]?.body).toBe(received[0]?.body);
+      expect(received[1]?.headers["idempotency-key"]).toBe(received[0]?.headers["idempotency-key"]);
+      const types = await eventTypes(id);
+      expect(types).not.toContain("step.retrying");
+      expect(types).not.toContain("step.notifyFailed");
+      expect(await audit(id)).not.toContain(waiting.callbackToken as string);
+    });
 
-      now = retrying.wakeAt as number;
+    it("gives up after 3 attempts, records step.notifyFailed and keeps waiting", async () => {
+      statuses = [500, 500, 500];
+      const id = await start(doc({ url: `${base}/hooks` }));
       await local.drain();
       const waiting = await getRun(id);
       expect(waiting).toMatchObject({ status: "waiting", waitReason: "callback" });
+      expect(received).toHaveLength(3);
+      const events = await storage.listEvents(TENANT, id);
+      const failed = events.filter((e) => e.type === "step.notifyFailed");
+      expect(failed).toEqual([
+        expect.objectContaining({
+          stepPath: "wait",
+          data: { error: { message: "Notify request failed: HTTP 500" }, attempts: 3 },
+        }),
+      ]);
+      expect(emitted).toContainEqual(expect.objectContaining({ type: "step.notifyFailed" }));
       const token = waiting.callbackToken as string;
-      expect(received).toHaveLength(2);
-      expect(received[1]?.headers["idempotency-key"]).toBe(received[0]?.headers["idempotency-key"]);
-      expect(JSON.parse(received[1]?.body ?? "").resumeUrl).toBe(
-        `https://crm.example/flowkit/resume/${token}`,
-      );
-      expect(token).not.toBe(firstToken);
+      expect(await audit(id)).not.toContain(token);
+      expect(await audit(id)).not.toContain("/resume/");
 
-      const trail = await audit(id);
-      expect(trail).toContain("step.retrying");
-      expect(trail).not.toContain(token);
-      expect(trail).not.toContain(firstToken);
-      expect(await local.resume(firstToken, {})).toBe("gone");
+      // The ops resume API still works.
+      expect(await local.resumeRun(TENANT, id, { approved: true }, "u1")).toBe("resumed");
+      await local.drain();
+      expect(outputAt((await getRun(id)).journal, "wait/resumed/ok")).toEqual({ value: true });
     });
 
-    it("fails the step once the retries are used up", async () => {
-      statuses = [500, 500, 500];
+    it("doesn't retry a permanent 4xx", async () => {
+      statuses = [404];
       const id = await start(doc({ url: `${base}/hooks` }));
-      for (let i = 0; i < 3; i++) {
-        await local.drain();
-        const run = await getRun(id);
-        if (run.status !== "waiting") break;
-        now = run.wakeAt as number;
-      }
-      const run = await getRun(id);
-      expect(run.status).toBe("failed");
-      expect(run.error?.message).toBe("Notify request failed: HTTP 500");
-      expect(received).toHaveLength(3);
+      await local.drain();
+      expect(await getRun(id)).toMatchObject({ status: "waiting", waitReason: "callback" });
+      expect(received).toHaveLength(1);
+      expect(await eventTypes(id)).toContain("step.notifyFailed");
+    });
+
+    it("doesn't follow a redirect to another origin with the body", async () => {
+      const other = base.replace("127.0.0.1", "localhost");
+      statuses = [{ status: 307, location: `${other}/elsewhere` }];
+      const id = await start(doc({ url: `${base}/hooks` }));
+      await local.drain();
+      expect(await getRun(id)).toMatchObject({ status: "waiting", waitReason: "callback" });
+      expect(received).toHaveLength(1);
+      const events = await storage.listEvents(TENANT, id);
+      expect(events.find((e) => e.type === "step.notifyFailed")?.data).toMatchObject({
+        attempts: 1,
+      });
+    });
+
+    it("doesn't notify when the park commit fails, and notifies once when the step re-runs", async () => {
+      let crash = true;
+      const crashing = createEngine({
+        registry: createRegistry([testPlugin]),
+        storage,
+        clock: () => now,
+        publicUrl: "https://crm.example",
+        http: { allowPrivateNetworks: true },
+        __testHooks: {
+          beforeCommit(_runId, stepPath, phase) {
+            if (crash && stepPath === "wait" && phase === "result") {
+              crash = false;
+              throw new Error("simulated crash");
+            }
+          },
+        },
+      });
+      const id = await start(doc({ url: `${base}/hooks` }));
+      await expect(crashing.drain()).rejects.toThrow("simulated crash");
+      expect(received).toEqual([]);
+      expect((await getRun(id)).callbackToken ?? null).toBeNull();
+
+      now += 60_000;
+      await local.drain();
+      const waiting = await getRun(id);
+      expect(waiting).toMatchObject({ status: "waiting", waitReason: "callback" });
+      expect(received).toHaveLength(1);
+      expect(JSON.parse(received[0]?.body ?? "").resumeUrl).toBe(
+        `https://crm.example/flowkit/resume/${waiting.callbackToken}`,
+      );
     });
 
     it("sends nothing without notify", async () => {

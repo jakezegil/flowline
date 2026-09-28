@@ -154,6 +154,14 @@ export type SuspendSignal = {
   readonly [FLOWKIT_SIGNAL]: true;
   /** Signal kind. */
   readonly kind: "suspend";
+  /**
+   * Ephemeral side effect the engine runs once the suspension is committed (so, for a callback,
+   * once its token is stored and the resume URL works), e.g. sending the resume URL elsewhere. It
+   * is never journaled. Best effort and at most once per suspension: a crash between the commit
+   * and the call skips it. Throwing a `RetryableError` retries it a few times inline; any other
+   * error, or the last retry, only records a `step.notifyFailed` event — the run keeps waiting.
+   */
+  readonly afterCommit?: () => Promise<void>;
 } & (
   | {
       /** Resume at this epoch ms time. */
@@ -215,12 +223,18 @@ export function branch<O = undefined>(id: string, output?: O): BranchSignal<O> {
 
 /**
  * Pause the run. The handler is re-invoked with `ctx.resume` set once the time is reached or the
- * callback is called.
+ * callback is called. `afterCommit` runs once the suspension is committed (see
+ * {@link SuspendSignal.afterCommit}).
  */
-export function suspend(opts: { until: number } | { callback: CallbackHandle }): SuspendSignal {
+export function suspend(
+  opts: ({ until: number } | { callback: CallbackHandle }) & {
+    afterCommit?: () => Promise<void>;
+  },
+): SuspendSignal {
+  const hook = opts.afterCommit ? { afterCommit: opts.afterCommit } : {};
   return "until" in opts
-    ? { [FLOWKIT_SIGNAL]: true, kind: "suspend", until: opts.until }
-    : { [FLOWKIT_SIGNAL]: true, kind: "suspend", callback: opts.callback };
+    ? { [FLOWKIT_SIGNAL]: true, kind: "suspend", until: opts.until, ...hook }
+    : { [FLOWKIT_SIGNAL]: true, kind: "suspend", callback: opts.callback, ...hook };
 }
 
 /** End the run successfully, skipping all remaining steps. */

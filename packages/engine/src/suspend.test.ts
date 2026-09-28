@@ -13,7 +13,7 @@ import { createMemoryStorage } from "@flowkit/storage-memory";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createEngine, type EngineOptions } from "./engine";
-import { FatalError } from "./errors";
+import { FatalError, RetryableError } from "./errors";
 import type { StorageAdapter } from "./storage";
 
 const TENANT = "t1";
@@ -645,5 +645,95 @@ describe("cancelRun", () => {
     expect(run.status).toBe("cancelled");
     expect(calls).toEqual({});
     expect((await eventsOf(id)).map((e) => e.type)).toEqual(["run.started", "run.cancelled"]);
+  });
+});
+
+describe("suspend afterCommit", () => {
+  /** A step that parks on a timer with `hook` as its afterCommit, recording the run at each call. */
+  function parkWith(hook: () => Promise<void>) {
+    const seen: unknown[] = [];
+    behaviours.s = (ctx) => {
+      if (ctx.resume) return { resumed: true };
+      return suspend({
+        until: now + 5000,
+        afterCommit: async () => {
+          const run = await storage.getRunById(ctx.runId);
+          seen.push({ status: run?.status, waitReason: run?.waitReason });
+          await hook();
+        },
+      });
+    };
+    return seen;
+  }
+
+  it("runs after the park commit of a timer suspension, and is never journaled", async () => {
+    const seen = parkWith(async () => {});
+    const id = await startRun(wf([step("s")]));
+    await makeEngine().drain();
+    expect(seen).toEqual([{ status: "waiting", waitReason: "timer" }]);
+    const run = await getRun(id);
+    expect(JSON.stringify([run.journal, await eventsOf(id)])).not.toContain("afterCommit");
+    now += 5000;
+    await makeEngine().drain();
+    expect((await getRun(id)).status).toBe("completed");
+    expect(seen).toHaveLength(1);
+  });
+
+  it("retries a RetryableError inline, at most 3 tries", async () => {
+    let failures = 2;
+    const seen = parkWith(async () => {
+      if (failures-- > 0) throw new RetryableError("flaky");
+    });
+    const id = await startRun(wf([step("s")]));
+    await makeEngine().drain();
+    expect(seen).toHaveLength(3);
+    expect((await eventsOf(id)).map((e) => e.type)).not.toContain("step.notifyFailed");
+  });
+
+  it("records step.notifyFailed for any other error without retrying, and keeps waiting", async () => {
+    const warnings: unknown[] = [];
+    const seen = parkWith(async () => {
+      throw new Error("receiver said no");
+    });
+    const id = await startRun(wf([step("s")]));
+    await makeEngine({
+      logger: {
+        debug() {},
+        info() {},
+        warn: (msg, meta) => warnings.push({ msg, meta }),
+        error() {},
+      },
+    }).drain();
+    expect(seen).toHaveLength(1);
+    expect(await getRun(id)).toMatchObject({ status: "waiting", waitReason: "timer" });
+    const failed = (await eventsOf(id)).filter((e) => e.type === "step.notifyFailed");
+    expect(failed).toEqual([
+      expect.objectContaining({
+        stepPath: "s",
+        data: { error: { message: "receiver said no" }, attempts: 1 },
+      }),
+    ]);
+    expect(warnings).toContainEqual(expect.objectContaining({ msg: "after-commit hook failed" }));
+  });
+
+  it("masks the callback's token and URL in the recorded error", async () => {
+    behaviours.s = async (ctx) => {
+      const cb = await ctx.callback({ timeoutMs: 10_000 });
+      return suspend({
+        callback: cb,
+        afterCommit: async () => {
+          throw new Error(`could not deliver ${cb.resumeUrl} (token ${cb.token})`);
+        },
+      });
+    };
+    const id = await startRun(wf([step("s")]));
+    await makeEngine().drain();
+    const token = (await getRun(id)).callbackToken as string;
+    const events = await eventsOf(id);
+    expect(JSON.stringify(events)).not.toContain(token);
+    expect(events.find((e) => e.type === "step.notifyFailed")?.data).toEqual({
+      error: { message: "could not deliver [redacted] (token [redacted])" },
+      attempts: 1,
+    });
   });
 });

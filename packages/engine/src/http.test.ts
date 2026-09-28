@@ -401,6 +401,46 @@ describe("redirects", () => {
     expect(await res.json()).toEqual({ method: "POST", body: "payload", type: "text/plain" });
   });
 
+  describe("with init.redirect", () => {
+    const redirectElsewhere = () => {
+      handler = (req, res) => {
+        if (req.url === "/a") {
+          res.writeHead(307, { location: `http://other.test:${port}/b` });
+          res.end();
+          return;
+        }
+        res.end("followed");
+      };
+    };
+    const post = { method: "POST", body: "resume-url-inside" } as const;
+    const other = () =>
+      ctxWith({
+        resolve: tableResolver({ "public.test": ["127.0.0.1"], "other.test": ["127.0.0.1"] })
+          .resolve,
+        isPrivate: loopbackIsPublic,
+      });
+
+    it('"error" fails on a redirect without re-sending the body', async () => {
+      redirectElsewhere();
+      const err = await fatal(
+        other().http.fetch(`http://public.test:${port}/a`, { ...post, redirect: "error" }),
+      );
+      expect(err.message).toBe("redirects are not allowed");
+      expect(hits).toHaveLength(1);
+    });
+
+    it('"manual" returns the redirect response as is', async () => {
+      redirectElsewhere();
+      const res = await other().http.fetch(`http://public.test:${port}/a`, {
+        ...post,
+        redirect: "manual",
+      });
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe(`http://other.test:${port}/b`);
+      expect(hits).toHaveLength(1);
+    });
+  });
+
   it("gives up after 5 redirects", async () => {
     handler = (req, res) => {
       const n = Number(req.url?.slice(1) ?? 0);

@@ -41,6 +41,10 @@ const MAX_BACKOFF_MS = 3_600_000;
 /** Consecutive `renewLease` rejections tolerated before the claim is abandoned. */
 const MAX_RENEWAL_ERRORS = 3;
 const DEFAULT_BASE_PATH = "/flowkit";
+/** Tries of a suspension's `afterCommit` hook (e.g. a callback notification). */
+const AFTER_COMMIT_ATTEMPTS = 3;
+/** Delay before the first `afterCommit` retry, doubling after each. */
+const AFTER_COMMIT_BACKOFF_MS = 100;
 /** @internal Run statuses that never change again (except through `retryRun`). */
 export const TERMINAL: ReadonlySet<Run["status"]> = new Set(["completed", "failed", "cancelled"]);
 
@@ -355,6 +359,52 @@ export function createExecutor(opts: EngineOptions): Executor {
       const ok = await commit({ ...patch, journal: { [path]: entry } }, events, path);
       if (ok) journal = { ...journal, [path]: entry };
       return ok;
+    };
+
+    /**
+     * Run a suspension's `afterCommit` once its park commit succeeded: best effort, at most once (a
+     * crash before this point skips it). Up to {@link AFTER_COMMIT_ATTEMPTS} tries, retrying only
+     * a `RetryableError`. The park released the lease, so a final failure appends a
+     * `step.notifyFailed` event (error message with the callback's token and URL masked) instead of
+     * a guarded commit, logs a warning and leaves the run waiting.
+     */
+    const runAfterCommit = async (
+      path: string,
+      hook: () => Promise<void>,
+      issued: CallbackHandle | undefined,
+    ): Promise<void> => {
+      for (let n = 1; ; n++) {
+        try {
+          await hook();
+          return;
+        } catch (err) {
+          const retryable = err instanceof Error && err.name === "RetryableError";
+          if (retryable && n < AFTER_COMMIT_ATTEMPTS) {
+            await new Promise((r) => setTimeout(r, AFTER_COMMIT_BACKOFF_MS * 2 ** (n - 1)));
+            continue;
+          }
+          let message = errorMessage(err);
+          for (const s of issued ? [issued.resumeUrl, issued.token] : []) {
+            message = message.split(s).join("[redacted]");
+          }
+          opts.logger?.warn("after-commit hook failed", {
+            runId: run.id,
+            stepPath: path,
+            error: message,
+          });
+          const events = [event("step.notifyFailed", path, { error: { message }, attempts: n })];
+          try {
+            await storage.appendEvents(events);
+            publish(events);
+          } catch (appendErr) {
+            opts.logger?.warn("could not record step.notifyFailed", {
+              runId: run.id,
+              error: errorMessage(appendErr),
+            });
+          }
+          return;
+        }
+      }
     };
 
     /** Clears the per-step wait state once a step's entry is final (done/branched/looping). */
@@ -853,12 +903,14 @@ export function createExecutor(opts: EngineOptions): Executor {
               callbackExpiresAt: expiresAt,
             });
           }
-          await commitEntry(
+          const parked = await commitEntry(
             path,
             { status: "suspended", pending, attempts: attempt, ...base },
             patch,
             [event("run.suspended", path, data)],
           );
+          // Only now does the callback's token exist in storage, so its URL works.
+          if (parked && result.afterCommit) await runAfterCommit(path, result.afterCommit, issued);
           return "stop";
         }
         if (result.kind === "subflow") {

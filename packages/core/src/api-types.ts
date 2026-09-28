@@ -171,6 +171,8 @@ export type RunEventType =
   | "step.failed"
   | "step.retrying"
   | "step.skipped"
+  /** A suspended step's `afterCommit` (e.g. a callback notification) failed; the run keeps waiting. */
+  | "step.notifyFailed"
   | "run.suspended"
   | "run.resumed"
   | "run.completed"
