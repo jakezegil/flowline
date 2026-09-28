@@ -357,7 +357,16 @@ export const requestApproval = defineNode({
 - **Webhooks.** `POST <basePath>/hooks/:tenantId/:workflowId/:slug` starts a run. The engine
   generates the slug on the first save. You can add an HMAC check with
   `X-Flowkit-Signature: sha256=<hex>`. The engine never stores the `authorization`, `cookie`,
-  signature or `proxy-*` headers.
+  signature or `proxy-*` headers. The webhook responds as follows:
+
+  | Case | Response |
+  |---|---|
+  | A new run started | 202 `{ runId }` |
+  | The dedupe header was a repeat | 200 `{ runId, deduped: true }` |
+  | The trigger's `filter` rejected the delivery | 200 `{ skipped: true }` |
+  | The slug is unknown | 404 |
+  | The signature is bad | 401 |
+  | The body does not match the declared fields | 400 `{ issues }` |
 - **Schedules.** Cron expressions with a time zone. Schedules do not catch up after downtime: only
   the most recent missed fire runs.
 - **Deduplication.** Dedupe keys are scoped to a workflow, and they are effectively permanent,
@@ -414,7 +423,10 @@ runStorageConformance("my-storage", async () => {
 ## Security notes
 
 - **Authorization.** Every editor route goes through `authorize(req)`, which returns
-  `{ tenantId, userId }` or `null` (a 401). Without `authorize`, every request acts as tenant
+  `{ tenantId, userId }` or `null` (a 401). Every editor request other than `GET` must send
+  `Content-Type: application/json`, even when it has no body. Otherwise the engine returns 415.
+  This check keeps cookie-authorized mutations safe from CSRF. `@flowkit/core/client` sets the
+  header for you. Without `authorize`, every request acts as tenant
   `"default"` and the engine logs a warning. Always set it in production. Each tenant can see only
   its own data.
 - **SSRF.** `ctx.http.fetch`, which `core.httpRequest` uses, blocks private, loopback and
