@@ -260,7 +260,7 @@ await engine.emit("contact.created", { contactId: "c_42" }, { tenantId: "acme" }
 
 `emit` starts every published workflow whose trigger listens for the event and resolves
 `{ started, rejected }`: `started` is the new run IDs, and `rejected` reports any match whose
-trigger rejected the payload (or whose `filter`/`dedupeKey` threw) without blocking the others from
+trigger rejected the payload (or whose `filter`/`dedupe.key` threw) without blocking the others from
 starting. The worker then runs the steps. To see the completed run, use `GET /flowline/runs` or
 `<RunList>` and `<RunViewer>`. For a workflow with a manual trigger, call
 `engine.start({ tenantId, workflowId, input })`. It validates `input` against the trigger's
@@ -417,11 +417,12 @@ export const requestApproval = defineNode({
 
 ### Triggers
 
-- **Events.** `engine.emit(event, payload, { tenantId, dedupeKey? })` starts a run for each
-  matching trigger and resolves `{ started, rejected }`. Each match is validated independently: an
-  invalid payload, or a `filter`/`dedupeKey` that throws, adds an entry to `rejected` (also logged
-  at `warn`, and reported through `onTriggerEvent` as `trigger.rejected`) without blocking the
-  other matches from starting. A trigger can also define `filter` and `dedupeKey`.
+- **Events.** `engine.emit(event, payload, { tenantId, dedupe?: { key?, window? } })` starts a
+  run for each matching trigger and resolves `{ started, rejected }`. Each match is handled
+  independently: an invalid payload, a `filter`/`dedupe.key` that throws, or a storage error while
+  starting the run adds an entry to `rejected` (also logged at `warn`, and reported through
+  `onTriggerEvent` as `trigger.rejected`) without blocking the other matches from starting. A
+  trigger can also define `filter` and `dedupe: { key, window? }`.
 - **Webhooks.** `POST <basePath>/hooks/:tenantId/:workflowId/:slug` starts a run. The engine
   generates the slug on the first save. You can add an HMAC check with
   `X-Flowline-Signature: sha256=<hex>`. The engine never stores the `authorization`, `cookie`,
@@ -438,8 +439,13 @@ export const requestApproval = defineNode({
 - **Schedules.** Cron expressions with a time zone. Schedules do not catch up after downtime: only
   the most recent missed fire runs.
 - **Deduplication.** Dedupe keys are scoped to a workflow. Each key claims a randomly generated run
-  ID for a dedupe window; a repeat delivery within that window gets the same run ID back, and a
-  delivery after the window expires starts a new run with a fresh ID.
+  ID for a dedupe window; a repeat delivery within that window gets the same run ID back (and is
+  reported through `onTriggerEvent` as `trigger.deduped`), and a delivery after the window expires
+  starts a new run with a fresh ID, even if the first run is still waiting. For `emit`, a
+  trigger's `dedupe.key` beats the call's `dedupe.key`; a webhook's dedupe header beats the
+  trigger's key. The window is the call's `dedupe.window` (or a webhook's `dedupeWindow`), else
+  the trigger's `dedupe.window`, else `createEngine({ dedupe: { defaultWindow } })`, which is 7
+  days by default. `POST /workflows/:id/run` accepts the same `dedupe` field.
 
 ### Calling a webhook
 
@@ -459,6 +465,7 @@ export const leadReceived = workflow("lead-received", { name: "Lead received" })
     fields: [{ name: "contactId", type: "string", required: true }],
     secret: "partner-webhook", // a secret's *name*; the engine calls secrets.get(tenantId, name)
     dedupeHeader: "X-Request-Id", // a repeated value returns the first run instead of a new one
+    dedupeWindow: "1d", // for this long (default 7d)
   })
   // The payload is { body, headers }: declared fields are under trigger.body.
   .step("contact", loadContact, { contactId: ref("trigger.body.contactId") })

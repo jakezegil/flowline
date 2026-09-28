@@ -148,7 +148,7 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
     try {
       const result = await engine.emit(event.type, event.payload, {
         tenantId: TENANT_ID,
-        dedupeKey: event.id,
+        dedupe: { key: event.id },
       });
       for (const rejection of result.rejected) {
         logger.warn("workflow rejected CRM event", {

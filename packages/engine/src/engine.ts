@@ -5,6 +5,7 @@
  */
 import {
   createRegistry,
+  type DurationInput,
   type FlowlineServices,
   findStep,
   type Issue,
@@ -35,7 +36,7 @@ import { entryAt } from "./interpreter";
 import { createRunBus } from "./sse";
 import type { NewRunEvent, Run, RunPatch, StorageAdapter } from "./storage";
 import { publishTriggerEvent, type TriggerEvent } from "./trigger-events";
-import { createTriggers, type EmitResult } from "./triggers";
+import { createTriggers, type DedupeOptions, type EmitResult } from "./triggers";
 import { startWorker, type Worker, type WorkerOptions } from "./worker";
 import { createWorkflows } from "./workflows";
 
@@ -95,11 +96,26 @@ export interface EngineOptions {
    * registry's own plugins. Default `true`.
    */
   builtins?: boolean;
+  /** Deduplication of deliveries (`emit`, `start`, webhooks, schedules). */
+  dedupe?: {
+    /**
+     * How long a dedupe key suppresses duplicates when neither the call (`dedupe.window`) nor
+     * the trigger (`dedupe.window`, a webhook's `dedupeWindow`) sets a window: whole ms or a
+     * duration such as `"30m"`, from 1 ms to 365 days. Also the window of schedule fire times.
+     * Default `"7d"`. An invalid value makes `createEngine` throw `FlowlineDefinitionError`.
+     */
+    defaultWindow?: DurationInput;
+  };
   /**
    * @internal Test-only hooks (crash injection). Not part of the public API; may change at any
    * time.
    */
   __testHooks?: {
+    /**
+     * Called right after a start claimed a dedupe key, before the run is created; throwing
+     * simulates a crash between the two.
+     */
+    afterDedupeClaim?(tenantId: string, key: string, runId: string): void | Promise<void>;
     /**
      * Called before every run commit; throwing simulates a crash before the write. `phase` is
      * `"start"` for the commit that marks a step in flight (before its handler runs) and
@@ -254,33 +270,43 @@ export interface Engine {
   /**
    * Start a run of every published workflow of the tenant whose `event` trigger listens to `event`
    * (a plugin trigger's `event`, or `config.event` of `core.event`) and whose `filter` accepts the
-   * payload. Each match is evaluated independently: an invalid payload, or a `filter` or
-   * `dedupeKey` that throws, produces one {@link EmitRejection} for that workflow (reported in
-   * `rejected`, logged at `warn`, and passed to `onTriggerEvent` as `trigger.rejected`) without
-   * affecting the other matches. `emit` itself never throws for a rejected match; storage errors
-   * still propagate. With a dedupe key (`opts.dedupeKey`, else the trigger's `dedupeKey()`), at
-   * most one run per workflow and key is ever started. Resolves the IDs of the runs this call
-   * started (`started`) and the matches that could not start (`rejected`), both in workflow ID
-   * order.
+   * payload. Each match is evaluated independently: an invalid payload, a `filter` or
+   * `dedupe.key` that throws, or a failure launching the run (a storage error, say) produces one
+   * {@link EmitRejection} for that workflow (reported in `rejected`, logged at `warn`, and passed
+   * to `onTriggerEvent` as `trigger.rejected`) without affecting the other matches; a launch
+   * failure has no `issues`. `emit` never throws for a rejected match; it throws only when the
+   * published workflows can't be listed, or for an invalid `opts.dedupe.window`
+   * ({@link FlowlineValidationError}, before any match starts). To retry rejected launches, emit
+   * again with a dedupe key: matches that already started are deduped.
+   *
+   * Deduplication: the key is the trigger's `dedupe.key(...)` when it returns one, else
+   * `opts.dedupe.key`; the window is `opts.dedupe.window`, else the trigger's `dedupe.window`,
+   * else `EngineOptions.dedupe.defaultWindow`. Within the window, a repeated key (per workflow)
+   * starts no run and reports `trigger.deduped`; after it, a new run starts with a fresh ID even
+   * if the first is still active. Resolves the IDs of the runs this call started (`started`) and
+   * the matches that could not start (`rejected`), both in workflow ID order.
    */
   emit(
     event: string,
     payload: unknown,
-    opts: { tenantId: string; dedupeKey?: string },
+    opts: { tenantId: string; dedupe?: DedupeOptions },
   ): Promise<EmitResult>;
   /**
    * Start a run of the workflow's published version with `input` (default `{}`) as the trigger
    * payload, validated against the trigger's declared fields or payload schema (a
-   * {@link FlowlineValidationError} when invalid). `startedBy` defaults to `{ kind: "manual" }`. With
-   * `dedupeKey`, repeated calls start one run and all resolve its ID.
+   * {@link FlowlineValidationError} when invalid). `startedBy` defaults to `{ kind: "manual" }`.
+   * With `dedupe.key`, repeated calls within the window (`dedupe.window`, else the trigger's, else
+   * `EngineOptions.dedupe.defaultWindow`) start one run and all resolve its ID. Unlike `emit`,
+   * storage errors propagate.
    *
    * @throws Error if the workflow has no published version in the tenant.
+   * @throws {@link FlowlineValidationError} for invalid input or an invalid `dedupe.window`.
    */
   start(opts: {
     tenantId: string;
     workflowId: string;
     input?: unknown;
-    dedupeKey?: string;
+    dedupe?: DedupeOptions;
     startedBy?: RunOrigin;
   }): Promise<string>;
   /**
@@ -375,7 +401,7 @@ function withBuiltins({ registry, builtins = true }: EngineOptions): Registry {
  * The built-in `core.*` nodes and triggers are available unless `builtins: false`.
  *
  * @throws `FlowlineDefinitionError` when the registry's manifest can't be built (see
- * `Registry.manifest`).
+ * `Registry.manifest`), or `dedupe.defaultWindow` is invalid.
  *
  * @example
  * ```ts

@@ -61,6 +61,7 @@ export {
   stop,
   suspend,
   type TransformRuntime,
+  type TriggerDedupe,
   type TriggerDefinition,
 } from "./define";
 export {
@@ -132,6 +133,7 @@ export {
 } from "./tree";
 export type {
   BranchSpec,
+  DurationInput,
   FieldDecl,
   FieldType,
   JSONSchema,

@@ -198,6 +198,75 @@ describe("defineTrigger", () => {
       }),
     ).toThrow(/payload.*dynamicPayload/);
   });
+
+  test("types dedupe.key args (config, payload, event) and keeps a valid window", () => {
+    const t = defineTrigger({
+      type: "crm.booked",
+      name: "Booked",
+      kind: "event",
+      event: "booking.created",
+      config: z.object({ scope: z.string().default("all") }),
+      payload: z.object({ bookingId: z.string() }),
+      dedupe: {
+        key: ({ config, payload, event }) => {
+          expectTypeOf(config.scope).toEqualTypeOf<string>();
+          expectTypeOf(payload.bookingId).toEqualTypeOf<string>();
+          expectTypeOf(event).toEqualTypeOf<string | undefined>();
+          return `${event}:${payload.bookingId}`;
+        },
+        window: "30m",
+      },
+    });
+    expect(
+      t.dedupe?.key({ config: { scope: "all" }, payload: { bookingId: "b1" }, event: "x" }),
+    ).toBe("x:b1");
+    for (const window of [1, "1s", "365d", 60_000]) {
+      expect(() =>
+        defineTrigger({
+          type: "a.b",
+          name: "B",
+          kind: "event",
+          config: z.object({}),
+          dedupe: { key: () => "k", window },
+        }),
+      ).not.toThrow();
+    }
+  });
+
+  test("rejects a dedupe window shorter than 1 ms, longer than 365d or unparsable", () => {
+    for (const window of [
+      0,
+      -1,
+      0.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      "0s",
+      "-1s",
+      "nope",
+      "",
+      "366d",
+      365 * 86_400_000 + 1,
+    ]) {
+      expect(() =>
+        defineTrigger({
+          type: "a.b",
+          name: "B",
+          kind: "event",
+          config: z.object({}),
+          dedupe: { key: () => "k", window },
+        }),
+      ).toThrow(FlowlineDefinitionError);
+    }
+    expect(() =>
+      defineTrigger({
+        type: "a.b",
+        name: "B",
+        kind: "event",
+        config: z.object({}),
+        dedupe: { key: () => "k", window: "nope" },
+      }),
+    ).toThrow(/Trigger "a\.b".*dedupe window/);
+  });
 });
 
 describe("definePlugin", () => {

@@ -244,6 +244,12 @@ export interface ResumeSpec {
 }
 
 /**
+ * A length of time: milliseconds, or duration text (a positive whole number and a unit, `s`, `m`,
+ * `h` or `d`), such as `"30s"`, `"5m"`, `"2h"` or `"7d"`.
+ */
+export type DurationInput = number | string;
+
+/**
  * How a trigger fires.
  *
  * `subflow` triggers make a workflow callable with `core.callSubflow`. Contract for plugin

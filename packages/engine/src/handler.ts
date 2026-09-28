@@ -9,7 +9,13 @@
  *
  * @module
  */
-import type { ApiErrorBody, RunStatus, TestStepRequest, WorkflowDoc } from "@flowlinejs/core";
+import type {
+  ApiErrorBody,
+  RunStatus,
+  RunWorkflowRequest,
+  TestStepRequest,
+  WorkflowDoc,
+} from "@flowlinejs/core";
 import type { Engine, EngineCore } from "./engine";
 import {
   EngineConflictError,
@@ -264,15 +270,28 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
       if (method === "POST" && n === 3 && action === "run") {
         const body = await readJson(req);
         if (body !== undefined && !isPlainObject(body)) {
-          throw new HttpError(400, "Body must be { input }");
+          throw new HttpError(400, "Body must be { input, dedupe }");
+        }
+        const dedupe = body?.dedupe;
+        if (
+          dedupe !== undefined &&
+          (!isPlainObject(dedupe) ||
+            (dedupe.key !== undefined && typeof dedupe.key !== "string") ||
+            (dedupe.window !== undefined &&
+              typeof dedupe.window !== "string" &&
+              typeof dedupe.window !== "number"))
+        ) {
+          throw new HttpError(400, "dedupe must be { key?: string, window?: string | number }");
         }
         if (!(await storage.getPublishedVersion(tenantId, id))) {
           throw notFound("Workflow is not published");
         }
+        // An invalid window is a FlowlineValidationError: 400.
         const runId = await engine.start({
           tenantId,
           workflowId: id,
           input: body?.input,
+          dedupe: dedupe as RunWorkflowRequest["dedupe"],
           startedBy: { kind: "manual", userId },
         });
         return json(202, { runId });

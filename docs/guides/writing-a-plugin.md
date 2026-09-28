@@ -217,14 +217,17 @@ export const contactCreated = defineTrigger({
   }),
   payload: z.object({ contactId: z.string(), source: z.string() }), // becomes `trigger.*` in refs
   filter: ({ config, payload }) => !config.source || payload.source === config.source,
-  dedupeKey: ({ payload }) => payload.contactId,
+  dedupe: { key: ({ payload }) => payload.contactId, window: "1d" }, // default window: 7 days
 });
 ```
 
 Your app fires the trigger with
 `engine.emit("contact.created", payload, { tenantId })`. The payload is validated against
 `payload`. A dedupe key is scoped to one workflow: repeating a key starts no new run until its
-dedupe window expires, after which the same key starts a fresh run with a new ID.
+dedupe window expires, after which the same key starts a fresh run with a new ID. `dedupe.key`
+also receives the delivered `event`, and returning `undefined` means no dedupe for that delivery.
+The trigger's key beats a key passed to `emit` (`{ dedupe: { key } }`); a window passed to `emit`
+beats the trigger's `window`.
 
 ## UI metadata
 

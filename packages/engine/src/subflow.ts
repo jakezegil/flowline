@@ -26,7 +26,7 @@ const FINISHED: ReadonlySet<Run["status"]> = new Set(["completed", "failed", "ca
 /**
  * @internal `doc`'s trigger config without the values of fields hidden by `showIf`, judged against
  * the trigger's manifest config schema. Everything that hands trigger config to trigger code
- * (config parsing, `filter`, `dedupeKey`, declared payload and output fields) reads it through
+ * (config parsing, `filter`, `dedupe.key`, declared payload and output fields) reads it through
  * here, so what the editor shows is what runs.
  */
 export function visibleTriggerConfig(

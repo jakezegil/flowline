@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { BranchSpec, OutputSpec, TriggerKind } from "./types";
+import type { BranchSpec, DurationInput, OutputSpec, TriggerKind } from "./types";
 
 /**
  * Thrown when a node, trigger, plugin or registry definition is invalid, or when the code-first
@@ -478,15 +478,61 @@ export interface TriggerDefinition<C extends z.ZodObject = z.ZodObject, P = unkn
   dynamicPayload?: { kind: "fields" | "webhook"; configPath: string };
   /** Return `false` to skip starting a run for this payload. */
   filter?(args: { config: z.infer<C>; payload: P }): boolean;
-  /** A key identifying duplicate deliveries; at most one run starts per key. */
-  dedupeKey?(args: { config: z.infer<C>; payload: P }): string | undefined;
+  /**
+   * Suppress duplicate deliveries: of the deliveries whose `key` matches within `window`, only
+   * the first starts a run; the others resolve that run's ID.
+   */
+  dedupe?: TriggerDedupe<C, P>;
+}
+
+/**
+ * Deduplication of a trigger's deliveries (see {@link TriggerDefinition.dedupe}).
+ *
+ * @typeParam C - Zod object schema of the trigger's config.
+ * @typeParam P - The payload type.
+ */
+export interface TriggerDedupe<C extends z.ZodObject, P> {
+  /**
+   * A key identifying duplicate deliveries; `undefined` (or `""`) → no dedupe for this delivery.
+   * `event` is the delivered event name for `event` triggers, else `undefined`. For `emit`, this
+   * key beats a key passed at the call site.
+   */
+  key(args: { config: z.infer<C>; payload: P; event?: string }): string | undefined;
+  /**
+   * How long a key suppresses duplicates: milliseconds or a duration such as `"30m"` or `"2d"`,
+   * from 1 ms to 365 days. Default: the engine's `dedupe.defaultWindow` (7 days unless
+   * configured). A window passed at the call site beats this one.
+   */
+  window?: DurationInput;
+}
+
+const DURATION_UNIT_MS = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 } as const;
+/** The longest dedupe window: 365 days (`MAX_DURATION_MS` of `@flowlinejs/nodes-builtin`). */
+const MAX_WINDOW_MS = 365 * DURATION_UNIT_MS.d;
+
+/**
+ * Whether `window` is a valid dedupe window: a whole number of ms, or duration text in the
+ * grammar of `parseDuration` from `@flowlinejs/nodes-builtin` (which `core` must not import),
+ * from 1 ms to {@link MAX_WINDOW_MS}. The engine re-parses it with `parseDuration` itself.
+ */
+function isValidWindow(window: DurationInput): boolean {
+  let ms: number;
+  if (typeof window === "number") {
+    ms = window;
+  } else {
+    const match = /^([1-9][0-9]*)([smhd])$/.exec(window);
+    if (!match) return false;
+    ms = Number(match[1]) * DURATION_UNIT_MS[match[2] as keyof typeof DURATION_UNIT_MS];
+  }
+  return Number.isInteger(ms) && ms >= 1 && ms <= MAX_WINDOW_MS;
 }
 
 /**
  * Define a trigger type.
  *
- * @throws {@link FlowlineDefinitionError} if `type` has no namespace or both `payload` and
- * `dynamicPayload` are given.
+ * @throws {@link FlowlineDefinitionError} if `type` has no namespace, both `payload` and
+ * `dynamicPayload` are given, or `dedupe.window` is not a whole number of ms or a duration from
+ * 1 ms to 365 days.
  */
 export function defineTrigger<C extends z.ZodObject, P>(
   def: TriggerDefinition<C, P>,
@@ -495,6 +541,12 @@ export function defineTrigger<C extends z.ZodObject, P>(
   if (def.payload !== undefined && def.dynamicPayload !== undefined) {
     throw new FlowlineDefinitionError(
       `Trigger "${def.type}" declares both payload and dynamicPayload; use one`,
+    );
+  }
+  const window = def.dedupe?.window;
+  if (window !== undefined && !isValidWindow(window)) {
+    throw new FlowlineDefinitionError(
+      `Trigger "${def.type}" has an invalid dedupe window ${JSON.stringify(window)}: use 1 ms to 365 days, e.g. 60000 or "30m"`,
     );
   }
   return def;
