@@ -1,42 +1,40 @@
+# Pull request checks. Pushes to main are gated (with the same reusable workflow) by release.yml,
+# so they aren't run twice.
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  gate:
+  gates:
+    uses: ./.github/workflows/gates.yml
+
+  changeset:
+    # Advisory only: warns (annotation + job summary) instead of failing, because not every change
+    # to packages/ needs a release. Use `pnpm changeset --empty` to acknowledge that explicitly.
+    name: Changeset present
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
         with:
-          node-version: 22
-          cache: pnpm
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Install
-        run: pnpm install --frozen-lockfile
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
 
-      # The docs-check package reads dist, so build must run before test.
-      - name: Build
-        run: pnpm build
-
-      - name: Test
-        run: pnpm test
-
-      - name: Typecheck
-        run: pnpm -r typecheck
-
-      - name: Lint
-        run: pnpm lint
-
-      # e2e (Playwright, examples/mini-crm) is intentionally not run in CI yet: it needs browser
-      # binaries installed and a dedicated job. Run it locally with
-      # `pnpm --filter @flowlinejs/example-mini-crm e2e`.
+      - name: Check for a changeset
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node scripts/release.mjs changeset-check --base "origin/$BASE_REF"

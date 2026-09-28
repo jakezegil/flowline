@@ -1,0 +1,24 @@
+name: Setup
+description: Install pnpm (version from package.json `packageManager`) and Node, then `pnpm install --frozen-lockfile`.
+
+inputs:
+  node-version:
+    description: Node version for setup-node.
+    default: "22"
+  cache:
+    description: setup-node package-manager cache ("pnpm", or "" to disable, e.g. in release jobs).
+    default: pnpm
+
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v6
+
+    - uses: actions/setup-node@v7
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: ${{ inputs.cache }}
+
+    - name: Install
+      shell: bash
+      run: pnpm install --frozen-lockfile

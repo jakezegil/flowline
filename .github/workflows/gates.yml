@@ -1,0 +1,125 @@
+# The repo's quality gates, shared by ci.yml (pull requests) and release.yml (main) so a release
+# can only happen after exactly the checks a PR has to pass.
+#
+# Order matters: build runs before test because examples/docs-check reads dist.
+name: Gates
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Build, test, typecheck, lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+        with:
+          node-version: "22"
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      - name: Test release tooling
+        run: pnpm test:scripts
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      # The exact tarballs a release would publish; the smoke job installs them as a consumer.
+      - name: Pack
+        run: node scripts/release.mjs pack --out "$RUNNER_TEMP/tarballs"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gate-tarballs
+          path: ${{ runner.temp }}/tarballs
+          retention-days: 3
+          if-no-files-found: error
+
+  smoke:
+    # The packages declare engines >=20.18.1, but the dev toolchain (Vitest 5, Vite 8) needs Node
+    # >=22.12, so the full gates run on 22 and the published output is checked on both.
+    name: Consumer smoke (Node ${{ matrix.node }})
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20.18.1", "22"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: gate-tarballs
+          path: ${{ runner.temp }}/tarballs
+
+      - name: Install tarballs and import every entry point
+        run: node scripts/smoke-consumer.mjs "$RUNNER_TEMP/tarballs"
+
+  e2e:
+    name: e2e (Playwright, chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+        with:
+          node-version: "22"
+
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('./examples/mini-crm/node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
+
+      - name: Install chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: pnpm --filter @flowlinejs/example-mini-crm exec playwright install --with-deps chromium
+
+      - name: Install chromium system dependencies
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter @flowlinejs/example-mini-crm exec playwright install-deps chromium
+
+      - name: e2e
+        run: pnpm --filter @flowlinejs/example-mini-crm e2e
+
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-results
+          path: examples/mini-crm/node_modules/.e2e-results
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
