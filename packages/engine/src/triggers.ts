@@ -2,23 +2,29 @@
  * Starting runs: `engine.emit` (event triggers), `engine.start` (manual/code), inbound webhooks
  * and cron schedules (`engine.tickSchedules`).
  *
- * Deduplication: a start with a dedupe key records the key (`recordDedupeKey`) and derives the run
- * id from it, so of any number of deliveries (concurrent ones, or in several processes) exactly one
- * starts a run, and a delivery retried after a crash between the two writes still creates it.
+ * Deduplication: a start with a dedupe key generates a random run ID up front and atomically
+ * claims the key for it (`claimDedupeKey`), so of any number of deliveries (concurrent ones, or in
+ * several processes) exactly one starts a run, and a delivery retried after a crash between the
+ * claim and the run's creation still creates it. A key claimed once suppresses duplicates only
+ * until its window expires (see {@link DEDUPE_WINDOW_MS}); a delivery after that starts a new run
+ * with a fresh ID.
+ *
+ * TODO(Task 3): this is the minimal switch to `claimDedupeKey`, keeping the engine compiling with a
+ * fixed default window. The full precedence/window configuration protocol (§4.2-4.4 of the design
+ * spec) lands separately.
  *
  * @module
  */
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { Issue, RunOrigin, WorkflowVersion } from "@flowlinejs/core";
 import { CronExpressionParser } from "cron-parser";
-import { sha256Hex } from "./context";
 import type { EngineCore } from "./engine";
 import { FlowlineValidationError } from "./errors";
 import { checkTriggerPayload, visibleTriggerConfig } from "./subflow";
 import { errorMessage } from "./util";
 
-/** How long dedupe keys are recorded. Run ids derived from a key keep deduplicating after it. */
-const DEDUPE_TTL_MS = 7 * 24 * 3_600_000;
+/** Default dedupe window: how long a claimed key suppresses duplicate deliveries. */
+const DEDUPE_WINDOW_MS = 7 * 24 * 3_600_000;
 
 /** Request headers never stored in a webhook run's `trigger.headers`. */
 const DROPPED_HEADERS: ReadonlySet<string> = new Set([
@@ -117,7 +123,8 @@ export function createTriggers(core: EngineCore): Triggers {
 
   /**
    * Create a queued run of `v` with its `run.started` event. With a dedupe key, starts nothing if
-   * the key was seen before. `created` is whether this call started the run.
+   * the key is still claimed by an earlier delivery. `created` is whether this call started the
+   * run.
    */
   const launch = async (
     v: WorkflowVersion,
@@ -126,17 +133,23 @@ export function createTriggers(core: EngineCore): Triggers {
     dedupeKey?: string,
   ): Promise<{ runId: string; created: boolean }> => {
     const now = clock();
-    let runId: string;
-    let fresh = true;
-    if (dedupeKey === undefined) {
-      runId = `run_${globalThis.crypto.randomUUID().replace(/-/g, "")}`;
-    } else {
-      fresh = await storage.recordDedupeKey(v.tenantId, dedupeKey, now, DEDUPE_TTL_MS);
-      runId = `run_${(await sha256Hex(`${v.tenantId}\u0000${dedupeKey}`)).slice(0, 32)}`;
+    let runId = `run_${globalThis.crypto.randomUUID().replace(/-/g, "")}`;
+    let claimed = true;
+    if (dedupeKey !== undefined) {
+      const claim = await storage.claimDedupeKey(
+        v.tenantId,
+        dedupeKey,
+        runId,
+        now,
+        DEDUPE_WINDOW_MS,
+      );
+      claimed = claim.claimed;
+      runId = claim.runId;
+      // A claim held by an earlier delivery whose run exists is a duplicate. One whose run is
+      // missing lost it to a crash right after the key was claimed: create it now (`createRun` is
+      // idempotent on the id).
+      if (!claimed && (await storage.getRun(v.tenantId, runId))) return { runId, created: false };
     }
-    // A seen key whose run exists is a duplicate. One whose run is missing lost it to a crash right
-    // after the key was recorded: create it now (`createRun` is idempotent on the id).
-    if (!fresh && (await storage.getRun(v.tenantId, runId))) return { runId, created: false };
     const events = [core.event({ id: runId, tenantId: v.tenantId }, "run.started", undefined)];
     const run = await storage.createRun(
       {
@@ -153,11 +166,11 @@ export function createTriggers(core: EngineCore): Triggers {
       events,
       now,
     );
-    // Only the delivery that recorded the key counts as creating the run: a concurrent duplicate
+    // Only the delivery that claimed the key counts as creating the run: a concurrent duplicate
     // can reach this point before that delivery's insert, and must not report or publish it too.
     // So a run recovered after a crash is created without its `run.started` reaching `onEvent`,
     // and its delivery is answered as a duplicate; the run itself executes normally.
-    const created = fresh && run.createdAt === now && run.workflowId === v.workflowId;
+    const created = claimed && run.createdAt === now && run.workflowId === v.workflowId;
     if (created) core.publish(events);
     return { runId, created };
   };

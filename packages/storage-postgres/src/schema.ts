@@ -49,6 +49,21 @@ export function migrations(s: string): Migration[] {
     { version: 1, statements: v1(s) },
     { version: 2, statements: v2(s) },
     { version: 3, statements: v3(s) },
+    { version: 4, statements: v4(s) },
+  ];
+}
+
+/**
+ * v4: `dedupe_keys.run_id` (`claimDedupeKey`). Pre-1.0, nothing is deployed: rows written before
+ * v4 have no run id, so dedupe history is reset once rather than reconstructed from the old
+ * derived-id scheme. All three statements are safe to repeat: after the first run there are no
+ * `NULL` rows left to delete.
+ */
+function v4(s: string): string[] {
+  return [
+    `ALTER TABLE ${s}.dedupe_keys ADD COLUMN IF NOT EXISTS run_id text`,
+    `DELETE FROM ${s}.dedupe_keys WHERE run_id IS NULL`,
+    `ALTER TABLE ${s}.dedupe_keys ALTER COLUMN run_id SET NOT NULL`,
   ];
 }
 

@@ -223,8 +223,8 @@ export const contactCreated = defineTrigger({
 
 Your app fires the trigger with
 `engine.emit("contact.created", payload, { tenantId })`. The payload is validated against
-`payload`. A dedupe key is scoped to one workflow, and dedupe is effectively permanent: repeating a
-key starts no new run.
+`payload`. A dedupe key is scoped to one workflow: repeating a key starts no new run until its
+dedupe window expires, after which the same key starts a fresh run with a new ID.
 
 ## UI metadata
 
