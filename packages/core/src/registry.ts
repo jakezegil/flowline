@@ -172,6 +172,7 @@ function triggerManifest(plugin: string, def: TriggerDefinition<any, any>): Trig
     icon: def.icon,
     kind: def.kind,
     event: def.event,
+    events: def.events ? [...def.events] : undefined,
     config,
     payload,
   });

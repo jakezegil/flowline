@@ -323,7 +323,10 @@ export function createTriggers(core: EngineCore): Triggers {
         .filter((v) => {
           const def = registry.getTrigger(v.doc.trigger.type);
           if (def?.kind !== "event") return false;
-          return (def.event ?? visibleTriggerConfig(registry, v.doc).event) === event;
+          if (def.event !== undefined) return def.event === event;
+          if (def.events !== undefined) return def.events.includes(event);
+          // core.event: the event name is configured, not declared on the trigger definition.
+          return visibleTriggerConfig(registry, v.doc).event === event;
         })
         .sort((a, b) => (a.workflowId < b.workflowId ? -1 : 1));
 
@@ -358,9 +361,24 @@ export function createTriggers(core: EngineCore): Triggers {
         const t = triggerOf(v);
         if (!t) continue;
 
+        // Spec §5's pipeline: normalize -> validate -> filter -> key. `normalize` runs before
+        // payload validation so it can reshape one source's raw event into this trigger's
+        // payload shape; returning `undefined` skips the delivery (not a rejection).
+        let raw = payload;
+        if (t.def.normalize !== undefined) {
+          try {
+            const normalized = t.def.normalize(event, payload);
+            if (normalized === undefined) continue;
+            raw = normalized;
+          } catch (err) {
+            reject(v, new Error(`normalize threw: ${errorMessage(err)}`));
+            continue;
+          }
+        }
+
         let value: unknown;
         try {
-          value = await payloadFor(v, payload, `Event "${event}"`);
+          value = await payloadFor(v, raw, `Event "${event}"`);
         } catch (err) {
           reject(v, err);
           continue;
@@ -368,7 +386,9 @@ export function createTriggers(core: EngineCore): Triggers {
 
         let skip = false;
         try {
-          skip = t.def.filter !== undefined && !t.def.filter({ config: t.config, payload: value });
+          skip =
+            t.def.filter !== undefined &&
+            !t.def.filter({ config: t.config, payload: value, event });
         } catch (err) {
           reject(v, new Error(`filter threw: ${errorMessage(err)}`));
           continue;

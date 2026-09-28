@@ -70,6 +70,66 @@ const dealKeyed = defineTrigger({
   dedupe: { key: ({ payload, event }) => `${event}/${payload.dealId}`, window: "1h" },
 });
 
+/** Normalized shape for {@link callEnded}: two raw event shapes (AI vs VoIP) unified. */
+const CallEnded = z.object({
+  call: z.object({ id: z.string(), source: z.enum(["ai", "voip"]), durationSec: z.number() }),
+});
+
+/**
+ * "Any call ended" (spec §5.4): listens to two events, normalizes each raw shape into
+ * {@link CallEnded}, filters on minimum duration and dedupes across sources by call ID.
+ * `raw.call.id === "skip"` makes `normalize` return `undefined`; `"boom"` makes it throw.
+ */
+const callEnded = defineTrigger({
+  type: "crm.callEnded",
+  name: "Any call ended",
+  kind: "event",
+  events: ["ai_call.ended", "voip_call.ended"],
+  config: z.object({ minSeconds: z.number().int().min(0).default(0) }),
+  payload: CallEnded,
+  normalize: (event, raw) => {
+    if (event === "ai_call.ended") {
+      const r = raw as { call: { id: string; seconds: number } };
+      if (r.call.id === "skip") return undefined;
+      if (r.call.id === "boom") throw new Error("bad payload");
+      return { call: { id: r.call.id, source: "ai", durationSec: r.call.seconds } };
+    }
+    const r = raw as { callId: string; durationMs: number };
+    return { call: { id: r.callId, source: "voip", durationSec: Math.round(r.durationMs / 1000) } };
+  },
+  filter: ({ config, payload }) => payload.call.durationSec >= config.minSeconds,
+  dedupe: { key: ({ payload }) => payload.call.id, window: "1h" },
+});
+
+/** Records the `event` argument `filter` and `dedupe.key` were called with. */
+const callEndedSpyEvents = {
+  filter: [] as (string | undefined)[],
+  dedupe: [] as (string | undefined)[],
+};
+
+/** A multi-event trigger used only to pin that `filter`/`dedupe.key` receive `event`. */
+const callEndedSpy = defineTrigger({
+  type: "crm.callEndedSpy",
+  name: "Call ended spy",
+  kind: "event",
+  events: ["ai_call.ended", "voip_call.ended"],
+  config: z.object({}),
+  payload: z.object({ callId: z.string() }),
+  normalize: (_event, raw) => ({
+    callId: "callId" in (raw as object) ? (raw as { callId: string }).callId : "unknown",
+  }),
+  filter: ({ event }) => {
+    callEndedSpyEvents.filter.push(event);
+    return true;
+  },
+  dedupe: {
+    key: ({ event }) => {
+      callEndedSpyEvents.dedupe.push(event);
+      return undefined;
+    },
+  },
+});
+
 const echo = defineNode({
   type: "crm.echo",
   name: "Echo",
@@ -82,7 +142,7 @@ const registry = createRegistry([
     id: "crm",
     name: "CRM",
     nodes: [echo],
-    triggers: [dealUpdated, dealAmountChanged, throwy, dealKeyed],
+    triggers: [dealUpdated, dealAmountChanged, throwy, dealKeyed, callEnded, callEndedSpy],
   }),
 ]);
 
@@ -133,6 +193,24 @@ const dealKeyedDoc = (id: string): WorkflowDoc => ({
   name: id,
   trigger: { type: "crm.dealKeyed", config: {} },
   steps,
+});
+
+const callEndedSteps: WorkflowDoc["steps"] = [
+  { id: "e", type: "crm.echo", config: { value: { $ref: "trigger.call.id" } } },
+];
+
+const callEndedDoc = (id: string, minSeconds = 0): WorkflowDoc => ({
+  id,
+  name: id,
+  trigger: { type: "crm.callEnded", config: { minSeconds } },
+  steps: callEndedSteps,
+});
+
+const callEndedSpyDoc = (id: string): WorkflowDoc => ({
+  id,
+  name: id,
+  trigger: { type: "crm.callEndedSpy", config: {} },
+  steps: [{ id: "e", type: "crm.echo", config: { value: { $ref: "trigger.callId" } } }],
 });
 
 /** A core.event workflow that waits 5 minutes on a delay before echoing. */
@@ -767,5 +845,143 @@ describe("dedupe windows", () => {
     expect(triggerEvents).toEqual([
       expect.objectContaining({ type: "trigger.rejected", workflowId: "b", issues: [] }),
     ]);
+  });
+});
+
+describe("multi-event triggers", () => {
+  it("starts the same workflow once per listed event, startedBy.event raw, trigger normalized", async () => {
+    await deploy(callEndedDoc("calls"));
+
+    const ai = await engine.emit(
+      "ai_call.ended",
+      { call: { id: "c1", seconds: 42 } },
+      { tenantId: "t1" },
+    );
+    expect(ai.rejected).toEqual([]);
+    expect(ai.started).toHaveLength(1);
+    const run1 = await storage.getRun("t1", ai.started[0] as string);
+    expect(run1).toMatchObject({
+      workflowId: "calls",
+      trigger: { call: { id: "c1", source: "ai", durationSec: 42 } },
+      startedBy: { kind: "event", event: "ai_call.ended" },
+    });
+
+    const voip = await engine.emit(
+      "voip_call.ended",
+      { callId: "c2", durationMs: 65_000 },
+      { tenantId: "t1" },
+    );
+    expect(voip.rejected).toEqual([]);
+    expect(voip.started).toHaveLength(1);
+    const run2 = await storage.getRun("t1", voip.started[0] as string);
+    expect(run2).toMatchObject({
+      workflowId: "calls",
+      trigger: { call: { id: "c2", source: "voip", durationSec: 65 } },
+      startedBy: { kind: "event", event: "voip_call.ended" },
+    });
+  });
+
+  it("does not match an event outside the listed events", async () => {
+    await deploy(callEndedDoc("calls"));
+    expect(await engine.emit("sms.sent", {}, { tenantId: "t1" })).toEqual({
+      started: [],
+      rejected: [],
+    });
+  });
+
+  it("normalize returning undefined skips the delivery: not started, not rejected", async () => {
+    await deploy(callEndedDoc("calls"));
+    const result = await engine.emit(
+      "ai_call.ended",
+      { call: { id: "skip", seconds: 10 } },
+      { tenantId: "t1" },
+    );
+    expect(result).toEqual({ started: [], rejected: [] });
+    expect(await storage.listRuns("t1", {})).toEqual([]);
+  });
+
+  it("normalize throwing rejects the match, message starting `normalize threw:`", async () => {
+    await deploy(callEndedDoc("calls"));
+    const result = await engine.emit(
+      "ai_call.ended",
+      { call: { id: "boom", seconds: 10 } },
+      { tenantId: "t1" },
+    );
+    expect(result.started).toEqual([]);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]?.message).toMatch(/^normalize threw:/);
+  });
+
+  it("a normalized payload failing the schema is rejected naming the field", async () => {
+    await deploy(callEndedDoc("calls"));
+    const result = await engine.emit(
+      "ai_call.ended",
+      { call: { id: "c3", seconds: "not-a-number" } },
+      { tenantId: "t1" },
+    );
+    expect(result.started).toEqual([]);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]?.message).toContain("durationSec");
+    expect(result.rejected[0]?.issues[0]).toMatchObject({ code: "config.invalid" });
+  });
+
+  it("respects filter after normalize (minSeconds)", async () => {
+    await deploy(callEndedDoc("calls", 30));
+    const short = await engine.emit(
+      "voip_call.ended",
+      { callId: "c4", durationMs: 5_000 },
+      { tenantId: "t1" },
+    );
+    expect(short).toEqual({ started: [], rejected: [] });
+    const long = await engine.emit(
+      "voip_call.ended",
+      { callId: "c5", durationMs: 35_000 },
+      { tenantId: "t1" },
+    );
+    expect(long.started).toHaveLength(1);
+  });
+
+  it("cross-source dedupe.key unifies two events into one run and one trigger.deduped", async () => {
+    const events: TriggerEvent[] = [];
+    engine = createEngine({
+      registry,
+      storage,
+      clock: () => now,
+      onTriggerEvent: (e) => events.push(e),
+    });
+    await deploy(callEndedDoc("calls"));
+
+    const ai = await engine.emit(
+      "ai_call.ended",
+      { call: { id: "shared", seconds: 42 } },
+      { tenantId: "t1" },
+    );
+    expect(ai.started).toHaveLength(1);
+
+    const voip = await engine.emit(
+      "voip_call.ended",
+      { callId: "shared", durationMs: 99_000 },
+      { tenantId: "t1" },
+    );
+    expect(voip.started).toEqual([]);
+
+    expect(await storage.listRuns("t1", {})).toHaveLength(1);
+    const deduped = events.filter((e) => e.type === "trigger.deduped");
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]).toMatchObject({
+      type: "trigger.deduped",
+      runId: ai.started[0],
+      source: { kind: "event", event: "voip_call.ended" },
+    });
+  });
+
+  it("dedupe.key and filter both receive the delivered event", async () => {
+    callEndedSpyEvents.filter.length = 0;
+    callEndedSpyEvents.dedupe.length = 0;
+    await deploy(callEndedSpyDoc("spy"));
+    await engine.emit("ai_call.ended", { callId: "s1" }, { tenantId: "t1" });
+    await engine.emit("voip_call.ended", { callId: "s2" }, { tenantId: "t1" });
+    expect(callEndedSpyEvents.filter).toEqual(["ai_call.ended", "voip_call.ended"]);
+    expect(callEndedSpyEvents.dedupe).toEqual(["ai_call.ended", "voip_call.ended"]);
   });
 });

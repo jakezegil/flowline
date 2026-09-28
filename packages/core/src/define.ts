@@ -464,8 +464,21 @@ export interface TriggerDefinition<C extends z.ZodObject = z.ZodObject, P = unkn
   icon?: string;
   /** How the trigger fires. */
   kind: TriggerKind;
-  /** For `event` triggers: the event name to listen to. */
+  /** For `event` triggers listening to one event. Mutually exclusive with `events`. */
   event?: string;
+  /**
+   * For `event` triggers listening to several events, each normalized to this trigger's payload
+   * shape by {@link TriggerDefinition.normalize}. Mutually exclusive with `event`; requires
+   * `normalize`.
+   */
+  events?: readonly string[];
+  /**
+   * Map a raw event payload onto this trigger's payload shape. Called before payload validation
+   * with the delivered event name (one of `events`, or `event` for a single-event trigger).
+   * Return `undefined` to ignore the delivery (skipped, not rejected). Only valid on `event`
+   * triggers.
+   */
+  normalize?(event: string, payload: unknown): P | undefined;
   /** Config schema. */
   config: C;
   /**
@@ -477,7 +490,7 @@ export interface TriggerDefinition<C extends z.ZodObject = z.ZodObject, P = unkn
   /** Payload shape derived from config. */
   dynamicPayload?: { kind: "fields" | "webhook"; configPath: string };
   /** Return `false` to skip starting a run for this payload. */
-  filter?(args: { config: z.infer<C>; payload: P }): boolean;
+  filter?(args: { config: z.infer<C>; payload: P; event?: string }): boolean;
   /**
    * Suppress duplicate deliveries: of the deliveries whose `key` matches within `window`, only
    * the first starts a run; the others resolve that run's ID.
@@ -531,8 +544,9 @@ function isValidWindow(window: DurationInput): boolean {
  * Define a trigger type.
  *
  * @throws {@link FlowlineDefinitionError} if `type` has no namespace, both `payload` and
- * `dynamicPayload` are given, or `dedupe.window` is not a whole number of ms or a duration from
- * 1 ms to 365 days.
+ * `dynamicPayload` are given, `dedupe.window` is not a whole number of ms or a duration from
+ * 1 ms to 365 days, both `event` and `events` are set, `events` is empty or has duplicates,
+ * `events` is set without `normalize`, or `events`/`normalize` are set on a non-`event` kind.
  */
 export function defineTrigger<C extends z.ZodObject, P>(
   def: TriggerDefinition<C, P>,
@@ -541,6 +555,27 @@ export function defineTrigger<C extends z.ZodObject, P>(
   if (def.payload !== undefined && def.dynamicPayload !== undefined) {
     throw new FlowlineDefinitionError(
       `Trigger "${def.type}" declares both payload and dynamicPayload; use one`,
+    );
+  }
+  if (def.event !== undefined && def.events !== undefined) {
+    throw new FlowlineDefinitionError(
+      `Trigger "${def.type}" declares both event and events; use one`,
+    );
+  }
+  if (def.events !== undefined) {
+    if (def.events.length === 0) {
+      throw new FlowlineDefinitionError(`Trigger "${def.type}" has empty events`);
+    }
+    if (new Set(def.events).size !== def.events.length) {
+      throw new FlowlineDefinitionError(`Trigger "${def.type}" has duplicate events`);
+    }
+    if (def.normalize === undefined) {
+      throw new FlowlineDefinitionError(`Trigger "${def.type}" declares events without normalize`);
+    }
+  }
+  if ((def.events !== undefined || def.normalize !== undefined) && def.kind !== "event") {
+    throw new FlowlineDefinitionError(
+      `Trigger "${def.type}" is kind "${def.kind}"; events and normalize require kind "event"`,
     );
   }
   const window = def.dedupe?.window;
