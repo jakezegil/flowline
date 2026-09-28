@@ -13,6 +13,11 @@ import type {
 export interface ValidationContext {
   /** Callable sub-flows by workflow ID, with their input and output schemas. */
   subflows?: Record<string, { name: string; input: JSONSchema; output: JSONSchema }>;
+  /**
+   * The tenant's configured secret names. When given, a `secret()` field naming any other secret
+   * gets a `secret.unknown` warning (it would fail at runtime).
+   */
+  secrets?: readonly string[];
 }
 
 /** One value a step can reference, as offered by the editor's data picker. */

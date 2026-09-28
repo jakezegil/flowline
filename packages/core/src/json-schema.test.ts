@@ -182,7 +182,7 @@ describe("outputSchemaFor / payloadSchemaFor / branchesFor", () => {
     const decl = [{ name: "q", type: "string" as const }];
     expect(
       payloadSchemaFor(trig("test.manual"), { type: "test.manual", config: { fields: decl } }),
-    ).toEqual(fieldsToJsonSchema(decl));
+    ).toEqual(fieldsToJsonSchema(decl, { closed: true }));
     const hook = payloadSchemaFor(trig("test.hook"), {
       type: "test.hook",
       config: { fields: decl },
@@ -190,6 +190,25 @@ describe("outputSchemaFor / payloadSchemaFor / branchesFor", () => {
     expect(schemaAtPath(hook, ["body", "q"])).toEqual({ type: "string" });
     expect(schemaAtPath(hook, ["headers", "x-id"])).toEqual({ type: "string" });
     expect(payloadSchemaFor(trig("test.any"), { type: "test.any", config: {} })).toEqual({});
+  });
+
+  test("field-declared payloads are closed; an undeclared webhook body stays open", () => {
+    const decl = [{ name: "q", type: "string" as const }];
+    const manual = payloadSchemaFor(trig("test.manual"), {
+      type: "test.manual",
+      config: { fields: decl },
+    });
+    expect(schemaAtPath(manual, ["Q"])).toBeUndefined();
+    const declared = payloadSchemaFor(trig("test.hook"), {
+      type: "test.hook",
+      config: { fields: decl },
+    });
+    expect(schemaAtPath(declared, ["body", "qq"])).toBeUndefined();
+    const open = payloadSchemaFor(trig("test.hook"), { type: "test.hook", config: { fields: [] } });
+    expect(schemaAtPath(open, ["body", "anything", "deep"])).toEqual({});
+    // Node outputs declared with fields() stay open (not a trigger or sub-flow shape).
+    const out = outputSchemaFor(node("test.fields"), step("a", "test.fields", { fields: decl }));
+    expect(schemaAtPath(out, ["extra"])).toEqual({});
   });
 
   test("branches: none, static, fromConfig + append, loop", () => {

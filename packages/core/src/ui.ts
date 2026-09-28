@@ -24,10 +24,12 @@ export function ui<T extends z.ZodType>(schema: T, meta: UiMeta): T {
 
 /**
  * A string field holding the *name* of a host-provided secret (resolved at runtime via
- * `ctx.secrets.get(name)`). Secret values never appear in workflow docs.
+ * `ctx.secrets.get(name)`). Secret values never appear in workflow docs. The field is
+ * literal-only: the name is chosen by the workflow's author, never by run data, so a reference or
+ * template there is a validation error and the engine refuses to run it.
  */
 export function secret(schema: z.ZodString = z.string()): z.ZodString {
-  return ui(schema, { secret: true, widget: "secret" });
+  return ui(schema, { secret: true, widget: "secret", literalOnly: true });
 }
 
 /** Mark a field as sensitive: its value is masked in run inspection and audit output. */

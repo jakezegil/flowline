@@ -761,6 +761,51 @@ describe("executor: errors and retries", () => {
   });
 });
 
+describe("executor: secret fields are literal-only", () => {
+  it("refuses a step whose secret field is a reference or template, before resolving any secret", async () => {
+    const asked: string[] = [];
+    const secrets = {
+      get: async (_t: string, name: string) => {
+        asked.push(name);
+        return "whsec_abc";
+      },
+    };
+    for (const vault of [{ $ref: "trigger.which" }, { $tpl: "{{trigger.which}}" }]) {
+      const id = await startRun(
+        wf([step("s", "test.secretive", { apiKey: "k", vault, name: "n" })]),
+        {
+          which: "HOOK_SECRET",
+        },
+      );
+      await makeEngine({ secrets }).drain();
+      const run = await getRun(id);
+      expect(run.status).toBe("failed");
+      expect(run.error).toMatchObject({
+        fatal: true,
+        message: 'Step "s": field "vault" holds a secret name and can\'t use a reference',
+      });
+    }
+    expect(asked).toEqual([]);
+  });
+
+  it("refuses a reference standing for an object that contains a secret field", async () => {
+    const id = await startRun(
+      wf([
+        step("h", "core.httpRequest", {
+          method: "GET",
+          url: "https://api.example.com",
+          auth: { $ref: "trigger.auth" },
+        }),
+      ]),
+      { auth: { type: "bearer", secret: "HOOK_SECRET" } },
+    );
+    await makeEngine().drain();
+    expect((await getRun(id)).error?.message).toBe(
+      'Step "h": field "auth" holds a secret name and can\'t use a reference',
+    );
+  });
+});
+
 describe("executor: redaction", () => {
   it("masks secret fields in the journal and secret + sensitive fields in events, then applies redact", async () => {
     const id = await startRun(

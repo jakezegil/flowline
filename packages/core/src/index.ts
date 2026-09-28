@@ -74,6 +74,8 @@ export {
   outputSchemaFor,
   payloadSchemaFor,
   schemaAtPath,
+  secretExprPath,
+  subflowOutputSchema,
 } from "./json-schema";
 export {
   collectRefs,

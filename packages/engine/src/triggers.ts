@@ -261,6 +261,14 @@ export function createTriggers(core: EngineCore): Triggers {
       if (slug === undefined || !safeEqual(slug, d.slug)) return { status: "notFound" };
 
       const secretName = configString(v, "secret");
+      const rawSecret = v.doc.trigger.config.secret;
+      // A signing secret that isn't a literal name (e.g. a reference) fails closed.
+      if (secretName === undefined && rawSecret !== undefined && rawSecret !== "") {
+        core.logger?.warn("webhook signing secret is not a secret name", {
+          workflowId: d.workflowId,
+        });
+        return { status: "unauthorized" };
+      }
       if (secretName !== undefined) {
         const key = await core.opts.secrets?.get(d.tenantId, secretName);
         const match = /^sha256=([0-9a-f]{64})$/i.exec(d.headers.get("x-flowkit-signature") ?? "");
