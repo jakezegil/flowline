@@ -35,7 +35,7 @@ import {
   useLabels,
 } from "./canvas-context";
 import { edgeTypes, type FlowEdgeData } from "./edges";
-import { fitViewport, revealViewport } from "./fit";
+import { fitViewport, motionDuration, revealViewport } from "./fit";
 import { edgeGeometries } from "./geometry";
 import { handleCanvasKey } from "./keyboard";
 import { EndNode, RejoinNode } from "./rejoin-node";
@@ -217,7 +217,7 @@ function Controls({ onFit }: { onFit(): void }) {
         type="button"
         aria-label={labels.zoomOut}
         title={labels.zoomOut}
-        onClick={() => rf.zoomOut({ duration: 150 })}
+        onClick={() => rf.zoomOut({ duration: motionDuration(150) })}
       >
         <Minus size={14} aria-hidden />
       </button>
@@ -225,7 +225,7 @@ function Controls({ onFit }: { onFit(): void }) {
         type="button"
         aria-label={labels.zoomIn}
         title={labels.zoomIn}
-        onClick={() => rf.zoomIn({ duration: 150 })}
+        onClick={() => rf.zoomIn({ duration: motionDuration(150) })}
       >
         <Plus size={14} aria-hidden />
       </button>
@@ -296,7 +296,7 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
       const l = layoutRef.current;
       if (!l || W === 0 || H === 0) return;
       rf.setViewport(fitViewport({ width: W, height: H }, l, { whole, minZoom: MIN_ZOOM }), {
-        duration,
+        duration: motionDuration(duration),
       });
     },
     [rf, flowStore, layoutRef],
@@ -331,12 +331,15 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
       if (focus) {
         if (current < 1 || revealViewport(pane, transform, node, [], PAN_MARGIN)) {
           const zoom = Math.max(current, 1);
-          rf.setCenter(node.x + node.w / 2, node.y + node.h / 2, { zoom, duration });
+          rf.setCenter(node.x + node.w / 2, node.y + node.h / 2, {
+            zoom,
+            duration: motionDuration(duration),
+          });
         }
         return;
       }
       const next = revealViewport(pane, transform, node, heads, PAN_MARGIN);
-      if (next) rf.setViewport(next, { duration });
+      if (next) rf.setViewport(next, { duration: motionDuration(duration) });
     },
     [rf, flowStore, layoutRef],
   );

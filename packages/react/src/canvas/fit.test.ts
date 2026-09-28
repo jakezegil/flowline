@@ -1,5 +1,5 @@
-import { describe, expect, test } from "vitest";
-import { FIT_MIN_ZOOM, FIT_PADDING, fitViewport, revealViewport } from "./fit";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { FIT_MIN_ZOOM, FIT_PADDING, fitViewport, motionDuration, revealViewport } from "./fit";
 
 const pane = { width: 1200, height: 800 };
 
@@ -77,5 +77,17 @@ describe("revealViewport", () => {
     });
     // In an 800px pane it doesn't fit: the card alone is in view, so nothing moves.
     expect(revealViewport(pane, [0, 0, 1], card(100, 100), heads, 24)).toBeNull();
+  });
+});
+
+describe("motionDuration", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  test("animates normally, and jumps when the user prefers reduced motion", () => {
+    const media = (reduce: boolean) => (q: string) => ({ matches: reduce && q.includes("reduce") });
+    vi.stubGlobal("matchMedia", media(false));
+    expect(motionDuration(250)).toBe(250);
+    vi.stubGlobal("matchMedia", media(true));
+    expect(motionDuration(250)).toBe(0);
   });
 });

@@ -5,6 +5,18 @@
  * @module
  */
 
+/**
+ * `ms`, or `0` when the user prefers reduced motion: viewport moves the user didn't drag (reveal,
+ * fit, zoom buttons) then jump instead of animating.
+ */
+export function motionDuration(ms: number): number {
+  try {
+    return globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : ms;
+  } catch {
+    return ms;
+  }
+}
+
 /** Top padding (and side padding, space permitting) of the fit. */
 export const FIT_PADDING = 100;
 /**
