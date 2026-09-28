@@ -413,7 +413,7 @@ export function createExecutor(opts: EngineOptions): Executor {
      * by the node's `timeoutMs` (at most {@link AFTER_COMMIT_TIMEOUT_MS}) and aborted when the
      * worker stops; only a `RetryableError` or a timeout is retried, and only while the run still
      * waits on this suspension (it holds no lease, so it may have been resumed or cancelled
-     * meanwhile). The park released the lease, so a final failure appends a `step.notifyFailed`
+     * meanwhile). The park released the lease, so a final failure appends a `step.afterCommitFailed`
      * event (error message with the callback's token and URL masked) instead of a guarded commit,
      * logs a warning and leaves the run waiting.
      */
@@ -448,12 +448,14 @@ export function createExecutor(opts: EngineOptions): Executor {
             stepPath: path,
             error: message,
           });
-          const events = [event("step.notifyFailed", path, { error: { message }, attempts: n })];
+          const events = [
+            event("step.afterCommitFailed", path, { error: { message }, attempts: n }),
+          ];
           try {
             await storage.appendEvents(events);
             publish(events);
           } catch (appendErr) {
-            opts.logger?.warn("could not record step.notifyFailed", {
+            opts.logger?.warn("could not record step.afterCommitFailed", {
               runId: run.id,
               error: errorMessage(appendErr),
             });

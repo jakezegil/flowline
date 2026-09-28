@@ -695,10 +695,10 @@ describe("suspend afterCommit", () => {
     const id = await startRun(wf([step("s")]));
     await makeEngine().drain();
     expect(seen).toHaveLength(3);
-    expect((await eventsOf(id)).map((e) => e.type)).not.toContain("step.notifyFailed");
+    expect((await eventsOf(id)).map((e) => e.type)).not.toContain("step.afterCommitFailed");
   });
 
-  it("records step.notifyFailed for any other error without retrying, and keeps waiting", async () => {
+  it("records step.afterCommitFailed for any other error without retrying, and keeps waiting", async () => {
     const warnings: unknown[] = [];
     const seen = parkWith(async () => {
       throw new Error("receiver said no");
@@ -714,7 +714,7 @@ describe("suspend afterCommit", () => {
     }).drain();
     expect(seen).toHaveLength(1);
     expect(await getRun(id)).toMatchObject({ status: "waiting", waitReason: "timer" });
-    const failed = (await eventsOf(id)).filter((e) => e.type === "step.notifyFailed");
+    const failed = (await eventsOf(id)).filter((e) => e.type === "step.afterCommitFailed");
     expect(failed).toEqual([
       expect.objectContaining({
         stepPath: "s",
@@ -739,7 +739,7 @@ describe("suspend afterCommit", () => {
     const token = (await getRun(id)).callbackToken as string;
     const events = await eventsOf(id);
     expect(JSON.stringify(events)).not.toContain(token);
-    expect(events.find((e) => e.type === "step.notifyFailed")?.data).toEqual({
+    expect(events.find((e) => e.type === "step.afterCommitFailed")?.data).toEqual({
       error: { message: "could not deliver [redacted] (token [redacted])" },
       attempts: 1,
     });
@@ -751,7 +751,7 @@ describe("suspend afterCommit", () => {
     });
     const id = await startRun(wf([step("s")]));
     await makeEngine().drain();
-    expect((await eventsOf(id)).find((e) => e.type === "step.notifyFailed")?.data).toEqual({
+    expect((await eventsOf(id)).find((e) => e.type === "step.afterCommitFailed")?.data).toEqual({
       error: { message: "still down" },
       attempts: 3,
     });
@@ -780,7 +780,7 @@ describe("suspend afterCommit", () => {
     expect(signals).toHaveLength(3);
     expect(signals.every((s) => s.aborted)).toBe(true);
     expect(await getRun(id)).toMatchObject({ status: "waiting", waitReason: "timer" });
-    expect((await eventsOf(id)).find((e) => e.type === "step.notifyFailed")?.data).toEqual({
+    expect((await eventsOf(id)).find((e) => e.type === "step.afterCommitFailed")?.data).toEqual({
       error: { message: "afterCommit timed out after 40ms" },
       attempts: 3,
     });
@@ -799,7 +799,7 @@ describe("suspend afterCommit", () => {
     await done;
     expect(signals[0]?.aborted).toBe(true);
     expect(signals).toHaveLength(1);
-    expect((await eventsOf(id)).find((e) => e.type === "step.notifyFailed")?.data).toEqual({
+    expect((await eventsOf(id)).find((e) => e.type === "step.afterCommitFailed")?.data).toEqual({
       error: { message: "worker stopped" },
       attempts: 1,
     });
@@ -826,6 +826,6 @@ describe("suspend afterCommit", () => {
     await engine.drain();
     expect(tries).toBe(1);
     expect((await getRun(id)).status).toBe("completed");
-    expect((await eventsOf(id)).map((e) => e.type)).not.toContain("step.notifyFailed");
+    expect((await eventsOf(id)).map((e) => e.type)).not.toContain("step.afterCommitFailed");
   });
 });

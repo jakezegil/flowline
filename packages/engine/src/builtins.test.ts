@@ -668,11 +668,11 @@ describe("built-ins over HTTP", () => {
       expect(received[1]?.headers["idempotency-key"]).toBe(received[0]?.headers["idempotency-key"]);
       const types = await eventTypes(id);
       expect(types).not.toContain("step.retrying");
-      expect(types).not.toContain("step.notifyFailed");
+      expect(types).not.toContain("step.afterCommitFailed");
       expect(await audit(id)).not.toContain(waiting.callbackToken as string);
     });
 
-    it("gives up after 3 attempts, records step.notifyFailed and keeps waiting", async () => {
+    it("gives up after 3 attempts, records step.afterCommitFailed and keeps waiting", async () => {
       statuses = [500, 500, 500];
       const id = await start(doc({ url: `${base}/hooks` }));
       await local.drain();
@@ -680,14 +680,14 @@ describe("built-ins over HTTP", () => {
       expect(waiting).toMatchObject({ status: "waiting", waitReason: "callback" });
       expect(received).toHaveLength(3);
       const events = await storage.listEvents(TENANT, id);
-      const failed = events.filter((e) => e.type === "step.notifyFailed");
+      const failed = events.filter((e) => e.type === "step.afterCommitFailed");
       expect(failed).toEqual([
         expect.objectContaining({
           stepPath: "wait",
           data: { error: { message: "Notify request failed: HTTP 500" }, attempts: 3 },
         }),
       ]);
-      expect(emitted).toContainEqual(expect.objectContaining({ type: "step.notifyFailed" }));
+      expect(emitted).toContainEqual(expect.objectContaining({ type: "step.afterCommitFailed" }));
       const token = waiting.callbackToken as string;
       expect(await audit(id)).not.toContain(token);
       expect(await audit(id)).not.toContain("/resume/");
@@ -704,7 +704,7 @@ describe("built-ins over HTTP", () => {
       await local.drain();
       expect(await getRun(id)).toMatchObject({ status: "waiting", waitReason: "callback" });
       expect(received).toHaveLength(1);
-      expect(await eventTypes(id)).toContain("step.notifyFailed");
+      expect(await eventTypes(id)).toContain("step.afterCommitFailed");
     });
 
     it("doesn't follow a redirect to another origin with the body", async () => {
@@ -715,7 +715,7 @@ describe("built-ins over HTTP", () => {
       expect(await getRun(id)).toMatchObject({ status: "waiting", waitReason: "callback" });
       expect(received).toHaveLength(1);
       const events = await storage.listEvents(TENANT, id);
-      expect(events.find((e) => e.type === "step.notifyFailed")?.data).toMatchObject({
+      expect(events.find((e) => e.type === "step.afterCommitFailed")?.data).toMatchObject({
         attempts: 1,
       });
     });

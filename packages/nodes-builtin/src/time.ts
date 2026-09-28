@@ -168,7 +168,7 @@ async function sendNotify(
  * (SSRF-guarded, redirects refused), with an `Idempotency-Key` unique to that resume URL.
  * Delivery is best effort and at most once per suspension: network errors, 5xx, 408 and 429 are
  * retried a few times inline; after that, or on any other failure, the run records a
- * `step.notifyFailed` event and keeps waiting (resumable through `engine.resumeRun` or ending at
+ * `step.afterCommitFailed` event and keeps waiting (resumable through `engine.resumeRun` or ending at
  * the timeout). A worker crash between the commit and the POST skips the notification. Without
  * `notify`, the run resumes through `engine.resumeRun` (the run API or UI) only.
  */

@@ -504,6 +504,7 @@ export const defaultLabels: FlowkitLabels = {
     "step.failed": "Failed",
     "step.retrying": "Retrying",
     "step.skipped": "Skipped",
+    "step.afterCommitFailed": "Notification failed",
     "run.suspended": "Waiting",
     "run.resumed": "Resumed",
     "run.completed": "Run completed",

@@ -168,7 +168,7 @@ export type SuspendSignal = {
    *   that timeout or when the worker stops; pass it to `fetch`. The handler's `ctx` belongs to a
    *   finished invocation: `ctx.signal` is never aborted and `ctx.callback()` throws.
    * - Throwing a `RetryableError` (or timing out) retries it: 3 tries, 100 ms then 200 ms apart.
-   *   Any other error, the last try, or a stopping worker records a `step.notifyFailed` event
+   *   Any other error, the last try, or a stopping worker records a `step.afterCommitFailed` event
    *   (token and resume URL masked); the run keeps waiting either way.
    */
   readonly afterCommit?: (opts: { signal: AbortSignal }) => Promise<void>;
