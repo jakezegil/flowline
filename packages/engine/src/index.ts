@@ -20,6 +20,7 @@ export {
 } from "./errors";
 export { buildScope, type Frame, type NextAction, nextAction } from "./interpreter";
 export {
+  type CancelRequest,
   type Lease,
   type ListRunsFilter,
   type NewRun,

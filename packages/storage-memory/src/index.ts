@@ -77,6 +77,7 @@ function applyPatch(stored: StoredRun, patch: RunPatch, now: number): void {
   if (patch.output !== undefined) run.output = clone(patch.output);
   setOpt(run, "error", patch.error);
   setOpt(run, "cancelRequestedAt", patch.cancelRequestedAt);
+  if (patch.cancelRequestedAt === null) delete run.cancelRequest;
   // Only a running run can hold a lease.
   if (patch.release || (patch.status !== undefined && patch.status !== "running")) {
     clearLease(stored);
@@ -418,9 +419,13 @@ export function createMemoryStorage(): StorageAdapter {
       return true;
     },
 
-    async requestCancel(tenantId, runId, now) {
+    async requestCancel(tenantId, runId, now, request) {
       const run = runs.get(runId)?.run;
       if (!run || run.tenantId !== tenantId || FINISHED.has(run.status)) return false;
+      // The first request's time, who and why stick.
+      if (run.cancelRequestedAt === undefined && request && Object.keys(request).length > 0) {
+        run.cancelRequest = clone(request);
+      }
       run.cancelRequestedAt ??= now;
       run.updatedAt = now;
       return true;

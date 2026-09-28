@@ -83,6 +83,7 @@ const RUN_INSERT_COLUMNS = [
   "error",
   "started_by",
   "cancel_requested_at",
+  "cancel_request",
   "created_at",
   "updated_at",
 ].join(", ");
@@ -116,6 +117,9 @@ function toRun(row: Row): Run {
   if (row.has_output) run.output = row.output;
   if (row.error !== null) run.error = row.error;
   if (row.cancel_requested_at !== null) run.cancelRequestedAt = num(row.cancel_requested_at);
+  if (row.cancel_request !== null && row.cancel_request !== undefined) {
+    run.cancelRequest = row.cancel_request;
+  }
   if (row.lease_owner !== null) run.leaseOwner = row.lease_owner;
   if (row.lease_until !== null) run.leaseUntil = num(row.lease_until);
   return run;
@@ -241,6 +245,8 @@ function patchAssignments(patch: RunPatch, now: number, p: Params): string[] {
   if (patch.output !== undefined) sets.push(`output = ${p.add(json(patch.output))}::jsonb`);
   optJson("error", patch.error);
   opt("cancel_requested_at", patch.cancelRequestedAt);
+  // Clearing the request clears who asked for it too.
+  if (patch.cancelRequestedAt === null) sets.push("cancel_request = NULL");
   sets.push(`updated_at = ${p.add(now)}`);
   return sets;
 }
@@ -284,6 +290,7 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
       `${p.add(json(run.error))}::jsonb`,
       `${p.add(json(run.startedBy))}::jsonb`,
       p.add(run.cancelRequestedAt ?? null),
+      `${p.add(json(run.cancelRequest))}::jsonb`,
       p.add(now),
       p.add(now),
     ];
@@ -702,13 +709,17 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
       return row !== undefined;
     },
 
-    async requestCancel(tenantId, runId, now) {
+    async requestCancel(tenantId, runId, now, request) {
+      const info = request && Object.keys(request).length > 0 ? JSON.stringify(request) : null;
+      // SET expressions read the old row: only the first request's who and why are kept.
       const { rows } = await pool.query(
         `UPDATE ${s}.runs SET cancel_requested_at = coalesce(cancel_requested_at, $3),
+           cancel_request = CASE WHEN cancel_requested_at IS NULL THEN $4::jsonb
+             ELSE cancel_request END,
            updated_at = $3
          WHERE id = $1 AND tenant_id = $2 AND status NOT IN ('completed', 'failed', 'cancelled')
          RETURNING id`,
-        [runId, tenantId, now],
+        [runId, tenantId, now, info],
       );
       return rows.length > 0;
     },

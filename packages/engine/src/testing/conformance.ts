@@ -1104,6 +1104,37 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect((await s.getRun(T1, "r1"))?.cancelRequestedAt).toBe(20);
       });
 
+      test("stores who asked and why, keeping the first request's", async (s) => {
+        await s.createRun(newRun("r1", { status: "waiting" }), [], 0);
+        await s.createRun(newRun("r2", { status: "waiting" }), [], 0);
+        await s.createRun(newRun("r3", { status: "waiting" }), [], 0);
+        expect(await s.requestCancel(T1, "r1", 20, { by: "ops", reason: "dupe" })).toBe(true);
+        expect(await s.requestCancel(T1, "r1", 30, { by: "later", reason: "x" })).toBe(true);
+        expect(await s.getRun(T1, "r1")).toMatchObject({
+          cancelRequestedAt: 20,
+          cancelRequest: { by: "ops", reason: "dupe" },
+        });
+        // A first request without details keeps none, even when a later one has them.
+        expect(await s.requestCancel(T1, "r2", 20)).toBe(true);
+        expect(await s.requestCancel(T1, "r2", 30, { by: "later" })).toBe(true);
+        expect((await s.getRun(T1, "r2"))?.cancelRequest).toBeUndefined();
+        expect(await s.requestCancel(T1, "r3", 20, { reason: "only why" })).toBe(true);
+        expect((await s.getRun(T1, "r3"))?.cancelRequest).toEqual({ reason: "only why" });
+      });
+
+      test("clearing the flag clears who asked", async (s) => {
+        await s.createRun(newRun("r1"), [], 0);
+        expect(await s.requestCancel(T1, "r1", 5, { by: "ops" })).toBe(true);
+        const lease = await claimOrFail(s, 10);
+        expect(await s.commit(lease, { cancelRequestedAt: null }, [], 20)).toBe(true);
+        const run = await s.getRun(T1, "r1");
+        expect(run?.cancelRequestedAt).toBeUndefined();
+        expect(run?.cancelRequest).toBeUndefined();
+        // A new request after the clear records its own details.
+        expect(await s.requestCancel(T1, "r1", 30, { by: "second" })).toBe(true);
+        expect((await s.getRun(T1, "r1"))?.cancelRequest).toEqual({ by: "second" });
+      });
+
       test("is a no-op on finished runs", async (s) => {
         for (const status of ["completed", "failed", "cancelled"] as const) {
           await s.createRun(newRun(status, { status }), [], 0);

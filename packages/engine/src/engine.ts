@@ -204,8 +204,8 @@ export interface Engine {
    * wake-up of the cancelled parent is ignored.
    *
    * `opts.by` and `opts.reason` are recorded on the `run.cancelled` event (as `data.by` and
-   * `data.reason`) when the run is cancelled at once. A run cancelled by its worker (the
-   * `"requested"` path) gets a `run.cancelled` event without them.
+   * `data.reason`), also when the worker cancels the run (the `"requested"` path: they are stored
+   * with the request). When several requests race, the first one's are kept.
    *
    * @throws Error if the run does not exist in the tenant.
    */
@@ -542,7 +542,12 @@ export function createEngine(options: EngineOptions): Engine {
       if (await cancelUnleased(run)) return "cancelled";
       // Lost the race: the run finished meanwhile, or a worker holds its lease and must cancel it
       // cooperatively.
-      if (!(await storage.requestCancel(tenantId, runId, clock()))) return "finished";
+      // The worker records who and why when it cancels the run.
+      const request = {
+        ...(by !== undefined ? { by } : {}),
+        ...(reason !== undefined ? { reason } : {}),
+      };
+      if (!(await storage.requestCancel(tenantId, runId, clock(), request))) return "finished";
       // The worker may have parked the run (and dropped its lease) between the failed CAS and the
       // request, after its own last check: cancel the now unleased run directly.
       const latest = await storage.getRun(tenantId, runId);
