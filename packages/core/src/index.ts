@@ -25,6 +25,7 @@ export {
   type ConfigOf,
   type DeepExpr,
   ref,
+  type StepConfig,
   type StepsBuilder,
   type TriggerConfigOf,
   tpl,
