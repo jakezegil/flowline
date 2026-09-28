@@ -34,6 +34,18 @@ export function triggersFor(manifest: Manifest | undefined, kind: WorkflowKind):
   return (manifest?.triggers ?? []).filter((t) => (t.kind === "subflow") === (kind === "subflow"));
 }
 
+/**
+ * The trigger a new workflow starts from until one is picked: the app's own events (Contact
+ * created, not the developer-facing core "App event"), else a webhook, else the first one.
+ */
+export function defaultTrigger(triggers: TriggerDef[]): TriggerDef | undefined {
+  return (
+    triggers.find((t) => t.kind === "event" && !t.type.startsWith("core.")) ??
+    triggers.find((t) => t.kind === "webhook") ??
+    triggers[0]
+  );
+}
+
 const KINDS: { kind: WorkflowKind; name: string; desc: string; icon: string }[] = [
   {
     kind: "workflow",
@@ -107,8 +119,8 @@ export function NewWorkflowDialog(props: {
         ? "A workflow with this ID exists."
         : undefined;
   const triggers = triggersFor(props.manifest, kind);
-  // The first trigger of the kind until one is picked (and again after switching kinds).
-  const trigger = triggers.find((t) => t.type === picked)?.type ?? triggers[0]?.type;
+  // The default trigger of the kind until one is picked (and again after switching kinds).
+  const trigger = (triggers.find((t) => t.type === picked) ?? defaultTrigger(triggers))?.type;
   const noun = kind === "subflow" ? "sub-flow" : "workflow";
 
   // The workflow is saved as a draft before the editor opens, so it exists even if nobody
@@ -240,6 +252,13 @@ export function NewWorkflowDialog(props: {
             </div>
           </fieldset>
         )}
+        {triggers.length === 0 && (
+          <p className="form__error" role="alert">
+            {props.manifest
+              ? `This app has no ${noun} trigger, so a ${noun} can't be created here.`
+              : "Loading triggers…"}
+          </p>
+        )}
         {saveError && (
           <p className="form__error" role="alert">
             Couldn't create the {noun}: {saveError}
@@ -249,7 +268,11 @@ export function NewWorkflowDialog(props: {
           <button type="button" className="btn" onClick={props.onClose}>
             Cancel
           </button>
-          <button type="submit" className="btn btn--primary" disabled={!id || !!idError || saving}>
+          <button
+            type="submit"
+            className="btn btn--primary"
+            disabled={!id || !!idError || !trigger || saving}
+          >
             {saving ? "Creating…" : "Create and open editor"}
           </button>
         </div>
@@ -261,7 +284,7 @@ export function NewWorkflowDialog(props: {
 /** The workflows page. */
 export function WorkflowsPage(): JSX.Element {
   const workflows = useQuery<WorkflowSummary[]>("workflows", () => flowkit.listWorkflows());
-  const manifest = useQuery<Manifest>("all", () => flowkit.getManifest());
+  const manifest = useQuery<Manifest>("static", () => flowkit.getManifest());
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const now = useNow();

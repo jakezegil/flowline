@@ -118,7 +118,11 @@ export const api = {
 
 // ------------------------------------------------------------------ change notifications
 
-type Topic = "contacts" | "deals" | "approvals" | "outbox" | "workflows" | "all";
+/**
+ * What a {@link useQuery} depends on. `"static"` data (who the demo user is, the plugin
+ * manifest) is fetched once per mount: no focus refetch, and `invalidate("all")` skips it.
+ */
+type Topic = "contacts" | "deals" | "approvals" | "outbox" | "workflows" | "static" | "all";
 const listeners = new Set<(topic: Topic) => void>();
 
 /** Tell every mounted {@link useQuery} on `topic` (or everything, with `"all"`) to refetch. */
@@ -137,9 +141,9 @@ export interface Query<T> {
 }
 
 /**
- * Fetch `load()` on mount, when `topic` is invalidated, when the window regains focus, and every
- * `pollMs` if given. Keeps the
- * last data while refetching, so a poll never flashes a loading state.
+ * Fetch `load()` on mount, when `topic` is invalidated, when the window regains focus (unless the
+ * topic is `"static"`), and every `pollMs` if given. Keeps the last data while refetching, so a
+ * poll never flashes a loading state.
  */
 export function useQuery<T>(topic: Topic, load: () => Promise<T>, pollMs?: number): Query<T> {
   const [data, setData] = useState<T | undefined>(undefined);
@@ -165,15 +169,16 @@ export function useQuery<T>(topic: Topic, load: () => Promise<T>, pollMs?: numbe
 
   useEffect(() => {
     reload();
+    const isStatic = topic === "static";
     const onChange = (t: Topic) => {
-      if (t === topic || t === "all") reload();
+      if (t === topic || (t === "all" && !isStatic)) reload();
     };
     listeners.add(onChange);
     const timer = pollMs ? setInterval(reload, pollMs) : undefined;
     // Coming back to the tab (another tab may have changed things) refetches right away.
-    window.addEventListener("focus", reload);
+    if (!isStatic) window.addEventListener("focus", reload);
     return () => {
-      window.removeEventListener("focus", reload);
+      if (!isStatic) window.removeEventListener("focus", reload);
       listeners.delete(onChange);
       if (timer) clearInterval(timer);
       seq.current++;

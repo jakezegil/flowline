@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { unreachableMessage, useQuery } from "./api";
+import { invalidate, unreachableMessage, useQuery } from "./api";
 
 afterEach(cleanup);
 
@@ -28,5 +28,21 @@ describe("useQuery", () => {
       window.dispatchEvent(new Event("focus"));
     });
     expect(await screen.findByText("count 2")).toBeTruthy();
+  });
+
+  it("fetches static data once: no focus refetch, and a reset of everything skips it", async () => {
+    let n = 0;
+    const load = vi.fn(async () => ++n);
+    function Probe() {
+      const q = useQuery("static", load);
+      return <span>static {q.data ?? "-"}</span>;
+    }
+    render(<Probe />);
+    expect(await screen.findByText("static 1")).toBeTruthy();
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      invalidate("all");
+    });
+    expect(load).toHaveBeenCalledTimes(1);
   });
 });

@@ -46,6 +46,8 @@ function newestMtime(dir: string): number {
   let newest = 0;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
+    // Tests are not built, so editing one does not make the build stale.
+    if (!entry.isDirectory() && /\.test\.tsx?$/.test(entry.name)) continue;
     const t = entry.isDirectory() ? newestMtime(path) : statSync(path).mtimeMs;
     if (t > newest) newest = t;
   }
@@ -302,9 +304,14 @@ describe("dependencies", () => {
 
   // Reads the built declarations, so it runs only against a dist at least as new as the sources:
   // `pnpm test` before `pnpm build` (no dist, or a stale one) skips it instead of failing.
-  it.skipIf(!engineDistIsFresh())(
+  // Locally a stale or missing build skips this (run `pnpm build` first); CI always runs it, so
+  // a pipeline that tests before building fails here instead of passing silently.
+  it.skipIf(!process.env.CI && !engineDistIsFresh())(
     "@flowkit/engine strips @internal members from its built declarations",
     () => {
+      expect(engineDistIsFresh(), "packages/engine/dist is missing or stale: run pnpm build").toBe(
+        true,
+      );
       const dir = join(REPO, "packages/engine/dist");
       const text = readFileSync(join(dir, "index.d.ts"), "utf8");
       // Declarations are split into chunks; follow the index's relative imports one level.

@@ -94,7 +94,8 @@ function usePendingApproval(runId: string): {
  */
 export function useUserName(): (userId: string) => string | undefined {
   const { users } = useUsers();
-  const demo = useQuery("all", api.demo);
+  // Only the signed-in user's ID is read, and it never changes.
+  const demo = useQuery("static", api.demo);
   const me = demo.data?.userId;
   return useCallback(
     (userId: string) =>
