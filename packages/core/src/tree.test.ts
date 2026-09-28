@@ -6,8 +6,10 @@ import {
   findStep,
   generateStepId,
   insertStep,
+  isGeneratedStepId,
   moveStep,
   removeStep,
+  renameStepId,
   updateStep,
   walkSteps,
 } from "./tree";
@@ -274,6 +276,36 @@ describe("duplicateStep", () => {
   test("throws for unknown id", () => {
     const doc = frozenClone(baseDoc());
     expect(() => duplicateStep(doc, "nope")).toThrow(FlowkitTreeError);
+  });
+});
+
+describe("renameStepId / isGeneratedStepId (L25)", () => {
+  test("renames a step and every reference to it, leaving the input untouched", () => {
+    const doc = frozenClone({
+      ...baseDoc(),
+      output: { email: { $ref: "steps.loadContact.email" } },
+    });
+    const next = renameStepId(doc, "loadContact", "getContact");
+    expect(findStep(next, "loadContact")).toBeUndefined();
+    expect(findStep(next, "getContact")?.step.type).toBe("crm.loadContact");
+    expect(findStep(next, "checkVip")?.step.config.expr).toEqual({ $ref: "steps.getContact.tier" });
+    expect(findStep(next, "sendVipEmail")?.step.config.to).toEqual({
+      $ref: "steps.getContact.email",
+    });
+    expect(findStep(next, "sendRegularEmail")?.step.config.to).toEqual({
+      $tpl: "Hi {{ steps.getContact.name }}",
+    });
+    expect(next.output).toEqual({ email: { $ref: "steps.getContact.email" } });
+    expect(renameStepId(doc, "checkVip", "checkVip")).toBe(doc);
+    expect(() => renameStepId(doc, "checkVip", "loadContact")).toThrow(FlowkitTreeError);
+    expect(() => renameStepId(doc, "nope", "x")).toThrow(FlowkitTreeError);
+  });
+
+  test("tells generated IDs from chosen ones", () => {
+    expect(isGeneratedStepId("httpRequest", "core.httpRequest")).toBe(true);
+    expect(isGeneratedStepId("httpRequest_3", "core.httpRequest")).toBe(true);
+    expect(isGeneratedStepId("httpRequest_x", "core.httpRequest")).toBe(false);
+    expect(isGeneratedStepId("callBilling", "core.httpRequest")).toBe(false);
   });
 });
 

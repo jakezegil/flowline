@@ -348,7 +348,11 @@ export interface NodeDefinition<I extends z.ZodObject = z.ZodObject, O = unknown
    * never run, and the canvas draws no path out of it.
    */
   endsRun?: boolean;
-  /** Template rendered against config for the step card, e.g. `"Load {{contactId}}"`. */
+  /**
+   * Template rendered against config for the step card, e.g. `"Load {{contactId}}"`. Choices
+   * show by their option label. `{{#key}}…{{/key}}` is an optional section, shown only while
+   * `key` is set (and not hidden by `showIf`): `"{{strategy}}{{#team}} · {{team}}{{/team}}"`.
+   */
   summary?: string;
   /** Config schema. Use {@link ui} to add editor hints. */
   input: I;

@@ -209,7 +209,10 @@ export interface NodeManifest {
   keywords?: string[];
   /** The step always ends the run (like Stop): steps after it can never run. */
   endsRun?: boolean;
-  /** Template rendered against config for the step card, e.g. `"Load {{contactId}}"`. */
+  /**
+   * Template rendered against config for the step card, e.g. `"Load {{contactId}}"`, with
+   * optional `{{#key}}…{{/key}}` sections (see `NodeDefinition.summary`).
+   */
   summary?: string;
   /** Input-side JSON Schema of the node's config. */
   input: JSONSchema;

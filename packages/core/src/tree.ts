@@ -1,4 +1,4 @@
-import { RESERVED_STEP_IDS } from "./ids";
+import { isValidStepId, RESERVED_STEP_IDS } from "./ids";
 import { formatRefPath, isRef, isTpl, parseRefPath, parseTemplate } from "./refs";
 import type { Step, ValueExpr, WorkflowDoc } from "./types";
 
@@ -286,6 +286,47 @@ function rewriteSubtreeConfigs(step: Step, idMap: Map<string, string>): Step {
     newStep.branches = branches;
   }
   return newStep;
+}
+
+/**
+ * Whether `id` is one {@link generateStepId} would give a step of `nodeType` (`"httpRequest"`,
+ * `"httpRequest_2"`), rather than one a person chose.
+ */
+export function isGeneratedStepId(id: string, nodeType: string): boolean {
+  const base = sanitizeBase(nodeType);
+  return id === base || (id.startsWith(`${base}_`) && /^[0-9]+$/.test(id.slice(base.length + 1)));
+}
+
+/**
+ * Renames step `id` to `newId`, rewriting every reference to it: in step configs anywhere in the
+ * tree and in the workflow's output mapping. Returns `doc` itself when the IDs are equal.
+ *
+ * @throws {FlowkitTreeError} If `id` doesn't exist, or `newId` is taken or not a valid step ID.
+ */
+export function renameStepId(doc: WorkflowDoc, id: string, newId: string): WorkflowDoc {
+  if (id === newId) return doc;
+  if (!findStep(doc, id)) throw new FlowkitTreeError(`Step "${id}" not found`);
+  if (allStepIds(doc).has(newId) || !isValidStepId(newId))
+    throw new FlowkitTreeError(`Step ID "${newId}" is taken or invalid`);
+  const idMap = new Map([[id, newId]]);
+  const rename = (step: Step): Step => ({
+    ...step,
+    id: step.id === id ? newId : step.id,
+    config: rewriteRefs(step.config, idMap) as Record<string, ValueExpr>,
+  });
+  const walk = (list: Step[]): Step[] =>
+    list.map((step) => {
+      const renamed = rename(step);
+      if (!step.branches) return renamed;
+      const branches: Record<string, Step[]> = {};
+      for (const [k, v] of Object.entries(step.branches)) branches[k] = walk(v);
+      return { ...renamed, branches };
+    });
+  return {
+    ...doc,
+    steps: walk(doc.steps),
+    ...(doc.output ? { output: rewriteRefs(doc.output, idMap) as Record<string, ValueExpr> } : {}),
+  };
 }
 
 /**

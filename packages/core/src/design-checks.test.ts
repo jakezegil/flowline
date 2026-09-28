@@ -36,6 +36,12 @@ const halt = defineNode({
   input: z.object({}),
   run: () => stop(),
 });
+const person = defineNode({
+  type: "t.person",
+  name: "Person",
+  input: z.object({ firstName: z.string(), api_key: z.string() }),
+  run: () => ({}),
+});
 const noop = defineNode({ type: "t.noop", name: "Noop", input: z.object({}), run: () => ({}) });
 const ifElse = defineNode({
   type: "t.if",
@@ -91,7 +97,7 @@ const manifest = createRegistry([
   definePlugin({
     id: "t",
     name: "T",
-    nodes: [email, http, halt, noop, ifElse, loop, load],
+    nodes: [email, http, halt, noop, ifElse, loop, load, person],
     triggers: [manual, sub, hidden],
   }),
 ]).manifest();
@@ -281,5 +287,12 @@ describe("scope (R3-M1, M2)", () => {
     expect(props.extra).toEqual({ type: "object" });
     expect(out?.required).toEqual(["contact"]);
     expect(describeSubflowOutput(doc([]), manifest)).toBeUndefined();
+  });
+});
+
+describe("messages (L1)", () => {
+  test("an unlabelled field is named in words, as the editor labels it", () => {
+    const messages = validateWorkflow(doc([s("p", "t.person")]), manifest).map((i) => i.message);
+    expect(messages).toEqual(['"First name" is required', '"API key" is required']);
   });
 });

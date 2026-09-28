@@ -22,7 +22,7 @@ export const conditionNode = defineNode({
   summary: "If conditions match",
   input: z.object({
     rules: ui(ConditionRulesSchema, { label: "Conditions", widget: "rules" }).describe(
-      'Text compares ignoring case unless Match case is on. Dates and times are UTC unless they include an offset. "Is in" takes a list or comma-separated text.',
+      'Text compares ignoring case unless Match case is on. Dates and times are UTC unless they include an offset. "Is one of" takes a list or comma-separated text.',
     ),
   }),
   output: z.object({ matched: z.boolean() }),
@@ -41,8 +41,9 @@ export const conditionNode = defineNode({
 
 const SwitchCase = z.object({
   id: ui(z.string().regex(BRANCH_ID, "Use letters, digits, - and _ only"), { label: "ID" }),
-  label: ui(z.string(), { label: "Label", placeholder: "Gold customers" }),
-  value: ui(z.unknown(), { label: "Value", placeholder: "gold" }),
+  // Labelled as the cases editor shows them, so messages name what the user sees.
+  label: ui(z.string(), { label: "Case name", placeholder: "Gold customers" }),
+  value: ui(z.unknown(), { label: "Matches", placeholder: "gold" }),
 });
 
 /**

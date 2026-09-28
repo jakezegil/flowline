@@ -55,7 +55,9 @@ export function fields(): z.ZodArray<
   return ui(
     z.array(
       z.object({
-        name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Field names must be identifiers"),
+        name: ui(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Field names must be identifiers"), {
+          label: "Field name",
+        }),
         type: z.enum(["string", "number", "boolean", "object", "array", "date"]),
         required: z.boolean().optional(),
         description: z.string().optional(),

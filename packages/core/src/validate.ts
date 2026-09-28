@@ -170,9 +170,26 @@ function uiMeta(schema: JSONSchema | undefined): UiMeta | undefined {
   return typeof meta === "object" && meta !== null ? (meta as UiMeta) : undefined;
 }
 
-function labelOf(schema: JSONSchema | undefined, key: string): string {
+const ACRONYMS = new Set(["id", "url", "uri", "api", "http", "json", "html", "ip", "sms"]);
+
+/**
+ * A field's name in messages: its label, else its title, else the key in words, as the editor
+ * labels it (`"firstName"` → `"First name"`, `"api_key"` → `"API key"`).
+ */
+function labelOf(schema: JSONSchema | undefined, key: string, plain = false): string {
   const label = uiMeta(schema)?.label;
-  return typeof label === "string" && label !== "" ? label : key;
+  if (typeof label === "string" && label !== "") return label;
+  if (typeof schema?.title === "string" && schema.title !== "") return schema.title;
+  // Plain JSON checks (a webhook body) answer an API caller, who knows the keys, not labels.
+  if (plain) return key;
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .map((w) => (ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w.toLowerCase()))
+    .join(" ");
+  return words === "" ? key : words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function joinPath(prefix: string, key: string): string {
@@ -646,7 +663,7 @@ function checkObject(
     const f: FieldCtx = {
       root: propRoot,
       path: joinPath(prefix, key),
-      label: labelOf(declared, key),
+      label: labelOf(declared, key, r.plain),
     };
     const value = obj[key];
     if (isEmptyValue(value, propRoot, propSchema)) {
@@ -666,7 +683,12 @@ function checkObject(
   if (Array.isArray(oneOf)) checkOneOfRequired(r, obj, props, root, prefix, oneOf);
   for (const key of required) {
     if (!Object.hasOwn(props, key) && isEmptyValue(obj[key], root, {})) {
-      report(r, "config.required", `"${key}" is required`, joinPath(prefix, key));
+      report(
+        r,
+        "config.required",
+        `"${labelOf(undefined, key, r.plain)}" is required`,
+        joinPath(prefix, key),
+      );
     }
   }
   const extra = schema.additionalProperties;
@@ -707,7 +729,8 @@ function checkOneOfRequired(
   if (first === undefined) return;
   const propSchema = (k: string) => (Object.hasOwn(props, k) ? asSchema(props[k]) : {});
   const isSet = (k: string) => !isEmptyValue(obj[k], root, propSchema(k));
-  const name = (g: string[]) => g.map((k) => `"${labelOf(propSchema(k), k)}"`).join(" and ");
+  const name = (g: string[]) =>
+    g.map((k) => `"${labelOf(propSchema(k), k, r.plain)}"`).join(" and ");
   const set = valid.filter((g) => g.every(isSet));
   if (set.length === 0) {
     report(r, "config.required", `Set ${orList(valid.map(name))}`, joinPath(prefix, first));

@@ -1231,7 +1231,7 @@ describe("validation through the engine", () => {
     ]);
     const v = await engine.saveWorkflow("a", doc, "setup");
     await expect(engine.publish("a", "wf", v.version, "setup")).rejects.toThrow(
-      'Workflow "wf" has errors: step "a": "value" references field "nmae", which doesn\'t exist on the trigger (+1 more)',
+      'Workflow "wf" has errors: step "a": "Value" references field "nmae", which doesn\'t exist on the trigger (+1 more)',
     );
   });
 

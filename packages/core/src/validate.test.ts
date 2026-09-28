@@ -484,7 +484,7 @@ describe("validateWorkflow", () => {
     const issues = validateWorkflow(doc, m);
     expect(issues).toEqual([issue({ code: "ref.typeMismatch", field: "addr" })]);
     expect(issues[0]!.message).toBe(
-      '"addr" expects { city } but steps.load.address is { city, zip }',
+      '"Addr" expects { city } but steps.load.address is { city, zip }',
     );
     // literal nested values too
     const lit = docWith([step("d", "x.defs", { addr: { city: "Paris" } })]);
@@ -592,7 +592,7 @@ describe("validateWorkflow", () => {
       },
     });
     expect(validateWorkflow(doc, m)).toEqual([
-      issue({ code: "config.required", field: "output.email", message: '"email" is required' }),
+      issue({ code: "config.required", field: "output.email", message: '"Email" is required' }),
       issue({ code: "config.required", field: "output.count" }),
     ]);
     doc.output = { email: { $ref: "steps.load.email" }, count: { $ref: "steps.load.email" } };
@@ -802,7 +802,7 @@ describe("oneOfRequired", () => {
     ]);
     // An empty string doesn't count, and a group needs all of its fields.
     expect(check("x.window", { preset: "", from: "a" })).toEqual([
-      issue({ code: "config.required", message: 'Set "from" and "to", "Preset" or "tag"' }),
+      issue({ code: "config.required", message: 'Set "From" and "To", "Preset" or "Tag"' }),
     ]);
   });
 
@@ -815,7 +815,7 @@ describe("oneOfRequired", () => {
       }),
     ]);
     expect(check("x.window", { from: "a", to: "b", preset: "p", tag: "t" })).toEqual([
-      issue({ message: 'Set only one of "from" and "to", "Preset" or "tag"' }),
+      issue({ message: 'Set only one of "From" and "To", "Preset" or "Tag"' }),
     ]);
   });
 
