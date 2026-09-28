@@ -618,6 +618,19 @@ describe("cancelRun", () => {
     expect((await eventsOf(id)).filter((e) => e.type === "run.cancelled")).toHaveLength(1);
   });
 
+  it("records who cancelled and why on the run.cancelled event", async () => {
+    behaviours.a = waitForCallback([]);
+    const id = await startRun(wf([step("a")]));
+    const engine = makeEngine();
+    await engine.drain();
+    expect(await engine.cancelRun(TENANT, id, { by: "u1", reason: "Demo data reset" })).toBe(
+      "cancelled",
+    );
+    const cancelled = (await eventsOf(id)).find((e) => e.type === "run.cancelled");
+    expect(cancelled?.data).toEqual({ by: "u1", reason: "Demo data reset" });
+    expect(cancelled?.stepPath).toBe("a");
+  });
+
   it("rejects unknown runs", async () => {
     await expect(makeEngine().cancelRun(TENANT, "missing")).rejects.toThrow(/not found/);
     const id = await startRun(wf([step("a")]));

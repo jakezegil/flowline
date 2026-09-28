@@ -114,6 +114,17 @@ export interface ResumeRunOptions {
   refuseHostHandled?: boolean;
 }
 
+/** Options of {@link Engine.cancelRun}. */
+export interface CancelRunOptions {
+  /**
+   * Who cancelled the run, e.g. the user's ID: recorded as `by` on the `run.cancelled` event.
+   * The `POST /runs/:id/cancel` route passes the caller's `userId`.
+   */
+  by?: string;
+  /** Why, e.g. `"Demo data reset"`: recorded as `reason` on the `run.cancelled` event. */
+  reason?: string;
+}
+
 /** A running engine instance. */
 export interface Engine {
   /**
@@ -192,9 +203,17 @@ export interface Engine {
    * Cancelling a parent does NOT cancel its child runs: they run to completion, and their
    * wake-up of the cancelled parent is ignored.
    *
+   * `opts.by` and `opts.reason` are recorded on the `run.cancelled` event (as `data.by` and
+   * `data.reason`) when the run is cancelled at once. A run cancelled by its worker (the
+   * `"requested"` path) gets a `run.cancelled` event without them.
+   *
    * @throws Error if the run does not exist in the tenant.
    */
-  cancelRun(tenantId: string, runId: string): Promise<"cancelled" | "requested" | "finished">;
+  cancelRun(
+    tenantId: string,
+    runId: string,
+    opts?: CancelRunOptions,
+  ): Promise<"cancelled" | "requested" | "finished">;
   /**
    * Continue a failed run from its failed step: the failed journal entry is removed and the run
    * is queued again (same run id, attempt 1); steps that completed are not re-run. Resolves the
@@ -497,13 +516,18 @@ export function createEngine(options: EngineOptions): Engine {
       return resumeWithToken(token, body, userId);
     },
 
-    async cancelRun(tenantId, runId) {
+    async cancelRun(tenantId, runId, cancelOpts = {}) {
       const run = await storage.getRun(tenantId, runId);
       if (!run) throw new Error(`Run "${runId}" not found`);
       if (TERMINAL.has(run.status)) return "finished";
+      const { by, reason } = cancelOpts;
+      const data =
+        by === undefined && reason === undefined
+          ? undefined
+          : { ...(by !== undefined ? { by } : {}), ...(reason !== undefined ? { reason } : {}) };
       /** The unleased compare-and-set cancel; `false` when the run is leased or finished. */
       const cancelUnleased = async (current: Run): Promise<boolean> => {
-        const events = [runEvent(current, "run.cancelled", current.currentStep)];
+        const events = [runEvent(current, "run.cancelled", current.currentStep, data)];
         const ok = await storage.updateRunUnleased(
           tenantId,
           runId,

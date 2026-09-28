@@ -587,6 +587,9 @@ describe("runs", () => {
     const res = await call("POST", `/runs/${queued}/cancel`);
     expect(res.status).toBe(200);
     expect((await storage.getRun("a", queued))?.status).toBe("cancelled");
+    // The cancel records who asked for it.
+    const events = await storage.listEvents("a", queued);
+    expect(events.find((e) => e.type === "run.cancelled")?.data).toEqual({ by: "user-a" });
     const again = await call("POST", `/runs/${queued}/cancel`);
     expect(again.status).toBe(409);
     expect(await again.json()).toEqual({ error: "finished" });

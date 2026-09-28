@@ -2,6 +2,7 @@
 export const VERSION = "0.1.0";
 
 export {
+  type CancelRunOptions,
   createEngine,
   type Engine,
   type EngineOptions,

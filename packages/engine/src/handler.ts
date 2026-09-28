@@ -367,7 +367,7 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
       }
       if (method === "POST" && n === 3 && action === "cancel") {
         await existingRun(tenantId, id);
-        const outcome = await engine.cancelRun(tenantId, id);
+        const outcome = await engine.cancelRun(tenantId, id, { by: userId });
         if (outcome === "finished") return json(409, { error: "finished" });
         return json(outcome === "cancelled" ? 200 : 202, { status: outcome });
       }
