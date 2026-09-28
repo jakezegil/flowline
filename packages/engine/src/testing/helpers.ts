@@ -9,6 +9,7 @@ import {
   isSignal,
   type NodeContext,
   type NodeDefinition,
+  type NodeResult,
   type PluginDefinition,
   type RunDetail,
   type RunEvent,
@@ -17,7 +18,7 @@ import {
 import { createMemoryStorage } from "@flowkit/storage-memory";
 import type { z } from "zod";
 import { createNodeContext } from "../context";
-import { createEngine } from "../engine";
+import { createEngine, type EngineOptions } from "../engine";
 
 const TEST_TENANT = "test";
 /** Drain-and-advance rounds before {@link runWorkflowInMemory} gives up on a run. */
@@ -31,17 +32,20 @@ const FINISHED: ReadonlySet<string> = new Set(["completed", "failed", "cancelled
  * by `ctx`, and its output is parsed with the output schema, if any. Signals (`branch()`,
  * `suspend()`, ...) are returned as they are.
  *
+ * Resolves {@link TestNodeResult}: the node's output type or a signal. `isSignal(out)` narrows it,
+ * so a node that declares `output` needs no cast (`if (!isSignal(out)) out.amount`).
+ *
  * @example
  * ```ts
  * expect(await testNode(loadContact, { contactId: "c1" }, { services: { db } })).toEqual(contact);
  * ```
  */
 // biome-ignore lint/suspicious/noExplicitAny: accepts node definitions of any input/output types
-export async function testNode<N extends NodeDefinition<any, any>>(
+export async function testNode<N extends NodeDefinition<any, any, any>>(
   node: N,
   input: z.input<N["input"]>,
   ctx: Partial<NodeContext> = {},
-): Promise<unknown> {
+): Promise<TestNodeResult<N>> {
   const parsed = await node.input.parseAsync(input);
   const clock = ctx.now ?? Date.now;
   const base = createNodeContext({
@@ -63,8 +67,44 @@ export async function testNode<N extends NodeDefinition<any, any>>(
     }),
   });
   const result = await node.run({ input: parsed, ctx: { ...base, ...ctx } });
-  if (isSignal(result) || !node.output) return result;
-  return (node.output as z.ZodType).parseAsync(result);
+  if (isSignal(result) || !node.output) return result as TestNodeResult<N>;
+  return (await (node.output as z.ZodType).parseAsync(result)) as TestNodeResult<N>;
+}
+
+/**
+ * What {@link testNode} resolves for node `N`: its parsed output (the output schema's type), a
+ * `branch()` signal carrying it, or another signal. Untyped nodes resolve `unknown`.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: matches node definitions of any input/output types
+export type TestNodeResult<N extends NodeDefinition<any, any, any>> =
+  N extends NodeDefinition<infer _I, infer O, infer _R> ? NodeResult<O> : unknown;
+
+/** Options of {@link runWorkflowInMemory}. */
+export interface RunWorkflowInMemoryOptions {
+  /** Plugins to register next to the built-in `core.*` nodes and triggers. */
+  plugins?: PluginDefinition[];
+  /** The run's trigger input (for a webhook trigger, `{ body, headers }`). */
+  trigger?: unknown;
+  /** Host services exposed to handlers as `ctx.services`. */
+  services?: FlowkitServices;
+  /** Base time source in epoch ms. Default `Date.now`. */
+  clock?: () => number;
+  /**
+   * Secret values by name, for `ctx.secrets.get(name)` and the webhook signing secret. A name
+   * that isn't listed is "not configured", as in production. Also used as the secret list the
+   * validator checks secret names against.
+   */
+  secrets?: Record<string, string>;
+  /**
+   * The network policy of `ctx.http.fetch` (see `EngineOptions.http`). Set
+   * `allowPrivateNetworks: true` to reach a mock server on `localhost`.
+   */
+  http?: EngineOptions["http"];
+  /**
+   * Sub-flows the doc calls: each is saved and published, in order, before the doc, so its
+   * `core.callSubflow` steps validate and run. Their runs are advanced along with the doc's.
+   */
+  subflows?: WorkflowDoc[];
 }
 
 /**
@@ -77,26 +117,49 @@ export async function testNode<N extends NodeDefinition<any, any>>(
  * (sensitive values masked) and its events.
  *
  * Requires `@flowkit/storage-memory`.
+ *
+ * @example
+ * ```ts
+ * const { run } = await runWorkflowInMemory(dealWebhook, {
+ *   plugins: [crm],
+ *   services,
+ *   trigger: { body: { dealId: "d1" }, headers: {} },
+ *   secrets: { CHAT_TOKEN: "test-token" }, // what ctx.secrets.get("CHAT_TOKEN") returns
+ *   http: { allowPrivateNetworks: true }, // let ctx.http reach a local mock server
+ *   subflows: [notifyOwner], // published first, so callSubflow can find it
+ * });
+ * ```
  */
 export async function runWorkflowInMemory(
   doc: WorkflowDoc,
-  opts: {
-    plugins?: PluginDefinition[];
-    trigger?: unknown;
-    services?: FlowkitServices;
-    clock?: () => number;
-  } = {},
+  opts: RunWorkflowInMemoryOptions = {},
 ): Promise<{ run: RunDetail["run"]; events: RunEvent[] }> {
   const base = opts.clock ?? Date.now;
   let skipped = 0;
   const clock = () => base() + skipped;
   const storage = createMemoryStorage();
+  const secrets = opts.secrets;
   const engine = createEngine({
     registry: createRegistry(opts.plugins ?? []),
     storage,
     clock,
     ...(opts.services ? { services: opts.services } : {}),
+    ...(opts.http ? { http: opts.http } : {}),
+    ...(secrets
+      ? {
+          secrets: {
+            get: async (_tenantId: string, name: string) =>
+              Object.hasOwn(secrets, name) ? secrets[name] : undefined,
+            list: async () => Object.keys(secrets),
+          },
+        }
+      : {}),
   });
+  // Sub-flows first, so the doc's callSubflow steps validate and run against them.
+  for (const sub of opts.subflows ?? []) {
+    const v = await engine.saveWorkflow(TEST_TENANT, sub, "test");
+    await engine.publish(TEST_TENANT, sub.id, v.version, "test");
+  }
   const saved = await engine.saveWorkflow(TEST_TENANT, doc, "test");
   await engine.publish(TEST_TENANT, doc.id, saved.version, "test");
   const runId = await engine.start({

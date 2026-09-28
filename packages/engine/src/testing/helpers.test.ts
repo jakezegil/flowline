@@ -1,5 +1,16 @@
-import { defineNode, definePlugin, sensitive, type WorkflowDoc } from "@flowkit/core";
-import { describe, expect, it } from "vitest";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import {
+  branch,
+  defineNode,
+  definePlugin,
+  isSignal,
+  type NodeResult,
+  secret,
+  sensitive,
+  type WorkflowDoc,
+} from "@flowkit/core";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import { runWorkflowInMemory, testNode } from "./index";
 
@@ -19,7 +30,39 @@ const secretive = defineNode({
   run: () => ({ pin: "1234" }),
 });
 
-const plugin = definePlugin({ id: "t", name: "T", nodes: [greet, secretive] });
+/** Posts to `baseUrl` with the secret `token` as a bearer credential, through `ctx.http`. */
+const post = defineNode({
+  type: "t.post",
+  name: "Post",
+  input: z.object({ baseUrl: z.string(), token: secret() }),
+  output: z.object({ messageId: z.string() }),
+  retry: { max: 1 },
+  run: async ({ input, ctx }) => {
+    const res = await ctx.http.fetch(input.baseUrl, {
+      method: "POST",
+      headers: { authorization: `Bearer ${await ctx.secrets.get(input.token)}` },
+    });
+    const body = (await res.json()) as { id: string };
+    return { messageId: body.id };
+  },
+});
+
+const size = defineNode({
+  type: "t.size",
+  name: "Size",
+  input: z.object({ amount: z.number() }),
+  output: z.object({ amount: z.number() }),
+  branches: {
+    kind: "static",
+    branches: [
+      { id: "small", label: "Small" },
+      { id: "large", label: "Large" },
+    ],
+  },
+  run: ({ input }) => branch(input.amount > 10 ? "large" : "small", input),
+});
+
+const plugin = definePlugin({ id: "t", name: "T", nodes: [greet, secretive, post, size] });
 
 describe("testNode", () => {
   it("runs a handler with parsed input and a default context", async () => {
@@ -29,6 +72,15 @@ describe("testNode", () => {
   it("accepts context overrides", async () => {
     const out = await testNode(greet, { name: "Ada", punctuation: "?" }, { stepId: "custom" });
     expect(out).toEqual({ text: "Hi Ada?", by: "custom" });
+  });
+
+  it("types the result as the node's output or a signal", async () => {
+    const out = await testNode(greet, { name: "Ada" });
+    expectTypeOf(out).toEqualTypeOf<NodeResult<{ text: string; by: string }>>();
+    if (isSignal(out)) throw new Error("expected output");
+    expectTypeOf(out.text).toEqualTypeOf<string>();
+    expect(out.text).toBe("Hi Ada!");
+    expect(await testNode(size, { amount: 50 })).toMatchObject({ branch: "large" });
   });
 
   it("rejects invalid input", async () => {
@@ -78,6 +130,90 @@ describe("runWorkflowInMemory", () => {
     await expect(runWorkflowInMemory(bad, { plugins: [plugin] })).rejects.toMatchObject({
       name: "FlowkitValidationError",
     });
+  });
+
+  it("passes secrets and the network policy through, for nodes calling a local API", async () => {
+    const seen: (string | undefined)[] = [];
+    const server = createServer((req, res) => {
+      seen.push(req.headers.authorization);
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ id: "m_1" }));
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const post: WorkflowDoc = {
+        id: "post",
+        name: "Post",
+        trigger: { type: "core.manual", config: {} },
+        steps: [
+          {
+            id: "p",
+            type: "t.post",
+            config: { baseUrl: `http://127.0.0.1:${port}`, token: "CHAT_TOKEN" },
+          },
+        ],
+      };
+      const blocked = await runWorkflowInMemory(post, {
+        plugins: [plugin],
+        secrets: { CHAT_TOKEN: "tok" },
+      });
+      expect(blocked.run.status).toBe("failed");
+      const { run } = await runWorkflowInMemory(post, {
+        plugins: [plugin],
+        secrets: { CHAT_TOKEN: "tok" },
+        http: { allowPrivateNetworks: true },
+      });
+      expect(run.status).toBe("completed");
+      expect(run.journal.p).toMatchObject({ output: { messageId: "m_1" } });
+      expect(seen).toEqual(["Bearer tok"]);
+      // A name that isn't listed is not configured, as in production.
+      const missing = await runWorkflowInMemory(post, {
+        plugins: [plugin],
+        secrets: {},
+        http: { allowPrivateNetworks: true },
+      });
+      expect(missing.run.error?.message).toContain('Secret "CHAT_TOKEN" is not configured');
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  });
+
+  it("publishes sub-flows first, so a workflow calling one validates and runs", async () => {
+    const child: WorkflowDoc = {
+      id: "child",
+      name: "Child",
+      trigger: {
+        type: "core.subflow",
+        config: {
+          input: [{ name: "name", type: "string", required: true }],
+          output: [{ name: "text", type: "string", required: true }],
+        },
+      },
+      steps: [{ id: "g", type: "t.greet", config: { name: { $ref: "trigger.name" } } }],
+      output: { text: { $ref: "steps.g.text" } },
+    };
+    const parent: WorkflowDoc = {
+      ...doc,
+      id: "parent",
+      steps: [
+        {
+          id: "call",
+          type: "core.callSubflow",
+          config: { workflowId: "child", input: { name: { $ref: "trigger.name" } } },
+        },
+      ],
+    };
+    await expect(
+      runWorkflowInMemory(parent, { plugins: [plugin], trigger: { name: "Ada" } }),
+    ).rejects.toThrow('calls sub-flow "child"');
+    const { run } = await runWorkflowInMemory(parent, {
+      plugins: [plugin],
+      trigger: { name: "Ada" },
+      subflows: [child],
+    });
+    expect(run.status).toBe("completed");
+    expect(run.journal.call).toMatchObject({ output: { text: "Hi Ada!" } });
   });
 
   it("uses a real clock by default", async () => {
