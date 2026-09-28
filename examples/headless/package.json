@@ -1,0 +1,22 @@
+{
+  "name": "headless",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Flowkit without a UI: define a plugin, build a workflow in code, run it in memory.",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@flowkit/core": "workspace:*",
+    "@flowkit/engine": "workspace:*",
+    "@flowkit/nodes-builtin": "workspace:*",
+    "@flowkit/storage-memory": "workspace:*",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "tsx": "4.23.13",
+    "vitest": "5.0.0"
+  }
+}
