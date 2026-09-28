@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     name: "mini-crm",
     environment: "node",
-    include: ["server/src/**/*.test.ts"],
+    // Web tests opt into jsdom with a `// @vitest-environment jsdom` comment.
+    include: ["server/src/**/*.test.ts", "web/src/**/*.test.tsx"],
   },
 });

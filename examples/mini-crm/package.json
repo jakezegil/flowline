@@ -4,28 +4,44 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "description": "Example CRM embedding Flowkit: a crm plugin, demo workflows and a Hono server.",
+  "description": "Example CRM embedding Flowkit: a crm plugin, demo workflows, a Hono server and a React web app.",
   "scripts": {
-    "dev": "tsx watch server/src/index.ts",
+    "dev": "concurrently -k -n server,web -c blue,magenta \"tsx watch server/src/index.ts\" \"vite --config web/vite.config.ts\"",
     "start": "tsx server/src/index.ts",
     "dev:server": "tsx watch server/src/index.ts",
+    "dev:web": "vite --config web/vite.config.ts",
     "start:server": "tsx server/src/index.ts",
+    "build": "vite build --config web/vite.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@flowkit/core": "workspace:*",
     "@flowkit/engine": "workspace:*",
     "@flowkit/nodes-builtin": "workspace:*",
+    "@flowkit/react": "workspace:*",
     "@flowkit/storage-memory": "workspace:*",
     "@flowkit/storage-postgres": "workspace:*",
     "@hono/node-server": "2.1.1",
     "hono": "4.13.7",
+    "lucide-react": "1.45.0",
     "pg": "8.23.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-router": "7.18.3",
     "zod": "^4"
   },
   "devDependencies": {
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.6",
     "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "concurrently": "10.0.5",
+    "jsdom": "30.0.1",
+    "playwright": "1.62.1",
     "tsx": "4.23.13",
+    "vite": "8.2.2",
     "vitest": "5.0.0"
   }
 }
