@@ -5,10 +5,14 @@
   "license": "MIT",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "flowkit-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
-    "./styles.css": "./src/styles.css"
+    "./styles.css": {
+      "flowkit-source": "./src/styles.css",
+      "default": "./dist/styles.css"
+    }
   },
   "sideEffects": [
     "*.css"
@@ -64,6 +68,7 @@
     "zustand": "5.0.15"
   },
   "peerDependencies": {
-    "react": ">=19"
+    "react": ">=19",
+    "react-dom": ">=19"
   }
 }

@@ -6,11 +6,11 @@
   "license": "MIT",
   "description": "Example CRM embedding Flowkit: a crm plugin, demo workflows, a Hono server and a React web app.",
   "scripts": {
-    "dev": "concurrently -k -n server,web -c blue,magenta \"tsx watch server/src/index.ts\" \"vite --config web/vite.config.ts\"",
-    "start": "tsx server/src/index.ts",
-    "dev:server": "tsx watch server/src/index.ts",
+    "dev": "concurrently -k -n server,web -c blue,magenta \"tsx watch --conditions=flowkit-source server/src/index.ts\" \"vite --config web/vite.config.ts\"",
+    "start": "tsx --conditions=flowkit-source server/src/index.ts",
+    "dev:server": "tsx watch --conditions=flowkit-source server/src/index.ts",
     "dev:web": "vite --config web/vite.config.ts",
-    "start:server": "tsx server/src/index.ts",
+    "start:server": "tsx --conditions=flowkit-source server/src/index.ts",
     "build": "vite build --config web/vite.config.ts",
     "typecheck": "tsc --noEmit"
   },
