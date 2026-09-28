@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { branchyDoc, docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
 import * as hooks from "../hooks";
+import { defaultLabels } from "../labels";
 import { createEditorStore, type EditorStore } from "../store/editor-store";
 import type { RunOverlay, RunStepStatus } from "./canvas-context";
 import { WorkflowCanvas } from "./workflow-canvas";
@@ -303,6 +304,37 @@ describe("WorkflowCanvas", () => {
     expect(summary?.textContent).toBe(
       "When contact.created happens · Stage: Won · Min amount: 5000 · Only on changes",
     );
+  });
+
+  test("a multi-event trigger's card caption uses labels.triggerEvents", () => {
+    const [created, ...rest] = manifest.triggers;
+    const twoEvents = {
+      ...(created as NonNullable<typeof created>),
+      event: undefined,
+      events: ["ai_call.ended", "voip_call.ended"],
+    };
+    const doc = fixtureDoc();
+    store = createEditorStore({
+      doc: { ...doc, trigger: { ...doc.trigger, config: {} } },
+      manifest: { ...manifest, triggers: [twoEvents, ...rest] },
+    });
+    render(<WorkflowCanvas store={store} />);
+    const summary = document.querySelector(
+      `.react-flow__node[data-id="trigger"] .fl-card__summary`,
+    );
+    expect(summary?.textContent).toBe(defaultLabels.triggerEvents(twoEvents.events));
+
+    const fourEvents = { ...twoEvents, events: ["a", "b", "c", "d"] };
+    store = createEditorStore({
+      doc: { ...doc, trigger: { ...doc.trigger, config: {} } },
+      manifest: { ...manifest, triggers: [fourEvents, ...rest] },
+    });
+    cleanup();
+    render(<WorkflowCanvas store={store} />);
+    const summary2 = document.querySelector(
+      `.react-flow__node[data-id="trigger"] .fl-card__summary`,
+    );
+    expect(summary2?.textContent).toBe("When any of: a, b, c, +1 more");
   });
 
   test("L19: right-click with no panel open doesn't open one", () => {
