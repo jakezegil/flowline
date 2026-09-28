@@ -8,7 +8,7 @@ import { isRef, isTpl, type JSONSchema, type ValueExpr } from "@flowkit/core";
 import { Braces } from "lucide-react";
 import { type JSX, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useFlowkitAppearance } from "../../provider";
-import { type FieldProps, useFormEnv } from "../form-context";
+import { type FieldProps, fieldMetaOf, useFormEnv } from "../form-context";
 import { RefTextInput } from "../ref-text-input";
 import { metaOf, optionLabel } from "../schema";
 import { AsideToggle, FieldShell, RefToggle, Segmented, Switch } from "./shell";
@@ -92,7 +92,7 @@ function LiteralField({
   children: ReactNode;
 }): JSX.Element {
   const env = useFormEnv();
-  const meta = metaOf(p.schema);
+  const meta = fieldMetaOf(env, p.schema);
   const refOnly = meta.refOnly === true;
   const mode = useRefMode(p.value, p.onChange, !meta.literalOnly && !refOnly);
   const refMode = refOnly || mode.on;
@@ -119,7 +119,7 @@ function LiteralField({
 /** Text with inline pills. */
 export function StringField(p: FieldProps): JSX.Element {
   const env = useFormEnv();
-  const meta = metaOf(p.schema);
+  const meta = fieldMetaOf(env, p.schema);
   return (
     <FieldShell
       label={p.label}
@@ -236,7 +236,7 @@ export function EnumField(p: FieldProps): JSX.Element {
   const { labels } = useFlowkitAppearance();
   const id = useId();
   const values = enumOptions(p.schema);
-  const meta = metaOf(p.schema);
+  const meta = fieldMetaOf(env, p.schema);
   const options = values.map((v) => ({ value: v, label: optionLabel(v, meta) }));
   const current = p.value !== undefined ? p.value : (p.schema.default as ValueExpr | undefined);
   const always = p.required || p.schema.default !== undefined;
@@ -297,7 +297,7 @@ function isJsonLiteral(v: ValueExpr | undefined): boolean {
 export function AnyField(p: FieldProps): JSX.Element {
   const env = useFormEnv();
   const { labels } = useFlowkitAppearance();
-  const meta = metaOf(p.schema);
+  const meta = fieldMetaOf(env, p.schema);
   const [json, setJson] = useState(() => isJsonLiteral(p.value));
   const [bad, setBad] = useState(false);
   // Like the `{x}` toggle: turning JSON off keeps the JSON value to restore when it's turned back on.

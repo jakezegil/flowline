@@ -1,5 +1,6 @@
-import type { Issue, JSONSchema, ScopeEntry, ValueExpr } from "@flowkit/core";
+import type { Issue, JSONSchema, ScopeEntry, UiMeta, ValueExpr } from "@flowkit/core";
 import { createContext, useContext } from "react";
+import { metaOf } from "./schema";
 
 /** What every field of a {@link SchemaForm} needs besides its own value. */
 export interface FormEnv {
@@ -18,6 +19,11 @@ export interface FormEnv {
   readOnly: boolean;
   /** The form's whole value, for widgets that depend on a sibling field. */
   values: Record<string, ValueExpr>;
+  /**
+   * Every field takes a literal value only: no `{x}` toggle, no picker (the trigger's config,
+   * which runs before any step and would otherwise offer the trigger's own data).
+   */
+  literalOnly?: boolean;
 }
 
 /** @internal Props of every field renderer. */
@@ -34,6 +40,12 @@ export interface FieldProps {
   onChange(v: ValueExpr | undefined): void;
   /** No label row (list items); the label still names the control for assistive tech. */
   bare?: boolean;
+}
+
+/** @internal A field's UI metadata within its form (a literal-only form makes it literal-only). */
+export function fieldMetaOf(env: FormEnv, schema: JSONSchema): UiMeta {
+  const meta = metaOf(schema);
+  return env.literalOnly ? { ...meta, literalOnly: true, refOnly: false } : meta;
 }
 
 /** @internal */

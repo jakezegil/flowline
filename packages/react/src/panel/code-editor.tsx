@@ -212,14 +212,15 @@ export function CodeEditor(props: {
   }, [value]);
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: stops an Escape the editor used
+    // biome-ignore lint/a11y/noStaticElementInteractions: keeps Escape inside the editor
     <div
       className="fk-code"
       data-readonly={readOnly || undefined}
       onKeyDown={(e) => {
-        // An Escape the editor used (closing completions) stops here, so it doesn't also close
-        // an enclosing panel; one it didn't use goes on.
-        if (e.key === "Escape" && e.defaultPrevented) e.stopPropagation();
+        // Escape in the editor closes its completions, or releases its hold on Tab ("press
+        // Escape, then Tab, to leave the editor"): it never also closes an enclosing panel.
+        // Once Tab has left the editor, Escape closes the panel as usual.
+        if (e.key === "Escape") e.stopPropagation();
       }}
     >
       <div ref={hostRef} className="fk-code__editor" />

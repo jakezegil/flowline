@@ -127,7 +127,8 @@ describe("ConfigPanel for a step", () => {
   test("the Configure tab counts the step's issues; issues without a field show on top", () => {
     const doc = docWith([step("email", "crm.sendEmail", { subject: "Hi", bogus: 1 })]);
     setup({ doc });
-    const tab = screen.getByRole("tab", { name: /Configure/ });
+    // L3: named "Configure, 2 issues", not "Configure 2 2 issues".
+    const tab = screen.getByRole("tab", { name: /^Configure, \d+ issues?$/ });
     expect(tab.textContent).toMatch(/\d/);
     // `to` is required and flagged next to its field.
     const to = screen.getByRole("textbox", { name: "To" }).closest(".fk-f") as HTMLElement;
@@ -283,7 +284,7 @@ describe("ConfigPanel for the trigger", () => {
     };
     const { store } = setup({ doc, select: TRIGGER_KEY, manifest: withBuiltinTriggers });
     expect(screen.getByText("Output values")).toBeTruthy();
-    expect(screen.getByText('"email" is required')).toBeTruthy();
+    expect(screen.getByText('"Email" is required')).toBeTruthy();
     // An undeclared key is said once: the validator's issue replaces the help line.
     expect(screen.getAllByText(/isn't a declared output field/)).toHaveLength(1);
     expect(screen.queryByText(/Not a declared output field/)).toBeNull();
@@ -298,7 +299,7 @@ describe("ConfigPanel for the trigger", () => {
 
     act(() => typeInto(editorView("email"), "a@b.c"));
     expect(store.getState().doc.output).toEqual({ stale: "x", email: "a@b.c" });
-    expect(screen.queryByText('"email" is required')).toBeNull();
+    expect(screen.queryByText('"Email" is required')).toBeNull();
 
     // Typed outputs take literals of their type (numbers, booleans), not only text.
     fireEvent.change(screen.getByRole("textbox", { name: "score" }), { target: { value: "5" } });

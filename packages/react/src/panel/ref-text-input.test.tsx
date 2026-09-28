@@ -440,4 +440,66 @@ describe("RefTextInput", () => {
     fireEvent.keyDown(content, { key: "Escape", keyCode: 27 });
     expect(outer).toHaveBeenCalledTimes(1);
   });
+
+  describe("placement (H1): the picker never covers the next field", () => {
+    function form() {
+      render(
+        <div className="fk-app">
+          <div className="fk-panel">
+            <RefTextInput
+              ariaLabel="Subject"
+              scope={scope}
+              samples={samples}
+              value={undefined}
+              onChange={() => {}}
+            />
+            <input aria-label="Timeout" />
+          </div>
+        </div>,
+      );
+    }
+
+    test("without room beside the panel it opens inline, before the next field", async () => {
+      form();
+      focus();
+      const tree = await screen.findByRole("tree");
+      const inline = tree.closest(".fk-ref-inline");
+      expect(inline).toBeTruthy();
+      expect(inline?.closest(".fk-ref-field")).toBeTruthy();
+      const next = screen.getByLabelText("Timeout");
+      // In the flow of the form, above the next field: it pushes it down rather than covering it.
+      expect(inline?.compareDocumentPosition(next) ?? 0).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      // Pressing inside the picker keeps focus in the field.
+      const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+      inline?.querySelector(".fk-dp__foot")?.dispatchEvent(press);
+      expect(press.defaultPrevented).toBe(true);
+      // Moving to another field closes it.
+      const content = document.querySelector(".cm-content") as HTMLElement;
+      act(() => {
+        fireEvent.blur(content, { relatedTarget: next });
+      });
+      expect(screen.queryByRole("tree")).toBeNull();
+    });
+
+    test("with room beside the panel it docks to the panel's left edge", async () => {
+      const rects = vi
+        .spyOn(Element.prototype, "getBoundingClientRect")
+        .mockImplementation(function (this: Element) {
+          if (this.classList.contains("fk-panel")) return DOMRect.fromRect({ x: 800, width: 400 });
+          if (this.classList.contains("fk-app")) return DOMRect.fromRect({ x: 0, width: 1200 });
+          return DOMRect.fromRect({ x: 816, y: 200, width: 368, height: 32 });
+        });
+      try {
+        form();
+        focus();
+        const tree = await screen.findByRole("tree");
+        const popover = tree.closest(".fk-ref-popover");
+        expect(popover?.hasAttribute("data-docked")).toBe(true);
+        expect(document.querySelector(".fk-ref-inline")).toBeNull();
+        expect(popover?.closest(".fk-panel")).toBeNull();
+      } finally {
+        rects.mockRestore();
+      }
+    });
+  });
 });

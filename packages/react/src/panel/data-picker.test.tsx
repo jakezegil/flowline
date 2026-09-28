@@ -74,12 +74,27 @@ describe("DataPicker", () => {
     if (!tags) throw new Error("no tags row");
     fireEvent.click(within(tags).getByTitle("Insert all of tags"));
     expect(onPick).toHaveBeenLastCalledWith("steps.load.tags", "string[]");
-    fireEvent.click(tags);
+    fireEvent.click(tags.querySelector(".fk-dp__chevron") as HTMLElement);
     const first = screen
       .getAllByRole("treeitem")
       .find((r) => r.textContent?.includes("First item"));
     fireEvent.click(first as HTMLElement);
     expect(onPick).toHaveBeenLastCalledWith("steps.load.tags[0]", "string");
+  });
+
+  test("M13: clicking a list or object field inserts it; its chevron opens it", () => {
+    const onPick = vi.fn();
+    render(<DataPicker scope={scope} samples={samples} onPick={onPick} />);
+    openLoad();
+    const tags = screen.getAllByRole("treeitem").find((r) => r.textContent?.startsWith("tags"));
+    if (!tags) throw new Error("no tags row");
+    fireEvent.click(tags);
+    expect(onPick).toHaveBeenLastCalledWith("steps.load.tags", "string[]");
+    expect(tags.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(tags.querySelector(".fk-dp__chevron") as HTMLElement);
+    expect(onPick).toHaveBeenCalledTimes(1);
+    const reopened = screen.getAllByRole("treeitem").find((r) => r.textContent?.startsWith("tags"));
+    expect(reopened?.getAttribute("aria-expanded")).toBe("true");
   });
 
   test("works from the keyboard: arrows move, Right expands, Enter picks", async () => {

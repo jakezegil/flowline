@@ -286,8 +286,9 @@ function PanelTabs({
           {t === "configure" ? labels.configureTab : labels.testTab}
           {t === "configure" && count > 0 && (
             <span className="fk-tab__badge" data-severity={errors > 0 ? "error" : "warning"}>
-              {count}
-              <span className="fk-sr-only"> {labels.issueCount(count)}</span>
+              {/* The number is for the eye; assistive tech hears "Configure, 2 issues" (L3). */}
+              <span aria-hidden="true">{count}</span>
+              <span className="fk-sr-only">, {labels.issueCount(count)}</span>
             </span>
           )}
           {t === "test" && testState && (

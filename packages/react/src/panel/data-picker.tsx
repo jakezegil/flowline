@@ -213,9 +213,14 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
   const pick = (row: Row, via: PickVia) => {
     if (row.pickable) onPick(row.node.ref, row.node.typeLabel, via);
   };
-  /** Enter or click: a value inserts; a group opens or closes (while searching, inserts). */
+  /**
+   * Enter or click: a value inserts; a group opens or closes (while searching, inserts). A click
+   * on a field that is a list or object inserts it whole (its chevron opens it); Enter opens it,
+   * Shift+Enter inserts it.
+   */
   const activate = (row: Row, via: PickVia) => {
     if (!row.node.expandable) pick(row, via);
+    else if (via === "pointer" && row.node.depth > 0 && row.pickable) pick(row, via);
     else if (!query) toggle(row.node.id);
     else if (row.node.depth > 0) pick(row, via);
   };
@@ -335,6 +340,7 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
               onHover={() => setActiveId(row.node.id)}
               onActivate={() => activate(row, "pointer")}
               onInsert={() => pick(row, "pointer")}
+              onToggle={() => toggle(row.node.id)}
               icon={row.node.depth === 0 ? resolveIcon(row.node.entry.icon) : undefined}
               labels={labels}
             />
@@ -394,10 +400,11 @@ function PickerRow(props: {
   onHover(): void;
   onActivate(): void;
   onInsert(): void;
+  onToggle(): void;
   icon: IconComponent | undefined;
   labels: FlowkitLabels;
 }): JSX.Element {
-  const { id, row, active, onHover, onActivate, onInsert, icon: Icon, labels } = props;
+  const { id, row, active, onHover, onActivate, onInsert, onToggle, icon: Icon, labels } = props;
   const { node } = row;
   const section = node.depth === 0;
   const sample = node.sample && !section ? formatSample(node.sample.value, labels) : undefined;
@@ -426,7 +433,19 @@ function PickerRow(props: {
       onMouseMove={active ? undefined : onHover}
       onClick={onActivate}
     >
-      <span className="fk-dp__chevron" data-open={row.open || undefined} aria-hidden="true">
+      <span
+        className="fk-dp__chevron"
+        data-open={row.open || undefined}
+        aria-hidden="true"
+        onClick={
+          node.expandable
+            ? (e) => {
+                e.stopPropagation();
+                onToggle();
+              }
+            : undefined
+        }
+      >
         {node.expandable && <ChevronRight size={13} />}
       </span>
       {section ? (
