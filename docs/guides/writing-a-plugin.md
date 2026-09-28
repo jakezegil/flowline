@@ -229,6 +229,38 @@ also receives the delivered `event`, and returning `undefined` means no dedupe f
 The trigger's key beats a key passed to `emit` (`{ dedupe: { key } }`); a window passed to `emit`
 beats the trigger's `window`.
 
+### Listening to several events
+
+A trigger can listen to more than one event and normalize each raw payload into one shape,
+e.g. an "Any call ended" trigger covering both an AI calling product and a VoIP one:
+
+```ts nocheck
+export const callEnded = defineTrigger({
+  type: "crm.callEnded",
+  name: "Any call ended",
+  kind: "event",
+  events: ["ai_call.ended", "voip_call.ended"], // requires normalize; mutually exclusive with `event`
+  config: z.object({ minSeconds: z.number().int().min(0).default(0) }),
+  payload: z.object({
+    call: z.object({ id: z.string(), source: z.enum(["ai", "voip"]), durationSec: z.number() }),
+  }),
+  normalize: (event, raw) => {
+    if (event === "ai_call.ended") {
+      const r = raw as { call: { id: string; seconds: number } };
+      return { call: { id: r.call.id, source: "ai", durationSec: r.call.seconds } };
+    }
+    const r = raw as { callId: string; durationMs: number };
+    return { call: { id: r.callId, source: "voip", durationSec: Math.round(r.durationMs / 1000) } };
+  },
+  filter: ({ config, payload }) => payload.call.durationSec >= config.minSeconds,
+  dedupe: { key: ({ payload }) => payload.call.id, window: "1h" }, // unifies both sources by call ID
+});
+```
+
+`normalize` runs before payload validation, with the delivered event name (one of `events`).
+Returning `undefined` skips that delivery (not a rejection); throwing rejects just that match. The
+run's `startedBy.event` is always the raw delivered event name, whichever of `events` it was.
+
 ## UI metadata
 
 The editor builds the config form from the input's JSON Schema. You can refine it with these

@@ -21,12 +21,29 @@ const dealUpdated = defineTrigger({
   config: z.object({ onlyStage: z.boolean().default(false) }),
   payload: z.object({ dealId: z.string() }),
 });
+const callEnded = defineTrigger({
+  type: "crm.callEnded",
+  name: "Any call ended",
+  kind: "event",
+  events: ["ai_call.ended", "voip_call.ended"],
+  config: z.object({}),
+  payload: z.object({ callId: z.string() }),
+  normalize: (event, raw) => ({ callId: `${event}:${JSON.stringify(raw)}` }),
+});
+/** Like `core.event`: the event name is configured, not declared on the definition. */
+const appEvent = defineTrigger({
+  type: "crm.appEvent",
+  name: "App event",
+  kind: "event",
+  config: z.object({ event: z.string() }),
+  payload: z.unknown(),
+});
 const crm = definePlugin({
   id: "crm",
   name: "CRM",
   icon: "building",
   nodes: [loadContact],
-  triggers: [dealUpdated],
+  triggers: [dealUpdated, callEnded, appEvent],
 });
 
 const props = (s: JSONSchema) => s.properties as Record<string, JSONSchema>;
@@ -110,6 +127,22 @@ test("plugins and triggers in the manifest", () => {
     kind: "schema",
     schema: expect.objectContaining({ properties: { dealId: { type: "string" } } }),
   });
+  expect(t.events).toBeUndefined();
+});
+
+test("manifest carries events for a multi-event trigger, event for a single-event one", () => {
+  const m = createRegistry([crm]).manifest();
+  const single = m.triggers.find((tr) => tr.type === "crm.dealUpdated")!;
+  const multi = m.triggers.find((tr) => tr.type === "crm.callEnded")!;
+  expect(single.event).toBe("deal.updated");
+  expect(single.events).toBeUndefined();
+  expect(multi.event).toBeUndefined();
+  expect(multi.events).toEqual(["ai_call.ended", "voip_call.ended"]);
+
+  // A `core.event`-shaped trigger (event name only in config) carries neither.
+  const configured = m.triggers.find((tr) => tr.type === "crm.appEvent")!;
+  expect(configured.event).toBeUndefined();
+  expect(configured.events).toBeUndefined();
 });
 
 test("defaults for output, payload, dynamic specs and branches", () => {

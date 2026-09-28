@@ -160,6 +160,12 @@ describe("builtinPlugin", () => {
     expect(trigger("core.subflow").payload).toEqual({ kind: "fields", configPath: "input" });
   });
 
+  it("carries neither event nor events for core.event: its event name lives in config", () => {
+    const t = trigger("core.event");
+    expect(t.event).toBeUndefined();
+    expect(t.events).toBeUndefined();
+  });
+
   it("types the forEach output as { count, results }", () => {
     const out = node("core.forEach").output;
     expect(out).toMatchObject({

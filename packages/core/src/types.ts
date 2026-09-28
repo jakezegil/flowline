@@ -274,8 +274,10 @@ export interface TriggerManifest {
   icon?: string;
   /** How the trigger fires. */
   kind: TriggerKind;
-  /** For `event` triggers: the event name it listens to. */
+  /** For `event` triggers listening to one event: the event name it listens to. */
   event?: string;
+  /** For `event` triggers listening to several events: the event names it listens to. */
+  events?: string[];
   /** Input-side JSON Schema of the trigger's config. */
   config: JSONSchema;
   /** Shape of the payload, available as `trigger` in reference scope. */

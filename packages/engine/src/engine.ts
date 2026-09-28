@@ -269,15 +269,19 @@ export interface Engine {
   startWorker(opts?: WorkerOptions): Worker;
   /**
    * Start a run of every published workflow of the tenant whose `event` trigger listens to `event`
-   * (a plugin trigger's `event`, or `config.event` of `core.event`) and whose `filter` accepts the
-   * payload. Each match is evaluated independently: an invalid payload, a `filter` or
-   * `dedupe.key` that throws, or a failure launching the run (a storage error, say) produces one
-   * {@link EmitRejection} for that workflow (reported in `rejected`, logged at `warn`, and passed
-   * to `onTriggerEvent` as `trigger.rejected`) without affecting the other matches; a launch
-   * failure has no `issues`. `emit` never throws for a rejected match; it throws only when the
-   * published workflows can't be listed, or for an invalid `opts.dedupe.window`
-   * ({@link FlowlineValidationError}, before any match starts). To retry rejected launches, emit
-   * again with a dedupe key: matches that already started are deduped.
+   * (a plugin trigger's `event`, one of its `events`, or `config.event` of `core.event`) and whose
+   * `filter` accepts the payload. When the trigger declares `normalize`, it runs first: it maps
+   * the raw payload to the trigger's payload shape before validation, given the delivered `event`.
+   * Returning `undefined` from `normalize` skips that match silently (no run, no rejection); a
+   * `normalize` that throws is treated like a throwing `filter` (see below). Each match is
+   * evaluated independently: an invalid (or invalidly normalized) payload, a `normalize`,
+   * `filter` or `dedupe.key` that throws, or a failure launching the run (a storage error, say)
+   * produces one {@link EmitRejection} for that workflow (reported in `rejected`, logged at
+   * `warn`, and passed to `onTriggerEvent` as `trigger.rejected`) without affecting the other
+   * matches; a launch failure has no `issues`. `emit` never throws for a rejected match; it
+   * throws only when the published workflows can't be listed, or for an invalid
+   * `opts.dedupe.window` ({@link FlowlineValidationError}, before any match starts). To retry
+   * rejected launches, emit again with a dedupe key: matches that already started are deduped.
    *
    * Deduplication: the key is the trigger's `dedupe.key(...)` when it returns one, else
    * `opts.dedupe.key`; the window is `opts.dedupe.window`, else the trigger's `dedupe.window`,

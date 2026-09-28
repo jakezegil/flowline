@@ -267,6 +267,108 @@ describe("defineTrigger", () => {
       }),
     ).toThrow(/Trigger "a\.b".*dedupe window/);
   });
+
+  describe("multi-event triggers", () => {
+    test("accepts events with normalize, event names, and a normalize alone on a single event", () => {
+      const multi = defineTrigger({
+        type: "crm.callEnded",
+        name: "Any call ended",
+        kind: "event",
+        events: ["ai_call.ended", "voip_call.ended"],
+        config: z.object({}),
+        payload: z.object({ callId: z.string() }),
+        normalize: (event, raw) => ({ callId: `${event}:${JSON.stringify(raw)}` }),
+      });
+      expect(multi.events).toEqual(["ai_call.ended", "voip_call.ended"]);
+
+      // The spec allows a single-event trigger to also declare normalize.
+      expect(() =>
+        defineTrigger({
+          type: "crm.single",
+          name: "Single",
+          kind: "event",
+          event: "deal.updated",
+          config: z.object({}),
+          payload: z.object({ ok: z.boolean() }),
+          normalize: () => ({ ok: true }),
+        }),
+      ).not.toThrow();
+    });
+
+    test("rejects both event and events", () => {
+      expect(() =>
+        defineTrigger({
+          type: "a.b",
+          name: "B",
+          kind: "event",
+          event: "x",
+          events: ["y", "z"],
+          config: z.object({}),
+          normalize: () => undefined,
+        }),
+      ).toThrow(/Trigger "a\.b".*event and events/);
+    });
+
+    test("rejects empty events", () => {
+      expect(() =>
+        defineTrigger({
+          type: "a.b",
+          name: "B",
+          kind: "event",
+          events: [],
+          config: z.object({}),
+          normalize: () => undefined,
+        }),
+      ).toThrow(/Trigger "a\.b".*empty events/);
+    });
+
+    test("rejects duplicate events", () => {
+      expect(() =>
+        defineTrigger({
+          type: "a.b",
+          name: "B",
+          kind: "event",
+          events: ["x", "x"],
+          config: z.object({}),
+          normalize: () => undefined,
+        }),
+      ).toThrow(/Trigger "a\.b".*duplicate events/);
+    });
+
+    test("rejects events without normalize", () => {
+      expect(() =>
+        defineTrigger({
+          type: "a.b",
+          name: "B",
+          kind: "event",
+          events: ["x", "y"],
+          config: z.object({}),
+        }),
+      ).toThrow(/Trigger "a\.b".*events without normalize/);
+    });
+
+    test("rejects events or normalize on a non-event kind", () => {
+      expect(() =>
+        defineTrigger({
+          type: "a.b",
+          name: "B",
+          kind: "webhook",
+          events: ["x", "y"],
+          config: z.object({}),
+          normalize: () => undefined,
+        }),
+      ).toThrow(/Trigger "a\.b".*kind "webhook".*events and normalize/);
+      expect(() =>
+        defineTrigger({
+          type: "a.c",
+          name: "C",
+          kind: "manual",
+          config: z.object({}),
+          normalize: () => undefined,
+        }),
+      ).toThrow(/Trigger "a\.c".*kind "manual".*events and normalize/);
+    });
+  });
 });
 
 describe("definePlugin", () => {
