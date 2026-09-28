@@ -9,6 +9,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -115,6 +116,51 @@ describe("package exports", () => {
   );
 });
 
+/**
+ * Whether a `vite.config.ts`/`vitest.config.ts` source passes the source condition to Vite, read
+ * from its syntax tree (so comments and unrelated strings don't count). Accepted:
+ * `export default defineConfig({ ...sourceConditions, … })` with `sourceConditions` imported from
+ * the repo's `source-conditions.ts`, or `resolve: { conditions: ["flowkit-source", …] }`.
+ */
+function configSetsSourceCondition(source: string): boolean {
+  const file = ts.createSourceFile("config.ts", source, ts.ScriptTarget.Latest, true);
+  const importsShared = file.statements.some(
+    (s) =>
+      ts.isImportDeclaration(s) &&
+      ts.isStringLiteral(s.moduleSpecifier) &&
+      /(^|\/)source-conditions(\.ts)?$/.test(s.moduleSpecifier.text) &&
+      s.importClause?.namedBindings !== undefined &&
+      ts.isNamedImports(s.importClause.namedBindings) &&
+      s.importClause.namedBindings.elements.some((e) => e.name.text === "sourceConditions"),
+  );
+  const property = (obj: ts.ObjectLiteralExpression, name: string) =>
+    obj.properties.find(
+      (p): p is ts.PropertyAssignment =>
+        ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === name,
+    )?.initializer;
+  for (const s of file.statements) {
+    if (!ts.isExportAssignment(s) || !ts.isCallExpression(s.expression)) continue;
+    const config = s.expression.arguments[0];
+    if (!config || !ts.isObjectLiteralExpression(config)) continue;
+    const spreadsShared = config.properties.some(
+      (p) =>
+        ts.isSpreadAssignment(p) &&
+        ts.isIdentifier(p.expression) &&
+        p.expression.text === "sourceConditions",
+    );
+    if (spreadsShared && importsShared) return true;
+    const resolve = property(config, "resolve");
+    const conditions =
+      resolve && ts.isObjectLiteralExpression(resolve)
+        ? property(resolve, "conditions")
+        : undefined;
+    const first =
+      conditions && ts.isArrayLiteralExpression(conditions) ? conditions.elements[0] : undefined;
+    if (first && ts.isStringLiteral(first) && first.text === "flowkit-source") return true;
+  }
+  return false;
+}
+
 /** Every file under `dir` (skipping node_modules and build output) whose name matches `re`. */
 function findFiles(dir: string, re: RegExp): string[] {
   const out: string[] = [];
@@ -157,8 +203,30 @@ describe("dev entry points run workspace sources", () => {
     const configs = roots.flatMap((r) => findFiles(r, /^vite(st)?\.config\.ts$/));
     expect(configs.length).toBeGreaterThanOrEqual(11);
     for (const file of configs) {
-      expect(readFileSync(file, "utf8"), file).toMatch(/sourceConditions|"flowkit-source"/);
+      expect(configSetsSourceCondition(readFileSync(file, "utf8")), file).toBe(true);
     }
+  });
+
+  it("the config check reads code, not comments or unrelated strings", () => {
+    const wrap = (body: string, imports = "") =>
+      `import { defineConfig } from "vite";\n${imports}\nexport default defineConfig({\n${body}\n});\n`;
+    const imported = 'import { sourceConditions } from "../../source-conditions.ts";';
+    // Passing shapes.
+    expect(configSetsSourceCondition(wrap("  ...sourceConditions,", imported))).toBe(true);
+    expect(
+      configSetsSourceCondition(
+        wrap('  resolve: { conditions: ["flowkit-source", ...defaultClientConditions] },'),
+      ),
+    ).toBe(true);
+    // Failing shapes: a comment, a stray string, a spread that isn't the shared config, the
+    // condition somewhere other than resolve.conditions.
+    expect(
+      configSetsSourceCondition(wrap('  // resolve: { conditions: ["flowkit-source"] }')),
+    ).toBe(false);
+    expect(configSetsSourceCondition(wrap("  /* ...sourceConditions */", imported))).toBe(false);
+    expect(configSetsSourceCondition(wrap('  define: { x: "flowkit-source" },'))).toBe(false);
+    expect(configSetsSourceCondition(wrap("  ...sourceConditions,"))).toBe(false);
+    expect(configSetsSourceCondition(wrap('  resolve: { conditions: ["module"] },'))).toBe(false);
   });
 
   it("source-conditions.ts keeps Vite's own default conditions", async () => {
