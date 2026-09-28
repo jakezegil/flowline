@@ -44,7 +44,10 @@ const SwitchCase = z.object({
   value: ui(z.unknown(), { label: "Value", placeholder: "gold" }),
 });
 
-/** Routes to the first case whose value equals the input value, or to `default`. */
+/**
+ * Routes to the first case whose value equals the input value (loosely, see `looseEquals`;
+ * ignoring case unless `caseSensitive` is set), or to `default`.
+ */
 export const switchNode = defineNode({
   type: "core.switch",
   name: "Switch",
@@ -55,8 +58,11 @@ export const switchNode = defineNode({
   summary: "Route by {{value}}",
   input: z.object({
     value: ui(z.unknown(), { label: "Value to match" }).describe(
-      'Compared with each case. Numbers and text compare loosely, so "5" matches 5.',
+      'Compared with each case. Numbers and text compare loosely, so "5" matches 5 and "EMEA" matches "emea".',
     ),
+    caseSensitive: ui(z.boolean(), { label: "Match case" })
+      .describe('Off by default, so "EMEA" matches "emea".')
+      .optional(),
     cases: ui(
       z.array(SwitchCase).superRefine((cases, check) => {
         const seen = new Set<string>();
@@ -89,7 +95,8 @@ export const switchNode = defineNode({
     append: [{ id: DEFAULT_BRANCH, label: "Default" }],
   },
   run: ({ input }) => {
-    const hit = input.cases.find((c) => looseEquals(input.value, c.value));
+    const caseSensitive = input.caseSensitive ?? false;
+    const hit = input.cases.find((c) => looseEquals(input.value, c.value, { caseSensitive }));
     const matched = hit ? hit.id : DEFAULT_BRANCH;
     return branch(matched, { matched });
   },

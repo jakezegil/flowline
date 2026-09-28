@@ -1,5 +1,6 @@
 import { isSignal, loop } from "@flowkit/core";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { fakeContext } from "../test/fake-context";
 import { conditionNode, forEachNode, stopNode, switchNode } from "./logic";
 import { and, eq, gt } from "./rules";
@@ -48,6 +49,32 @@ describe("core.switch", () => {
 
   it("takes Default when nothing matches", async () => {
     expect(await run(3)).toMatchObject({ branch: "default", output: { matched: "default" } });
+  });
+
+  describe("case sensitivity", () => {
+    const regions = [
+      { id: "emea", label: "EMEA", value: "emea" },
+      { id: "apac", label: "APAC", value: "apac" },
+    ];
+    const route = (value: unknown, caseSensitive?: boolean) =>
+      switchNode.run({
+        input: switchNode.input.parse({ value, cases: regions, caseSensitive }),
+        ctx,
+      });
+
+    it('matches "EMEA" to "emea" by default', async () => {
+      expect(await route("EMEA")).toMatchObject({ branch: "emea" });
+      expect(await route("EMEA", false)).toMatchObject({ branch: "emea" });
+    });
+
+    it("matches case exactly with caseSensitive", async () => {
+      expect(await route("EMEA", true)).toMatchObject({ branch: "default" });
+      expect(await route("emea", true)).toMatchObject({ branch: "emea" });
+    });
+
+    it('shows "Match case" in the editor', () => {
+      expect(JSON.stringify(z.toJSONSchema(switchNode.input))).toContain('"Match case"');
+    });
   });
 
   it("requires unique, path-safe case IDs other than default", () => {
