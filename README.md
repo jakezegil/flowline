@@ -43,7 +43,11 @@ pnpm add -D @flowkit/storage-memory # for tests and prototypes
 ```
 
 `zod` 4 is a peer dependency of `@flowkit/core`, `@flowkit/nodes-builtin` and `@flowkit/engine`:
-install it once, so your schemas and flowkit's share one copy. Zod 3 is not supported.
+install it once, so your schemas and flowkit's share one copy. Zod 3 is not supported. If a
+second copy slips in (typically a `link:`/`file:` dependency on a flowkit checkout, which resolves
+its own zod), `createRegistry` throws a `FlowkitDefinitionError` naming the field whose
+`ui()`/`secret()`/`sensitive()` metadata it can't read, rather than dropping those guarantees.
+Dedupe zod (`pnpm dedupe`, or an `overrides` entry), or install a packed tarball instead.
 
 ### 1. Define a node
 
