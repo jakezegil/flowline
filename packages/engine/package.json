@@ -34,7 +34,9 @@
   },
   "dependencies": {
     "@flowkit/core": "workspace:*",
-    "@flowkit/nodes-builtin": "workspace:*"
+    "@flowkit/nodes-builtin": "workspace:*",
+    "quickjs-emscripten": "0.32.0",
+    "undici": "7.29.1"
   },
   "peerDependencies": {
     "vitest": ">=3"

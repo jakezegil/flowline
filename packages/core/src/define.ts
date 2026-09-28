@@ -116,8 +116,18 @@ export interface NodeContext {
     steps: Record<string, unknown>;
     loop?: { item: unknown; index: number };
   }>;
-  /** SSRF-guarded fetch. */
-  http: { fetch(url: string, init?: RequestInit): Promise<Response> };
+  /**
+   * SSRF-guarded fetch. `init.timeoutMs` bounds the connect, response-header and body timeouts;
+   * `init.signal` defaults to {@link NodeContext.signal}. `init.credentialHeaders` names headers
+   * (case-insensitive) that carry credentials: they never follow a redirect to another origin,
+   * even when they would otherwise be kept (such as `Accept` or `Idempotency-Key`).
+   */
+  http: {
+    fetch(
+      url: string,
+      init?: RequestInit & { timeoutMs?: number; credentialHeaders?: string[] },
+    ): Promise<Response>;
+  };
 }
 
 /**

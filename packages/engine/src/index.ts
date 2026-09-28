@@ -20,3 +20,4 @@ export type {
   WaitReason,
   WorkflowAuditEntry,
 } from "./storage";
+export { type QuickjsRuntimeOptions, quickjsRuntime } from "./transform/quickjs";

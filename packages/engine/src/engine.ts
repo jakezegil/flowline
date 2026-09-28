@@ -52,8 +52,12 @@ export interface EngineOptions {
   leaseMs?: number;
   /** Steps executed per claim before the run is re-queued for fairness. Default `100`. */
   stepsPerClaim?: number;
-  /** Network policy of `ctx.http.fetch`. */
-  http?: { allowPrivateNetworks?: boolean; allowHosts?: string[] };
+  /**
+   * Network policy of `ctx.http.fetch`: non-public addresses are blocked unless
+   * `allowPrivateNetworks`; `allowHosts` (exact, case-insensitive hostnames) restricts the hosts
+   * that may be requested; response bodies over `maxResponseBytes` (default 10 MB) fail.
+   */
+  http?: { allowPrivateNetworks?: boolean; allowHosts?: string[]; maxResponseBytes?: number };
   /** Engine and handler logger. */
   logger?: Logger;
   /**
