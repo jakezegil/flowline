@@ -8,7 +8,7 @@ import {
 } from "@flowkit/core";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type JSX, useState } from "react";
-import { afterEach, beforeAll, describe, expect, test } from "vitest";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import builtin from "../../playground/builtin-manifest.json";
 import { mockClient, setupDom } from "../../test/dom";
 import { fixtureDoc, manifest } from "../../test/fixtures";
@@ -277,7 +277,7 @@ describe("SchemaForm with the HTTP request schema", () => {
     expect(screen.getByRole("textbox", { name: "Timeout (ms)" })).toBeTruthy();
   });
 
-  test("the Advanced group opens by itself when it holds an issue", () => {
+  test("the Advanced group opens by itself when it holds an issue, and can still be closed", () => {
     renderForm({
       schema: http,
       issues: [
@@ -286,6 +286,57 @@ describe("SchemaForm with the HTTP request schema", () => {
     });
     expect(screen.getByRole("textbox", { name: "Timeout (ms)" })).toBeTruthy();
     expect(screen.getByText("Too long")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.queryByRole("textbox", { name: "Timeout (ms)" })).toBeNull();
+  });
+
+  test("a secret list older than a few seconds is fetched again on focus", async () => {
+    const client = mockClient({ listSecrets: async () => ["API_TOKEN"] });
+    renderForm({ schema: http, initial: { auth: { type: "bearer" } } }, client);
+    const secret = (await screen.findByRole("combobox", { name: /Secret/ })) as HTMLSelectElement;
+    await waitFor(() => expect(secret.disabled).toBe(false));
+    expect(client.listSecrets).toHaveBeenCalledTimes(1);
+    fireEvent.focus(secret);
+    expect(client.listSecrets).toHaveBeenCalledTimes(1);
+    const now = Date.now();
+    const spy = vi.spyOn(Date, "now").mockReturnValue(now + 60_000);
+    try {
+      fireEvent.focus(secret);
+      await waitFor(() => expect(client.listSecrets).toHaveBeenCalledTimes(2));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("SchemaForm references and JSON", () => {
+  const schema: JSONSchema = {
+    type: "object",
+    properties: {
+      extra: {
+        type: "object",
+        additionalProperties: { type: "string" },
+        "x-flowkit": { label: "Extra", refOnly: true },
+      },
+      payload: { "x-flowkit": { label: "Payload" } },
+    },
+  };
+
+  test("a refOnly map takes only a reference", () => {
+    renderForm({ schema });
+    const field = fieldOf(screen.getByRole("textbox", { name: "Extra" }));
+    expect(within(field).queryByRole("button", { name: "Add entry" })).toBeNull();
+    expect(within(field).queryByRole("button", { name: "Use data from earlier steps" })).toBeNull();
+  });
+
+  test("turning JSON off and on again restores the JSON value", () => {
+    renderForm({ schema, initial: { payload: { a: 1 } } });
+    const toggle = screen.getByRole("button", { name: "Edit as JSON" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggle);
+    expect(latest.payload).toBeUndefined();
+    fireEvent.click(toggle);
+    expect(latest.payload).toEqual({ a: 1 });
   });
 });
 

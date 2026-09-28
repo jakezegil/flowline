@@ -345,7 +345,9 @@ export function MapField(p: FieldProps): JSX.Element {
   const listRef = useRef<HTMLOListElement>(null);
   const valueSchema = mapValueOf(env.root, p.schema);
   const textValues = ["string", "any"].includes(fieldKind(env.root, valueSchema));
-  const mode = useRefMode(p.value, p.onChange, !meta.literalOnly);
+  const refOnly = meta.refOnly === true;
+  const mode = useRefMode(p.value, p.onChange, !meta.literalOnly && !refOnly);
+  const refMode = refOnly || mode.on;
   const idRef = useRef(0);
   const nextId = () => idRef.current++;
   const obj = asObject(p.value);
@@ -377,14 +379,14 @@ export function MapField(p: FieldProps): JSX.Element {
       description={p.schema.description as string | undefined}
       issues={issuesAt(env.issues, p.path)}
       aside={
-        meta.literalOnly ? undefined : (
+        meta.literalOnly || refOnly ? undefined : (
           <RefToggle on={mode.on} onToggle={mode.toggle} disabled={env.readOnly} />
         )
       }
       group
       bare={p.bare}
     >
-      {mode.on ? (
+      {refMode ? (
         <RefTextInput
           value={p.value}
           onChange={p.onChange}

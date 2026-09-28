@@ -134,6 +134,7 @@ function RuleRow({
   path,
   ops,
   join,
+  within,
   onChange,
   onMove,
   onRemove,
@@ -144,6 +145,8 @@ function RuleRow({
   path: string;
   ops: string[];
   join?: string;
+  /** The enclosing group's name, for rules inside a nested group ("Group 1, Value 2"). */
+  within?: string;
   onChange(r: Rule): void;
   onMove(to: number): void;
   onRemove(): void;
@@ -157,7 +160,8 @@ function RuleRow({
     (type === "date" ? labels.ruleOpsDate[op] : undefined) ?? labels.ruleOps[op] ?? op;
   const unary = UNARY.has(rule.op);
   const caseable = TEXT_OPS.has(rule.op) && (type === "string" || type === "any");
-  const name = labels.itemTitle(labels.ruleLeft, index + 1);
+  const base = labels.itemTitle(labels.ruleLeft, index + 1);
+  const name = within ? `${within}, ${base}` : base;
   const setOp = (op: string) => {
     const { right: _r, caseSensitive: _c, ...rest } = rule;
     const next: Rule = { ...rest, op };
@@ -299,7 +303,8 @@ function GroupEditor({
             const rulePath = `${path}.rules[${i}]`;
             const k = keys.keys[i];
             if (isGroup(r)) {
-              const name = labels.itemTitle(labels.ruleGroup, i + 1);
+              const own = labels.itemTitle(labels.ruleGroup, i + 1);
+              const name = nested ? `${label}, ${own}` : own;
               return (
                 <li key={k} className="fk-rule fk-rule--group">
                   {i > 0 && <span className="fk-rule__join">{join}</span>}
@@ -334,6 +339,7 @@ function GroupEditor({
                 path={rulePath}
                 ops={ops}
                 {...(i > 0 ? { join } : {})}
+                {...(nested ? { within: label } : {})}
                 onChange={(nr) => setRules(group.rules.map((x, j) => (j === i ? nr : x)))}
                 onMove={(to) => move(i, to)}
                 onRemove={() => remove(i)}

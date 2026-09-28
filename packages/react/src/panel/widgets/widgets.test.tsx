@@ -98,8 +98,11 @@ describe("rules widget", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
     fireEvent.click(screen.getByRole("button", { name: "Add group" }));
     fireEvent.click(screen.getAllByRole("radio", { name: "Any rule" })[0] as HTMLElement);
-    const ops = screen.getAllByRole("combobox", { name: "Value 1: Operator" });
-    fireEvent.change(ops[0] as HTMLElement, { target: { value: "isNotEmpty" } });
+    // Rules inside a nested group are named after it, so every name is unique.
+    expect(screen.getByRole("combobox", { name: "Group 2, Value 1: Operator" })).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: "Value 1: Operator" }), {
+      target: { value: "isNotEmpty" },
+    });
 
     expect(latest.rules).toEqual({
       combinator: "or",

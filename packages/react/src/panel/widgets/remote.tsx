@@ -18,17 +18,25 @@ import { issuesAt, issuesUnder, metaOf, propertiesOf } from "../schema";
 import { asObject, NestedForm, ObjectFields, withKey } from "../schema-form";
 
 type ListKey = "secrets" | "subflows";
-const cache = new WeakMap<FlowkitClient, Map<ListKey, Promise<unknown>>>();
+type Entry = { promise: Promise<unknown>; at: number };
+const cache = new WeakMap<FlowkitClient, Map<ListKey, Entry>>();
+/** A cached list older than this is fetched again when a field needing it mounts or is focused. */
+const STALE_MS = 15_000;
 
-/** A list from the server, fetched once per client and shared by every field that needs it. */
+/**
+ * A list from the server, shared by every field that needs it. It is fetched again when a field
+ * mounts or its control is focused (`refresh`) and the cached copy is older than a few seconds, so
+ * a secret or sub-flow added meanwhile shows up without a reload. The old list stays shown while
+ * the new one loads.
+ */
 function useServerList<T>(
   key: ListKey,
   load: (c: FlowkitClient) => Promise<T>,
-): { data?: T; error?: string; retry(): void } {
+): { data?: T; error?: string; retry(): void; refresh(): void } {
   const { client } = useFlowkit();
   const [state, setState] = useState<{ data?: T; error?: string }>({});
   const [attempt, setAttempt] = useState(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` re-runs the load on retry.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` re-runs the load on retry and refresh.
   useEffect(() => {
     let active = true;
     let byKey = cache.get(client);
@@ -36,23 +44,31 @@ function useServerList<T>(
       byKey = new Map();
       cache.set(client, byKey);
     }
-    let promise = byKey.get(key) as Promise<T> | undefined;
-    if (!promise) {
-      promise = load(client);
-      byKey.set(key, promise);
+    let entry = byKey.get(key);
+    if (!entry || Date.now() - entry.at > STALE_MS) {
+      entry = { promise: load(client), at: Date.now() };
+      byKey.set(key, entry);
     }
-    promise.then(
+    const mine = entry;
+    (mine.promise as Promise<T>).then(
       (data) => active && setState({ data }),
       (err: unknown) => {
-        byKey?.delete(key);
-        if (active) setState({ error: errorText(err) });
+        if (byKey?.get(key) === mine) byKey.delete(key);
+        if (active) setState((prev) => ({ ...prev, error: errorText(err) }));
       },
     );
     return () => {
       active = false;
     };
   }, [client, key, attempt]);
-  return { ...state, retry: () => setAttempt((n) => n + 1) };
+  return {
+    ...state,
+    retry: () => setAttempt((n) => n + 1),
+    refresh() {
+      const entry = cache.get(client)?.get(key);
+      if (!entry || Date.now() - entry.at > STALE_MS) setAttempt((n) => n + 1);
+    },
+  };
 }
 
 function LoadError({ message, retry }: { message: string; retry(): void }): JSX.Element {
@@ -107,6 +123,7 @@ export function SecretWidget(p: FieldProps): JSX.Element {
             value={value}
             disabled={env.readOnly || secrets.data === undefined}
             aria-invalid={missing || undefined}
+            onFocus={secrets.refresh}
             onChange={(e) => p.onChange(e.target.value === "" ? undefined : e.target.value)}
           >
             {secrets.data === undefined ? (
@@ -144,7 +161,12 @@ function useCurrentWorkflowId(): string | undefined {
 }
 
 /** Callable sub-flows: the server's list, else what the editor loaded. */
-function useSubflows(): { data?: SubflowInfo[]; error?: string; retry(): void } {
+function useSubflows(): {
+  data?: SubflowInfo[];
+  error?: string;
+  retry(): void;
+  refresh(): void;
+} {
   return useServerList("subflows", (c) => c.listSubflows());
 }
 
@@ -174,6 +196,7 @@ export function SubflowSelectWidget(p: FieldProps): JSX.Element {
         value={value}
         disabled={env.readOnly || subflows.data === undefined}
         aria-invalid={missing || undefined}
+        onFocus={subflows.refresh}
         onChange={(e) => p.onChange(e.target.value === "" ? undefined : e.target.value)}
       >
         {subflows.data === undefined ? (

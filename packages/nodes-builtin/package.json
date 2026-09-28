@@ -30,7 +30,8 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsup"
+    "build": "tsup",
+    "manifest:playground": "UPDATE_PLAYGROUND_MANIFEST=1 vitest run src/playground-manifest.test.ts && biome format --write ../react/playground/builtin-manifest.json"
   },
   "dependencies": {
     "@flowkit/core": "workspace:*",

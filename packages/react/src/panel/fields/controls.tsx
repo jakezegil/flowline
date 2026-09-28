@@ -299,6 +299,9 @@ export function AnyField(p: FieldProps): JSX.Element {
   const id = useId();
   const [json, setJson] = useState(() => isJsonLiteral(p.value));
   const [draft, setDraft] = useState<string | null>(null);
+  // Like the `{x}` toggle: turning JSON off keeps the JSON value to restore when it's turned back on.
+  const stash = useRef<ValueExpr | undefined>(undefined);
+  const refOnly = meta.refOnly === true;
   const text = p.value === undefined ? "" : JSON.stringify(p.value, null, 2);
   let draftValue: unknown;
   let bad = false;
@@ -314,20 +317,29 @@ export function AnyField(p: FieldProps): JSX.Element {
       ? draft
       : text;
   const jsonMode = json || isJsonLiteral(p.value);
-  const toggle = meta.literalOnly ? undefined : (
-    <AsideToggle
-      on={jsonMode}
-      label={labels.editAsJson}
-      disabled={env.readOnly}
-      onToggle={() => {
-        if (jsonMode && typeof p.value !== "string") p.onChange(undefined);
-        setDraft(null);
-        setJson(!jsonMode);
-      }}
-    >
-      <Braces size={13} aria-hidden />
-    </AsideToggle>
-  );
+  const toggle =
+    meta.literalOnly || refOnly ? undefined : (
+      <AsideToggle
+        on={jsonMode}
+        label={labels.editAsJson}
+        disabled={env.readOnly}
+        onToggle={() => {
+          if (jsonMode) {
+            if (typeof p.value !== "string") {
+              stash.current = p.value;
+              p.onChange(undefined);
+            }
+          } else if (stash.current !== undefined) {
+            if (p.value === undefined || p.value === "") p.onChange(stash.current);
+            stash.current = undefined;
+          }
+          setDraft(null);
+          setJson(!jsonMode);
+        }}
+      >
+        <Braces size={13} aria-hidden />
+      </AsideToggle>
+    );
   return (
     <FieldShell
       label={p.label}

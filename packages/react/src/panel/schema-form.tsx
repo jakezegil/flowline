@@ -13,7 +13,15 @@ import {
 } from "@flowkit/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { ChevronRight } from "lucide-react";
-import { type JSX, useContext, useId, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  type JSX,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { EditorContext } from "../hooks";
 import { useFlowkit } from "../provider";
 import type { EditorState, EditorStore } from "../store/editor-store";
@@ -131,9 +139,13 @@ function FieldGroup({
   hasIssues: boolean;
   children: JSX.Element[];
 }): JSX.Element {
-  const [open, setOpen] = useState(!/^advanced$/i.test(title.trim()));
+  const [open, setOpen] = useState(hasIssues || !/^advanced$/i.test(title.trim()));
   const id = useId();
-  const shown = open || hasIssues;
+  // Opens by itself when an issue appears inside, but can still be collapsed afterwards.
+  useEffect(() => {
+    if (hasIssues) setOpen(true);
+  }, [hasIssues]);
+  const shown = open;
   return (
     <section className="fk-group" data-open={shown ? "" : undefined}>
       <h3 className="fk-group__title">
