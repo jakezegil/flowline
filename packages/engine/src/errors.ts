@@ -40,3 +40,16 @@ export class FlowkitValidationError extends Error {
     this.issues = issues;
   }
 }
+
+/**
+ * @internal The engine refused an operation because of its target's current state (e.g. retrying
+ * a run that is not failed). The HTTP handler answers 409.
+ */
+export class EngineConflictError extends Error {
+  override readonly name: string = "EngineConflictError";
+}
+
+/** @internal An engine call named something that does not exist. The HTTP handler answers 404. */
+export class EngineNotFoundError extends Error {
+  override readonly name: string = "EngineNotFoundError";
+}

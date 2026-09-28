@@ -30,23 +30,15 @@ import {
 import type { z } from "zod";
 import { createNodeContext } from "./context";
 import type { EngineCore } from "./engine";
-import { FlowkitValidationError, RetryableError } from "./errors";
+import { EngineNotFoundError, FlowkitValidationError, RetryableError } from "./errors";
 import { createGuardedFetch, type GuardedFetch } from "./http";
 import { redactBySchema } from "./redact";
 import type { Run } from "./storage";
+import { DEFAULT_BASE_PATH, errorMessage, isPlainObject } from "./util";
 
 const WORKFLOW_ID = /^[a-z0-9][a-z0-9-_]*$/;
-const SLUG = /^[A-Za-z0-9_-]{16,128}$/;
-const DEFAULT_BASE_PATH = "/flowkit";
+const SLUG = /^[A-Za-z0-9_-]{22,128}$/;
 const DEFAULT_TIMEOUT_MS = 300_000;
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** Why `steps` is not a list of well-formed steps, or `undefined`. */
 function stepsProblem(steps: unknown, where: string): string | undefined {
@@ -219,7 +211,8 @@ export function createWorkflows(core: EngineCore): Workflows {
 
     async publish(tenantId, workflowId, version, actor) {
       const v = await storage.getWorkflowVersion(tenantId, workflowId, version);
-      if (!v) throw new Error(`Workflow "${workflowId}" version ${version} not found`);
+      if (!v)
+        throw new EngineNotFoundError(`Workflow "${workflowId}" version ${version} not found`);
       const issues = await validate(tenantId, v.doc);
       if (hasErrors(issues)) {
         throw new FlowkitValidationError(`Workflow "${workflowId}" has errors`, issues);
@@ -342,12 +335,18 @@ export function createWorkflows(core: EngineCore): Workflows {
         durationMs: elapsed(),
         ...extra,
       });
+      /** Validated output with `secret` fields masked, as the journal stores it. */
       const checkOutput = async (value: unknown) => {
         if (!node.output) return { ok: true as const, value };
         const res = await (node.output as z.ZodType).safeParseAsync(value);
-        return res.success
-          ? { ok: true as const, value: res.data }
-          : { ok: false as const, message: res.error.issues[0]?.message ?? "invalid output" };
+        if (!res.success) {
+          return { ok: false as const, message: res.error.issues[0]?.message ?? "invalid output" };
+        }
+        const shown =
+          manifest.output.kind === "schema"
+            ? redactBySchema(res.data, manifest.output.schema, { mask: "secret" })
+            : res.data;
+        return { ok: true as const, value: shown };
       };
       if (isSignal(result)) {
         switch (result.kind) {
