@@ -275,4 +275,59 @@ describe("ConfigOf typing", () => {
     // @ts-expect-error — onlyWhenStageChanges must be boolean
     expect(() => wf3.trigger(dealUpdated, { onlyWhenStageChanges: "yes" })).not.toThrow();
   });
+
+  describe("config may be omitted when {} is a valid config", () => {
+    const appEvent = defineTrigger({
+      type: "crm.appEvent",
+      name: "App event",
+      kind: "event",
+      config: z.object({}),
+    });
+    const ping = defineNode({
+      type: "crm.ping",
+      name: "Ping",
+      input: z.object({}),
+      run: () => ({}),
+    });
+
+    test("empty schemas: trigger() and step() without config", () => {
+      const doc = workflow("wf").trigger(appEvent).step("p", ping).build();
+      expect(doc.trigger).toEqual({ type: "crm.appEvent", config: {} });
+      expect(doc.steps).toEqual([{ id: "p", type: "crm.ping", config: {} }]);
+      // Passing {} still works, and unknown keys are still rejected.
+      workflow("wf").trigger(appEvent, {}).step("p", ping, {});
+      // @ts-expect-error — the empty schema has no field "x"
+      workflow("wf").trigger(appEvent, { x: 1 });
+    });
+
+    test("all-optional or defaulted fields: trigger() and step() without config", () => {
+      const doc = workflow("wf").trigger(dealUpdated).step("halt", halt).step("h", httpRequest, {
+        url: "https://example.com",
+      });
+      expect(doc.build().steps[0]).toEqual({ id: "halt", type: "core.stop", config: {} });
+    });
+
+    test("a branching node without config still takes branches", () => {
+      const pick = defineNode({
+        type: "crm.pick",
+        name: "Pick",
+        input: z.object({ bias: z.number().optional() }),
+        branches: { kind: "static", branches: [{ id: "a", label: "A" }] },
+        run: () => branch("a"),
+      });
+      const doc = workflow("wf")
+        .trigger(appEvent)
+        .step("pick", pick, undefined, { a: (b) => b.step("p", ping) })
+        .build();
+      expect(doc.steps[0]?.branches).toEqual({ a: [{ id: "p", type: "crm.ping", config: {} }] });
+    });
+
+    test("required fields still demand a config", () => {
+      const b = workflow("wf").trigger(appEvent);
+      // @ts-expect-error — delay's duration is required
+      expect(() => b.step("d", delay)).not.toThrow();
+      // @ts-expect-error — the schedule trigger's cron is required
+      expect(() => workflow("wf2").trigger(scheduled)).not.toThrow();
+    });
+  });
 });

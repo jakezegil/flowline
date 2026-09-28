@@ -165,7 +165,7 @@ import { loadContact } from "./nodes";
 import { contactCreated } from "./plugin";
 
 export const welcomeContact = workflow("welcome-contact", { name: "Welcome new contacts" })
-  .trigger(contactCreated, {})
+  .trigger(contactCreated)
   .step("contact", loadContact, { contactId: ref("trigger.contactId") })
   .build();
 

@@ -65,6 +65,20 @@ export type TriggerConfigOf<T extends { config: z.ZodType }> = {
   [K in keyof z.input<T["config"]>]: DeepExpr<z.input<T["config"]>[K]>;
 };
 
+/**
+ * The config arguments of a builder method: optional when `{}` is a valid config (an empty
+ * schema, or one whose fields are all optional or defaulted), required otherwise. Checked with
+ * `{}` rather than `object`, because Zod types the input of `z.object({})` as
+ * `Record<string, never>`, which `object` is not assignable to.
+ */
+// biome-ignore lint/complexity/noBannedTypes: `{}` is exactly "a config with no required fields"
+type ConfigArgs<C, Rest extends unknown[] = []> = {} extends C
+  ? [config?: C, ...rest: Rest]
+  : [config: C, ...rest: Rest];
+
+/** The `branches` argument of {@link StepsBuilder.step}. */
+type BranchFillers = Record<string, (b: StepsBuilder) => StepsBuilder>;
+
 // biome-ignore lint/suspicious/noExplicitAny: any node definition
 type AnyNode = NodeDefinition<any, any, any>;
 // biome-ignore lint/suspicious/noExplicitAny: any trigger definition
@@ -73,9 +87,10 @@ type AnyTrigger = TriggerDefinition<any, any>;
 /** Builds a list of steps; the root {@link WorkflowBuilder} and every branch builder are one. */
 export interface StepsBuilder {
   /**
-   * Append a step running `node` with `config`. For branching or looping nodes, `branches` maps
-   * each branch ID (e.g. `if`/`else`, switch case IDs, forEach's `body`) to a callback that adds
-   * the branch's steps to the builder it receives and returns it.
+   * Append a step running `node` with `config`. `config` may be omitted when every config field is
+   * optional. For branching or looping nodes, `branches` maps each branch ID (e.g. `if`/`else`,
+   * switch case IDs, forEach's `body`) to a callback that adds the branch's steps to the builder
+   * it receives and returns it.
    *
    * @throws {@link FlowkitDefinitionError} if `id` is not a valid step ID or is already used
    * anywhere in the workflow.
@@ -83,8 +98,7 @@ export interface StepsBuilder {
   step<N extends AnyNode>(
     id: string,
     node: N,
-    config: ConfigOf<N>,
-    branches?: Record<string, (b: StepsBuilder) => StepsBuilder>,
+    ...args: ConfigArgs<ConfigOf<N>, [branches?: BranchFillers]>
   ): this;
 }
 
@@ -94,12 +108,7 @@ export interface WorkflowBuilder extends StepsBuilder {
    * Set the trigger. `config` may be omitted when every config field is optional. Calling it
    * again replaces the trigger.
    */
-  trigger<T extends AnyTrigger>(
-    t: T,
-    ...config: object extends TriggerConfigOf<T>
-      ? [config?: TriggerConfigOf<T>]
-      : [config: TriggerConfigOf<T>]
-  ): this;
+  trigger<T extends AnyTrigger>(t: T, ...config: ConfigArgs<TriggerConfigOf<T>>): this;
   /** Set the output mapping evaluated at the end of a run (for sub-flows). */
   output(map: Record<string, ValueExpr>): this;
   /**
@@ -138,8 +147,7 @@ class StepsBuilderImpl implements StepsBuilder {
   step<N extends AnyNode>(
     id: string,
     node: N,
-    config: ConfigOf<N>,
-    branches?: Record<string, (b: StepsBuilder) => StepsBuilder>,
+    ...[config, branches]: [config?: unknown, branches?: BranchFillers]
   ): this {
     if (!isValidStepId(id)) {
       throw new FlowkitDefinitionError(
