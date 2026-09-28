@@ -94,6 +94,12 @@ export interface EngineOptions {
   };
 }
 
+/** Options of {@link Engine.resumeRun}. */
+export interface ResumeRunOptions {
+  /** Resume only when the run waits on a callback at this step path (e.g. `"size/if/approval"`). */
+  expectStep?: string;
+}
+
 /** A running engine instance. */
 export interface Engine {
   /**
@@ -127,12 +133,19 @@ export interface Engine {
    * Resume a callback-waiting run without its token, for authorized callers such as the run
    * viewer. Behaves like {@link Engine.resume} and records `userId` on the `run.resumed` event.
    * Resolves `"gone"` when the run does not exist in the tenant or is not waiting on a callback.
+   *
+   * With `opts.expectStep`, it resumes only a callback wait of the step at that path, and resolves
+   * `"gone"` otherwise. The check and the resume are one compare-and-set: the run is resumed by
+   * the token of the wait that was checked, so a wait that ended meanwhile (even one replaced by a
+   * new wait at the same step) is not resumed. Use it when the caller decided about one specific
+   * step, e.g. an approval inbox.
    */
   resumeRun(
     tenantId: string,
     runId: string,
     body: unknown,
     userId: string,
+    opts?: ResumeRunOptions,
   ): Promise<"resumed" | "gone">;
   /**
    * Cancel a run. A queued or waiting run (or a running one whose worker's lease has expired) is
@@ -389,8 +402,9 @@ export function createEngine(options: EngineOptions): Engine {
 
     resume: (token, body) => resumeWithToken(token, body),
 
-    async resumeRun(tenantId, runId, body, userId) {
+    async resumeRun(tenantId, runId, body, userId, opts = {}) {
       const run = await storage.getRun(tenantId, runId);
+      if (opts.expectStep !== undefined && run?.currentStep !== opts.expectStep) return "gone";
       const token = run?.status === "waiting" && run.waitReason === "callback" && run.callbackToken;
       // The token is looked up server-side and never leaves the engine.
       return token ? resumeWithToken(token, body, userId) : "gone";

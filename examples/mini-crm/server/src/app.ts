@@ -93,6 +93,7 @@ async function demoAuthorize(_req: Request): Promise<{ tenantId: string; userId:
 
 /** Statuses of runs that have not finished. */
 const ACTIVE_STATUSES = ["queued", "running", "waiting"] as const;
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
 
 const consoleLogger: Logger = {
   debug: () => {},
@@ -181,7 +182,24 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
 
   app.get("/api/users", (c) => c.json(crm.listUsers()));
   app.get("/api/outbox", (c) => c.json(crm.listOutbox()));
-  app.get("/api/approvals", (c) => c.json(crm.listApprovals()));
+  /** Whether run `runId` still waits on a callback at step `stepPath`. */
+  const waitsAt = async (runId: string, stepPath: string): Promise<boolean> => {
+    const run = await engine.storage.getRun(TENANT_ID, runId);
+    return (
+      run?.status === "waiting" && run.waitReason === "callback" && run.currentStep === stepPath
+    );
+  };
+
+  app.get("/api/approvals", async (c) => {
+    // A run cancelled elsewhere (e.g. from the run viewer) leaves its approval pending: expire
+    // those lazily here. One lookup per pending approval; a real inbox would page.
+    for (const a of crm.listApprovals()) {
+      if (a.status !== "pending") continue;
+      const run = await engine.storage.getRun(TENANT_ID, a.runId);
+      if (!run || TERMINAL_STATUSES.has(run.status)) crm.expireApproval(a.id);
+    }
+    return c.json(crm.listApprovals());
+  });
 
   app.post("/api/approvals/:id/decision", async (c) => {
     const id = c.req.param("id");
@@ -194,23 +212,23 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
       return c.json({ error: `Approval is already ${current.status}`, approval: current }, 409);
     }
     try {
-      // Resume only the step this approval belongs to. `resumeRun` resumes whatever callback the
-      // run waits on and re-checks that it is still waiting, atomically.
-      const detail = await engine.getRunDetail(TENANT_ID, decided.runId);
-      const waiting =
-        detail?.run.status === "waiting" &&
-        detail.run.journal[decided.stepPath]?.status === "suspended";
-      const outcome = waiting
-        ? await engine.resumeRun(TENANT_ID, decided.runId, { decision }, DEMO_USER_ID)
-        : "gone";
+      // `expectStep` makes the step check and the resume one compare-and-set: only the callback
+      // wait of this approval's step is resumed, never a later wait of the same run.
+      const outcome = await engine.resumeRun(TENANT_ID, decided.runId, { decision }, DEMO_USER_ID, {
+        expectStep: decided.stepPath,
+      });
       if (outcome === "gone") {
         // The run stopped waiting (timed out or was cancelled) before this decision.
         return c.json({ error: "gone", approval: crm.expireApproval(id) }, 410);
       }
       return c.json({ approval: decided }, 202);
     } catch (err) {
-      // The run was not resumed: undo the claim so the decision can be retried.
-      crm.reopenApproval(id);
+      // The run was not resumed. If it still waits at the step, undo the claim so the decision
+      // can be retried; if it stopped waiting meanwhile (timed out, cancelled), nobody can decide
+      // any more. When even that lookup fails, reopen: a later decision gets 410 and expires it.
+      const retryable = await waitsAt(decided.runId, decided.stepPath).catch(() => true);
+      if (retryable) crm.reopenApproval(id);
+      else crm.expireApproval(id);
       throw err;
     }
   });

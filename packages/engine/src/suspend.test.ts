@@ -384,6 +384,38 @@ describe("resumeRun", () => {
     expect(resumed.map((e) => e.data)).toEqual([{ kind: "callback", by: "u1" }]);
   });
 
+  it("with expectStep, resumes only a run waiting at that step", async () => {
+    const handles: CallbackHandle[] = [];
+    behaviours.a = waitForCallback(handles);
+    const id = await startRun(wf([step("a")]));
+    const engine = makeEngine();
+    await engine.drain();
+
+    expect(await engine.resumeRun(TENANT, id, { x: 1 }, "u1", { expectStep: "b" })).toBe("gone");
+    expect((await getRun(id)).status).toBe("waiting");
+    expect(await engine.resumeRun(TENANT, id, { x: 2 }, "u1", { expectStep: "a" })).toBe("resumed");
+    await engine.drain();
+    expect((await getRun(id)).journal.a).toMatchObject({
+      output: { resume: { kind: "callback", body: { x: 2 } } },
+    });
+  });
+
+  it("with expectStep, does not resume a newer wait at the same step", async () => {
+    // The run is re-read, then resumed by the token of the wait it saw: if that wait ended and a
+    // new one began meanwhile, the stale token no longer matches.
+    const handles: CallbackHandle[] = [];
+    behaviours.a = waitForCallback(handles);
+    const id = await startRun(wf([step("a")]));
+    const engine = makeEngine();
+    await engine.drain();
+    const stale = await getRun(id);
+    const real = engine.storage.getRun.bind(engine.storage);
+    engine.storage.getRun = async () => stale;
+    expect(await engine.resume(handles[0]!.token, { first: true })).toBe("resumed");
+    expect(await engine.resumeRun(TENANT, id, {}, "u1", { expectStep: "a" })).toBe("gone");
+    engine.storage.getRun = real;
+  });
+
   it("does not resume a timer-waiting run", async () => {
     behaviours.a = (ctx) => (ctx.resume ? {} : suspend({ until: ctx.now() + 1000 }));
     const id = await startRun(wf([step("a")]));

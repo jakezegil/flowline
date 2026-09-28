@@ -56,8 +56,12 @@ export interface FlowkitClient {
   retryRun(id: string): Promise<{ runId: string }>;
   /** `POST /runs/:id/cancel` — cancel a run. */
   cancelRun(id: string): Promise<void>;
-  /** `POST /runs/:id/resume` — authorized resume of a run waiting on a callback, with `body` as the callback body. */
-  resumeRun(id: string, body?: unknown): Promise<void>;
+  /**
+   * `POST /runs/:id/resume` — authorized resume of a run waiting on a callback, with `body` as the
+   * callback body. With `opts.expectStep` (sent as `?step=`), only a wait at that step path is
+   * resumed; otherwise the server answers 410.
+   */
+  resumeRun(id: string, body?: unknown, opts?: { expectStep?: string }): Promise<void>;
   /**
    * Stream a run's events from `GET /runs/:id/stream`. Uses `fetch` (so `headers()` auth works),
    * reconnects with `?after=<lastSeq>` and exponential backoff (500ms doubling to 10s), delivers
@@ -271,8 +275,9 @@ export function createClient(opts: ClientOptions): FlowkitClient {
     cancelRun: async (id) => {
       await request("POST", `/runs/${enc(id)}/cancel`);
     },
-    resumeRun: async (id, body) => {
-      await request("POST", `/runs/${enc(id)}/resume`, { value: body });
+    resumeRun: async (id, body, opts = {}) => {
+      const qs = opts.expectStep === undefined ? "" : `?step=${enc(opts.expectStep)}`;
+      await request("POST", `/runs/${enc(id)}/resume${qs}`, { value: body });
     },
     subscribeRun: (id, onEvent) => subscribe(id, onEvent),
   };
