@@ -11,7 +11,12 @@
  */
 import type { ApiErrorBody, RunStatus, TestStepRequest, WorkflowDoc } from "@flowkit/core";
 import type { Engine, EngineCore } from "./engine";
-import { EngineConflictError, EngineNotFoundError, FlowkitValidationError } from "./errors";
+import {
+  EngineConflictError,
+  EngineNotFoundError,
+  FlowkitValidationError,
+  ResumeHostHandledError,
+} from "./errors";
 import { runEventStream } from "./sse";
 import type { Triggers } from "./triggers";
 import { DEFAULT_BASE_PATH, isPlainObject } from "./util";
@@ -344,9 +349,20 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
       }
       if (method === "POST" && n === 3 && action === "resume") {
         const step = url.searchParams.get("step");
-        const opts = step === null ? {} : { expectStep: step };
-        const outcome = await engine.resumeRun(tenantId, id, await readJson(req), userId, opts);
-        return outcome === "resumed" ? json(202, {}) : json(410, { error: "gone" });
+        // Steps the host app resumes itself (`resume.hostHandled`) are refused here: 409.
+        const opts = {
+          refuseHostHandled: true,
+          ...(step === null ? {} : { expectStep: step }),
+        };
+        try {
+          const outcome = await engine.resumeRun(tenantId, id, await readJson(req), userId, opts);
+          return outcome === "resumed" ? json(202, {}) : json(410, { error: "gone" });
+        } catch (err) {
+          if (err instanceof ResumeHostHandledError) {
+            throw new HttpError(409, err.message, { code: err.code });
+          }
+          throw err;
+        }
       }
     }
     throw notFound();

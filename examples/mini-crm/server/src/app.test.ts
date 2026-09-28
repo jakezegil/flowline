@@ -150,6 +150,27 @@ describe("inbound lead routing", () => {
     expect(await again.json()).toMatchObject({ approval: { id: approvalId, status: "approved" } });
   });
 
+  it("approvals are decided in the CRM, not through the generic resume route", async () => {
+    const runId = await postLead(enterpriseLead, "lead-generic");
+    const [approval] = await get<Approval[]>("/api/approvals");
+    const generic = await call("POST", `/flowkit/runs/${runId}/resume`, { decision: "approved" });
+    expect(generic.status).toBe(409);
+    expect(await generic.json()).toMatchObject({ code: "resume_host_handled" });
+    expect((await runDetail(runId)).run.status).toBe("waiting");
+    expect((await get<Approval[]>("/api/approvals"))[0]?.status).toBe("pending");
+
+    // The CRM's own endpoint resumes it in-process (engine.resumeRun).
+    const decided = await call("POST", `/api/approvals/${approval?.id}/decision`, {
+      decision: "approved",
+    });
+    expect(decided.status).toBe(202);
+    await crm.engine.drain();
+    expect((await runDetail(runId)).run.status).toBe("completed");
+    expect(await get<OutboxMessage[]>("/api/outbox")).toEqual([
+      expect.objectContaining({ subject: "Enterprise lead approved" }),
+    ]);
+  });
+
   it("stops the run without email when the manager rejects", async () => {
     const runId = await postLead(enterpriseLead, "lead-2");
     const [approval] = await get<Approval[]>("/api/approvals");

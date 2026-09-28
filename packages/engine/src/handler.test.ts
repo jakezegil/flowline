@@ -43,8 +43,31 @@ const pause = defineNode({
   run: ({ ctx }) => (ctx.resume ? { resumed: true } : suspend({ until: ctx.now() + 60_000 })),
 });
 
+/** Waits for a callback whose body is `{ decision }`; `host` nodes are resumed by the host app. */
+const decisionWait = (type: string, hostHandled: boolean) =>
+  defineNode({
+    type,
+    name: "Decision",
+    input: z.object({}),
+    resume: { body: z.object({ decision: z.enum(["approved", "rejected"]) }), hostHandled },
+    run: async ({ ctx }) => {
+      if (ctx.resume?.kind === "callback") return { body: ctx.resume.body };
+      return suspend({ callback: await ctx.callback({ timeoutMs: 3_600_000 }) });
+    },
+  });
+
 const registry = createRegistry([
-  definePlugin({ id: "t", name: "Test", nodes: [echo, lookup, pause] }),
+  definePlugin({
+    id: "t",
+    name: "Test",
+    nodes: [
+      echo,
+      lookup,
+      pause,
+      decisionWait("t.decide", false),
+      decisionWait("t.hostDecide", true),
+    ],
+  }),
 ]);
 
 function manualDoc(id: string, steps: WorkflowDoc["steps"] = []): WorkflowDoc {
@@ -589,6 +612,64 @@ describe("resume", () => {
       by: "user-a",
     });
     expect((await call("POST", `/runs/${runId}/resume`, { body: {} })).status).toBe(410);
+  });
+
+  async function decisionRun(type: string) {
+    const doc: WorkflowDoc = {
+      id: "decide",
+      name: "Decide",
+      trigger: { type: "core.manual", config: {} },
+      steps: [{ id: "decide", type, config: {} }],
+    };
+    await deploy(doc, "a");
+    const runId = await engine.start({ tenantId: "a", workflowId: "decide" });
+    await engine.drain();
+    const run = await storage.getRun("a", runId);
+    expect(run?.status).toBe("waiting");
+    return { runId, token: run?.callbackToken as string };
+  }
+
+  it("refuses a host-handled step on the generic route with 409 resume_host_handled", async () => {
+    const { runId } = await decisionRun("t.hostDecide");
+    const body = { decision: "approved" };
+    const res = await call("POST", `/runs/${runId}/resume`, { body });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "resume_host_handled" });
+    const withStep = await call("POST", `/runs/${runId}/resume?step=decide`, { body });
+    expect(withStep.status).toBe(409);
+    expect((await storage.getRun("a", runId))?.status).toBe("waiting");
+    // The host's own code resumes it in-process.
+    expect(await engine.resumeRun("a", runId, body, "boss", { expectStep: "decide" })).toBe(
+      "resumed",
+    );
+  });
+
+  it("checks the body against the node's resume.body on the authorized route (400)", async () => {
+    const { runId } = await decisionRun("t.decide");
+    const bad = await call("POST", `/runs/${runId}/resume`, { body: { decision: "maybe" } });
+    expect(bad.status).toBe(400);
+    const err = (await bad.json()) as { error: string; issues: unknown[] };
+    expect(err.error).toMatch(/Resume body for step "decide": field "decision"/);
+    expect(err.issues).toHaveLength(1);
+    expect((await storage.getRun("a", runId))?.status).toBe("waiting");
+    const ok = await call("POST", `/runs/${runId}/resume`, { body: { decision: "rejected" } });
+    expect(ok.status).toBe(202);
+    await engine.drain();
+    expect((await storage.getRun("a", runId))?.journal.decide).toMatchObject({
+      output: { body: { decision: "rejected" } },
+    });
+  });
+
+  it("checks the body on the public token route too, keeping the token usable", async () => {
+    const { runId, token } = await decisionRun("t.hostDecide");
+    const bad = await call("POST", `/resume/${token}`, { tenant: null, body: {} });
+    expect(bad.status).toBe(400);
+    expect((await storage.getRun("a", runId))?.status).toBe("waiting");
+    const ok = await call("POST", `/resume/${token}`, {
+      tenant: null,
+      body: { decision: "approved" },
+    });
+    expect(ok.status).toBe(202);
   });
 
   it("resumes only at the step named by ?step", async () => {

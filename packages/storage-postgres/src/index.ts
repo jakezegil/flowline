@@ -646,6 +646,15 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
       });
     },
 
+    async getRunByCallbackToken(token) {
+      const { rows } = await pool.query(
+        `SELECT ${RUN_COLUMNS} FROM ${s}.runs r
+         WHERE r.callback_token = $1 AND r.status = 'waiting'`,
+        [token],
+      );
+      return rows[0] ? toRun(rows[0]) : null;
+    },
+
     async resumeByToken(token, resume, now, event) {
       const row = await resumeWhere(
         "r.callback_token = $1 AND (r.callback_expires_at IS NULL OR r.callback_expires_at > $2)",

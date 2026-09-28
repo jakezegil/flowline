@@ -310,4 +310,9 @@ export interface ApiErrorBody {
   error: string;
   /** Validation issues, e.g. for a rejected publish (422). */
   issues?: unknown[];
+  /**
+   * Machine-readable reason, where one is defined: `"resume_host_handled"` (409 from
+   * `POST /runs/:id/resume` for a step the host app resumes itself).
+   */
+  code?: string;
 }

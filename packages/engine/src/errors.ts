@@ -53,3 +53,16 @@ export class EngineConflictError extends Error {
 export class EngineNotFoundError extends Error {
   override readonly name: string = "EngineNotFoundError";
 }
+
+/**
+ * `resumeRun` with `refuseHostHandled` found the run waiting on a step whose node declares
+ * `resume.hostHandled`: the host app resumes it (e.g. from its approvals page, which checks who
+ * may decide), not the generic resume route. The HTTP handler answers 409 with
+ * `code: "resume_host_handled"`.
+ */
+export class ResumeHostHandledError extends Error {
+  /** Error name, for `instanceof`-free checks across package copies. */
+  override readonly name: string = "ResumeHostHandledError";
+  /** Machine-readable code, also sent by the HTTP handler. */
+  readonly code = "resume_host_handled";
+}

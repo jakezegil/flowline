@@ -920,6 +920,25 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect(await s.resumeByToken("unknown", resume, 501)).toBeNull();
       });
 
+      test("getRunByCallbackToken finds the waiting run holding the token", async (s) => {
+        await s.createRun(
+          newRun("r1", {
+            status: "waiting",
+            currentStep: "wait",
+            waitReason: "callback",
+            callbackToken: "tok-1",
+            callbackExpiresAt: 1000,
+          }),
+          [],
+          0,
+        );
+        await s.createRun(newRun("r2", { status: "queued" }), [], 0);
+        expect(await s.getRunByCallbackToken("tok-1")).toEqual(await s.getRun(T1, "r1"));
+        expect(await s.getRunByCallbackToken("unknown")).toBeNull();
+        await s.resumeByToken("tok-1", { kind: "callback", body: null }, 500);
+        expect(await s.getRunByCallbackToken("tok-1")).toBeNull();
+      });
+
       test("concurrent resumeByToken calls with one token: exactly one succeeds", async (s) => {
         await s.createRun(
           newRun("r1", {

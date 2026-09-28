@@ -292,6 +292,13 @@ export interface StorageAdapter {
   getRunById(runId: string): Promise<Run | null>;
 
   /**
+   * The `waiting` run whose `callbackToken` is `token`, or `null`. The token's expiry is not
+   * checked. The engine reads it to check a callback body before resuming with
+   * {@link StorageAdapter.resumeByToken} (which only succeeds while the same wait holds the token).
+   */
+  getRunByCallbackToken(token: string): Promise<Run | null>;
+
+  /**
    * Summaries of the tenant's runs, newest first (`createdAt` descending, then `id` descending),
    * optionally filtered by workflow and/or status, at most `limit` rows (default 50). `topLevel`
    * leaves out sub-flow runs (`startedBy.kind === "subflow"`). A summary carries `stoppedAt` when

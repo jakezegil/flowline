@@ -12,6 +12,7 @@ export {
   type FatalErrorOptions,
   FlowkitStorageError,
   FlowkitValidationError,
+  ResumeHostHandledError,
   RetryableError,
 } from "./errors";
 export { buildScope, type Frame, type NextAction, nextAction } from "./interpreter";

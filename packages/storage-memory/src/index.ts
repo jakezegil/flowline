@@ -380,6 +380,13 @@ export function createMemoryStorage(): StorageAdapter {
       return true;
     },
 
+    async getRunByCallbackToken(token) {
+      for (const { run } of runs.values()) {
+        if (run.status === "waiting" && run.callbackToken === token) return clone(run);
+      }
+      return null;
+    },
+
     async resumeByToken(token, resume, now, event) {
       for (const stored of runs.values()) {
         const run = stored.run;
