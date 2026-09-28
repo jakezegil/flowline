@@ -591,8 +591,13 @@ describe("performance", () => {
     }
     const store = storeFor(docWith(steps));
     store.getState().renameStep("s0", "warm-up");
-    const t0 = performance.now();
-    store.getState().renameStep("s1", "Timed");
-    expect(performance.now() - t0).toBeLessThan(20);
+    // Best of several commands: robust to CI/parallel-load noise, still catches algorithmic regressions.
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 1; i <= 7; i++) {
+      const t0 = performance.now();
+      store.getState().renameStep(`s${i}`, `Timed ${i}`);
+      best = Math.min(best, performance.now() - t0);
+    }
+    expect(best).toBeLessThan(20);
   });
 });

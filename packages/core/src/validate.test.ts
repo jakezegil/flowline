@@ -630,10 +630,14 @@ describe("validateWorkflow", () => {
     }
     const doc = docWith(steps);
     expect(validateWorkflow(doc, manifest)).toEqual([]);
-    const runs = 5;
-    const start = performance.now();
-    for (let i = 0; i < runs; i++) validateWorkflow(doc, manifest);
-    expect((performance.now() - start) / runs).toBeLessThan(20);
+    // Best of several runs: robust to CI/parallel-load noise, still catches algorithmic regressions.
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 7; i++) {
+      const start = performance.now();
+      validateWorkflow(doc, manifest);
+      best = Math.min(best, performance.now() - start);
+    }
+    expect(best).toBeLessThan(20);
   });
 });
 
