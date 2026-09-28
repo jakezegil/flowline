@@ -3,6 +3,25 @@
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
+  "description": "Framework-agnostic core for defining Flowkit workflow nodes and plugins, and for building, validating and rendering workflow documents.",
+  "keywords": [
+    "workflow",
+    "automation",
+    "workflow-builder",
+    "workflow-engine",
+    "zod"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakezegil/flowkit.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/jakezegil/flowkit/tree/main/packages/core#readme",
+  "bugs": "https://github.com/jakezegil/flowkit/issues",
+  "engines": {
+    "node": ">=20.3.0"
+  },
+  "sideEffects": false,
   "exports": {
     ".": {
       "flowkit-source": "./src/index.ts",
@@ -16,6 +35,7 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
