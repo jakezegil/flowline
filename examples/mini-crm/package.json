@@ -12,7 +12,8 @@
     "dev:web": "vite --config web/vite.config.ts",
     "start:server": "tsx server/src/index.ts",
     "build": "vite build --config web/vite.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test --config e2e/playwright.config.ts"
   },
   "dependencies": {
     "@flowkit/core": "workspace:*",
