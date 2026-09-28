@@ -27,7 +27,7 @@ import {
 } from "@codemirror/view";
 import { parseRefPath, type ScopeEntry, type ValueExpr } from "@flowkit/core";
 import * as Popover from "@radix-ui/react-popover";
-import { Braces } from "lucide-react";
+import { Variable } from "lucide-react";
 import {
   type JSX,
   type KeyboardEvent,
@@ -571,7 +571,7 @@ export function RefTextInput(props: {
                 else setOpen((o) => !o);
               }}
             >
-              <Braces size={13} aria-hidden />
+              <Variable size={13} aria-hidden />
             </button>
           )}
         </div>

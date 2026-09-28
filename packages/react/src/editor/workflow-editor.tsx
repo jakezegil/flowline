@@ -1,4 +1,4 @@
-import type { WorkflowDoc } from "@flowkit/core";
+import type { ValidationContext, WorkflowDoc } from "@flowkit/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { type JSX, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { PortalContainerContext } from "../canvas/canvas-context";
@@ -143,6 +143,12 @@ export function WorkflowEditor(props: {
    * browser's previous page), when there is one.
    */
   notFoundAction?: EditorNotFoundAction;
+  /**
+   * The engine's outbound network policy (its `http` settings), so URL fields warn about the
+   * hosts it will block, as publishing does. By default private and loopback hosts warn. Read
+   * once per load.
+   */
+  network?: ValidationContext["network"];
   /** Called after a successful publish with the published version. */
   onPublish?(version: number): void;
   /** Called after every successful save with the new version. */
@@ -167,7 +173,12 @@ export function WorkflowEditor(props: {
 }): JSX.Element {
   const { workflowId, initialDoc, className, headerLeft, renderPanel } = props;
   const { theme, labels } = useFlowkitAppearance();
-  const { state, retry, startNew } = useEditorLoad(workflowId, initialDoc, props.create);
+  const { state, retry, startNew } = useEditorLoad(
+    workflowId,
+    initialDoc,
+    props.create,
+    props.network,
+  );
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
   const style = useMemo(() => themeStyle(theme.tokens), [theme.tokens]);
   const callbacks = {

@@ -441,6 +441,20 @@ describe("RefTextInput", () => {
     expect(outer).toHaveBeenCalledTimes(1);
   });
 
+  test("L10: Browse data has its own icon, not the {} of Edit as JSON", () => {
+    render(
+      <RefTextInput
+        ariaLabel="Subject"
+        scope={scope}
+        samples={samples}
+        value={undefined}
+        onChange={() => {}}
+      />,
+    );
+    const browse = screen.getByRole("button", { name: "Browse data", hidden: true });
+    expect(browse.querySelector("svg")?.getAttribute("class")).toContain("lucide-variable");
+  });
+
   describe("placement (H1): the picker never covers the next field", () => {
     function form() {
       render(

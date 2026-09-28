@@ -20,7 +20,14 @@ describe("DataPicker", () => {
       .getAllByRole("treeitem")
       .filter((r) => r.getAttribute("aria-level") === "1")
       .map((r) => r.querySelector(".fk-dp__section-name")?.textContent);
-    expect(sections).toEqual(["For each tag", "Deal updated", "Fetch orders", "Load contact"]);
+    expect(sections).toEqual(["For each tag", "Trigger", "Fetch orders", "Load contact"]);
+  });
+
+  test("L4: the trigger is headed like its pills, with its own name as the caption", () => {
+    render(<DataPicker scope={scope} samples={samples} onPick={() => {}} />);
+    const trigger = screen.getAllByRole("treeitem")[0] as HTMLElement;
+    expect(trigger.querySelector(".fk-dp__section-name")?.textContent).toBe("Trigger");
+    expect(trigger.querySelector(".fk-dp__caption")?.textContent).toBe("Deal updated");
   });
 
   test("shows fields with types and sample values", () => {

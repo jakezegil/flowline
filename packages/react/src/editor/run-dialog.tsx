@@ -144,7 +144,9 @@ export function RunDialog({
                     {...common}
                     className="fk-input fk-input--mono"
                     rows={3}
-                    placeholder={labels.jsonPlaceholder}
+                    placeholder={
+                      f.type === "array" ? labels.jsonListPlaceholder : labels.jsonPlaceholder
+                    }
                     value={typeof value === "string" ? value : ""}
                     onChange={(e) => set(e.target.value)}
                   />

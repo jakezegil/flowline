@@ -165,6 +165,41 @@ describe("WorkflowEditor", () => {
     await waitFor(() => expect(selectedId()).toBe("step:email"));
   });
 
+  test("M17: URL fields warn about hosts the engine blocks, per the network prop", async () => {
+    const fetchNode = {
+      ...(manifest.nodes[0] as (typeof manifest.nodes)[number]),
+      type: "test.fetch",
+      name: "Fetch",
+      summary: undefined,
+      input: {
+        type: "object",
+        properties: { url: { type: "string", "x-flowkit": { label: "URL", outboundUrl: true } } },
+      },
+    };
+    const m = { ...manifest, nodes: [...manifest.nodes, fetchNode] };
+    const doc = docWith([step("fetch", "test.fetch", { url: "http://localhost:8911/x" })]);
+    const view = (network?: { allowPrivateNetworks: boolean }) => (
+      <FlowkitProvider
+        client={mockClient({
+          getManifest: async () => m,
+          listSubflows: async () => [],
+          getWorkflow: async () => detail(doc),
+        })}
+      >
+        <div style={{ height: 800 }}>
+          <WorkflowEditor workflowId={doc.id} {...(network ? { network } : {})} />
+        </div>
+      </FlowkitProvider>
+    );
+    const { unmount } = render(view());
+    await screen.findByText("Draft · v3");
+    expect((await screen.findByRole("button", { name: /1 issue/ })).textContent).toContain("1");
+    unmount();
+    render(view({ allowPrivateNetworks: true }));
+    await screen.findByText("Draft · v3");
+    expect(screen.queryByRole("button", { name: /issue/ })).toBeNull();
+  });
+
   test("M7: a server rejection's issues show on the pill, the step and its field", async () => {
     const { client } = setup(fixtureDoc());
     await screen.findByText("Draft · v3");
@@ -282,6 +317,30 @@ describe("WorkflowEditor", () => {
     });
     expect(client.runWorkflow).toHaveBeenCalledWith("welcome", { email: "ada@example.com" });
     expect(onRunStarted).toHaveBeenCalledWith("r9");
+  });
+
+  test("L15: a list field's placeholder shows a JSON list, an object field's an object", async () => {
+    const doc: WorkflowDoc = {
+      ...fixtureDoc(),
+      trigger: {
+        type: "logic.manual",
+        config: {
+          fields: [
+            { name: "tags", type: "array" },
+            { name: "meta", type: "object" },
+          ],
+        },
+      },
+      steps: [],
+    };
+    setup(doc, { published: 3 });
+    await screen.findByText("Published v3");
+    fireEvent.click(button("Run"));
+    await screen.findByRole("dialog", { name: "Run workflow" });
+    expect(screen.getByLabelText("tags").getAttribute("placeholder")).toBe(
+      'A JSON list, e.g. ["gold", "silver"]',
+    );
+    expect(screen.getByLabelText("meta").getAttribute("placeholder")).toBe("JSON, e.g. {}");
   });
 
   test("Run is only offered for manual triggers", async () => {

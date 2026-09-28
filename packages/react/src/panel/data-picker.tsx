@@ -408,14 +408,15 @@ function PickerRow(props: {
   const { node } = row;
   const section = node.depth === 0;
   const sample = node.sample && !section ? formatSample(node.sample.value, labels) : undefined;
-  const caption =
-    node.entry.kind === "trigger"
-      ? labels.scopeTrigger
-      : node.entry.kind === "loop"
-        ? labels.scopeLoop
-        : node.entry.disabled
-          ? labels.scopeDisabled
-          : labels.scopeStep;
+  // The trigger's section is headed like its pills ("Trigger › email"), with its own name ("Webhook") as the caption.
+  const trigger = node.entry.kind === "trigger";
+  const caption = trigger
+    ? node.name
+    : node.entry.kind === "loop"
+      ? labels.scopeLoop
+      : node.entry.disabled
+        ? labels.scopeDisabled
+        : labels.scopeStep;
   return (
     // biome-ignore lint/a11y/useFocusableInteractive: rows are reached with aria-activedescendant from the search box
     // biome-ignore lint/a11y/useKeyWithClickEvents: the search box handles the keyboard for the tree
@@ -454,7 +455,7 @@ function PickerRow(props: {
             {Icon && <Icon size={14} />}
           </span>
           <span className="fk-dp__section">
-            <span className="fk-dp__section-name">{node.name}</span>
+            <span className="fk-dp__section-name">{trigger ? labels.scopeTrigger : node.name}</span>
             <span className="fk-dp__caption">{row.empty ? labels.noKnownFields : caption}</span>
           </span>
         </>
