@@ -1,11 +1,11 @@
 /**
  * Test utilities for Flowkit hosts, plugin authors and adapter authors, exposed as
- * `@flowkit/engine/testing`. The conformance suite requires `vitest`; `runWorkflowInMemory`
- * requires `@flowkit/storage-memory` (both optional peer dependencies).
+ * `@flowkit/engine/testing`. `runWorkflowInMemory` requires `@flowkit/storage-memory` (an
+ * optional peer dependency). This entry point never imports `vitest` — the `StorageAdapter`
+ * conformance suite, which does, is its own entry point: `@flowkit/engine/conformance`.
  *
  * @module
  */
-export { type ConformanceFixture, runStorageConformance } from "./conformance";
 export {
   type RunWorkflowInMemoryOptions,
   runWorkflowInMemory,

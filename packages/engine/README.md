@@ -14,7 +14,7 @@ pnpm add @flowkit/storage-memory   # or @flowkit/storage-postgres
 
 `zod` 4 is a required peer dependency. Bring your own `StorageAdapter` — `@flowkit/storage-memory`
 (for tests and prototypes) or `@flowkit/storage-postgres` — as a peer; `vitest` is an optional peer
-used only by `@flowkit/engine/testing`.
+used only by `@flowkit/engine/conformance`. `@flowkit/engine/testing` never imports `vitest`.
 
 ## Usage
 
@@ -38,5 +38,6 @@ export const worker = engine.startWorker({ concurrency: 4 });
 
 See the [root README](../../README.md) for the full quick start (nodes, plugin, Postgres storage,
 HTTP mount, worker, publish, editor) and `docs/` for the design spec. `@flowkit/engine/testing`
-exports `runWorkflowInMemory`, `testNode` and a storage conformance suite for testing your own
-adapter.
+exports `runWorkflowInMemory` and `testNode`. `@flowkit/engine/conformance` exports
+`runStorageConformance`, a storage conformance suite for testing your own `StorageAdapter` — its
+own entry point because it requires `vitest`.

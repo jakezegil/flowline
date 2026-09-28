@@ -321,4 +321,19 @@ describe("dependencies", () => {
       for (const source of [text, ...chunks]) expect(source).not.toContain("__testHooks");
     },
   );
+
+  // `vitest` is an optional peer of @flowkit/engine; @flowkit/engine/testing must stay importable
+  // without it. The storage conformance suite (which needs vitest) is its own entry point,
+  // @flowkit/engine/conformance, so it can't leak a static "vitest" import into testing/index.js.
+  it.skipIf(!process.env.CI && !engineDistIsFresh())(
+    "@flowkit/engine/testing's built output never imports vitest",
+    () => {
+      expect(engineDistIsFresh(), "packages/engine/dist is missing or stale: run pnpm build").toBe(
+        true,
+      );
+      const text = readFileSync(join(REPO, "packages/engine/dist/testing/index.js"), "utf8");
+      expect(text).not.toMatch(/from\s+["']vitest["']/);
+      expect(text).not.toMatch(/require\(\s*["']vitest["']\s*\)/);
+    },
+  );
 });

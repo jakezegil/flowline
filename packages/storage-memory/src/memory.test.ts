@@ -1,4 +1,4 @@
-import { runStorageConformance } from "@flowkit/engine/testing";
+import { runStorageConformance } from "@flowkit/engine/conformance";
 import { describe, expect, it } from "vitest";
 import { createMemoryStorage } from "./index";
 
