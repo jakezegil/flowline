@@ -10,7 +10,7 @@ import type {
   RunEventType,
   TransformRuntime,
 } from "@flowkit/core";
-import { createExecutor, TERMINAL } from "./executor";
+import { cancelPatch, createExecutor, TERMINAL } from "./executor";
 import { entryAt } from "./interpreter";
 import type { NewRunEvent, Run, RunPatch, StorageAdapter } from "./storage";
 
@@ -112,11 +112,10 @@ export interface Engine {
    * step, before it would wait or be re-queued, and on every lease renewal while a handler runs).
    * Resolves `"finished"` when the run had already completed, failed or been cancelled.
    *
-   * A request is a request, not a guarantee: a run whose last step finishes before the worker's
-   * next check still completes (or fails). In the rare case that the request lands between the
-   * worker's final check and its commit that parks the run (`waiting`/`queued`), the run stays
-   * flagged and is cancelled when it is next claimed; calling `cancelRun` again cancels such a
-   * parked run at once.
+   * A run whose last step finishes before the worker's next check still completes (or fails).
+   * A run is never left parked (`waiting`/`queued`) with a pending request: the worker re-reads
+   * the run after each commit that parks it and cancels it if flagged, and `cancelRun` re-reads
+   * the run after flagging it and cancels it directly if it is no longer leased.
    *
    * A cancelled sub-flow resumes its parent step with `subflowFailed` ("Sub-flow cancelled").
    * Cancelling a parent does NOT cancel its child runs: they run to completion, and their
@@ -231,36 +230,32 @@ export function createEngine(opts: EngineOptions): Engine {
       const run = await storage.getRun(tenantId, runId);
       if (!run) throw new Error(`Run "${runId}" not found`);
       if (TERMINAL.has(run.status)) return "finished";
-      const patch: RunPatch = {
-        status: "cancelled",
-        wakeAt: null,
-        callbackToken: null,
-        callbackExpiresAt: null,
+      /** The unleased compare-and-set cancel; `false` when the run is leased or finished. */
+      const cancelUnleased = async (current: Run): Promise<boolean> => {
+        const events = [runEvent(current, "run.cancelled", current.currentStep)];
+        const ok = await storage.updateRunUnleased(
+          tenantId,
+          runId,
+          { status: ["queued", "waiting", "running"] },
+          cancelPatch(current),
+          events,
+          clock(),
+        );
+        if (ok) executor.publish(events);
+        return ok;
       };
-      if (run.parent) {
-        patch.wakeParent = {
-          runId: run.parent.runId,
-          stepPath: run.parent.stepPath,
-          childRunId: run.id,
-          resume: { kind: "subflowFailed", error: { message: "Sub-flow cancelled" } },
-        };
-      }
-      const events = [runEvent(run, "run.cancelled", run.currentStep)];
-      const ok = await storage.updateRunUnleased(
-        tenantId,
-        runId,
-        { status: ["queued", "waiting", "running"] },
-        patch,
-        events,
-        clock(),
-      );
-      if (ok) {
-        executor.publish(events);
-        return "cancelled";
-      }
+      if (await cancelUnleased(run)) return "cancelled";
       // Lost the race: the run finished meanwhile, or a worker holds its lease and must cancel it
       // cooperatively.
-      return (await storage.requestCancel(tenantId, runId, clock())) ? "requested" : "finished";
+      if (!(await storage.requestCancel(tenantId, runId, clock()))) return "finished";
+      // The worker may have parked the run (and dropped its lease) between the failed CAS and the
+      // request, after its own last check: cancel the now unleased run directly.
+      const latest = await storage.getRun(tenantId, runId);
+      const leased = latest?.leaseUntil !== undefined && latest.leaseUntil >= clock();
+      if (latest && !TERMINAL.has(latest.status) && !leased && (await cancelUnleased(latest))) {
+        return "cancelled";
+      }
+      return "requested";
     },
 
     async retryRun(tenantId, runId) {

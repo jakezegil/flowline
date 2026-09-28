@@ -563,6 +563,79 @@ describe("cancelRun", () => {
     expect((await eventsOf(id)).some((e) => e.type === "run.suspended")).toBe(false);
   });
 
+  it.each([
+    [
+      "a timer suspend",
+      "run.suspended",
+      (ctx: NodeContext) => suspend({ until: ctx.now() + 1000 }),
+    ],
+    [
+      "a callback suspend",
+      "run.suspended",
+      async (ctx: NodeContext) => suspend({ callback: await ctx.callback({ timeoutMs: 1000 }) }),
+    ],
+    [
+      "a retry wait",
+      "step.retrying",
+      () => {
+        throw new Error("flaky");
+      },
+    ],
+  ])(
+    "cancels the run right after %s when the request lands just before the park",
+    async (_name, parkEvent, behaviour) => {
+      behaviours.a = behaviour;
+      let armed = true;
+      const id = await startRun(wf([step("a"), step("b")]));
+      const engine = makeEngine({
+        __testHooks: {
+          async beforeCommit(runId, stepPath, phase) {
+            // After the executor's pre-park check, while it still holds the lease.
+            if (armed && stepPath === "a" && phase === "result") {
+              armed = false;
+              expect(await storage.requestCancel(TENANT, runId, now)).toBe(true);
+            }
+          },
+        },
+      });
+      expect(await engine.runOnce()).toBe(true);
+      const run = await getRun(id);
+      expect(run.status).toBe("cancelled");
+      expect(run.leaseOwner).toBeUndefined();
+      expect(run.wakeAt).toBeUndefined();
+      expect(run.callbackToken).toBeUndefined();
+      expect((await eventsOf(id)).map((e) => e.type).slice(-2)).toEqual([
+        parkEvent,
+        "run.cancelled",
+      ]);
+      now += 60_000;
+      expect(await engine.runOnce()).toBe(false);
+      expect(calls).toEqual({ a: 1 });
+    },
+  );
+
+  it("cancels at once when the worker parks the run between the failed CAS and the request", async () => {
+    behaviours.a = (ctx) => suspend({ until: ctx.now() + 60_000 });
+    const id = await startRun(wf([step("a")]));
+    await makeEngine().drain();
+    expect((await getRun(id)).status).toBe("waiting");
+    // The first CAS loses as if the worker still held the lease; by the request it has parked.
+    const base = storage;
+    let casCalls = 0;
+    storage = {
+      ...base,
+      async updateRunUnleased(...args) {
+        return ++casCalls === 1 ? false : base.updateRunUnleased(...args);
+      },
+    };
+    expect(await makeEngine().cancelRun(TENANT, id)).toBe("cancelled");
+    expect(casCalls).toBe(2);
+    const run = await getRun(id);
+    expect(run.status).toBe("cancelled");
+    expect(run.cancelRequestedAt).toBe(now);
+    expect((await eventsOf(id)).filter((e) => e.type === "run.cancelled")).toHaveLength(1);
+  });
+
   it("cancels a flagged run right after it is claimed", async () => {
     const id = await startRun(wf([step("a")]));
     expect(await storage.requestCancel(TENANT, id, now)).toBe(true);

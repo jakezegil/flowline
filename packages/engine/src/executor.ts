@@ -43,6 +43,29 @@ const DEFAULT_BASE_PATH = "/flowkit";
 /** @internal Run statuses that never change again (except through `retryRun`). */
 export const TERMINAL: ReadonlySet<Run["status"]> = new Set(["completed", "failed", "cancelled"]);
 
+/**
+ * @internal The patch that cancels `run`, whichever path cancels it: wake-up and callback state
+ * cleared and, for a sub-flow run, the parent woken with `subflowFailed` ("Sub-flow cancelled").
+ */
+export function cancelPatch(run: Pick<Run, "id" | "parent">): RunPatch {
+  const patch: RunPatch = {
+    status: "cancelled",
+    wakeAt: null,
+    resume: null,
+    callbackToken: null,
+    callbackExpiresAt: null,
+  };
+  if (run.parent) {
+    patch.wakeParent = {
+      runId: run.parent.runId,
+      stepPath: run.parent.stepPath,
+      childRunId: run.id,
+      resume: { kind: "subflowFailed", error: { message: "Sub-flow cancelled" } },
+    };
+  }
+  return patch;
+}
+
 /** @internal Advances claimed runs. Shared by the engine and crash-injection tests. */
 export interface Executor {
   /** Lease duration used for claims and renewals. */
@@ -268,6 +291,9 @@ export function createExecutor(opts: EngineOptions): Executor {
         wakePatch = undefined;
         resumedKind = undefined;
         publish(all);
+        // A request that arrived after the check above but before this park found the run still
+        // leased (so `cancelRun` only flagged it). The run is unleased now: cancel it directly.
+        if (patch.status === "waiting" || patch.status === "queued") await cancelParked(stepPath);
       }
       return ok;
     };
@@ -280,17 +306,27 @@ export function createExecutor(opts: EngineOptions): Executor {
     const cancelUnderLease = async (stepPath: string): Promise<void> => {
       resumedKind = undefined;
       await commit(
-        {
-          status: "cancelled",
-          wakeAt: null,
-          resume: null,
-          callbackToken: null,
-          callbackExpiresAt: null,
-          ...wakeParent({ kind: "subflowFailed", error: { message: "Sub-flow cancelled" } }),
-        },
+        cancelPatch(run),
         [event("run.cancelled", stepPath === "" ? undefined : stepPath)],
         stepPath,
       );
+    };
+
+    /** After parking the run: cancel it (unleased CAS) if a cancel request is pending. */
+    const cancelParked = async (stepPath: string): Promise<void> => {
+      const latest = await storage.getRun(run.tenantId, run.id);
+      if (latest?.cancelRequestedAt === undefined) return;
+      const events = [event("run.cancelled", stepPath === "" ? undefined : stepPath)];
+      const ok = await storage.updateRunUnleased(
+        run.tenantId,
+        run.id,
+        { status: ["waiting", "queued"] },
+        cancelPatch(run),
+        events,
+        clock(),
+      );
+      // Losing the CAS means another worker claimed the run; its after-claim check cancels it.
+      if (ok) publish(events);
     };
 
     /** Whether cancellation of this run was requested; reads the run row. */
