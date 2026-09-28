@@ -663,13 +663,21 @@ The design spec is `docs/superpowers/specs/2026-09-27-flowline-design.md`.
 
 ### Releasing
 
-Releases go through [Changesets](https://github.com/changesets/changesets): run `pnpm changeset`
-to add one, and `.github/workflows/release.yml` opens or updates a "Version Packages" PR on every
-push to `main` with pending changesets, then publishes once that PR is merged (via
-`changesets/action`, gated on the repo's own `install`/`build`/`test`/`typecheck`/`lint` run).
+Releases are automatic. Add a changeset to any PR that changes a published package
+(`pnpm changeset`, or `pnpm changeset --empty` when no release is needed). When the PR merges,
+`.github/workflows/release.yml` does the rest:
 
-**Do not add the `NPM_TOKEN` secret until a first publish is explicitly approved.** With no
-pending changesets, the first push to `main` after the secret exists publishes the current
-versions immediately — see the comment at the top of `.github/workflows/release.yml`.
+1. It runs the same gates as a PR.
+2. It runs `changeset version` and commits the bump and changelogs to `main` as a
+   `[skip ci]` bot commit.
+3. It publishes every `@flowlinejs/*` version that isn't on npm yet, under the `latest` dist-tag.
+4. It tags the release and creates a GitHub Release.
+
+There is no Version PR. Publishing uses npm trusted publishing (GitHub Actions OIDC), so the repo
+holds no npm token.
+
+A **new** package needs a one-time manual bootstrap: its first publish, and its trusted-publisher
+setup on npmjs.com. See [docs/releasing.md](docs/releasing.md), which also covers recovering from
+a failed release.
 
 MIT licensed.

@@ -1,69 +1,174 @@
-# IMPORTANT: do not add the NPM_TOKEN secret until a first publish is explicitly approved.
-# With no pending changesets, the first push to main after the secret exists publishes the
-# current versions immediately (no "Version Packages" PR). Until then the job runs the gates
-# and skips the release step.
+# Fully automatic releases on every push to main. See docs/releasing.md.
+#
+#   gates           same checks as a PR (reusable gates.yml)
+#   prepare         pending changesets -> `changeset version` + bot commit to main ([skip ci]);
+#                   then pack every package version that isn't on npm yet
+#   publish         `npm publish <tarball>` via npm trusted publishing (OIDC, no token)
+#   github-release  tags (<name>@<version> + v<version>) and one GitHub Release for the fixed group
+#
+# Nothing to release -> prepare packs nothing, publish is skipped, github-release is a no-op.
+# Every job is idempotent: re-running a failed run skips versions already on npm and existing
+# tags/releases, and fast-forwards over the version commit an earlier attempt already pushed.
+#
+# The npm trusted publisher for each package must name this file: release.yml.
 name: Release
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
+  workflow_dispatch:
 
-concurrency: ${{ github.workflow }}-${{ github.ref }}
+permissions: {}
 
-permissions:
-  id-token: write
-  contents: write
-  pull-requests: write
+# One release at a time, never cancelled midway. A newer push queues behind the running one.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
-    # Guards workflow_dispatch: a manual run against any other ref must not version or publish.
-    if: github.ref == 'refs/heads/main'
+  gates:
+    # Only the upstream repo's main releases: guards workflow_dispatch on other refs, and forks
+    # with Actions enabled (which would otherwise commit/tag in the fork and fail at publish).
+    if: github.repository == 'jakezegil/flowline' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/gates.yml
+
+  prepare:
+    needs: gates
     runs-on: ubuntu-latest
-    env:
-      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+    timeout-minutes: 15
+    permissions:
+      contents: write # push the version commit
+    outputs:
+      status: ${{ steps.sync.outputs.status }}
+      mode: ${{ steps.plan.outputs.mode }}
+      sha: ${{ steps.version.outputs.sha || steps.sync.outputs.sha }}
+      count: ${{ steps.pack.outputs.count || '0' }}
     steps:
-      - uses: actions/checkout@v5
+      # No persisted token: install and build run without write credentials on disk. The steps
+      # that fetch or push get GIT_AUTH_TOKEN, which release.mjs hands to git via env only.
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v5
+      - uses: ./.github/actions/setup
         with:
-          node-version: 22
-          cache: pnpm
-          registry-url: https://registry.npmjs.org
+          node-version: "22"
+          cache: "" # no shared cache in the job that produces release artifacts
 
-      - name: Install
-        run: pnpm install --frozen-lockfile
+      # A re-run starts from the original commit; if an earlier attempt already pushed the
+      # version commit, continue from it. If other commits landed since, a newer run owns them.
+      - name: Sync with main
+        id: sync
+        env:
+          GIT_AUTH_TOKEN: ${{ github.token }}
+        run: node scripts/release.mjs sync
+
+      - name: Plan
+        id: plan
+        if: steps.sync.outputs.status != 'superseded'
+        run: node scripts/release.mjs plan
+
+      - name: Version packages
+        id: version
+        if: steps.plan.outputs.mode == 'version'
+        run: node scripts/release.mjs version
 
       - name: Build
+        if: steps.plan.outputs.mode == 'version' || steps.plan.outputs.mode == 'publish'
         run: pnpm build
 
-      - name: Test
-        run: pnpm test
+      - name: Pack unpublished versions
+        id: pack
+        if: steps.plan.outputs.mode == 'version' || steps.plan.outputs.mode == 'publish'
+        run: node scripts/release.mjs pack --out "$RUNNER_TEMP/release" --only-unpublished
 
-      - name: Typecheck
-        run: pnpm -r typecheck
-
-      - name: Lint
-        run: pnpm lint
-
-      # Opens/updates a "Version Packages" PR when changesets are pending, or publishes to npm
-      # (via the repo's `release` script, which builds again itself) once they've been merged to
-      # main. Only runs past this point once install/build/test/typecheck/lint above are green.
-      - name: Create release PR or publish to npm
-        # Skipped (not failed) until the NPM_TOKEN secret exists.
-        if: env.HAS_NPM_TOKEN == 'true'
-        uses: changesets/action@v1
-        with:
-          version: pnpm version-packages
-          publish: pnpm release
-          # TODO: once this repo is public, add `--provenance` to the `release` script's
-          # `pnpm -r publish` call (npm provenance requires a public GitHub repo).
+      # Pushed with GITHUB_TOKEN, which doesn't trigger workflows; `[skip ci]` in the subject
+      # also covers a future switch to an app/PAT token. Fails (and publishes nothing) if main
+      # moved meanwhile: the newer queued run releases instead.
+      - name: Push version commit
+        if: steps.version.outputs.committed == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_AUTH_TOKEN: ${{ github.token }}
+        run: node scripts/release.mjs push
+
+      - uses: actions/upload-artifact@v7
+        if: steps.pack.outputs.count != '' && steps.pack.outputs.count != '0'
+        with:
+          name: release-tarballs
+          path: ${{ runner.temp }}/release
+          retention-days: 7
+          overwrite: true # "Re-run all jobs" uploads again under the same name
+          if-no-files-found: error
+
+  publish:
+    needs: prepare
+    if: needs.prepare.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # No dependency install here: only npm and our tarballs run with the OIDC permission.
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing
+    outputs:
+      done: ${{ steps.publish.outputs.done }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      # No registry-url: nothing writes an _authToken line, so npm authenticates via OIDC.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # Trusted publishing needs npm >= 11.5.1 (Node 22 ships 10.x). Pinned; bump deliberately.
+      - name: Install npm 11
+        run: npm install -g npm@11.19.1
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-tarballs
+          path: ${{ runner.temp }}/release
+
+      - name: Publish to npm
+        id: publish
+        # NPM_TOKEN is an optional bootstrap-only fallback (docs/releasing.md); leave it unset.
+        env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/release.mjs publish --dir "$RUNNER_TEMP/release"
+
+  github-release:
+    needs: [prepare, publish]
+    # Also runs when nothing was published, so a re-run heals missing tags/releases.
+    if: >-
+      always() && needs.prepare.result == 'success' && needs.prepare.outputs.status != 'superseded'
+      && (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # tags and releases
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # PUBLISHED is what the publish job just confirmed. The registry CDN can lag a few minutes
+      # behind a publish, so those versions aren't re-checked. Any others are polled, concurrently and with bounded
+      # backoff (about 315s at most), using cache-busted full-packument reads.
+      - name: Tag and create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GIT_AUTH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+          PUBLISHED: ${{ needs.publish.outputs.done }}
+        run: node scripts/release.mjs github-release --sha "$SHA" --published "$PUBLISHED"
