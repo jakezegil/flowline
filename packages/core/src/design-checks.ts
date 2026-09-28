@@ -13,31 +13,50 @@ import type { Manifest, NodeManifest, Step, WorkflowDoc } from "./types";
 
 /** One address, `local@domain.tld`, with no spaces, commas or angle brackets. */
 const EMAIL = /^[^\s@,;<>()"]+@[^\s@,;<>()"]+\.[^\s@,;<>()".]+$/;
+/** A display name and an address in angle brackets: `Ada Lovelace <ada@example.com>`. */
+const NAMED = /^(?:"[^"]*"|[^<>@,;"]*)\s*<\s*([^<>\s]+)\s*>$/;
+/** Stands for a reference's value while a template's shape is judged. */
+const REF = "\u0000";
+
+/** Whether `s` is one address, bare or with a display name (`Ada <ada@example.com>`). */
+function oneAddress(s: string, fits: (addr: string) => boolean): boolean {
+  if (fits(s)) return true;
+  const named = NAMED.exec(s);
+  return named?.[1] !== undefined && fits(named[1]);
+}
 
 /**
  * Why a value of an email-format field (`format: "email"`) can't be one email address, or
- * `undefined` when it looks fine. A literal must look like an address. A template must not mix
- * its references with words (text with spaces), which is how an address gets glued to the next
- * field's text (`dev@acme.testEnterprise lead approved`).
+ * `undefined` when it looks fine. A literal must look like an address, bare or with a display
+ * name (`Ada <ada@example.com>`). A template must not mix its references with other text, which
+ * is how an address gets glued to the next field's text (`{{a.email}}Enterprise lead` or
+ * `{{a.email}}foo`); text that builds the address around them (`{{a.user}}@acme.com`,
+ * `{{a.name}} <{{a.email}}>`) is fine.
  */
 export function emailProblem(value: unknown): string | undefined {
   if (typeof value === "string") {
-    return value.trim() === "" || EMAIL.test(value.trim())
+    const s = value.trim();
+    return s === "" || oneAddress(s, (a) => EMAIL.test(a))
       ? undefined
       : "isn't a valid email address";
   }
   if (typeof value === "object" && value !== null && "$tpl" in value) {
     const tpl = (value as { $tpl: unknown }).$tpl;
     if (typeof tpl !== "string") return undefined;
-    const text = parseTemplate(tpl)
+    const parts = parseTemplate(tpl);
+    const shape = parts
+      .map((p) => ("text" in p ? p.text : REF))
+      .join("")
+      .trim();
+    // A reference alone is the address; around one, text must build a single address.
+    const fits = (a: string) => a === REF || EMAIL.test(a.replaceAll(REF, "x.io"));
+    if (shape === REF || oneAddress(shape, fits)) return undefined;
+    const text = parts
       .flatMap((p) => ("text" in p ? [p.text] : []))
-      .join("");
-    if (/\s/.test(text)) {
-      const words = text.trim();
-      return words === ""
-        ? "should be one email address, but it joins several values with spaces"
-        : `should be one email address, but its references are mixed with other text ("${words}")`;
-    }
+      .join("")
+      .trim();
+    if (text === "") return "should be one email address, but it joins several values with spaces";
+    return `should be one email address, but its references are mixed with other text ("${text}")`;
   }
   return undefined;
 }

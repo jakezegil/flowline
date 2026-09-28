@@ -114,6 +114,11 @@ describe("email fields", () => {
     expect(emailProblem("dev@acme.testEnterprise lead approved")).toBe(
       "isn't a valid email address",
     );
+    // Minor 5: a display name is fine; two addresses aren't.
+    expect(emailProblem("Ada Lovelace <ada@example.com>")).toBeUndefined();
+    expect(emailProblem('"Lovelace, Ada" <ada@example.com>')).toBeUndefined();
+    expect(emailProblem("Ada <ada@example>")).toBe("isn't a valid email address");
+    expect(emailProblem("a@x.io, b@x.io")).toBe("isn't a valid email address");
   });
 
   test("a template gluing words to a reference is flagged; a built address is not", () => {
@@ -122,6 +127,13 @@ describe("email fields", () => {
     );
     expect(emailProblem({ $tpl: "{{steps.a.first}}.{{steps.a.last}}@acme.com" })).toBeUndefined();
     expect(emailProblem({ $tpl: "{{steps.a.email}} {{steps.b.email}}" })).toContain("spaces");
+    // Minor 5: text glued to a reference without a space is flagged too.
+    expect(emailProblem({ $tpl: "{{steps.a.email}}foo" })).toContain('("foo")');
+    expect(emailProblem({ $tpl: "{{steps.a.user}}@acme.com" })).toBeUndefined();
+    expect(emailProblem({ $tpl: "hello@{{steps.a.domain}}" })).toBeUndefined();
+    expect(emailProblem({ $tpl: "{{steps.a.name}} <{{steps.a.email}}>" })).toBeUndefined();
+    expect(emailProblem({ $tpl: "Sales <{{steps.a.email}}>" })).toBeUndefined();
+    expect(emailProblem({ $tpl: "{{steps.a.email}}" })).toBeUndefined();
   });
 
   test("the validator warns on the field (H1's To), never errors", () => {
