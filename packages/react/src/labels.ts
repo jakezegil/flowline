@@ -386,6 +386,8 @@ export interface FlowkitLabels {
   waitingUntil(when: string): string;
   waitingForSubflow: string;
   failedAt(step: string): string;
+  /** Title of a stopped run's banner, e.g. "Stopped at Reject lead". */
+  stoppedAt(step: string): string;
   iterationOf(i: number, n: number): string;
   showStep: string;
   runSummary: string;
@@ -428,6 +430,24 @@ export interface FlowkitLabels {
   noRuns: string;
   noRunsWithStatus(status: string): string;
   loadRunsFailed: string;
+
+  // Not found, resume guidance
+  /** Title of the editor's state for a workflow ID that doesn't exist. */
+  workflowNotFound: string;
+  workflowNotFoundDetail(workflowId: string): string;
+  /** The editor's not-found action with `notFoundAction="create"`: a new workflow under the ID. */
+  createWorkflow: string;
+  /** The editor's default not-found action: back to the previous page. */
+  goBack: string;
+  /** Title of the run viewer's state for a run ID that doesn't exist. */
+  runNotFound: string;
+  runNotFoundDetail(runId: string): string;
+  /** Shown instead of Resume… when the waiting step is resumed from the host app. */
+  resumeHandledByApp: string;
+  /** The resume dialog's body field is empty but the step expects a body. */
+  callbackBodyRequired: string;
+  /** Resume dialog: the body the waiting step expects, e.g. "Expects { decision }". */
+  callbackBodyExpects(type: string): string;
 }
 
 /** Formats a run duration: `850ms`, `1.2s`, `2m 5s`, `1h 35m`, `1d 2h`. */
@@ -490,6 +510,8 @@ export const defaultLabels: FlowkitLabels = {
     waiting: "Waiting",
     skipped: "Skipped",
     pending: "Not run yet",
+    stopped: "Stopped the run",
+    cancelled: "Cancelled",
   },
   duration: formatDuration,
   attempts: (n) => `${n} attempts`,
@@ -805,6 +827,7 @@ export const defaultLabels: FlowkitLabels = {
   waitingUntil: (when) => `Waiting until ${when}`,
   waitingForSubflow: "Waiting for a called workflow to finish",
   failedAt: (step) => `Failed at ${step}`,
+  stoppedAt: (step) => `Stopped at ${step}`,
   iterationOf: (i, n) => `iteration ${i} of ${n}`,
   showStep: "Show step",
   runSummary: "Run details",
@@ -854,6 +877,16 @@ export const defaultLabels: FlowkitLabels = {
   noRuns: "No runs yet. Runs appear here as soon as the workflow is triggered.",
   noRunsWithStatus: (status) => `No ${status.toLowerCase()} runs.`,
   loadRunsFailed: "Couldn't load runs.",
+
+  workflowNotFound: "Workflow not found",
+  workflowNotFoundDetail: (id) => `There is no workflow with the ID “${id}”.`,
+  createWorkflow: "Create this workflow",
+  goBack: "Go back",
+  runNotFound: "Run not found",
+  runNotFoundDetail: (id) => `There is no run with the ID “${id}”. It may have been deleted.`,
+  resumeHandledByApp: "This step is resumed from the app, not from here.",
+  callbackBodyRequired: "Enter the callback body",
+  callbackBodyExpects: (type) => `Expects ${type}`,
 };
 
 /** "just now", "5 min ago", "in 6 days". */

@@ -13,7 +13,13 @@ import { createMemoryStorage } from "@flowkit/storage-memory";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createEngine, type EngineOptions } from "./engine";
-import { FatalError, RetryableError } from "./errors";
+import {
+  FatalError,
+  FlowkitValidationError,
+  ResumeHostHandledError,
+  ResumeUnverifiableError,
+  RetryableError,
+} from "./errors";
 import { createExecutor } from "./executor";
 import type { Lease, StorageAdapter } from "./storage";
 
@@ -38,6 +44,16 @@ const registry = createRegistry([
           calls[ctx.stepPath] = (calls[ctx.stepPath] ?? 0) + 1;
           const b = behaviours[ctx.stepId];
           return (b ? b(ctx) : { value: input.value }) as never;
+        },
+      }),
+      defineNode({
+        type: "t.approve",
+        name: "Approve",
+        input: z.object({}),
+        resume: { body: z.object({ ok: z.boolean() }), hostHandled: true },
+        run: async ({ ctx }) => {
+          if (ctx.resume) return { resume: ctx.resume };
+          return suspend({ callback: await ctx.callback({ timeoutMs: 10_000 }) });
         },
       }),
       defineNode({
@@ -422,6 +438,95 @@ describe("resumeRun", () => {
     const engine = makeEngine();
     await engine.drain();
     expect(await engine.resumeRun(TENANT, id, {}, "u1")).toBe("gone");
+  });
+});
+
+describe("resume declarations", () => {
+  const approve = (id: string): Step => ({ id, type: "t.approve", config: {} });
+
+  it("resumeRun and resume check the body against resume.body, resuming nothing on a mismatch", async () => {
+    const id = await startRun(wf([approve("a")]));
+    const engine = makeEngine();
+    await engine.drain();
+    const { callbackToken } = await getRun(id);
+    await expect(engine.resumeRun(TENANT, id, { ok: "yes" }, "u1")).rejects.toThrow(
+      FlowkitValidationError,
+    );
+    await expect(engine.resume(callbackToken as string, null)).rejects.toThrow(
+      /Resume body for step "a"/,
+    );
+    const run = await getRun(id);
+    expect(run.status).toBe("waiting");
+    expect(run.callbackToken).toBe(callbackToken);
+    expect(await engine.resume(callbackToken as string, { ok: true })).toBe("resumed");
+    await engine.drain();
+    expect((await getRun(id)).journal.a).toMatchObject({
+      output: { resume: { kind: "callback", body: { ok: true } } },
+    });
+  });
+
+  it("refuses a host-handled step only with refuseHostHandled", async () => {
+    const id = await startRun(wf([approve("a")]));
+    const engine = makeEngine();
+    await engine.drain();
+    const refused = engine.resumeRun(TENANT, id, { ok: true }, "u1", { refuseHostHandled: true });
+    await expect(refused).rejects.toThrow(ResumeHostHandledError);
+    await expect(refused).rejects.toMatchObject({ code: "resume_host_handled" });
+    expect((await getRun(id)).status).toBe("waiting");
+    expect(await engine.resumeRun(TENANT, id, { ok: true }, "u1")).toBe("resumed");
+  });
+
+  it("an unknown or expired token is gone before the body is checked", async () => {
+    const id = await startRun(wf([approve("a")]));
+    const engine = makeEngine();
+    await engine.drain();
+    expect(await engine.resume("unknown", null)).toBe("gone");
+    now += 20_000;
+    expect(await engine.resume((await getRun(id)).callbackToken as string, null)).toBe("gone");
+  });
+
+  it("fails closed when the waiting step can't be checked", async () => {
+    const id = await startRun(wf([approve("a")]));
+    await makeEngine().drain();
+    const { callbackToken } = await getRun(id);
+    const token = callbackToken as string;
+
+    // The node type is no longer registered.
+    const bare = createEngine({ registry: createRegistry([]), storage, clock });
+    await expect(bare.resumeRun(TENANT, id, { ok: true }, "u1")).rejects.toThrow(
+      ResumeUnverifiableError,
+    );
+    await expect(bare.resume(token, { ok: true })).rejects.toMatchObject({
+      code: "resume_unverifiable",
+    });
+
+    // The pinned version, or the step in it, is missing.
+    const engine = makeEngine();
+    const real = storage.getWorkflowVersion.bind(storage);
+    storage.getWorkflowVersion = async () => null;
+    await expect(engine.resume(token, { ok: true })).rejects.toThrow(/version 1 of "wf"/);
+    storage.getWorkflowVersion = async (...args) => {
+      const v = await real(...args);
+      return v && { ...v, doc: { ...v.doc, steps: [] } };
+    };
+    await expect(engine.resumeRun(TENANT, id, { ok: true }, "u1")).rejects.toThrow(
+      /step "a" is not in its workflow/,
+    );
+    storage.getWorkflowVersion = real;
+
+    expect((await getRun(id)).status).toBe("waiting");
+    expect(await engine.resume(token, { ok: true })).toBe("resumed");
+  });
+
+  it("nodes without a declaration take any body", async () => {
+    const handles: CallbackHandle[] = [];
+    behaviours.a = waitForCallback(handles);
+    const id = await startRun(wf([step("a")]));
+    const engine = makeEngine();
+    await engine.drain();
+    expect(await engine.resumeRun(TENANT, id, "anything", "u1", { refuseHostHandled: true })).toBe(
+      "resumed",
+    );
   });
 });
 

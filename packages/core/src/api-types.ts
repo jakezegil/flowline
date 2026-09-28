@@ -6,17 +6,21 @@
  * - `GET  /manifest` → `Manifest`
  * - `GET  /workflows` → {@link WorkflowSummary}[]
  * - `GET  /workflows/:id` → {@link WorkflowDetail}
- * - `PUT  /workflows/:id` body {@link WorkflowDoc} → {@link WorkflowVersion}
+ * - `PUT  /workflows/:id?create=true` body {@link WorkflowDoc} → {@link WorkflowVersion} (with
+ *   `create=true`, only for a new workflow: 409 `{ code: "workflow_exists" }` otherwise)
  * - `POST /workflows/:id/publish` body {@link PublishRequest} → 2xx (422 `{ issues }` when invalid)
  * - `POST /workflows/validate` body {@link WorkflowDoc} → `Issue[]`
  * - `POST /workflows/:id/test-step` body {@link TestStepRequest} → {@link TestStepResponse}
  * - `POST /workflows/:id/run` body {@link RunWorkflowRequest} → {@link RunStartedResponse}
- * - `GET  /runs?workflowId&status&limit` → {@link RunSummary}[]
+ * - `GET  /runs?workflowId&status&topLevel&stopped&limit` → {@link RunSummary}[] (`topLevel=true`
+ *   leaves out sub-flow runs; `stopped=true|false` keeps only, or leaves out, runs a Stop ended)
  * - `GET  /runs/:id` → {@link RunDetail}
  * - `POST /runs/:id/retry` → {@link RunStartedResponse} (409 when the run is not failed)
  * - `POST /runs/:id/cancel` → 200 cancelled, 202 cancellation requested, 409 `{ error: "finished" }`
  * - `POST /runs/:id/resume?step=<stepPath>` body = callback body → 202 (410 `{ error: "gone" }`
- *   when not waiting on a callback, or, with `step`, not waiting at that step)
+ *   when not waiting on a callback, or, with `step`, not waiting at that step; 409
+ *   `{ code: "resume_host_handled" | "resume_unverifiable" }`; 400 when the body doesn't match
+ *   the node's `resume.body`)
  * - `GET  /runs/:id/stream?after=<seq>` → `text/event-stream` of `event: run`, `id: <seq>`,
  *   `data: <RunEvent JSON>` frames; ends once the run's latest event is
  *   `run.completed|failed|cancelled|stopped` (a retried run's earlier `run.failed` does not end it)
@@ -30,7 +34,9 @@
  *   for a bad `X-Flowkit-Signature`, 400 `{ issues }` for a body not matching the declared
  *   fields). The signature has no timestamp, so a captured delivery can be replayed: set a
  *   dedupe header (e.g. the sender's delivery id) alongside a signing secret.
- * - `POST /resume/:token` body = callback body → 202 (410 `{ error: "gone" }`)
+ * - `POST /resume/:token` body = callback body → 202 (410 `{ error: "gone" }`; 409
+ *   `{ code: "resume_unverifiable" }` when the waiting step can't be checked; 400 when the body
+ *   doesn't match the node's `resume.body`)
  *
  * Editor requests other than `GET` must send `Content-Type: application/json`, bodyless ones
  * (cancel, retry) too; anything else, including no `Content-Type`, is refused with 415 (so a
@@ -176,6 +182,11 @@ export interface RunSummary {
   error?: RunError;
   /** What started the run. */
   startedBy: RunOrigin;
+  /**
+   * For a run that a Stop step (`core.stop`) ended early: the path of that step. The run's
+   * `status` is `completed`; this tells it apart from a run that reached its end.
+   */
+  stoppedAt?: string;
 }
 
 /** Types of audit events recorded for a run. */
@@ -304,4 +315,11 @@ export interface ApiErrorBody {
   error: string;
   /** Validation issues, e.g. for a rejected publish (422). */
   issues?: unknown[];
+  /**
+   * Machine-readable reason, where one is defined: `"resume_host_handled"` (409 from
+   * `POST /runs/:id/resume` for a step the host app resumes itself), `"resume_unverifiable"` (409:
+   * the waiting step's node or version is missing) or `"workflow_exists"` (409 from
+   * `PUT /workflows/:id?create=true`).
+   */
+  code?: string;
 }

@@ -6,6 +6,7 @@
 import {
   createRegistry,
   type FlowkitServices,
+  findStep,
   type Issue,
   type Logger,
   type Registry,
@@ -21,7 +22,13 @@ import {
   type WorkflowVersion,
 } from "@flowkit/core";
 import { builtinPlugin } from "@flowkit/nodes-builtin";
-import { EngineConflictError, EngineNotFoundError } from "./errors";
+import {
+  EngineConflictError,
+  EngineNotFoundError,
+  FlowkitValidationError,
+  ResumeHostHandledError,
+  ResumeUnverifiableError,
+} from "./errors";
 import { cancelPatch, createExecutor, TERMINAL } from "./executor";
 import { createHandler } from "./handler";
 import { entryAt } from "./interpreter";
@@ -98,6 +105,12 @@ export interface EngineOptions {
 export interface ResumeRunOptions {
   /** Resume only when the run waits on a callback at this step path (e.g. `"size/if/approval"`). */
   expectStep?: string;
+  /**
+   * Refuse (throw {@link ResumeHostHandledError}) when the waiting step's node declares
+   * `resume.hostHandled`. The generic `POST /runs/:id/resume` route sets it; host code that
+   * resumes such a step itself (e.g. an approvals endpoint) leaves it unset.
+   */
+  refuseHostHandled?: boolean;
 }
 
 /** A running engine instance. */
@@ -127,6 +140,13 @@ export interface Engine {
    * Resume the run waiting on callback `token` (from `ctx.callback()`) with `body` as
    * `ctx.resume = { kind: "callback", body }`. Tokens are single use: resolves `"gone"` when the
    * token is unknown, already used, expired, or its run is no longer waiting.
+   *
+   * The token is a bearer capability: it resumes the wait even when the node declares
+   * `resume.hostHandled`. Never hand out the token of a step only your app may decide.
+   *
+   * @throws {FlowkitValidationError} (rejects, resuming nothing) when the waiting step's node
+   * declares `resume.body` and `body` doesn't match it.
+   * @throws {ResumeUnverifiableError} when the waiting step can't be checked.
    */
   resume(token: string, body: unknown): Promise<"resumed" | "gone">;
   /**
@@ -139,6 +159,13 @@ export interface Engine {
    * the token of the wait that was checked, so a wait that ended meanwhile (even one replaced by a
    * new wait at the same step) is not resumed. Use it when the caller decided about one specific
    * step, e.g. an approval inbox.
+   *
+   * @throws {FlowkitValidationError} when the waiting step's node declares `resume.body` and
+   * `body` doesn't match it.
+   * @throws {ResumeHostHandledError} with `opts.refuseHostHandled`, when the waiting step's node
+   * declares `resume.hostHandled`.
+   * @throws {ResumeUnverifiableError} when the waiting step can't be checked (its version, step
+   * or node type is missing).
    */
   resumeRun(
     tenantId: string,
@@ -235,9 +262,18 @@ export interface Engine {
    * without a slug (`trigger.config.slug`) keeps the previous version's slug, or gets a new random
    * one: its URL is `<basePath>/hooks/<tenantId>/<workflowId>/<slug>`.
    *
+   * With `opts.create`, saves only a workflow that doesn't exist yet (as version 1): an editor
+   * creating a new workflow never overwrites an existing one under the same ID.
+   *
    * @throws {@link FlowkitValidationError} if `doc` is not a structurally valid document.
+   * @throws {@link WorkflowExistsError} with `opts.create`, if the workflow already exists.
    */
-  saveWorkflow(tenantId: string, doc: WorkflowDoc, actor: string): Promise<WorkflowVersion>;
+  saveWorkflow(
+    tenantId: string,
+    doc: WorkflowDoc,
+    actor: string,
+    opts?: { create?: boolean },
+  ): Promise<WorkflowVersion>;
   /**
    * Publish a saved version (after validating it) and audit it (`published`).
    *
@@ -378,6 +414,42 @@ export function createEngine(options: EngineOptions): Engine {
     return "resumed" as const;
   };
 
+  /**
+   * Checks a callback resume of `run` against the waiting step's node `resume` declaration:
+   * throws when the node is host-handled (and `refuseHostHandled`) or `body` doesn't match
+   * `resume.body`.
+   */
+  const checkResume = async (run: Run, body: unknown, refuseHostHandled: boolean) => {
+    // Fails closed: a wait that can't be traced to its node's declaration isn't resumed.
+    const path = run.currentStep;
+    const unverifiable = (what: string) =>
+      new ResumeUnverifiableError(`Run "${run.id}" can't be resumed: ${what}`);
+    if (path === undefined) throw unverifiable("it has no waiting step");
+    const v = await storage.getWorkflowVersion(run.tenantId, run.workflowId, run.version);
+    if (!v) throw unverifiable(`version ${run.version} of "${run.workflowId}" is missing`);
+    const stepId = path.slice(path.lastIndexOf("/") + 1);
+    const step = findStep(v.doc, stepId)?.step;
+    if (!step) throw unverifiable(`step "${stepId}" is not in its workflow`);
+    const node = opts.registry.getNode(step.type);
+    if (!node) throw unverifiable(`node type "${step.type}" is not registered`);
+    const spec = node.resume;
+    if (!spec) return;
+    if (refuseHostHandled && spec.hostHandled) {
+      throw new ResumeHostHandledError(
+        `Step "${stepId}" is resumed by the app, not by the generic resume route`,
+      );
+    }
+    if (!spec.body) return;
+    const res = await spec.body.safeParseAsync(body);
+    if (res.success) return;
+    const issue = res.error.issues[0];
+    const field = issue && issue.path.length > 0 ? `field "${issue.path.join(".")}" ` : "";
+    const message = `Resume body for step "${stepId}": ${field}${issue?.message ?? "is invalid"}`;
+    throw new FlowkitValidationError(message, [
+      { code: "config.invalid", severity: "error", message, stepId },
+    ]);
+  };
+
   const core: EngineCore = {
     opts,
     registry: opts.registry,
@@ -400,14 +472,25 @@ export function createEngine(options: EngineOptions): Engine {
       return claims;
     },
 
-    resume: (token, body) => resumeWithToken(token, body),
+    async resume(token, body) {
+      const run = await storage.getRunByCallbackToken(token);
+      if (!run || (run.callbackExpiresAt !== undefined && run.callbackExpiresAt <= clock())) {
+        return "gone";
+      }
+      // The same token resumes only the wait that was checked.
+      await checkResume(run, body, false);
+      return resumeWithToken(token, body);
+    },
 
-    async resumeRun(tenantId, runId, body, userId, opts = {}) {
+    async resumeRun(tenantId, runId, body, userId, resumeOpts = {}) {
       const run = await storage.getRun(tenantId, runId);
-      if (opts.expectStep !== undefined && run?.currentStep !== opts.expectStep) return "gone";
+      const { expectStep, refuseHostHandled = false } = resumeOpts;
+      if (expectStep !== undefined && run?.currentStep !== expectStep) return "gone";
       const token = run?.status === "waiting" && run.waitReason === "callback" && run.callbackToken;
+      if (!token) return "gone";
+      await checkResume(run, body, refuseHostHandled);
       // The token is looked up server-side and never leaves the engine.
-      return token ? resumeWithToken(token, body, userId) : "gone";
+      return resumeWithToken(token, body, userId);
     },
 
     async cancelRun(tenantId, runId) {

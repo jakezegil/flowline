@@ -6,7 +6,7 @@ import { createRegistry } from "./registry";
 import { removeStep } from "./tree";
 import type { JSONSchema, Manifest, NodeManifest, Step, WorkflowDoc } from "./types";
 import { UI_META_KEY, ui } from "./ui";
-import { hasErrors, type Issue, validateWorkflow } from "./validate";
+import { checkJson, hasErrors, type Issue, validateWorkflow } from "./validate";
 
 const issue = (partial: Partial<Issue>) => expect.objectContaining(partial);
 const tupleNode = defineNode({
@@ -803,5 +803,42 @@ describe("warnIfEmpty", () => {
     expect(
       validateWorkflow(docWith([step("s", "x.tags", { tags: { $ref: "trigger.tags" } })]), m),
     ).not.toContainEqual(issue({ code: "config.empty" }));
+  });
+});
+
+describe("checkJson", () => {
+  const body: JSONSchema = {
+    type: "object",
+    properties: {
+      decision: { type: "string", enum: ["approved", "rejected"] },
+      note: { type: "string", maxLength: 5 },
+    },
+    required: ["decision"],
+    additionalProperties: false,
+  };
+
+  test("accepts a matching value", () => {
+    expect(checkJson({ decision: "approved" }, body)).toEqual([]);
+  });
+
+  test("reports required, enum, length and unknown-key problems", () => {
+    expect(checkJson({}, body)).toEqual(['"decision" is required']);
+    expect(checkJson({ decision: "maybe", note: "too long", x: 1 }, body)).toEqual([
+      '"decision" must be one of: "approved", "rejected"',
+      '"note" must be at most 5 characters',
+      '"x" is not a known field',
+    ]);
+    expect(checkJson([], body, "Body")).toEqual(['"Body" must be an object']);
+  });
+
+  test("a missing value is required unless the schema accepts anything", () => {
+    expect(checkJson(undefined, body, "Body")).toEqual(['"Body" is required']);
+    expect(checkJson(undefined, {})).toEqual([]);
+  });
+
+  test("treats $ref and $tpl objects as plain data", () => {
+    const schema: JSONSchema = { type: "object", properties: { $ref: { type: "number" } } };
+    expect(checkJson({ $ref: "steps.a" }, schema)).toEqual(['"$ref" must be a number']);
+    expect(checkJson({ $tpl: "{{x}}" }, { type: "object" })).toEqual([]);
   });
 });

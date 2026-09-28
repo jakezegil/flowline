@@ -165,6 +165,27 @@ export interface NodeManifest {
   output: OutputSpec;
   /** How the node branches. */
   branches: BranchSpec;
+  /** How a wait of this node is resumed (see {@link ResumeSpec}). */
+  resume?: ResumeSpec;
+}
+
+/**
+ * How a node that waits on a callback (`suspend({ callback })`) is resumed, in the manifest. Tells
+ * the run viewer what body to ask for, or to send people to the host app instead.
+ */
+export interface ResumeSpec {
+  /** Input-side JSON Schema of the callback body the handler expects on resume. */
+  body?: JSONSchema;
+  /**
+   * The wait is decided in the host app (an approvals page, a signed endpoint), not by posting a
+   * raw body: the run viewer shows {@link ResumeSpec.hint} instead of its resume form, and the
+   * generic `POST /runs/:id/resume` route refuses it (409 `resume_host_handled`). The public
+   * token route still resumes it, since a callback token is a bearer capability: never expose the
+   * token or resume URL of such a step.
+   */
+  hostHandled?: boolean;
+  /** Where or how to resume, shown in the run viewer, e.g. "Approve or reject it in Approvals." */
+  hint?: string;
 }
 
 /**

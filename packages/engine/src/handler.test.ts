@@ -43,8 +43,31 @@ const pause = defineNode({
   run: ({ ctx }) => (ctx.resume ? { resumed: true } : suspend({ until: ctx.now() + 60_000 })),
 });
 
+/** Waits for a callback whose body is `{ decision }`; `host` nodes are resumed by the host app. */
+const decisionWait = (type: string, hostHandled: boolean) =>
+  defineNode({
+    type,
+    name: "Decision",
+    input: z.object({}),
+    resume: { body: z.object({ decision: z.enum(["approved", "rejected"]) }), hostHandled },
+    run: async ({ ctx }) => {
+      if (ctx.resume?.kind === "callback") return { body: ctx.resume.body };
+      return suspend({ callback: await ctx.callback({ timeoutMs: 3_600_000 }) });
+    },
+  });
+
 const registry = createRegistry([
-  definePlugin({ id: "t", name: "Test", nodes: [echo, lookup, pause] }),
+  definePlugin({
+    id: "t",
+    name: "Test",
+    nodes: [
+      echo,
+      lookup,
+      pause,
+      decisionWait("t.decide", false),
+      decisionWait("t.hostDecide", true),
+    ],
+  }),
 ]);
 
 function manualDoc(id: string, steps: WorkflowDoc["steps"] = []): WorkflowDoc {
@@ -295,6 +318,25 @@ describe("workflow management", () => {
     expect(detail).toMatchObject({ latest: { version: 1 }, published: null });
   });
 
+  it("with ?create=true saves only a workflow that doesn't exist yet (409 workflow_exists)", async () => {
+    const created = await call("PUT", "/workflows/wf?create=true", { body: manualDoc("wf") });
+    expect(created.status).toBe(200);
+    expect(await created.json()).toMatchObject({ version: 1 });
+    const again = await call("PUT", "/workflows/wf?create=true", {
+      body: { ...manualDoc("wf"), name: "Blank" },
+    });
+    expect(again.status).toBe(409);
+    expect(await again.json()).toMatchObject({ code: "workflow_exists" });
+    expect((await storage.getLatestVersion("a", "wf"))?.version).toBe(1);
+    // Without it, a save is the next version as before.
+    expect(
+      await json<{ version: number }>(call("PUT", "/workflows/wf", { body: manualDoc("wf") })),
+    ).toMatchObject({ version: 2 });
+    expect(
+      (await call("PUT", "/workflows/wf?create=maybe", { body: manualDoc("wf") })).status,
+    ).toBe(400);
+  });
+
   it("rejects a save whose body id differs from the URL", async () => {
     const res = await call("PUT", "/workflows/other", { body: manualDoc("wf") });
     expect(res.status).toBe(400);
@@ -442,6 +484,18 @@ describe("runs", () => {
     expect(await json<unknown[]>(call("GET", "/runs?limit=1"))).toHaveLength(1);
     expect((await call("GET", "/runs?status=bogus")).status).toBe(400);
     expect((await call("GET", "/runs?limit=-3")).status).toBe(400);
+    // topLevel=true is passed on to storage; anything but true/false is refused.
+    const listRuns = vi.spyOn(storage, "listRuns");
+    expect(await json<unknown[]>(call("GET", "/runs?topLevel=true"))).toHaveLength(2);
+    expect(listRuns).toHaveBeenLastCalledWith("a", { topLevel: true });
+    await call("GET", "/runs?topLevel=false");
+    expect(listRuns).toHaveBeenLastCalledWith("a", {});
+    expect((await call("GET", "/runs?topLevel=yes")).status).toBe(400);
+    await call("GET", "/runs?status=completed&stopped=false");
+    expect(listRuns).toHaveBeenLastCalledWith("a", { status: "completed", stopped: false });
+    await call("GET", "/runs?stopped=true");
+    expect(listRuns).toHaveBeenLastCalledWith("a", { stopped: true });
+    expect((await call("GET", "/runs?stopped=1")).status).toBe(400);
   });
 
   it("returns run detail without the callback token and with sensitive values masked", async () => {
@@ -582,6 +636,88 @@ describe("resume", () => {
       by: "user-a",
     });
     expect((await call("POST", `/runs/${runId}/resume`, { body: {} })).status).toBe(410);
+  });
+
+  async function decisionRun(type: string) {
+    const doc: WorkflowDoc = {
+      id: "decide",
+      name: "Decide",
+      trigger: { type: "core.manual", config: {} },
+      steps: [{ id: "decide", type, config: {} }],
+    };
+    await deploy(doc, "a");
+    const runId = await engine.start({ tenantId: "a", workflowId: "decide" });
+    await engine.drain();
+    const run = await storage.getRun("a", runId);
+    expect(run?.status).toBe("waiting");
+    return { runId, token: run?.callbackToken as string };
+  }
+
+  it("refuses a host-handled step on the generic route with 409 resume_host_handled", async () => {
+    const { runId } = await decisionRun("t.hostDecide");
+    const body = { decision: "approved" };
+    const res = await call("POST", `/runs/${runId}/resume`, { body });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "resume_host_handled" });
+    const withStep = await call("POST", `/runs/${runId}/resume?step=decide`, { body });
+    expect(withStep.status).toBe(409);
+    expect((await storage.getRun("a", runId))?.status).toBe("waiting");
+    // The host's own code resumes it in-process.
+    expect(await engine.resumeRun("a", runId, body, "boss", { expectStep: "decide" })).toBe(
+      "resumed",
+    );
+  });
+
+  it("checks the body against the node's resume.body on the authorized route (400)", async () => {
+    const { runId } = await decisionRun("t.decide");
+    const bad = await call("POST", `/runs/${runId}/resume`, { body: { decision: "maybe" } });
+    expect(bad.status).toBe(400);
+    const err = (await bad.json()) as { error: string; issues: unknown[] };
+    expect(err.error).toMatch(/Resume body for step "decide": field "decision"/);
+    expect(err.issues).toHaveLength(1);
+    expect((await storage.getRun("a", runId))?.status).toBe("waiting");
+    const ok = await call("POST", `/runs/${runId}/resume`, { body: { decision: "rejected" } });
+    expect(ok.status).toBe(202);
+    await engine.drain();
+    expect((await storage.getRun("a", runId))?.journal.decide).toMatchObject({
+      output: { body: { decision: "rejected" } },
+    });
+  });
+
+  it("checks the body on the public token route too, keeping the token usable", async () => {
+    const { runId, token } = await decisionRun("t.hostDecide");
+    const bad = await call("POST", `/resume/${token}`, { tenant: null, body: {} });
+    expect(bad.status).toBe(400);
+    expect((await storage.getRun("a", runId))?.status).toBe("waiting");
+    const ok = await call("POST", `/resume/${token}`, {
+      tenant: null,
+      body: { decision: "approved" },
+    });
+    expect(ok.status).toBe(202);
+  });
+
+  it("answers 409 resume_unverifiable on both routes when the wait can't be checked", async () => {
+    const { runId, token } = await decisionRun("t.decide");
+    const real = storage.getWorkflowVersion.bind(storage);
+    storage.getWorkflowVersion = async () => null;
+    try {
+      const body = { decision: "approved" };
+      for (const res of [
+        await call("POST", `/resume/${token}`, { tenant: null, body }),
+        await call("POST", `/runs/${runId}/resume`, { body }),
+      ]) {
+        expect(res.status).toBe(409);
+        expect(await res.json()).toMatchObject({ code: "resume_unverifiable" });
+      }
+    } finally {
+      storage.getWorkflowVersion = real;
+    }
+    expect((await storage.getRun("a", runId))?.status).toBe("waiting");
+    const ok = await call("POST", `/resume/${token}`, {
+      tenant: null,
+      body: { decision: "approved" },
+    });
+    expect(ok.status).toBe(202);
   });
 
   it("resumes only at the step named by ?step", async () => {

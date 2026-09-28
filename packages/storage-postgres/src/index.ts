@@ -132,6 +132,7 @@ function toSummary(row: Row): RunSummary {
     startedBy: row.started_by,
   };
   if (row.error !== null) summary.error = row.error;
+  if (typeof row.stopped_at === "string") summary.stoppedAt = row.stopped_at;
   return summary;
 }
 
@@ -438,6 +439,27 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
       });
     },
 
+    async createWorkflowVersion(tenantId, doc, actor, now) {
+      return tx(async (q) => {
+        // The workflows row is the lock: of concurrent creates, one inserts it.
+        const { rows } = await q.query(
+          `INSERT INTO ${s}.workflows (tenant_id, workflow_id, name, latest_version, updated_at)
+           VALUES ($1, $2, $3, 1, $4)
+           ON CONFLICT (tenant_id, workflow_id) DO NOTHING
+           RETURNING latest_version`,
+          [tenantId, doc.id, doc.name, now],
+        );
+        if (rows.length === 0) return null;
+        const inserted = await q.query(
+          `INSERT INTO ${s}.workflow_versions
+             (tenant_id, workflow_id, version, doc, trigger_type, created_by, created_at)
+           VALUES ($1, $2, 1, $3::json, $4, $5, $6) RETURNING *`,
+          [tenantId, doc.id, json(doc), doc.trigger.type, actor, now],
+        );
+        return toVersion(inserted.rows[0] as Row);
+      });
+    },
+
     async getWorkflowVersion(tenantId, workflowId, version) {
       const { rows } = await pool.query(
         `SELECT * FROM ${s}.workflow_versions
@@ -581,9 +603,19 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
       const where = [`tenant_id = ${p.add(tenantId)}`];
       if (f.workflowId !== undefined) where.push(`workflow_id = ${p.add(f.workflowId)}`);
       if (f.status !== undefined) where.push(`status = ${p.add(f.status)}`);
+      if (f.topLevel === true) where.push(`started_by->>'kind' IS DISTINCT FROM 'subflow'`);
+      const outer =
+        f.stopped === undefined ? "" : `WHERE stopped_at IS ${f.stopped ? "NOT NULL" : "NULL"}`;
+      // stopped_at: see `stoppedAtOf` (computed here so the journal isn't read out).
       const { rows } = await pool.query(
-        `SELECT id, workflow_id, version, status, created_at, updated_at, error, started_by
-         FROM ${s}.runs WHERE ${where.join(" AND ")}
+        `SELECT * FROM (
+           SELECT id, workflow_id, version, status, created_at, updated_at, error, started_by,
+             CASE WHEN status = 'completed' AND jsonb_typeof(output->'stoppedAt') = 'string'
+               AND journal->(output->>'stoppedAt')->>'status' = 'done'
+               AND journal->(output->>'stoppedAt')->'output'->'stopped' = 'true'::jsonb
+             THEN output->>'stoppedAt' END AS stopped_at
+           FROM ${s}.runs WHERE ${where.join(" AND ")}
+         ) r ${outer}
          ORDER BY created_at DESC, id COLLATE "C" DESC LIMIT ${p.add(f.limit ?? 50)}`,
         p.values,
       );
@@ -637,6 +669,15 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
         await applyRelated(q, patch, events, now);
         return true;
       });
+    },
+
+    async getRunByCallbackToken(token) {
+      const { rows } = await pool.query(
+        `SELECT ${RUN_COLUMNS} FROM ${s}.runs r
+         WHERE r.callback_token = $1 AND r.status = 'waiting'`,
+        [token],
+      );
+      return rows[0] ? toRun(rows[0]) : null;
     },
 
     async resumeByToken(token, resume, now, event) {

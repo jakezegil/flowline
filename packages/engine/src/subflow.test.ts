@@ -276,7 +276,17 @@ describe("sub-flows", () => {
     const parentId = await startRun(parentDoc, { email: "a@x.test" });
     await makeEngine().drain();
     expect(resumes).toEqual([{ kind: "subflow", output: { id: "early", email: "a@x.test" } }]);
-    expect((await getRun(parentId)).status).toBe("completed");
+    const parent = await getRun(parentId);
+    expect(parent.status).toBe("completed");
+    // The parent's call step is done (the child's Stop doesn't stop the parent), and only the
+    // child reads as stopped; top-level listings leave the child out.
+    expect(parent.journal.call?.status).toBe("done");
+    const runs = await storage.listRuns(TENANT, {});
+    expect(runs.find((r) => r.id === parentId)).not.toHaveProperty("stoppedAt");
+    expect(runs.find((r) => r.id !== parentId)?.stoppedAt).toBe("halt");
+    expect((await storage.listRuns(TENANT, { topLevel: true })).map((r) => r.id)).toEqual([
+      parentId,
+    ]);
   });
 
   it("resumes the parent with subflowFailed when a stopped child's output does not resolve", async () => {

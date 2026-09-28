@@ -53,3 +53,39 @@ export class EngineConflictError extends Error {
 export class EngineNotFoundError extends Error {
   override readonly name: string = "EngineNotFoundError";
 }
+
+/**
+ * `resumeRun` with `refuseHostHandled` found the run waiting on a step whose node declares
+ * `resume.hostHandled`: the host app resumes it (e.g. from its approvals page, which checks who
+ * may decide), not the generic resume route. The HTTP handler answers 409 with
+ * `code: "resume_host_handled"`.
+ */
+export class ResumeHostHandledError extends Error {
+  /** Error name, for `instanceof`-free checks across package copies. */
+  override readonly name: string = "ResumeHostHandledError";
+  /** Machine-readable code, also sent by the HTTP handler. */
+  readonly code = "resume_host_handled";
+}
+
+/**
+ * A resume was refused because the engine could not check it against the waiting step's
+ * declaration: the run's pinned version, the waiting step or its node type is missing. The check
+ * fails closed. The HTTP handler answers 409 with `code: "resume_unverifiable"`.
+ */
+export class ResumeUnverifiableError extends Error {
+  /** Error name, for `instanceof`-free checks across package copies. */
+  override readonly name: string = "ResumeUnverifiableError";
+  /** Machine-readable code, also sent by the HTTP handler. */
+  readonly code = "resume_unverifiable";
+}
+
+/**
+ * `saveWorkflow` with `create` found that the workflow already exists; nothing was saved. The
+ * HTTP handler answers 409 with `code: "workflow_exists"`.
+ */
+export class WorkflowExistsError extends Error {
+  /** Error name, for `instanceof`-free checks across package copies. */
+  override readonly name: string = "WorkflowExistsError";
+  /** Machine-readable code, also sent by the HTTP handler. */
+  readonly code = "workflow_exists";
+}

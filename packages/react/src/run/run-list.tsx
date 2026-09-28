@@ -3,24 +3,70 @@ import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useFlowkit, useFlowkitAppearance } from "../provider";
 import { themeStyle } from "../theme";
 import { errorText, useNow } from "../ui/primitives";
-import { isTerminal } from "./run-status";
+import { displayState, isTerminal, useRunStateName } from "./run-status";
+import { useWorkflowNames } from "./use-workflow-names";
 
-const FILTERS: (RunStatus | undefined)[] = [
+/** A filter tab: a run status, or "stopped" (completed by a Stop step). */
+type RunFilter = RunStatus | "stopped";
+
+const FILTERS: (RunFilter | undefined)[] = [
   undefined,
   "running",
   "waiting",
   "failed",
   "completed",
+  "stopped",
   "cancelled",
 ];
 
+/** The `listRuns` filter of a tab: "Completed" leaves out stopped runs, which have their own. */
+function filterOf(tab: RunFilter | undefined): { status?: RunStatus; stopped?: boolean } {
+  if (tab === "stopped") return { status: "completed", stopped: true };
+  if (tab === "completed") return { status: "completed", stopped: false };
+  return tab ? { status: tab } : {};
+}
+
+/**
+ * Which ends of a sideways-scrolling row have more content past them: `"start"`, `"end"`,
+ * `"both"`, or `undefined` when everything fits. Drives the edge fade on the filter chips.
+ */
+function useScrollOverflow(ref: {
+  current: HTMLElement | null;
+}): "start" | "end" | "both" | undefined {
+  const [overflow, setOverflow] = useState<"start" | "end" | "both" | undefined>();
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      // 1px slack: fractional widths leave a sub-pixel remainder at the end.
+      const start = el.scrollLeft > 1;
+      const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+      setOverflow(start && end ? "both" : start ? "start" : end ? "end" : undefined);
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(update);
+    observer?.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  }, [ref]);
+  return overflow;
+}
+
 /** Loads `listRuns` for a filter and reloads it every `pollMs` while mounted. */
-function useRunList(workflowId: string | undefined, status: RunStatus | undefined, pollMs: number) {
+function useRunList(
+  workflowId: string | undefined,
+  status: RunFilter | undefined,
+  topLevel: boolean,
+  pollMs: number,
+) {
   const { client } = useFlowkit();
   const [state, setState] = useState<{ key: string; runs?: RunSummary[]; error?: string }>({
     key: "",
   });
-  const key = `${workflowId ?? ""}|${status ?? ""}`;
+  const key = `${workflowId ?? ""}|${status ?? ""}|${topLevel}`;
   const loadRef = useRef<() => void>(() => {});
   useEffect(() => {
     let active = true;
@@ -30,7 +76,8 @@ function useRunList(workflowId: string | undefined, status: RunStatus | undefine
       client
         .listRuns({
           ...(workflowId !== undefined ? { workflowId } : {}),
-          ...(status !== undefined ? { status } : {}),
+          ...filterOf(status),
+          ...(topLevel ? { topLevel } : {}),
         })
         .then(
           (runs) => active && request === latest && setState({ key, runs }),
@@ -53,7 +100,7 @@ function useRunList(workflowId: string | undefined, status: RunStatus | undefine
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [client, workflowId, status, pollMs, key]);
+  }, [client, workflowId, status, topLevel, pollMs, key]);
   const retry = useCallback(() => {
     setState({ key: "" });
     loadRef.current();
@@ -62,16 +109,24 @@ function useRunList(workflowId: string | undefined, status: RunStatus | undefine
 }
 
 /**
- * A compact, live list of runs, newest first: status, when it started, how long it took, what
- * started it, and the workflow version. Filter tabs narrow it by status; it refreshes every
- * `pollMs` (5 seconds by default). Pair it with `<RunViewer>`. Needs a `<FlowkitProvider>`.
+ * A compact, live list of runs, newest first: status (a run a Stop step ended reads "Stopped"),
+ * when it started, how long it took, what started it, and the workflow version. Filter tabs
+ * narrow it by status ("Completed" and "Stopped" are separate); it refreshes every `pollMs` (5 seconds by default). Across all workflows
+ * it names each run's workflow and leaves out sub-flow runs (see `includeSubflowRuns`). Pair it
+ * with `<RunViewer>`. Needs a `<FlowkitProvider>`.
  *
  * @example
  * <RunList workflowId="welcome" selectedRunId={runId} onSelect={setRunId} />
  */
 export function RunList(props: {
-  /** Only this workflow's runs; all workflows (with their IDs shown) when omitted. */
+  /** Only this workflow's runs; all workflows (each row naming its workflow) when omitted. */
   workflowId?: string;
+  /**
+   * Also list runs started by a sub-flow step (`startedBy.kind === "subflow"`). By default they
+   * are listed only for a single `workflowId` (whose runs may all be sub-flow runs) and left out
+   * of the all-workflows list, where they would crowd out the runs people started.
+   */
+  includeSubflowRuns?: boolean;
   selectedRunId?: string;
   onSelect(runId: string): void;
   /** Refresh interval in ms (default 5000; 0 turns polling off). */
@@ -79,9 +134,17 @@ export function RunList(props: {
   className?: string;
 }): JSX.Element {
   const { workflowId, selectedRunId, onSelect, pollMs = 5000, className } = props;
+  const includeSubflowRuns = props.includeSubflowRuns ?? workflowId !== undefined;
   const { theme, labels } = useFlowkitAppearance();
-  const [status, setStatus] = useState<RunStatus | undefined>(undefined);
-  const { runs, error, retry } = useRunList(workflowId, status, pollMs);
+  const stateName = useRunStateName();
+  const [status, setStatus] = useState<RunFilter | undefined>(undefined);
+  const filtersRef = useRef<HTMLFieldSetElement>(null);
+  const filtersOverflow = useScrollOverflow(filtersRef);
+  const { runs, error, retry } = useRunList(workflowId, status, !includeSubflowRuns, pollMs);
+  const names = useWorkflowNames(
+    useMemo(() => runs?.map((r) => r.workflowId) ?? [], [runs]),
+    workflowId === undefined,
+  );
   const live = runs?.some((r) => !isTerminal(r.status)) ?? false;
   const now = useNow(live ? 1000 : 30_000, true);
   const style = useMemo(() => themeStyle(theme.tokens), [theme.tokens]);
@@ -108,7 +171,7 @@ export function RunList(props: {
   } else if (runs.length === 0) {
     body = (
       <div className="fk-runs__state">
-        <p>{status ? labels.noRunsWithStatus(labels.runState[status]) : labels.noRuns}</p>
+        <p>{status ? labels.noRunsWithStatus(stateName(status)) : labels.noRuns}</p>
       </div>
     );
   } else {
@@ -116,25 +179,28 @@ export function RunList(props: {
       <ul className="fk-runs__rows" aria-label={labels.runs}>
         {runs.map((r) => {
           const end = isTerminal(r.status) ? r.updatedAt : now;
+          const state = displayState(r);
           return (
             <li key={r.id}>
               <button
                 type="button"
                 className="fk-runs__row"
-                data-status={r.status}
+                data-status={state}
                 aria-current={r.id === selectedRunId ? "true" : undefined}
                 onClick={() => onSelect(r.id)}
               >
                 <span className="fk-runs__dot" aria-hidden />
                 <span className="fk-runs__main">
-                  <span className="fk-runs__status">{labels.runState[r.status]}</span>
+                  <span className="fk-runs__status">{stateName(state)}</span>
                   <span className="fk-runs__time" title={labels.dateTime(r.createdAt)}>
                     {labels.relativeTime(r.createdAt - now)}
                   </span>
                 </span>
                 <span className="fk-runs__sub">
                   <span className="fk-runs__origin">
-                    {workflowId === undefined ? `${r.workflowId} · ` : ""}
+                    {workflowId === undefined
+                      ? `${names.get(r.workflowId) ?? r.workflowId} · `
+                      : ""}
                     {labels.origin(r.startedBy)}
                   </span>
                   <span className="fk-runs__nums">
@@ -158,7 +224,12 @@ export function RunList(props: {
       data-fk-theme={theme.colorMode ?? "system"}
       style={style}
     >
-      <fieldset className="fk-runs__filters" aria-label={labels.filterRuns}>
+      <fieldset
+        ref={filtersRef}
+        className="fk-runs__filters"
+        aria-label={labels.filterRuns}
+        {...(filtersOverflow ? { "data-overflow": filtersOverflow } : {})}
+      >
         {FILTERS.map((f) => (
           <button
             key={f ?? "all"}
@@ -168,7 +239,7 @@ export function RunList(props: {
             {...(f ? { "data-status": f } : {})}
             onClick={() => setStatus(f)}
           >
-            {f ? labels.runState[f] : labels.allRuns}
+            {f ? stateName(f) : labels.allRuns}
           </button>
         ))}
       </fieldset>

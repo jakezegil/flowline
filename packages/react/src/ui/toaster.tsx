@@ -17,7 +17,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useFlowkitAppearance } from "../provider";
+import { type FlowkitNotice, type NotifyHandler, useFlowkitAppearance } from "../provider";
 
 /** What a toast looks like: neutral, a success, or an error. */
 export type ToastTone = "neutral" | "success" | "danger";
@@ -45,20 +45,51 @@ export function useToast(): (t: ToastInput) => void {
   return show;
 }
 
-/** Holds the toast state and renders the toast region after `children`. */
-export function ToasterProvider({ children }: { children: ReactNode }): JSX.Element {
+/**
+ * Hands `notice` to the provider's `onNotify`, if any. `true` when the host took it (so Flowkit
+ * shows nothing); `false` when Flowkit should show its own toast.
+ */
+export function notifyHost(onNotify: NotifyHandler | undefined, notice: FlowkitNotice): boolean {
+  return onNotify !== undefined && onNotify(notice) !== false;
+}
+
+/**
+ * Holds the toast state and renders the toast region after `children`. Notices go to the
+ * provider's `onNotify` first; only those it leaves (none, or it returns `false`) show here.
+ */
+export function ToasterProvider({
+  children,
+  source = "editor",
+}: {
+  children: ReactNode;
+  /** What `onNotify` is told raised the notices. */
+  source?: FlowkitNotice["source"];
+}): JSX.Element {
+  const { onNotify } = useFlowkitAppearance();
+  const notify = useRef(onNotify);
+  notify.current = onNotify;
   const [toast, setToast] = useState<ShownToast | null>(null);
   const next = useRef(1);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const show = useCallback((t: ToastInput) => {
-    const id = next.current++;
-    clearTimeout(timer.current);
-    setToast({ ...t, id });
-    timer.current = setTimeout(
-      () => setToast((cur) => (cur?.id === id ? null : cur)),
-      t.tone === "danger" ? TOAST_MS * 2 : TOAST_MS,
-    );
-  }, []);
+  const show = useCallback(
+    (t: ToastInput) => {
+      const notice: FlowkitNotice = {
+        message: t.message,
+        tone: t.tone ?? "neutral",
+        source,
+        ...(t.action ? { action: t.action } : {}),
+      };
+      if (notifyHost(notify.current, notice)) return;
+      const id = next.current++;
+      clearTimeout(timer.current);
+      setToast({ ...t, id });
+      timer.current = setTimeout(
+        () => setToast((cur) => (cur?.id === id ? null : cur)),
+        t.tone === "danger" ? TOAST_MS * 2 : TOAST_MS,
+      );
+    },
+    [source],
+  );
   useEffect(() => () => clearTimeout(timer.current), []);
   const value = useMemo(() => show, [show]);
   return (

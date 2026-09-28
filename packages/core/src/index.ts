@@ -117,6 +117,7 @@ export type {
   OutputSpec,
   PluginManifest,
   RefExpr,
+  ResumeSpec,
   Step,
   TplExpr,
   TriggerConfig,
@@ -127,4 +128,4 @@ export type {
   WorkflowDoc,
 } from "./types";
 export { fields, secret, sensitive, UI_META_KEY, ui } from "./ui";
-export { hasErrors, type Issue, type IssueCode, validateWorkflow } from "./validate";
+export { checkJson, hasErrors, type Issue, type IssueCode, validateWorkflow } from "./validate";
