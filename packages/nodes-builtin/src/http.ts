@@ -147,7 +147,10 @@ export const httpRequest = defineNode({
       .optional(),
     query: ui(stringRecord(), { label: "Query parameters" }).optional(),
     bodyType: ui(z.enum(["none", "json", "form", "text"]), { label: "Body type" }).default("none"),
-    body: ui(z.unknown(), { label: "Body" }).optional(),
+    body: ui(z.unknown(), {
+      label: "Body",
+      showIf: { field: "bodyType", notEquals: "none" },
+    }).optional(),
     auth: ui(authSchema, { label: "Authentication" }).default({ type: "none" }),
     timeoutMs: ui(z.number().int().positive(), {
       label: "Timeout (ms)",
