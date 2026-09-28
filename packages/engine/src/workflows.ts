@@ -123,11 +123,15 @@ export function createWorkflows(core: EngineCore): Workflows {
     for (const v of await storage.listPublished({ tenantId })) {
       const t = triggers.get(v.doc.trigger.type);
       if (t?.kind !== "subflow") continue;
-      const decls = configValueAt(v.doc.trigger.config, "output");
+      const config = dropHiddenFields(
+        v.doc.trigger.config,
+        t.config,
+      ) as typeof v.doc.trigger.config;
+      const decls = configValueAt(config, "output");
       out.push({
         id: v.workflowId,
         name: v.doc.name,
-        input: payloadSchemaFor(t, v.doc.trigger),
+        input: payloadSchemaFor(t, { ...v.doc.trigger, config }),
         output: Array.isArray(decls) ? fieldsToJsonSchema(decls as FieldDecl[]) : {},
       });
     }

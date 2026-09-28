@@ -14,7 +14,7 @@ import { CronExpressionParser } from "cron-parser";
 import { sha256Hex } from "./context";
 import type { EngineCore } from "./engine";
 import { FlowkitValidationError } from "./errors";
-import { checkTriggerPayload } from "./subflow";
+import { checkTriggerPayload, visibleTriggerConfig } from "./subflow";
 import { errorMessage } from "./util";
 
 /** How long dedupe keys are recorded. Run ids derived from a key keep deduplicating after it. */
@@ -39,9 +39,12 @@ function payloadIssue(message: string): Issue {
   return { code: "config.invalid", severity: "error", message };
 }
 
-/** A literal string in trigger config, or `undefined`. */
-function configString(v: WorkflowVersion, key: string): string | undefined {
-  const value = v.doc.trigger.config[key];
+/** A literal string in (visible) trigger config, or `undefined`. */
+function configString(
+  config: WorkflowVersion["doc"]["trigger"]["config"],
+  key: string,
+): string | undefined {
+  const value = config[key];
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
@@ -153,7 +156,7 @@ export function createTriggers(core: EngineCore): Triggers {
   const triggerOf = (v: WorkflowVersion) => {
     const def = registry.getTrigger(v.doc.trigger.type);
     if (!def) return undefined;
-    const parsed = def.config.safeParse(v.doc.trigger.config);
+    const parsed = def.config.safeParse(visibleTriggerConfig(registry, v.doc));
     if (!parsed.success) {
       core.logger?.warn("skipping workflow with invalid trigger config", {
         tenantId: v.tenantId,
@@ -171,7 +174,7 @@ export function createTriggers(core: EngineCore): Triggers {
       for (const v of await storage.listPublished({ tenantId })) {
         const def = registry.getTrigger(v.doc.trigger.type);
         if (def?.kind !== "event") continue;
-        if ((def.event ?? v.doc.trigger.config.event) !== event) continue;
+        if ((def.event ?? visibleTriggerConfig(registry, v.doc).event) !== event) continue;
         const t = triggerOf(v);
         if (!t) continue;
         // Validation throws before any run is created.
@@ -256,11 +259,12 @@ export function createTriggers(core: EngineCore): Triggers {
       if (!v || registry.getTrigger(v.doc.trigger.type)?.kind !== "webhook") {
         return { status: "notFound" };
       }
-      const slug = configString(v, "slug");
+      const visible = visibleTriggerConfig(registry, v.doc);
+      const slug = configString(visible, "slug");
       // A wrong slug looks exactly like a missing workflow.
       if (slug === undefined || !safeEqual(slug, d.slug)) return { status: "notFound" };
 
-      const secretName = configString(v, "secret");
+      const secretName = configString(visible, "secret");
       if (secretName !== undefined) {
         const key = await core.opts.secrets?.get(d.tenantId, secretName);
         const match = /^sha256=([0-9a-f]{64})$/i.exec(d.headers.get("x-flowkit-signature") ?? "");
@@ -307,7 +311,7 @@ export function createTriggers(core: EngineCore): Triggers {
       // A throwing filter or dedupeKey propagates (500), so the sender retries the delivery.
       if (t.def.filter && !t.def.filter({ config: t.config, payload }))
         return { status: "skipped" };
-      const dedupeHeader = configString(v, "dedupeHeader");
+      const dedupeHeader = configString(visible, "dedupeHeader");
       const dedupeValue =
         (dedupeHeader === undefined ? null : d.headers.get(dedupeHeader)) ||
         t.def.dedupeKey?.({ config: t.config, payload });
