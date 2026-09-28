@@ -36,8 +36,13 @@ export type PickerExit = "escape" | "tab" | "shiftTab" | "up";
 /** How a row was picked: a keyboard pick keeps focus in the picker for the next one. */
 export type PickVia = "keyboard" | "pointer";
 
-/** Most rows the picker renders at once; a search with more says so. */
+/** Most search results the picker renders at once; a search with more says so. */
 const MAX_ROWS = 200;
+/**
+ * Most rows rendered while browsing. Browsing only shows what is expanded (lists show just `[0]`),
+ * so this is a safety net for a sample object with thousands of keys, not a normal limit.
+ */
+const MAX_BROWSE_ROWS = 2000;
 
 /** @internal The picker with the hooks a reference input needs to host it in a popover. */
 export interface DataPickerViewProps {
@@ -164,7 +169,9 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => initialExpanded(scope, samples));
   const allRows = useRows(scope, samples, expanded, query, filterType);
-  const rows = allRows.length > MAX_ROWS ? allRows.slice(0, MAX_ROWS) : allRows;
+  const searching = query.trim() !== "";
+  const cap = searching ? MAX_ROWS : MAX_BROWSE_ROWS;
+  const rows = allRows.length > cap ? allRows.slice(0, cap) : allRows;
   const [activeId, setActiveId] = useState<string | null>(null);
   const baseId = useId();
   const treeId = `${baseId}tree`;
@@ -336,7 +343,9 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
       )}
       {allRows.length > rows.length && (
         <p className="fk-dp__more" role="status">
-          {labels.moreMatches(rows.length, allRows.length)}
+          {searching
+            ? labels.moreMatches(rows.length, allRows.length)
+            : labels.moreRows(rows.length, allRows.length)}
         </p>
       )}
       <span id={keysId} className="fk-sr-only">
