@@ -588,6 +588,61 @@ describe("RefTextInput", () => {
           rects?.mockRestore();
         }
       });
+
+      test(`${mode}: between ref fields, Tab and Shift+Tab reach the neighbouring editors`, async () => {
+        const rects = mode === "docked" ? docked() : undefined;
+        // Chrome reports tabIndex -1 for CodeMirror's contenteditable (no tabindex attribute).
+        const tabIndex = vi
+          .spyOn(HTMLElement.prototype, "tabIndex", "get")
+          .mockImplementation(function (this: HTMLElement) {
+            if (this.classList.contains("cm-content")) return -1;
+            const attr = this.getAttribute("tabindex");
+            if (attr !== null) return Number(attr);
+            return /^(INPUT|BUTTON|SELECT|TEXTAREA|A)$/.test(this.tagName) ? 0 : -1;
+          });
+        const field = (label: string) => (
+          <RefTextInput
+            ariaLabel={label}
+            scope={scope}
+            samples={samples}
+            value={undefined}
+            onChange={() => {}}
+          />
+        );
+        try {
+          render(
+            <div className="fk-app">
+              <div className="fk-panel">
+                {field("To")}
+                {field("Subject")}
+                {/* A Radix focus guard, as a portaled popover adds: never a destination. */}
+                <span data-radix-focus-guard="" tabIndex={0} />
+                {field("Body")}
+              </div>
+            </div>,
+          );
+          const content = (label: string) =>
+            document.querySelector(`.cm-content[aria-label="${label}"]`) as HTMLElement;
+          const openSubject = async () => {
+            act(() => {
+              fireEvent.focus(content("Subject"));
+            });
+            const search = await screen.findByRole("combobox", { name: "Search data" });
+            search.focus();
+            return search;
+          };
+          fireEvent.keyDown(await openSubject(), { key: "Tab" });
+          expect(document.activeElement).toBe(content("Body"));
+          act(() => {
+            fireEvent.blur(content("Body"), { relatedTarget: null });
+          });
+          fireEvent.keyDown(await openSubject(), { key: "Tab", shiftKey: true });
+          expect(document.activeElement).toBe(content("To"));
+        } finally {
+          tabIndex.mockRestore();
+          rects?.mockRestore();
+        }
+      });
     }
   });
 

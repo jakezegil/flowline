@@ -74,22 +74,36 @@ const TABBABLE =
   'a[href], button, input, select, textarea, [tabindex], [contenteditable="true"], [contenteditable=""]';
 
 /**
+ * Whether `el` (matched by {@link TABBABLE}) is in the Tab order. An explicit `tabindex` decides;
+ * otherwise native controls and contenteditable elements are, even where the browser reports
+ * `tabIndex` -1 for a contenteditable without the attribute (Chrome does for CodeMirror's
+ * `.cm-content`, the editor of every other ref field).
+ */
+function inTabOrder(el: HTMLElement): boolean {
+  const attr = el.getAttribute("tabindex");
+  if (attr !== null) return Number(attr) >= 0;
+  return el.isContentEditable || el.tabIndex >= 0 || el.getAttribute("contenteditable") !== null;
+}
+
+/**
  * The control Tab (`dir` 1) or Shift+Tab (`dir` -1) reaches from `root` when focus leaves it: the
  * next or previous element in document order that is in the Tab order and outside `root` and any
- * data picker.
+ * data picker. Radix's focus guards (the invisible Tab stops around a portaled popover) don't
+ * count, since focusing one sends focus nowhere useful.
  */
 function tabbableBeside(root: Element, dir: 1 | -1): HTMLElement | null {
   const all = Array.from(root.ownerDocument.querySelectorAll<HTMLElement>(TABBABLE)).filter(
     (el) =>
-      el.tabIndex >= 0 &&
+      inTabOrder(el) &&
       !(el as HTMLButtonElement).disabled &&
+      !el.hasAttribute("data-radix-focus-guard") &&
       !el.closest("[hidden], [inert], .fk-dp, .fk-ref-popover") &&
-      (!root.contains(el) || el === root),
+      !root.contains(el),
   );
   const after = (el: Element) =>
     (root.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
   if (dir === 1) return all.find((el) => after(el)) ?? null;
-  return all.filter((el) => !after(el) && el !== root).at(-1) ?? null;
+  return all.filter((el) => !after(el)).at(-1) ?? null;
 }
 
 /**
