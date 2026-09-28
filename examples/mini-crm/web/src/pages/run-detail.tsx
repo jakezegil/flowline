@@ -6,7 +6,7 @@
  */
 import { RunViewer, useRun } from "@flowkit/react";
 import { Activity, BadgeCheck, Check, X } from "lucide-react";
-import { type JSX, useEffect, useState } from "react";
+import { type JSX, useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { type Approval, api, useQuery, useUsers } from "../api";
 import { useDecideApproval } from "../decide";
@@ -88,15 +88,32 @@ function usePendingApproval(runId: string): {
   return { approval, markDecided: () => setDecided(approval?.id ?? null) };
 }
 
+/**
+ * A user's name by ID for the run viewer (who cancelled a run): a CRM user's name, "Demo user" for the
+ * demo's signed-in user, or `undefined` (the viewer then shows the ID).
+ */
+export function useUserName(): (userId: string) => string | undefined {
+  const { users } = useUsers();
+  const demo = useQuery("all", api.demo);
+  const me = demo.data?.userId;
+  return useCallback(
+    (userId: string) =>
+      users?.find((u) => u.id === userId)?.name ?? (userId === me ? "Demo user" : undefined),
+    [users, me],
+  );
+}
+
 function Run(props: { runId: string; query: string }): JSX.Element {
   const navigate = useNavigate();
   const { approval, markDecided } = usePendingApproval(props.runId);
+  const userName = useUserName();
   return (
     <div className="run-detail">
       {approval && <ApprovalBar key={approval.id} approval={approval} onDecided={markDecided} />}
       <RunViewer
         runId={props.runId}
         className="run-detail__viewer"
+        userName={userName}
         onRetried={(next) => navigate(`/runs/${next}${props.query}`)}
       />
     </div>

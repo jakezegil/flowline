@@ -244,7 +244,7 @@ export function DealsPage(): JSX.Element {
                     <td>
                       {run ? (
                         <span className="automation">
-                          <RunBadge runId={run.id} status={run.status} />
+                          <RunBadge runId={run.id} status={run.status} stoppedAt={run.stoppedAt} />
                           <span className="automation__wf">{workflowName(run.workflowId)}</span>
                         </span>
                       ) : (

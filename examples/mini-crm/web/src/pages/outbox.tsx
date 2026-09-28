@@ -8,7 +8,35 @@ import { Activity, Inbox } from "lucide-react";
 import { type JSX, useState } from "react";
 import { Link } from "react-router";
 import { api, type OutboxMessage, useQuery, useWorkflowName } from "../api";
-import { Avatar, EmptyState, ErrorState, fullTime, PageHeader, timeAgo, useNow } from "../ui";
+import {
+  Avatar,
+  Badge,
+  EmptyState,
+  ErrorState,
+  fullTime,
+  PageHeader,
+  timeAgo,
+  useNow,
+} from "../ui";
+
+/**
+ * Whether `to` is one plausible email address. The outbox records whatever a step sent, so a
+ * mapping that glued two values together (`"ava@acme.testava@acme.test"`) shows up here.
+ */
+export function isValidAddress(to: string): boolean {
+  return /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>.]{2,}$/.test(to.trim());
+}
+
+const INVALID_TITLE =
+  "Not a valid email address: a real mail server would reject it. Check the step's To mapping.";
+
+function InvalidAddress(): JSX.Element {
+  return (
+    <Badge tone="warning" title={INVALID_TITLE}>
+      Invalid address
+    </Badge>
+  );
+}
 
 /** Test steps run outside any run: their run IDs start with `test_` and have no run to open. */
 const isTestRun = (m: OutboxMessage) => m.runId?.startsWith("test_") ?? false;
@@ -82,6 +110,11 @@ export function OutboxPage(): JSX.Element {
                 >
                   <span className="mail__row">
                     <span className="mail__to">{m.to}</span>
+                    {!isValidAddress(m.to) && (
+                      <span className="mail__flag">
+                        <InvalidAddress />
+                      </span>
+                    )}
                     <span className="mail__time" title={fullTime(m.sentAt)}>
                       {timeAgo(m.sentAt, now)}
                     </span>
@@ -102,6 +135,12 @@ export function OutboxPage(): JSX.Element {
                     <span>
                       <span className="muted">To </span>
                       {selected.to}
+                      {!isValidAddress(selected.to) && (
+                        <>
+                          {" "}
+                          <InvalidAddress />
+                        </>
+                      )}
                     </span>
                     <span className="muted">Sent {fullTime(selected.sentAt)}</span>
                   </div>

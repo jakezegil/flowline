@@ -1,6 +1,7 @@
 /**
  * Workflows: every workflow with its trigger and published version, and a "New workflow" dialog
- * that picks a name and a trigger, saves the new workflow as a draft and opens the editor.
+ * that picks a workflow or a sub-flow, a name and a trigger, saves it as a draft and opens the
+ * editor.
  *
  * @module
  */
@@ -24,6 +25,29 @@ import {
 } from "../ui";
 
 type TriggerDef = Manifest["triggers"][number];
+
+/** What the New workflow dialog creates: a workflow that starts on its own, or a sub-flow. */
+export type WorkflowKind = "workflow" | "subflow";
+
+/** The triggers a new workflow of `kind` can start from, in manifest order. */
+export function triggersFor(manifest: Manifest | undefined, kind: WorkflowKind): TriggerDef[] {
+  return (manifest?.triggers ?? []).filter((t) => (t.kind === "subflow") === (kind === "subflow"));
+}
+
+const KINDS: { kind: WorkflowKind; name: string; desc: string; icon: string }[] = [
+  {
+    kind: "workflow",
+    name: "Workflow",
+    desc: "Runs on its own when something happens: a CRM change, a webhook, a schedule or a click.",
+    icon: "workflow",
+  },
+  {
+    kind: "subflow",
+    name: "Sub-flow",
+    desc: 'A reusable piece, like "Get or create contact", that other workflows run with a Run sub-flow step. It takes inputs and returns an output.',
+    icon: "log-in",
+  },
+];
 
 /** Workflow ID from a name: `"Big deal alert!"` → `"big-deal-alert"`. */
 export function slugify(name: string): string {
@@ -59,7 +83,8 @@ function TriggerLabel(props: { type: string; manifest: Manifest | undefined }): 
   );
 }
 
-function NewWorkflowDialog(props: {
+/** The New workflow dialog: a workflow or a sub-flow, its name and ID, and its trigger. */
+export function NewWorkflowDialog(props: {
   open: boolean;
   onClose(): void;
   manifest: Manifest | undefined;
@@ -69,7 +94,8 @@ function NewWorkflowDialog(props: {
   const { resolveIcon } = useFlowkit();
   const [name, setName] = useState("");
   const [idEdited, setIdEdited] = useState<string | null>(null);
-  const [trigger, setTrigger] = useState("crm.dealUpdated");
+  const [kind, setKind] = useState<WorkflowKind>("workflow");
+  const [picked, setPicked] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const id = idEdited ?? slugify(name);
@@ -80,7 +106,10 @@ function NewWorkflowDialog(props: {
       : props.taken.has(id)
         ? "A workflow with this ID exists."
         : undefined;
-  const triggers = (props.manifest?.triggers ?? []).filter((t) => t.kind !== "subflow");
+  const triggers = triggersFor(props.manifest, kind);
+  // The first trigger of the kind until one is picked (and again after switching kinds).
+  const trigger = triggers.find((t) => t.type === picked)?.type ?? triggers[0]?.type;
+  const noun = kind === "subflow" ? "sub-flow" : "workflow";
 
   // The workflow is saved as a draft before the editor opens, so it exists even if nobody
   // presses Save there.
@@ -90,7 +119,7 @@ function NewWorkflowDialog(props: {
     if (!def || !id || idError || saving) return;
     const doc: WorkflowDoc = {
       id,
-      name: name.trim() || "Untitled workflow",
+      name: name.trim() || `Untitled ${noun}`,
       trigger: { type: def.type, config: defaultTriggerConfig(def) },
       steps: [],
     };
@@ -110,11 +139,42 @@ function NewWorkflowDialog(props: {
     <Dialog
       open={props.open}
       onClose={props.onClose}
-      title="New workflow"
-      description="Pick what starts it. You add the steps in the editor."
+      title={kind === "subflow" ? "New sub-flow" : "New workflow"}
+      description={
+        kind === "subflow"
+          ? "Name it here. In the editor you declare its inputs and output and add its steps."
+          : "Pick what starts it. You add the steps in the editor."
+      }
       width={560}
     >
       <form className="form" onSubmit={submit}>
+        <fieldset className="field">
+          <legend className="field__label">Create</legend>
+          <div className="choice-grid">
+            {KINDS.map((k) => {
+              const Icon = resolveIcon(k.icon);
+              return (
+                <label key={k.kind} className="choice" data-checked={k.kind === kind || undefined}>
+                  <input
+                    type="radio"
+                    name="kind"
+                    value={k.kind}
+                    checked={k.kind === kind}
+                    onChange={() => setKind(k.kind)}
+                    className="sr-only"
+                  />
+                  <span className="choice__icon" aria-hidden>
+                    <Icon size={16} />
+                  </span>
+                  <span className="choice__text">
+                    <span className="choice__name">{k.name}</span>
+                    <span className="choice__desc">{k.desc}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
         <div className="form__row form__row--wide">
           <label className="field">
             <span className="field__label">Name</span>
@@ -122,7 +182,7 @@ function NewWorkflowDialog(props: {
               className="input"
               required
               autoComplete="off"
-              placeholder="Big deal alert"
+              placeholder={kind === "subflow" ? "Get or create contact" : "Big deal alert"}
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
@@ -133,7 +193,7 @@ function NewWorkflowDialog(props: {
               className="input input--mono"
               required
               autoComplete="off"
-              placeholder="big-deal-alert"
+              placeholder={kind === "subflow" ? "get-or-create-contact" : "big-deal-alert"}
               value={id}
               aria-invalid={idError ? true : undefined}
               onChange={(e) => setIdEdited(e.target.value)}
@@ -145,40 +205,44 @@ function NewWorkflowDialog(props: {
             {idError}
           </p>
         )}
-        <fieldset className="field">
-          <legend className="field__label">Starts when</legend>
-          <div className="choice-grid">
-            {triggers.map((t) => {
-              const Icon = resolveIcon(t.icon);
-              return (
-                <label
-                  key={t.type}
-                  className="choice"
-                  data-checked={t.type === trigger || undefined}
-                >
-                  <input
-                    type="radio"
-                    name="trigger"
-                    value={t.type}
-                    checked={t.type === trigger}
-                    onChange={() => setTrigger(t.type)}
-                    className="sr-only"
-                  />
-                  <span className="choice__icon" aria-hidden>
-                    <Icon size={16} />
-                  </span>
-                  <span className="choice__text">
-                    <span className="choice__name">{t.name}</span>
-                    {t.description && <span className="choice__desc">{t.description}</span>}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-        </fieldset>
+        {/* A sub-flow starts when another workflow runs it: with one sub-flow trigger there's
+            nothing to pick. */}
+        {(kind === "workflow" || triggers.length > 1) && (
+          <fieldset className="field">
+            <legend className="field__label">Starts when</legend>
+            <div className="choice-grid">
+              {triggers.map((t) => {
+                const Icon = resolveIcon(t.icon);
+                return (
+                  <label
+                    key={t.type}
+                    className="choice"
+                    data-checked={t.type === trigger || undefined}
+                  >
+                    <input
+                      type="radio"
+                      name="trigger"
+                      value={t.type}
+                      checked={t.type === trigger}
+                      onChange={() => setPicked(t.type)}
+                      className="sr-only"
+                    />
+                    <span className="choice__icon" aria-hidden>
+                      <Icon size={16} />
+                    </span>
+                    <span className="choice__text">
+                      <span className="choice__name">{t.name}</span>
+                      {t.description && <span className="choice__desc">{t.description}</span>}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        )}
         {saveError && (
           <p className="form__error" role="alert">
-            Couldn't create the workflow: {saveError}
+            Couldn't create the {noun}: {saveError}
           </p>
         )}
         <div className="dialog__foot">

@@ -38,7 +38,19 @@ export class ApiError extends Error {
   }
 }
 
-const UNREACHABLE = "Can't reach the CRM server. Is it running on port 8787?";
+/** Where the dev server proxies `/api` (set by web/vite.config.ts; a build serves it itself). */
+const API_TARGET: string | undefined = import.meta.env.DEV
+  ? import.meta.env.VITE_CRM_API_TARGET
+  : undefined;
+
+/** The message for a server that doesn't answer, naming the address the app expects it at. */
+export function unreachableMessage(target: string | undefined = API_TARGET): string {
+  return target
+    ? `Can't reach the CRM server. Is it running at ${target}?`
+    : "Can't reach the CRM server. Is it running?";
+}
+
+const UNREACHABLE = unreachableMessage();
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method, headers: { accept: "application/json" } };
@@ -125,7 +137,8 @@ export interface Query<T> {
 }
 
 /**
- * Fetch `load()` on mount, when `topic` is invalidated, and every `pollMs` if given. Keeps the
+ * Fetch `load()` on mount, when `topic` is invalidated, when the window regains focus, and every
+ * `pollMs` if given. Keeps the
  * last data while refetching, so a poll never flashes a loading state.
  */
 export function useQuery<T>(topic: Topic, load: () => Promise<T>, pollMs?: number): Query<T> {
@@ -157,7 +170,10 @@ export function useQuery<T>(topic: Topic, load: () => Promise<T>, pollMs?: numbe
     };
     listeners.add(onChange);
     const timer = pollMs ? setInterval(reload, pollMs) : undefined;
+    // Coming back to the tab (another tab may have changed things) refetches right away.
+    window.addEventListener("focus", reload);
     return () => {
+      window.removeEventListener("focus", reload);
       listeners.delete(onChange);
       if (timer) clearInterval(timer);
       seq.current++;

@@ -151,6 +151,49 @@ test("rejecting the approval stops the run and shows the stopped banner", async 
   await expect(list.locator("[aria-current=true]")).toContainText("Stopped");
 });
 
+test("cancelling a waiting run shows who cancelled it, and the run list and Approvals badge follow at once", async ({
+  page,
+  request,
+}) => {
+  const runId = await sendEnterpriseLead(request);
+  await expectWaitingForApproval(page, runId);
+  const nav = page.getByRole("navigation", { name: "Main" });
+  const approvalsLink = nav.getByRole("link", { name: /^Approvals/ });
+  await expect(approvalsLink).toContainText("1 pending");
+
+  // Show only waiting runs: this one is listed.
+  const list = page.getByRole("complementary", { name: "Runs" });
+  await list
+    .getByRole("group", { name: "Filter runs by status" })
+    .getByRole("button", { name: "Waiting" })
+    .click();
+  const row = list.locator("[aria-current=true]");
+  await expect(row).toContainText("Waiting");
+  // Rows say what the run is about: the lead's email.
+  await expect(row).toContainText(ENTERPRISE_LEAD.email);
+
+  const run = runRegion(page);
+  await run.getByRole("button", { name: "Cancel run" }).click();
+  await page
+    .getByRole("dialog", { name: "Cancel this run?" })
+    .getByRole("button", { name: "Cancel run" })
+    .click();
+
+  // M15: a banner like the stopped one, naming the step, who cancelled and when.
+  const banner = run.getByRole("status").filter({ hasText: "Cancelled while waiting at" });
+  await expect(banner).toContainText("Cancelled while waiting at Manager approval");
+  await expect(banner).toContainText(/By Demo user · (just now|\d+ sec)/);
+  await expect(run.getByRole("region", { name: "Approval" })).toHaveCount(0);
+
+  // M16: the run leaves the Waiting list and the badge drops without a reload, and sooner than
+  // the list's (3 s) and the badge's (5 s) polls would get to it.
+  await expect(list.getByRole("listitem").filter({ hasText: ENTERPRISE_LEAD.email })).toHaveCount(
+    0,
+    { timeout: 1500 },
+  );
+  await expect(approvalsLink).not.toContainText("pending", { timeout: 1500 });
+});
+
 test("the generic resume endpoint refuses a host-handled approval with 409", async ({
   page,
   request,
