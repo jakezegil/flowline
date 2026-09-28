@@ -70,6 +70,28 @@ const DOCK_ROOM = 356;
 /** The rectangle the picker docks to: the panel's left edge, level with the field. */
 type DockRect = () => DOMRect;
 
+const TABBABLE =
+  'a[href], button, input, select, textarea, [tabindex], [contenteditable="true"], [contenteditable=""]';
+
+/**
+ * The control Tab (`dir` 1) or Shift+Tab (`dir` -1) reaches from `root` when focus leaves it: the
+ * next or previous element in document order that is in the Tab order and outside `root` and any
+ * data picker.
+ */
+function tabbableBeside(root: Element, dir: 1 | -1): HTMLElement | null {
+  const all = Array.from(root.ownerDocument.querySelectorAll<HTMLElement>(TABBABLE)).filter(
+    (el) =>
+      el.tabIndex >= 0 &&
+      !(el as HTMLButtonElement).disabled &&
+      !el.closest("[hidden], [inert], .fk-dp, .fk-ref-popover") &&
+      (!root.contains(el) || el === root),
+  );
+  const after = (el: Element) =>
+    (root.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  if (dir === 1) return all.find((el) => after(el)) ?? null;
+  return all.filter((el) => !after(el) && el !== root).at(-1) ?? null;
+}
+
 /**
  * Where to dock the picker of the field `field`: beside the config panel holding it, when the
  * panel has {@link DOCK_ROOM} to its left inside the app (not a bottom sheet or a narrow app).
@@ -506,6 +528,15 @@ export function RefTextInput(props: {
   };
 
   const onExit = (reason: PickerExit) => {
+    if (reason === "tab" || reason === "shiftTab") {
+      // Tab leaves the field for the next (or previous) control, as it would from the field.
+      const root = fieldRef.current?.closest(".fk-ref-field") ?? null;
+      const target = root ? tabbableBeside(root, reason === "tab" ? 1 : -1) : null;
+      setOpen(false);
+      if (target) target.focus();
+      else focusEditor();
+      return;
+    }
     if (reason !== "up") setOpen(false);
     focusEditor();
   };

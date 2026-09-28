@@ -537,6 +537,60 @@ describe("RefTextInput", () => {
     });
   });
 
+  describe("I4: Tab moves on from a picker field, never back into it", () => {
+    function form() {
+      render(
+        <div className="fk-app">
+          <div className="fk-panel">
+            <input aria-label="Before" />
+            <RefTextInput
+              ariaLabel="Subject"
+              scope={scope}
+              samples={samples}
+              value={undefined}
+              onChange={() => {}}
+            />
+            <input aria-label="Timeout" />
+          </div>
+        </div>,
+      );
+    }
+    const docked = () =>
+      vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+        this: Element,
+      ) {
+        if (this.classList.contains("fk-panel")) return DOMRect.fromRect({ x: 800, width: 400 });
+        if (this.classList.contains("fk-app")) return DOMRect.fromRect({ x: 0, width: 1200 });
+        return DOMRect.fromRect({ x: 816, y: 200, width: 368, height: 32 });
+      });
+
+    for (const mode of ["inline", "docked"] as const) {
+      test(`${mode}: the search box isn't a Tab stop; Tab and Shift+Tab in it leave the field`, async () => {
+        const rects = mode === "docked" ? docked() : undefined;
+        try {
+          form();
+          focus();
+          const search = await screen.findByRole("combobox", { name: "Search data" });
+          expect(search.tabIndex).toBe(-1);
+          expect(Boolean(search.closest(".fk-ref-inline"))).toBe(mode === "inline");
+          search.focus();
+          fireEvent.keyDown(search, { key: "Tab" });
+          expect(document.activeElement).toBe(screen.getByLabelText("Timeout"));
+          expect(screen.queryByRole("tree")).toBeNull();
+
+          focus();
+          const again = await screen.findByRole("combobox", { name: "Search data" });
+          again.focus();
+          fireEvent.keyDown(again, { key: "Tab", shiftKey: true });
+          expect(document.activeElement).toBe(screen.getByLabelText("Before"));
+          expect(screen.queryByRole("tree")).toBeNull();
+        } finally {
+          rects?.mockRestore();
+        }
+      });
+    }
+  });
+
   describe("placement (H1): the picker never covers the next field", () => {
     function form() {
       render(

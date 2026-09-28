@@ -300,6 +300,8 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
           ref={searchRef}
           type="text"
           role="combobox"
+          // Hosted in a field, the box is reached with ArrowDown, not as a Tab stop of its own.
+          {...(onExit ? { tabIndex: -1 } : {})}
           aria-expanded="true"
           aria-controls={treeId}
           aria-autocomplete="list"
