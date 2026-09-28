@@ -616,6 +616,7 @@ describe("RefTextInput", () => {
                 {field("To")}
                 {field("Subject")}
                 {/* A Radix focus guard, as a portaled popover adds: never a destination. */}
+                {/* biome-ignore lint/a11y/noNoninteractiveTabindex: Radix's guards are tabbable spans */}
                 <span data-radix-focus-guard="" tabIndex={0} />
                 {field("Body")}
               </div>
