@@ -27,6 +27,7 @@ export const transform = defineNode({
   description: "Compute values with a JavaScript snippet.",
   icon: "code",
   category: "Data",
+  keywords: ["code", "javascript", "script", "map", "compute"],
   summary: "Transform data",
   input: z.object({
     code: ui(z.string(), {

@@ -1,17 +1,20 @@
 import { describe, expect, test } from "vitest";
 import {
   allStepIds,
+  codeBlocksRename,
   duplicateStep,
   FlowkitTreeError,
   findStep,
   generateStepId,
   insertStep,
+  isGeneratedStepId,
   moveStep,
   removeStep,
+  renameStepId,
   updateStep,
   walkSteps,
 } from "./tree";
-import type { Step, WorkflowDoc } from "./types";
+import type { Manifest, Step, WorkflowDoc } from "./types";
 
 function deepFreeze<T>(obj: T): T {
   if (obj !== null && typeof obj === "object" && !Object.isFrozen(obj)) {
@@ -274,6 +277,193 @@ describe("duplicateStep", () => {
   test("throws for unknown id", () => {
     const doc = frozenClone(baseDoc());
     expect(() => duplicateStep(doc, "nope")).toThrow(FlowkitTreeError);
+  });
+});
+
+describe("renameStepId / isGeneratedStepId (L25)", () => {
+  test("renames a step and every reference to it, leaving the input untouched", () => {
+    const doc = frozenClone({
+      ...baseDoc(),
+      output: { email: { $ref: "steps.loadContact.email" } },
+    });
+    const next = renameStepId(doc, "loadContact", "getContact");
+    expect(findStep(next, "loadContact")).toBeUndefined();
+    expect(findStep(next, "getContact")?.step.type).toBe("crm.loadContact");
+    expect(findStep(next, "checkVip")?.step.config.expr).toEqual({ $ref: "steps.getContact.tier" });
+    expect(findStep(next, "sendVipEmail")?.step.config.to).toEqual({
+      $ref: "steps.getContact.email",
+    });
+    expect(findStep(next, "sendRegularEmail")?.step.config.to).toEqual({
+      $tpl: "Hi {{ steps.getContact.name }}",
+    });
+    expect(next.output).toEqual({ email: { $ref: "steps.getContact.email" } });
+    expect(renameStepId(doc, "checkVip", "checkVip")).toBe(doc);
+    expect(() => renameStepId(doc, "checkVip", "loadContact")).toThrow(FlowkitTreeError);
+    expect(() => renameStepId(doc, "nope", "x")).toThrow(FlowkitTreeError);
+  });
+
+  /** A manifest whose Transform has a `code` field (`widget: "code"`) and a plain `label`. */
+  const codeManifest = {
+    nodes: [
+      {
+        type: "core.transform",
+        input: {
+          properties: { code: { "x-flowkit": { widget: "code" } }, label: { type: "string" } },
+        },
+      },
+    ],
+  } as unknown as Manifest;
+
+  test("I2: rewrites steps.<id> and steps['<id>'] in code, leaving strings and comments", () => {
+    const code = [
+      "// steps.httpRequest is the call",
+      "const s = 'steps.httpRequest';",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the code holds a template literal
+      "const t = `${steps.httpRequest.output.status} steps.httpRequest`;",
+      "const r = /steps.httpRequest/;",
+      "return { n: steps.httpRequest.output.status, m: steps['httpRequest'].body,",
+      '  o: steps?.httpRequest, p: steps["httpRequest"], q: input.steps.httpRequest,',
+      "  x: other.steps.httpRequest, y: steps.httpRequestOld };",
+    ].join("\n");
+    const doc: WorkflowDoc = {
+      ...baseDoc(),
+      steps: [
+        { id: "httpRequest", type: "core.httpRequest", config: {} },
+        { id: "calc", type: "core.transform", config: { code, label: "steps.httpRequest" } },
+      ],
+    };
+    const next = renameStepId(doc, "httpRequest", "sendEmail", codeManifest);
+    const config = findStep(next, "calc")?.step.config;
+    expect(config?.code).toBe(
+      [
+        "// steps.httpRequest is the call",
+        "const s = 'steps.httpRequest';",
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the code holds a template literal
+        "const t = `${steps.sendEmail.output.status} steps.httpRequest`;",
+        "const r = /steps.httpRequest/;",
+        "return { n: steps.sendEmail.output.status, m: steps['sendEmail'].body,",
+        '  o: steps?.sendEmail, p: steps["sendEmail"], q: input.steps.sendEmail,',
+        "  x: other.steps.httpRequest, y: steps.httpRequestOld };",
+      ].join("\n"),
+    );
+    // Not a code field: left alone.
+    expect(config?.label).toBe("steps.httpRequest");
+    // Template literals without `${…}` are plain keys (N3).
+    const tick = renameStepId(
+      {
+        ...baseDoc(),
+        steps: [
+          { id: "httpRequest", type: "core.httpRequest", config: {} },
+          { id: "calc", type: "core.transform", config: { code: "return steps[`httpRequest`];" } },
+        ],
+      },
+      "httpRequest",
+      "sendEmail",
+      codeManifest,
+    );
+    expect(findStep(tick, "calc")?.step.config.code).toBe("return steps[`sendEmail`];");
+  });
+
+  test("N2: without a manifest only {{ }} refs are rewritten, never plain strings", () => {
+    const code = "return { n: steps.httpRequest.output.status, m: steps['httpRequest'].body }";
+    const doc: WorkflowDoc = {
+      ...baseDoc(),
+      steps: [
+        { id: "httpRequest", type: "core.httpRequest", config: {} },
+        {
+          id: "calc",
+          type: "core.transform",
+          config: {
+            code,
+            body: "See steps.httpRequest for details",
+            to: { $ref: "steps.httpRequest.email" },
+            note: { $tpl: "Status {{ steps.httpRequest.status }}" },
+          },
+        },
+      ],
+    };
+    const config = findStep(renameStepId(doc, "httpRequest", "sendEmail"), "calc")?.step.config;
+    expect(config?.code).toBe(code);
+    expect(config?.body).toBe("See steps.httpRequest for details");
+    expect(config?.to).toEqual({ $ref: "steps.sendEmail.email" });
+    expect(config?.note).toEqual({ $tpl: "Status {{ steps.sendEmail.status }}" });
+    // Nothing is code without a manifest, so nothing blocks either.
+    expect(
+      codeBlocksRename(
+        {
+          ...doc,
+          steps: [
+            doc.steps[0] as Step,
+            {
+              id: "calc",
+              type: "core.transform",
+              config: { code: "return steps[k]; // httpRequest" },
+            },
+          ],
+        },
+        "httpRequest",
+      ),
+    ).toBe(false);
+  });
+
+  test("I2: code that reads steps dynamically blocks a rename of a step it names", () => {
+    const withCode = (code: string): WorkflowDoc => ({
+      ...baseDoc(),
+      steps: [
+        { id: "httpRequest", type: "core.httpRequest", config: {} },
+        { id: "calc", type: "core.transform", config: { code } },
+      ],
+    });
+    expect(
+      codeBlocksRename(
+        withCode("const k = 'httpRequest'; return steps[k];"),
+        "httpRequest",
+        codeManifest,
+      ),
+    ).toBe(true);
+    expect(
+      codeBlocksRename(
+        withCode("const { httpRequest } = steps; return httpRequest;"),
+        "httpRequest",
+        codeManifest,
+      ),
+    ).toBe(true);
+    // Dynamic, but the ID isn't written anywhere: nothing to break by name.
+    expect(
+      codeBlocksRename(withCode("return Object.keys(steps);"), "httpRequest", codeManifest),
+    ).toBe(false);
+    // A template key with `${…}` is dynamic; the ID in its text counts (N3).
+    expect(
+      codeBlocksRename(
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the code holds a template literal
+        withCode("return steps[`${'http'}Request`] ?? steps[`httpRequest${x}`];"),
+        "httpRequest",
+        codeManifest,
+      ),
+    ).toBe(true);
+    expect(
+      codeBlocksRename(
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the code holds a template literal
+        withCode("const k = `httpRequest`; return steps[`${k}`];"),
+        "httpRequest",
+        codeManifest,
+      ),
+    ).toBe(true);
+    // A plain template key is static: rewritten, not blocking.
+    expect(
+      codeBlocksRename(withCode("return steps[`httpRequest`];"), "httpRequest", codeManifest),
+    ).toBe(false);
+    // Static accesses are rewritten, not blocking.
+    expect(
+      codeBlocksRename(withCode("return steps.httpRequest;"), "httpRequest", codeManifest),
+    ).toBe(false);
+  });
+
+  test("tells generated IDs from chosen ones", () => {
+    expect(isGeneratedStepId("httpRequest", "core.httpRequest")).toBe(true);
+    expect(isGeneratedStepId("httpRequest_3", "core.httpRequest")).toBe(true);
+    expect(isGeneratedStepId("httpRequest_x", "core.httpRequest")).toBe(false);
+    expect(isGeneratedStepId("callBilling", "core.httpRequest")).toBe(false);
   });
 });
 

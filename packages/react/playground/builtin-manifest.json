@@ -15,7 +15,8 @@
       "description": "Take the If path when the conditions match, and the Else path when they don't.",
       "icon": "split",
       "category": "Logic",
-      "summary": "If conditions match",
+      "keywords": ["if", "else", "condition", "branch", "filter"],
+      "summary": "If {{rules}}",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -70,7 +71,7 @@
                           "x-flowkit": {
                             "label": "Compare with"
                           },
-                          "description": "Numbers and text compare loosely (\"5\" equals 5). Dates and times are UTC unless they include an offset. For \"is in\", give a list or comma-separated text."
+                          "description": "Numbers and text compare loosely (\"5\" equals 5). Dates and times are UTC unless they include an offset. For \"is one of\", give a list or comma-separated text."
                         },
                         "caseSensitive": {
                           "type": "boolean",
@@ -98,7 +99,7 @@
               "label": "Conditions",
               "widget": "rules"
             },
-            "description": "Text compares ignoring case unless Match case is on. Dates and times are UTC unless they include an offset. \"Is in\" takes a list or comma-separated text."
+            "description": "Text compares ignoring case unless Match case is on. Dates and times are UTC unless they include an offset. \"Is one of\" takes a list or comma-separated text."
           }
         },
         "required": ["rules"],
@@ -153,7 +154,7 @@
                           "x-flowkit": {
                             "label": "Compare with"
                           },
-                          "description": "Numbers and text compare loosely (\"5\" equals 5). Dates and times are UTC unless they include an offset. For \"is in\", give a list or comma-separated text."
+                          "description": "Numbers and text compare loosely (\"5\" equals 5). Dates and times are UTC unless they include an offset. For \"is one of\", give a list or comma-separated text."
                         },
                         "caseSensitive": {
                           "type": "boolean",
@@ -214,6 +215,7 @@
       "description": "Compare a value with each case in order and take the path of the first match, or Default when none match.",
       "icon": "route",
       "category": "Logic",
+      "keywords": ["case", "route", "branch", "match"],
       "summary": "Route by {{value}}",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -247,13 +249,13 @@
                 "label": {
                   "type": "string",
                   "x-flowkit": {
-                    "label": "Label",
+                    "label": "Case name",
                     "placeholder": "Gold customers"
                   }
                 },
                 "value": {
                   "x-flowkit": {
-                    "label": "Value",
+                    "label": "Matches",
                     "placeholder": "gold"
                   }
                 }
@@ -302,6 +304,7 @@
       "description": "Run the steps inside the loop once for every item in a list, one item at a time. Inside, use Loop item and Loop index.",
       "icon": "repeat",
       "category": "Logic",
+      "keywords": ["loop", "iterate", "each", "list"],
       "summary": "For each item in {{items}}",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -352,6 +355,8 @@
       "description": "End the run here as a success. No later steps run.",
       "icon": "circle-stop",
       "category": "Logic",
+      "keywords": ["end", "exit", "halt", "finish"],
+      "endsRun": true,
       "summary": "Stop the run",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -382,6 +387,7 @@
       "description": "Pause the run for a while, or until a date and time, then continue.",
       "icon": "timer",
       "category": "Timing",
+      "keywords": ["wait", "sleep", "pause", "timer"],
       "summary": "Wait {{duration}}{{until}}",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -439,6 +445,7 @@
       "description": "Pause until another system calls this step's one-time resume URL, or until the timeout passes.",
       "icon": "hourglass",
       "category": "Timing",
+      "keywords": ["webhook", "callback", "resume", "external"],
       "summary": "Wait for a callback",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -514,6 +521,7 @@
       "description": "Run another workflow with the input you map, wait for it to finish and use its output.",
       "icon": "workflow",
       "category": "Sub-flows",
+      "keywords": ["subflow", "call", "workflow", "reuse"],
       "summary": "Run sub-flow {{workflowId}}",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -557,12 +565,14 @@
       "description": "Call an external HTTP API.",
       "icon": "globe",
       "category": "Integrations",
+      "keywords": ["api", "fetch", "rest", "url", "webhook"],
       "summary": "{{method}} {{url}}",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "method": {
+            "default": "GET",
             "type": "string",
             "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
             "x-flowkit": {
@@ -573,7 +583,8 @@
             "type": "string",
             "x-flowkit": {
               "label": "URL",
-              "placeholder": "https://api.example.com/items"
+              "placeholder": "https://api.example.com/items",
+              "outboundUrl": true
             }
           },
           "headers": {
@@ -735,7 +746,7 @@
             }
           }
         },
-        "required": ["method", "url"]
+        "required": ["url"]
       },
       "output": {
         "kind": "schema",
@@ -772,6 +783,7 @@
       "description": "Compute values with a JavaScript snippet.",
       "icon": "code",
       "category": "Data",
+      "keywords": ["code", "javascript", "script", "map", "compute"],
       "summary": "Transform data",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -794,7 +806,10 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                  "x-flowkit": {
+                    "label": "Field name"
+                  }
                 },
                 "type": {
                   "type": "string",
@@ -875,7 +890,10 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                  "x-flowkit": {
+                    "label": "Field name"
+                  }
                 },
                 "type": {
                   "type": "string",
@@ -940,7 +958,10 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                  "x-flowkit": {
+                    "label": "Field name"
+                  }
                 },
                 "type": {
                   "type": "string",
@@ -1036,7 +1057,10 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                  "x-flowkit": {
+                    "label": "Field name"
+                  }
                 },
                 "type": {
                   "type": "string",
@@ -1065,7 +1089,10 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                  "x-flowkit": {
+                    "label": "Field name"
+                  }
                 },
                 "type": {
                   "type": "string",

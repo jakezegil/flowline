@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPrivateAddress } from "./ssrf";
+import { isPrivateAddress, isPrivateHost, normalizeHost } from "./net";
 
 describe("isPrivateAddress", () => {
   it.each([
@@ -104,5 +104,61 @@ describe("isPrivateAddress", () => {
     "gggg::1",
   ])("%s is not an IP address and fails closed", (ip) => {
     expect(isPrivateAddress(ip)).toBe(true);
+  });
+});
+
+describe("normalizeHost", () => {
+  it.each([
+    ["127.1", "127.0.0.1"],
+    ["2130706433", "127.0.0.1"],
+    ["0x7f.0.0.1", "127.0.0.1"],
+    ["[0:0:0:0:0:0:0:1]", "::1"],
+    ["0:0:0:0:0:0:0:1", "::1"],
+    ["[::FFFF:127.0.0.1]", "::ffff:7f00:1"],
+    ["Example.COM.", "example.com"],
+    ["bücher.example", "xn--bcher-kva.example"],
+    ["", ""],
+  ])("%s becomes %s", (host, want) => {
+    expect(normalizeHost(host)).toBe(want);
+  });
+});
+
+describe("isPrivateHost", () => {
+  it.each([
+    "localhost",
+    "api.localhost",
+    "localhost.",
+    "127.1",
+    "2130706433",
+    "0x7f.0.0.1",
+    "0177.0.0.1",
+    "[::ffff:7f00:1]",
+    "[0:0:0:0:0:0:0:1]",
+    "198.18.0.1",
+    "198.19.255.255",
+    "224.0.0.1",
+    "239.255.255.255",
+    "240.0.0.1",
+    "192.0.0.8",
+    "64:ff9b::a00:1",
+    "[64:ff9b::7f00:1]",
+    "2002:c0a8:101::",
+    "[2002:7f00:1::]",
+  ])("%s is private", (host) => {
+    expect(isPrivateHost(host)).toBe(true);
+  });
+
+  it.each([
+    "api.github.com",
+    "fdic.gov",
+    "fe80.example",
+    "fc00.example",
+    "example.com.",
+    "8.8.8.8",
+    "198.20.0.1",
+    "[2606:4700:4700::1111]",
+    "64:ff9b::808:808",
+  ])("%s is public", (host) => {
+    expect(isPrivateHost(host)).toBe(false);
   });
 });

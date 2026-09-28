@@ -61,14 +61,22 @@ const KINDS: { kind: WorkflowKind; name: string; desc: string; icon: string }[] 
   },
 ];
 
-/** Workflow ID from a name: `"Big deal alert!"` → `"big-deal-alert"`. */
+/** Longest generated workflow ID. */
+const MAX_ID = 48;
+
+/**
+ * Workflow ID from a name: `"Big deal alert!"` → `"big-deal-alert"`. A long name is cut at the
+ * last whole word that fits in {@link MAX_ID} characters (a single longer word is cut hard).
+ */
 export function slugify(name: string): string {
-  return name
+  const slug = name
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
+    .replace(/^-+|-+$/g, "");
+  if (slug.length <= MAX_ID) return slug;
+  const cut = slug.slice(0, MAX_ID + 1).lastIndexOf("-");
+  return cut > 0 ? slug.slice(0, cut) : slug.slice(0, MAX_ID);
 }
 
 /** A trigger's config with each property's schema default filled in. */

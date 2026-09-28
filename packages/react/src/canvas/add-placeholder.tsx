@@ -2,6 +2,8 @@ import type { StepLocation } from "@flowkit/core";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Plus } from "lucide-react";
 import { memo } from "react";
+import { useEditorStore } from "../hooks";
+import { insertLabel } from "./actions";
 import { useCanvasUi, useLabels } from "./canvas-context";
 import { NodeHandles } from "./handles";
 
@@ -27,6 +29,7 @@ export const AddPlaceholder = memo(function AddPlaceholder({ data }: NodeProps<P
       s.picker.request.loc.parentId === data.loc.parentId &&
       s.picker.request.loc.branch === data.loc.branch,
   );
+  const name = useEditorStore((s) => insertLabel(s.doc, s.manifest, data.loc, labels));
   if (readOnly) {
     return (
       <>
@@ -43,6 +46,7 @@ export const AddPlaceholder = memo(function AddPlaceholder({ data }: NodeProps<P
       <button
         type="button"
         className="fk-placeholder nodrag nopan"
+        aria-label={name}
         data-active={active || undefined}
         onClick={(e) => {
           e.stopPropagation();

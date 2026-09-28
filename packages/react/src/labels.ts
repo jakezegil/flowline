@@ -40,6 +40,18 @@ export interface FlowkitLabels {
   // Step cards
   /** Subtitle of a step whose type isn't in the manifest. */
   unknownStep(type: string): string;
+  /** Card summary of a condition without rules. */
+  noConditions: string;
+  /** Card summary of a condition whose first rule has no value to test yet. */
+  conditionNotSet: string;
+  /** Stands for the missing right-hand side of a rule in a card summary. */
+  ruleValueNotSet: string;
+  /** After a condition summary's first rule: the other rules, `or` when any may match. */
+  moreRules(n: number, or: boolean): string;
+  /** A trigger card's filters, after its caption: "Stage: Won". */
+  triggerFilter(label: string, value: string): string;
+  /** Subtitle of a card that can never run (an earlier step always ends the run). */
+  neverRuns: string;
   /** The chip on a disabled step. */
   disabled: string;
   /** Accessible name of a disabled step's card. */
@@ -123,8 +135,14 @@ export interface FlowkitLabels {
   codeEditorHint: string;
 
   // Edges and placeholders
-  /** The "+" buttons on connections. */
+  /** The "+" buttons on connections, where nothing more specific applies. */
   addStepHere: string;
+  /** A "+" after a step. */
+  addStepAfter(step: string): string;
+  /** The "+" under the trigger (`first`: the workflow has no steps yet). */
+  addStepAfterTrigger(first: boolean): string;
+  /** A "+" at the top of a branch, or an empty branch's placeholder. */
+  addStepInBranch(branch: string, block: string): string;
   /** An empty branch's placeholder (also the picker's name when adding). */
   addStep: string;
   /** An empty branch on a read-only canvas. */
@@ -155,7 +173,8 @@ export interface FlowkitLabels {
   referenceCopied: string;
   copyFailed(reference: string): string;
   stepCopied: string;
-  stepDeleted: string;
+  /** Toast after deleting a step, naming it: `Deleted “Send email”`. */
+  stepDeleted(name: string): string;
   undo: string;
   dismiss: string;
 
@@ -194,6 +213,8 @@ export interface FlowkitLabels {
   statusLive(version: number): string;
   /** Issues pill text. */
   issueCount(n: number): string;
+  /** Issues pill of a workflow whose only issue is that it has no steps. */
+  addFirstStep: string;
   /** Issues pill accessible description. */
   showNextIssue: string;
   /** Issues pill tooltip while cycling through the steps with issues: "Step 2 of 3 with issues". */
@@ -202,6 +223,8 @@ export interface FlowkitLabels {
   saving: string;
   saved(version: number): string;
   saveFailed(message: string): string;
+  /** Why a request failed when it never reached the server (in place of "Failed to fetch"). */
+  serverUnreachable: string;
   run: string;
   /** Tooltip of Run when nothing is published yet. */
   runNeedsPublish: string;
@@ -216,6 +239,8 @@ export interface FlowkitLabels {
   required: string;
   /** Placeholder of a JSON field in the run dialog. */
   jsonPlaceholder: string;
+  /** Placeholder of a list field in the run dialog. */
+  jsonListPlaceholder: string;
   invalidJson: string;
   invalidNumber: string;
   invalidDate: string;
@@ -228,6 +253,8 @@ export interface FlowkitLabels {
   alreadyPublished: string;
   /** Toast when the server rejects a publish (422). */
   publishRejected(issues: number): string;
+  /** Toast when the server rejects a save (422). */
+  saveRejected(issues: number): string;
   publishFailed(message: string): string;
   showIssues: string;
   closePanel: string;
@@ -498,13 +525,16 @@ function noValue(label: string): string {
   return `No ${acronym ? label : label.charAt(0).toLowerCase() + label.slice(1)}`;
 }
 
-const nav = "Use the arrow keys to move between steps and Enter to open one.";
+const nav = "Use the arrow keys to move between steps, and Enter or Space to open one.";
+/** The "+" buttons between steps are pointer targets outside the Tab order; ⌘K reaches them. */
+const add =
+  'Press Control+K (Command+K on a Mac) to add a step after this one (what the "+" between steps does), Shift with it to add one before';
 
 /** The English defaults. */
 export const defaultLabels: FlowkitLabels = {
   canvas: "Workflow canvas",
   canvasHelpReadOnly: nav,
-  canvasHelp: `${nav} Press Delete to remove the selected step, and Escape to clear the selection.`,
+  canvasHelp: `${nav} ${add}, Delete to remove it, and Escape to clear the selection.`,
   edgeDescription: "Connection between steps.",
   controls: "Canvas controls",
   zoomIn: "Zoom in",
@@ -521,6 +551,12 @@ export const defaultLabels: FlowkitLabels = {
   triggerSubflow: "When called by another workflow",
 
   unknownStep: (type) => `Unknown step type ${type}`,
+  noConditions: "No conditions",
+  conditionNotSet: "Condition not set",
+  ruleValueNotSet: "(not set)",
+  moreRules: (n, or) => `${or ? "or" : "and"} ${n} more`,
+  triggerFilter: (label, value) => `${label}: ${value}`,
+  neverRuns: "Never runs: an earlier step ends the run",
   disabled: "Disabled",
   disabledNode: (name) => `${name} (disabled)`,
   stepName: "Step name",
@@ -584,6 +620,9 @@ export const defaultLabels: FlowkitLabels = {
     "Type steps. or trigger. for suggestions. Press Escape, then Tab, to leave the editor.",
 
   addStepHere: "Add step here",
+  addStepAfter: (step) => `Add step after ${step}`,
+  addStepAfterTrigger: (first) => (first ? "Add first step" : "Add step after the trigger"),
+  addStepInBranch: (branch, block) => `Add step to ${branch} of ${block}`,
   addStep: "Add step",
   noSteps: "No steps",
   end: "End",
@@ -608,7 +647,7 @@ export const defaultLabels: FlowkitLabels = {
   referenceCopied: "Reference copied",
   copyFailed: (reference) => `Couldn't copy. The reference is ${reference}`,
   stepCopied: "Step copied",
-  stepDeleted: "Step deleted",
+  stepDeleted: (name) => `Deleted “${name}”`,
   undo: "Undo",
   dismiss: "Dismiss",
 
@@ -639,12 +678,14 @@ export const defaultLabels: FlowkitLabels = {
   statusPublished: (v) => `Published v${v}`,
   statusLive: (v) => `v${v} is live`,
   issueCount: (n) => (n === 1 ? "1 issue" : `${n} issues`),
+  addFirstStep: "Add a first step",
   showNextIssue: "Select the next step with an issue",
   issuePosition: (i, n) => `Step ${i} of ${n} with issues`,
   save: "Save",
   saving: "Saving…",
   saved: (v) => `Saved as v${v}`,
   saveFailed: (m) => `Couldn't save. ${m}`,
+  serverUnreachable: "The server can't be reached. Check your connection, then try again.",
   run: "Run",
   runNeedsPublish: "Publish the workflow to run it",
   runDialogTitle: "Run workflow",
@@ -656,6 +697,7 @@ export const defaultLabels: FlowkitLabels = {
   cancel: "Cancel",
   required: "Required",
   jsonPlaceholder: "JSON, e.g. {}",
+  jsonListPlaceholder: 'A JSON list, e.g. ["gold", "silver"]',
   invalidJson: "Enter valid JSON",
   invalidNumber: "Enter a number",
   invalidDate: "Enter a date and time",
@@ -668,6 +710,8 @@ export const defaultLabels: FlowkitLabels = {
     n === 0
       ? "Publishing was blocked"
       : `Publishing was blocked by ${n === 1 ? "1 issue" : `${n} issues`}`,
+  saveRejected: (n) =>
+    n === 0 ? "Saving was blocked" : `Saving was blocked by ${n === 1 ? "1 issue" : `${n} issues`}`,
   publishFailed: (m) => `Couldn't publish. ${m}`,
   showIssues: "Show",
   closePanel: "Close panel",

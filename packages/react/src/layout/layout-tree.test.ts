@@ -69,6 +69,38 @@ describe("layoutTree", () => {
     ]);
   });
 
+  test("L12: a branch ending in a Stop doesn't rejoin (no edge, no + after the Stop)", () => {
+    const email = manifest.nodes.find((n) => n.type === "crm.sendEmail");
+    const stop = { ...(email as NonNullable<typeof email>), type: "logic.stop", endsRun: true };
+    const m = { ...manifest, nodes: [...manifest.nodes, stop] };
+    const doc = docWith([
+      step(
+        "cond",
+        "logic.condition",
+        { value: true },
+        {
+          branches: { if: [step("email", "crm.sendEmail"), step("stop", "logic.stop")], else: [] },
+        },
+      ),
+    ]);
+    const edges = layoutTree(doc, m).edges.map((e) => e.id);
+    expect(edges).toContain("step:email->step:stop");
+    expect(edges).toContain("ph:cond:else->join:cond");
+    expect(edges.some((e) => e.startsWith("step:stop->"))).toBe(false);
+    // Disabled, the Stop is skipped at run time, so the branch rejoins.
+    const off = docWith([
+      step(
+        "cond",
+        "logic.condition",
+        { value: true },
+        {
+          branches: { if: [step("stop", "logic.stop", {}, { disabled: true })], else: [] },
+        },
+      ),
+    ]);
+    expect(layoutTree(off, m).edges.map((e) => e.id)).toContain("step:stop->join:cond");
+  });
+
   test("condition with an empty else: columns centered under the card, placeholder, join", () => {
     const doc = docWith([
       step(

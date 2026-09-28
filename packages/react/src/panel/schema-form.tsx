@@ -302,8 +302,10 @@ export function SchemaForm(props: {
   scope?: ScopeEntry[];
   /** Sample outputs by step ID; defaults to the editor's samples. */
   samples?: Record<string, unknown>;
+  /** Literal values only: no `{x}` toggles or data picker (the trigger's config). */
+  literalOnly?: boolean;
 }): JSX.Element {
-  const { schema, value, onChange, stepId, issues, readOnly = false } = props;
+  const { schema, value, onChange, stepId, issues, readOnly = false, literalOnly = false } = props;
   const store = useContext(EditorContext);
   const doc = useOptionalEditor(store, (s) => s.doc, null);
   const manifest = useOptionalEditor(store, (s) => s.manifest, null);
@@ -318,8 +320,18 @@ export function SchemaForm(props: {
   const samples = props.samples ?? storeSamples;
   const invalidRefs = useMemo(() => invalidRefsIn(value, scope), [value, scope]);
   const env = useMemo<FormEnv>(
-    () => ({ root: schema, stepId, scope, samples, issues, invalidRefs, readOnly, values: value }),
-    [schema, stepId, scope, samples, issues, invalidRefs, readOnly, value],
+    () => ({
+      root: schema,
+      stepId,
+      scope,
+      samples,
+      issues,
+      invalidRefs,
+      readOnly,
+      values: value,
+      literalOnly,
+    }),
+    [schema, stepId, scope, samples, issues, invalidRefs, readOnly, value, literalOnly],
   );
   return (
     <Tooltip.Provider delayDuration={300} skipDelayDuration={100}>

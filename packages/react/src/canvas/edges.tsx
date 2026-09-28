@@ -2,7 +2,9 @@ import type { StepLocation } from "@flowkit/core";
 import { type Edge, EdgeLabelRenderer, type EdgeProps } from "@xyflow/react";
 import { Plus, TriangleAlert } from "lucide-react";
 import { type CSSProperties, memo } from "react";
+import { useEditorStore } from "../hooks";
 import type { LayoutEdge } from "../layout/layout-tree";
+import { insertLabel } from "./actions";
 import { useCanvasUi, useLabels } from "./canvas-context";
 import type { EdgeGeometry, Point } from "./geometry";
 
@@ -38,13 +40,19 @@ function AddButton({ p, loc }: { p: Point; loc: StepLocation }) {
   const active = useCanvasUi(
     (s) => s.picker?.request.mode === "insert" && sameLoc(s.picker.request.loc, loc),
   );
+  const name = useEditorStore((s) => insertLabel(s.doc, s.manifest, loc, labels));
   if (readOnly) return null;
   return (
     <div className="fk-edge-ctl nodrag nopan" style={at(p)}>
+      {/* Out of the tab order (they'd all come before the cards): from the keyboard, ⌘K adds a
+          step after the focused card and ⇧⌘K before it. */}
       <button
         type="button"
         className="fk-add"
-        aria-label={labels.addStepHere}
+        tabIndex={-1}
+        aria-label={name}
+        title={name}
+        data-insert-at={`${loc.parentId ?? ""}/${loc.branch ?? ""}/${loc.index}`}
         data-active={active || undefined}
         onClick={(e) => {
           e.stopPropagation();

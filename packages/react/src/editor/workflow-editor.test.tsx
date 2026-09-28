@@ -148,10 +148,43 @@ describe("WorkflowEditor", () => {
   test("a publish rejected by the server shows its issues in a toast", async () => {
     const { client } = setup(fixtureDoc());
     await screen.findByText("Draft · v3");
-    client.publish.mockRejectedValue(httpError(422, { error: "Invalid", issues: [{}, {}] }));
+    const issue = { code: "x", message: "Server says no", severity: "error", stepId: "email" };
+    // Malformed entries aren't counted (Minor 3).
+    client.publish.mockRejectedValue(
+      httpError(422, { error: "Invalid", issues: [{}, issue, { ...issue, stepId: "load" }] }),
+    );
     fireEvent.click(button("Publish"));
     await screen.findByText("Publishing was blocked by 2 issues");
     expect(client.saveWorkflow).not.toHaveBeenCalled();
+  });
+
+  test("Minor 4: a save rejected by the server shows its issues like a publish", async () => {
+    const { client } = setup(fixtureDoc());
+    const name = await screen.findByRole("textbox", { name: "Workflow name" });
+    fireEvent.change(name, { target: { value: "Onboarding" } });
+    fireEvent.blur(name);
+    const before = screen.queryByRole("button", { name: /issue/ })?.textContent ?? "";
+    const issue = { code: "x", message: "Server says no", severity: "error", stepId: "email" };
+    client.saveWorkflow.mockRejectedValue(httpError(422, { error: "Invalid", issues: [issue] }));
+    fireEvent.click(button("Save"));
+    await screen.findByText("Saving was blocked by 1 issue");
+    const pill = await screen.findByRole("button", { name: /\d+ issues?/ });
+    expect(pill.textContent).not.toBe(before);
+    fireEvent.click(button("Show"));
+    await waitFor(() => expect(selectedId()).toBe("step:email"));
+  });
+
+  test("Minor 12: Enter in the name box commits and keeps focus there", async () => {
+    setup(fixtureDoc());
+    const name = (await screen.findByRole("textbox", {
+      name: "Workflow name",
+    })) as HTMLInputElement;
+    name.focus();
+    fireEvent.change(name, { target: { value: "Onboarding" } });
+    fireEvent.keyDown(name, { key: "Enter" });
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+    expect(document.activeElement).toBe(name);
+    expect(name.value).toBe("Onboarding");
   });
 
   test("Show on a server rejection selects the step the server flagged", async () => {
@@ -163,6 +196,117 @@ describe("WorkflowEditor", () => {
     await screen.findByText("Publishing was blocked by 1 issue");
     fireEvent.click(button("Show"));
     await waitFor(() => expect(selectedId()).toBe("step:email"));
+  });
+
+  test("M17: URL fields warn about hosts the engine blocks, per the network prop", async () => {
+    const fetchNode = {
+      ...(manifest.nodes[0] as (typeof manifest.nodes)[number]),
+      type: "test.fetch",
+      name: "Fetch",
+      summary: undefined,
+      input: {
+        type: "object",
+        properties: { url: { type: "string", "x-flowkit": { label: "URL", outboundUrl: true } } },
+      },
+    };
+    const m = { ...manifest, nodes: [...manifest.nodes, fetchNode] };
+    const doc = docWith([step("fetch", "test.fetch", { url: "http://localhost:8911/x" })]);
+    const view = (network?: { allowPrivateNetworks: boolean }) => (
+      <FlowkitProvider
+        client={mockClient({
+          getManifest: async () => m,
+          listSubflows: async () => [],
+          getWorkflow: async () => detail(doc),
+        })}
+      >
+        <div style={{ height: 800 }}>
+          <WorkflowEditor workflowId={doc.id} {...(network ? { network } : {})} />
+        </div>
+      </FlowkitProvider>
+    );
+    const { unmount } = render(view());
+    await screen.findByText("Draft · v3");
+    expect((await screen.findByRole("button", { name: /1 issue/ })).textContent).toContain("1");
+    unmount();
+    render(view({ allowPrivateNetworks: true }));
+    await screen.findByText("Draft · v3");
+    expect(screen.queryByRole("button", { name: /issue/ })).toBeNull();
+  });
+
+  test("M7: a server rejection's issues show on the pill, the step and its field", async () => {
+    const { client } = setup(fixtureDoc());
+    await screen.findByText("Draft · v3");
+    const before = screen.queryByRole("button", { name: /issue/ })?.textContent ?? "";
+    const issue = {
+      code: "config.invalid",
+      message: "Subject is too long for the mail server",
+      severity: "error",
+      stepId: "email",
+      field: "subject",
+    };
+    client.publish.mockRejectedValue(httpError(422, { error: "Invalid", issues: [issue] }));
+    fireEvent.click(button("Publish"));
+    await screen.findByText("Publishing was blocked by 1 issue");
+    const pill = await screen.findByRole("button", { name: /\d+ issues?/ });
+    expect(pill.textContent).not.toBe(before);
+    fireEvent.click(button("Show"));
+    const field = (await screen.findByRole("textbox", { name: "Subject" })).closest(
+      ".fk-f",
+    ) as HTMLElement;
+    expect(field.textContent).toContain("Subject is too long for the mail server");
+    // Publishing stays blocked until the flagged step changes.
+    expect(button("Publish").getAttribute("aria-disabled")).toBe("true");
+  });
+
+  test('M3: a new workflow\'s pill reads "Add a first step" and opens the picker at the "+"', async () => {
+    setup(null);
+    const pill = await screen.findByRole("button", { name: "Add a first step" });
+    const plus = screen.getByRole("button", { name: "Add first step" });
+    fireEvent.click(pill);
+    expect(plus.hasAttribute("data-pulse")).toBe(true);
+    expect(await screen.findByRole("dialog", { name: "Add step" })).toBeTruthy();
+    // Nothing selected: the trigger has no issue to show.
+    expect(screen.queryByRole("complementary", { name: "Step settings" })).toBeNull();
+  });
+
+  test("H2: onDirtyChange reports unsaved changes, for the host's router guard", async () => {
+    const onDirtyChange = vi.fn();
+    const client = mockClient({
+      getManifest: async () => manifest,
+      listSubflows: async () => [],
+      getWorkflow: async () => detail(fixtureDoc()),
+    });
+    const { unmount } = render(
+      <FlowkitProvider client={client}>
+        <WorkflowEditor workflowId="welcome" onDirtyChange={onDirtyChange} />
+      </FlowkitProvider>,
+    );
+    const name = await screen.findByRole("textbox", { name: "Workflow name" });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    fireEvent.change(name, { target: { value: "Changed" } });
+    fireEvent.blur(name);
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    client.saveWorkflow.mockImplementation(async (doc: WorkflowDoc) => detail(doc, 4).latest);
+    fireEvent.click(button("Save"));
+    await screen.findByText("Draft · v4");
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    fireEvent.change(name, { target: { value: "Again" } });
+    fireEvent.blur(name);
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    unmount();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  test("L18: a server that can't be reached is said in plain words", async () => {
+    const { client } = setup(fixtureDoc());
+    await screen.findByText("Draft · v3");
+    client.saveWorkflow.mockRejectedValue(new TypeError("Failed to fetch"));
+    fireEvent.click(button("Save"));
+    expect(
+      await screen.findByText(
+        "Couldn't save. The server can't be reached. Check your connection, then try again.",
+      ),
+    ).toBeTruthy();
   });
 
   test("Publish stays busy while it saves first", async () => {
@@ -206,6 +350,30 @@ describe("WorkflowEditor", () => {
     });
     expect(client.runWorkflow).toHaveBeenCalledWith("welcome", { email: "ada@example.com" });
     expect(onRunStarted).toHaveBeenCalledWith("r9");
+  });
+
+  test("L15: a list field's placeholder shows a JSON list, an object field's an object", async () => {
+    const doc: WorkflowDoc = {
+      ...fixtureDoc(),
+      trigger: {
+        type: "logic.manual",
+        config: {
+          fields: [
+            { name: "tags", type: "array" },
+            { name: "meta", type: "object" },
+          ],
+        },
+      },
+      steps: [],
+    };
+    setup(doc, { published: 3 });
+    await screen.findByText("Published v3");
+    fireEvent.click(button("Run"));
+    await screen.findByRole("dialog", { name: "Run workflow" });
+    expect(screen.getByLabelText("tags").getAttribute("placeholder")).toBe(
+      'A JSON list, e.g. ["gold", "silver"]',
+    );
+    expect(screen.getByLabelText("meta").getAttribute("placeholder")).toBe("JSON, e.g. {}");
   });
 
   test("Run is only offered for manual triggers", async () => {

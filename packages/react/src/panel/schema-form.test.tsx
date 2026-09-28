@@ -31,6 +31,7 @@ function Form(props: {
   initial?: Value;
   issues?: Issue[];
   readOnly?: boolean;
+  literalOnly?: boolean;
 }): JSX.Element {
   const [value, setValue] = useState<Value>(props.initial ?? {});
   latest = value;
@@ -51,6 +52,7 @@ function Form(props: {
       scope={scope}
       samples={{}}
       {...(props.readOnly ? { readOnly: true } : {})}
+      {...(props.literalOnly ? { literalOnly: true } : {})}
     />
   );
 }
@@ -171,6 +173,15 @@ describe("SchemaForm", () => {
     renderForm({ schema: mixed });
     const field = fieldOf(screen.getByRole("textbox", { name: "Template" }));
     expect(within(field).queryByRole("button", { name: "Use data from earlier steps" })).toBeNull();
+  });
+
+  test("M14: a literal-only form (the trigger's) has no reference toggles or picker", () => {
+    renderForm({ schema: mixed, literalOnly: true });
+    expect(screen.queryAllByRole("button", { name: "Use data from earlier steps" })).toEqual([]);
+    const title = screen.getByRole("textbox", { name: "Task title" });
+    fireEvent.focus(title);
+    expect(screen.queryByRole("tree")).toBeNull();
+    expect(fieldOf(title).querySelector(".fk-ref__browse")).toBeNull();
   });
 
   test("issues show under their field, errors marked invalid", () => {

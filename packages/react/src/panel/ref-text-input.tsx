@@ -1,6 +1,9 @@
 /**
  * The reference input: a CodeMirror field where text and reference pills mix. Focusing it
- * opens the data picker below; typing `{{` autocompletes over the same values.
+ * opens the data picker; typing `{{` autocompletes over the same values. In a config panel with
+ * room beside it the picker docks to the panel's left edge, level with the field; elsewhere (a
+ * narrow panel, a bottom sheet, a form on its own) it opens inline under the field and pushes
+ * the next fields down. Either way it never covers another field.
  *
  * @module
  */
@@ -22,15 +25,17 @@ import {
   placeholder as placeholderExt,
   tooltips,
 } from "@codemirror/view";
-import { parseRefPath, type ScopeEntry, type ValueExpr } from "@flowkit/core";
+import { type JSONSchema, parseRefPath, type ScopeEntry, type ValueExpr } from "@flowkit/core";
 import * as Popover from "@radix-ui/react-popover";
-import { Braces } from "lucide-react";
+import { Variable } from "lucide-react";
 import {
   type JSX,
   type KeyboardEvent,
+  type MouseEvent,
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -57,7 +62,66 @@ import {
   refCompletionSource,
 } from "./picker/ref-completion";
 import { findRefs, partsToValue, pillInfo, valueKey, valueToParts } from "./picker/ref-model";
-import { flattenTree, formatSample } from "./picker/schema-tree";
+import { flattenTree, formatSample, pickFilterFor } from "./picker/schema-tree";
+
+/** Room the docked picker needs to the left of the panel: its width and a gap. */
+const DOCK_ROOM = 356;
+
+/** The rectangle the picker docks to: the panel's left edge, level with the field. */
+type DockRect = () => DOMRect;
+
+const TABBABLE =
+  'a[href], button, input, select, textarea, [tabindex], [contenteditable="true"], [contenteditable=""]';
+
+/**
+ * Whether `el` (matched by {@link TABBABLE}) is in the Tab order. An explicit `tabindex` decides;
+ * otherwise native controls and contenteditable elements are, even where the browser reports
+ * `tabIndex` -1 for a contenteditable without the attribute (Chrome does for CodeMirror's
+ * `.cm-content`, the editor of every other ref field).
+ */
+function inTabOrder(el: HTMLElement): boolean {
+  const attr = el.getAttribute("tabindex");
+  if (attr !== null) return Number(attr) >= 0;
+  return el.isContentEditable || el.tabIndex >= 0 || el.getAttribute("contenteditable") !== null;
+}
+
+/**
+ * The control Tab (`dir` 1) or Shift+Tab (`dir` -1) reaches from `root` when focus leaves it: the
+ * next or previous element in document order that is in the Tab order and outside `root` and any
+ * data picker. Radix's focus guards (the invisible Tab stops around a portaled popover) don't
+ * count, since focusing one sends focus nowhere useful.
+ */
+function tabbableBeside(root: Element, dir: 1 | -1): HTMLElement | null {
+  const all = Array.from(root.ownerDocument.querySelectorAll<HTMLElement>(TABBABLE)).filter(
+    (el) =>
+      inTabOrder(el) &&
+      !(el as HTMLButtonElement).disabled &&
+      !el.hasAttribute("data-radix-focus-guard") &&
+      !el.closest("[hidden], [inert], .fk-dp, .fk-ref-popover") &&
+      !root.contains(el),
+  );
+  const after = (el: Element) =>
+    (root.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  if (dir === 1) return all.find((el) => after(el)) ?? null;
+  return all.filter((el) => !after(el)).at(-1) ?? null;
+}
+
+/**
+ * Where to dock the picker of the field `field`: beside the config panel holding it, when the
+ * panel has {@link DOCK_ROOM} to its left inside the app (not a bottom sheet or a narrow app).
+ */
+function dockBeside(field: HTMLElement): DockRect | undefined {
+  const panel = field.closest(".fk-panel");
+  if (!panel) return undefined;
+  const app = panel.closest(".fk-app") ?? document.documentElement;
+  const p = panel.getBoundingClientRect();
+  if (p.width === 0 || p.left - app.getBoundingClientRect().left < DOCK_ROOM) return undefined;
+  return () => {
+    const edge = panel.getBoundingClientRect().left;
+    const f = field.getBoundingClientRect();
+    return DOMRect.fromRect({ x: edge, y: f.top, width: 0, height: f.height });
+  };
+}
 
 /** Marks a transaction that loads a value from props (not a user edit, so not emitted). */
 const external = Annotation.define<boolean>();
@@ -178,6 +242,9 @@ const jsonTheme = EditorView.theme({
  * - `json`: the content is JSON (any value), with pills standing for `{ $ref }` values and
  *   strings holding pills for `{ $tpl }` values. Text that isn't valid JSON isn't emitted;
  *   `onJsonError` hears whether the content currently parses.
+ * - `schema`: the field's schema. Text, number and yes/no fields offer only single values in the
+ *   picker (a list or object row opens instead of inserting); list and object fields offer values
+ *   of their type; JSON and any-typed fields offer everything.
  */
 export function RefTextInput(props: {
   value: ValueExpr | undefined;
@@ -193,6 +260,7 @@ export function RefTextInput(props: {
   readOnly?: boolean;
   json?: boolean;
   onJsonError?(invalid: boolean): void;
+  schema?: JSONSchema;
 }): JSX.Element {
   const {
     value,
@@ -207,6 +275,10 @@ export function RefTextInput(props: {
     readOnly = false,
     json = false,
   } = props;
+  const filterType = useMemo(
+    () => (json ? undefined : pickFilterFor(props.schema)),
+    [json, props.schema],
+  );
   const onJsonErrorRef = useRef(props.onJsonError);
   onJsonErrorRef.current = props.onJsonError;
   const { labels, resolveIcon } = useFlowkitAppearance();
@@ -234,6 +306,23 @@ export function RefTextInput(props: {
 
   const withPicker = !literalOnly && !readOnly;
   const pickerOpen = withPicker && open && !completing;
+
+  // Docked beside the panel, or inline under the field: decided each time the picker opens.
+  const [dock, setDock] = useState<DockRect | null>(null);
+  const dockRef = useRef<DockRect | null>(null);
+  dockRef.current = dock;
+  useLayoutEffect(() => {
+    const field = fieldRef.current;
+    setDock(() => (pickerOpen && field ? (dockBeside(field) ?? null) : null));
+  }, [pickerOpen]);
+  const anchor = useRef({
+    getBoundingClientRect: () =>
+      dockRef.current?.() ?? fieldRef.current?.getBoundingClientRect() ?? DOMRect.fromRect(),
+    // Scrolling the panel moves the field: the popover follows its scroll parents.
+    get contextElement() {
+      return fieldRef.current ?? undefined;
+    },
+  });
 
   const resolver = useMemo<PillResolver>(
     () => ({
@@ -453,6 +542,15 @@ export function RefTextInput(props: {
   };
 
   const onExit = (reason: PickerExit) => {
+    if (reason === "tab" || reason === "shiftTab") {
+      // Tab leaves the field for the next (or previous) control, as it would from the field.
+      const root = fieldRef.current?.closest(".fk-ref-field") ?? null;
+      const target = root ? tabbableBeside(root, reason === "tab" ? 1 : -1) : null;
+      setOpen(false);
+      if (target) target.focus();
+      else focusEditor();
+      return;
+    }
     if (reason !== "up") setOpen(false);
     focusEditor();
   };
@@ -460,6 +558,23 @@ export function RefTextInput(props: {
   const inside = (node: EventTarget | null) =>
     node instanceof Node &&
     (fieldRef.current?.contains(node) || contentRef.current?.contains(node));
+
+  /** Pressing in the picker (not its search box) keeps focus where it is. */
+  const keepFocus = (e: MouseEvent<HTMLElement>) => {
+    if (e.target !== searchRef.current) e.preventDefault();
+  };
+
+  const picker = (
+    <DataPickerView
+      id={pickerId}
+      scope={scope}
+      samples={samples}
+      onPick={onPick}
+      onExit={onExit}
+      searchRef={searchRef}
+      {...(filterType ? { filterType } : {})}
+    />
+  );
 
   const onKeyDown = (e: KeyboardEvent) => {
     // An Escape the field or picker used (closing the picker or autocomplete) stops here, so it
@@ -482,39 +597,44 @@ export function RefTextInput(props: {
       }}
       onKeyDown={onKeyDown}
     >
-      <Popover.Root open={pickerOpen} onOpenChange={(o) => !o && setOpen(false)}>
-        <Popover.Anchor asChild>
-          <div
-            ref={fieldRef}
-            className="fk-ref"
-            data-multiline={multiline || undefined}
-            data-focused={focused || undefined}
-            data-readonly={readOnly || undefined}
-            data-single={singlePill || undefined}
-          >
-            <div ref={hostRef} className="fk-ref__editor" />
-            {withPicker && (
-              <button
-                type="button"
-                className="fk-ref__browse"
-                tabIndex={-1}
-                aria-label={labels.browseData}
-                aria-expanded={pickerOpen}
-                aria-controls={pickerId}
-                title={labels.browseData}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  const view = viewRef.current;
-                  if (!view) return;
-                  if (!view.hasFocus) view.focus();
-                  else setOpen((o) => !o);
-                }}
-              >
-                <Braces size={13} aria-hidden />
-              </button>
-            )}
+      <Popover.Root open={pickerOpen && dock !== null} onOpenChange={(o) => !o && setOpen(false)}>
+        <Popover.Anchor virtualRef={anchor} />
+        <div
+          ref={fieldRef}
+          className="fk-ref"
+          data-multiline={multiline || undefined}
+          data-focused={focused || undefined}
+          data-readonly={readOnly || undefined}
+          data-single={singlePill || undefined}
+        >
+          <div ref={hostRef} className="fk-ref__editor" />
+          {withPicker && (
+            <button
+              type="button"
+              className="fk-ref__browse"
+              tabIndex={-1}
+              aria-label={labels.browseData}
+              aria-expanded={pickerOpen}
+              aria-controls={pickerId}
+              title={labels.browseData}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                const view = viewRef.current;
+                if (!view) return;
+                if (!view.hasFocus) view.focus();
+                else setOpen((o) => !o);
+              }}
+            >
+              <Variable size={13} aria-hidden />
+            </button>
+          )}
+        </div>
+        {pickerOpen && dock === null && (
+          // biome-ignore lint/a11y/noStaticElementInteractions: keeps focus in the field while picking
+          <div ref={contentRef} className="fk-ref-inline" onMouseDown={keepFocus}>
+            {picker}
           </div>
-        </Popover.Anchor>
+        )}
         {withPicker && (
           <span id={hintId} className="fk-sr-only">
             {singlePill ? labels.refPickHint : labels.refInputHint(multiline)}
@@ -525,10 +645,12 @@ export function RefTextInput(props: {
             <Popover.Content
               ref={contentRef}
               className="fk-ref-popover"
-              side="bottom"
+              data-docked=""
+              side="left"
               align="start"
-              sideOffset={6}
+              sideOffset={8}
               collisionPadding={8}
+              onMouseDown={keepFocus}
               onOpenAutoFocus={(e) => e.preventDefault()}
               onCloseAutoFocus={(e) => e.preventDefault()}
               // Escape is handled here, before the editor or picker see it: in the field it
@@ -544,14 +666,7 @@ export function RefTextInput(props: {
                 if (inside(e.target)) e.preventDefault();
               }}
             >
-              <DataPickerView
-                id={pickerId}
-                scope={scope}
-                samples={samples}
-                onPick={onPick}
-                onExit={onExit}
-                searchRef={searchRef}
-              />
+              {picker}
             </Popover.Content>
           </Popover.Portal>
         )}

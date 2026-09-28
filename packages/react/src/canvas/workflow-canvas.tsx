@@ -288,7 +288,7 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
 
   /**
    * Fits the workflow, anchored to the top. The initial fit only zooms out to a readable zoom
-   * (a tall or wide workflow then pans); `whole` (the "Fit" button) fits everything.
+   * (a tall or wide workflow then pans); `whole` (the "Fit" button) fits as much as stays legible.
    */
   const fitTop = useCallback(
     (duration = 0, whole = false) => {

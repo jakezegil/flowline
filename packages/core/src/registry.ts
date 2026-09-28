@@ -129,6 +129,8 @@ function nodeManifest(plugin: string, def: NodeDefinition<any, any>): NodeManife
     description: def.description,
     icon: def.icon,
     category: def.category,
+    keywords: def.keywords ? [...def.keywords] : undefined,
+    endsRun: def.endsRun ? true : undefined,
     summary: def.summary,
     input: toSchema(def.input, "input", def.type, "input"),
     output,

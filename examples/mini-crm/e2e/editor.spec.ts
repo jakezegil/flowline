@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "playwright/test";
+import { type APIRequestContext, expect, type Page, test } from "playwright/test";
 
 /** The header's status ("Draft · v2"), as opposed to a toast, which has a Dismiss button. */
 function headerStatus(page: Page) {
@@ -40,13 +40,13 @@ test("builds a workflow from scratch, maps a field through the data picker, save
   const publish = main.getByRole("button", { name: "Publish" });
   await expect(main.getByRole("textbox", { name: "Workflow name" })).toHaveValue(name);
   await expect(headerStatus(page)).toHaveText("Draft · v1");
-  // An empty workflow has one (warning) issue.
-  await expect(main.getByRole("button", { name: "1 issue" })).toBeVisible();
+  // An empty workflow's only issue is that it has no steps: the pill says what to do.
+  await expect(main.getByRole("button", { name: "Add a first step" })).toBeVisible();
 
   // Add "Get contact" with the "+" between the trigger and End.
-  await canvas.getByRole("button", { name: "Add step here" }).click();
+  await canvas.getByRole("button", { name: "Add first step" }).click();
   const picker = page.getByRole("dialog", { name: "Add step" });
-  await picker.getByRole("combobox", { name: "Add step" }).fill("Get contact");
+  await picker.getByRole("combobox", { name: "Search steps" }).fill("Get contact");
   await picker.getByRole("option", { name: /^Get contact/ }).click();
 
   const card = canvas.getByRole("group", { name: "Get contact" });
@@ -61,7 +61,11 @@ test("builds a workflow from scratch, maps a field through the data picker, save
   await expect(panel.getByRole("tab", { name: /Configure/ })).toHaveAccessibleName(/1 issue/);
   await panel.getByRole("button", { name: "Browse data" }).click();
   const tree = page.getByRole("tree", { name: "Insert data" });
-  await tree.getByRole("treeitem", { name: /^deal\b/ }).click();
+  // A click on an object inserts it (M13); its chevron opens it.
+  await tree
+    .getByRole("treeitem", { name: /^deal\b/ })
+    .locator(".fk-dp__chevron")
+    .click();
   await tree.getByRole("treeitem", { name: /^contactId\b/ }).click();
   await page.keyboard.press("Escape");
 
@@ -172,4 +176,124 @@ test("deleting a referenced step flags the stale reference and blocks Publish", 
   await expect(canvas.getByRole("group", { name: "Load contact" })).toBeVisible();
   await expect(main.getByRole("button", { name: /issues?$/ })).toHaveCount(0);
   await expect(publish).toBeEnabled();
+});
+
+/** Saves a draft (Load contact → Email contact) under a fresh ID and opens it in the editor. */
+async function openEmailWorkflow(page: Page, request: APIRequestContext, base: string) {
+  const id = uniqueId(base);
+  const saved = await request.put(`/flowkit/workflows/${id}?create=true`, {
+    data: {
+      id,
+      name: "Notify owner",
+      trigger: { type: "crm.dealUpdated", config: {} },
+      steps: [
+        {
+          id: "load",
+          type: "crm.getContact",
+          name: "Load contact",
+          config: { contactId: { $ref: "trigger.deal.contactId" } },
+        },
+        { id: "email", type: "crm.sendEmail", name: "Notify owner", config: {} },
+      ],
+    },
+  });
+  expect(saved.ok()).toBe(true);
+  await page.goto(`/workflows/${id}`);
+  const main = page.getByRole("main");
+  const canvas = main.getByRole("application", { name: "Workflow canvas" });
+  await expect(canvas.getByRole("group", { name: "Notify owner" })).toBeVisible();
+  return { id, main, canvas };
+}
+
+test("H1: the data picker never covers the next field, and clicking that field moves focus there", async ({
+  page,
+  request,
+}) => {
+  const { main, canvas } = await openEmailWorkflow(page, request, "h1-picker");
+  await canvas.getByRole("group", { name: "Notify owner" }).click();
+  const panel = main.getByRole("complementary", { name: "Step settings" });
+  const to = panel.getByRole("textbox", { name: "To" });
+  const subject = panel.getByRole("textbox", { name: "Subject" });
+  await to.click();
+  const tree = page.getByRole("tree", { name: "Insert data" });
+  await expect(tree).toBeVisible();
+  // Insert Load contact › contact.email into To.
+  await page.getByRole("combobox", { name: "Search data" }).fill("email");
+  await tree
+    .getByRole("treeitem", { name: /^email\b/ })
+    .first()
+    .click();
+  await expect(to.getByRole("img", { name: /Load contact › contact\.email/ })).toBeVisible();
+
+  // Wherever the picker is, it isn't over Subject.
+  const pickerBox = await page.locator(".fk-dp").first().boundingBox();
+  const subjectBox = await subject.boundingBox();
+  expect(pickerBox && subjectBox).toBeTruthy();
+  if (pickerBox && subjectBox) {
+    const overlaps =
+      pickerBox.x < subjectBox.x + subjectBox.width &&
+      subjectBox.x < pickerBox.x + pickerBox.width &&
+      pickerBox.y < subjectBox.y + subjectBox.height &&
+      subjectBox.y < pickerBox.y + pickerBox.height;
+    expect(overlaps).toBe(false);
+  }
+  // The click lands on Subject (which opens its own picker), not on To's.
+  await subject.click();
+  await expect(subject).toBeFocused();
+  await page.keyboard.type("Enterprise lead approved");
+  await expect(subject).toContainText("Enterprise lead approved");
+  await expect(to).not.toContainText("Enterprise lead approved");
+});
+
+test("H2: leaving the editor through the app's links with unsaved changes asks first", async ({
+  page,
+  request,
+}) => {
+  const { id, main } = await openEmailWorkflow(page, request, "h2-leave");
+  const name = main.getByRole("textbox", { name: "Workflow name" });
+  await name.fill("Notify owner, edited");
+  await name.press("Enter");
+  await expect(headerStatus(page)).toHaveText("Unsaved changes");
+
+  await page.getByRole("link", { name: "Runs" }).first().click();
+  const confirm = page.getByRole("dialog", { name: "Leave without saving?" });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "Keep editing" }).click();
+  await expect(confirm).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`/workflows/${id}$`));
+  await expect(name).toHaveValue("Notify owner, edited");
+
+  await main.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link").click();
+  await page
+    .getByRole("dialog", { name: "Leave without saving?" })
+    .getByRole("button", { name: "Leave and discard" })
+    .click();
+  await expect(page).toHaveURL(/\/workflows$/);
+
+  // Once saved, leaving doesn't ask.
+  await page.goto(`/workflows/${id}`);
+  await name.fill("Notify owner, saved");
+  await name.press("Enter");
+  await main.getByRole("button", { name: "Save" }).click();
+  await expect(headerStatus(page)).toHaveText(/Draft · v\d/);
+  await page.getByRole("link", { name: "Runs" }).first().click();
+  await expect(page).toHaveURL(/\/runs$/);
+});
+
+test("H3: step search ranks the step named like the query first, and Enter inserts it", async ({
+  page,
+  request,
+}) => {
+  const { canvas } = await openEmailWorkflow(page, request, "h3-search");
+  const picker = page.getByRole("dialog", { name: "Add step" });
+  const search = picker.getByRole("combobox", { name: "Search steps" });
+  const first = picker.locator('[role="option"][aria-selected="true"]');
+
+  await canvas.getByRole("button", { name: "Add step after Notify owner" }).click();
+  await search.fill("send email");
+  await expect(first).toHaveAccessibleName(/^Send email/);
+  await search.fill("approval");
+  await expect(first).toHaveAccessibleName(/^Request approval/);
+  await page.keyboard.press("Enter");
+  await expect(canvas.getByRole("group", { name: "Request approval" })).toBeVisible();
 });

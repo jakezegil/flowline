@@ -204,6 +204,13 @@ describe("ctx.http.fetch SSRF guard", () => {
     expect(hits).toHaveLength(1);
   });
 
+  it("matches allowHosts through a trailing dot and an international name", async () => {
+    const { resolve } = tableResolver({ "xn--bcher-kva.test": ["127.0.0.1"] });
+    const ctx = ctxWith({ resolve, allowPrivateNetworks: true, allowHosts: ["bücher.test."] });
+    expect((await ctx.http.fetch(`http://xn--bcher-kva.test:${port}/`)).status).toBe(200);
+    expect((await ctx.http.fetch(`http://bücher.test.:${port}/`)).status).toBe(200);
+  });
+
   it("reports DNS failures as retryable", async () => {
     const { resolve } = tableResolver({});
     const err = await ctxWith({ resolve })

@@ -101,7 +101,7 @@ describe("builtinPlugin", () => {
 
   it("carries the editor metadata the brief specifies", () => {
     expect(node("core.condition")).toMatchObject({
-      summary: "If conditions match",
+      summary: "If {{rules}}",
       branches: {
         kind: "static",
         branches: [

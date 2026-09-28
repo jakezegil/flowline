@@ -296,10 +296,52 @@ export function childNodes(node: PickerNode, samples: Record<string, unknown>): 
   return out;
 }
 
-/** True if a row's value can go into a field of type `filterType` (always, without a filter). */
+/** Any single value that isn't a list or an object: what a text, number or yes/no field takes. */
+export const SCALAR_FILTER: JSONSchema = {
+  type: ["string", "number", "integer", "boolean", "null"],
+};
+
+/**
+ * The picker filter for a field of schema `schema`: {@link SCALAR_FILTER} for text, number,
+ * boolean and enum fields (so a list or object can't be dropped into them), the schema itself for
+ * list and object fields, and none for any-typed (JSON) fields or without a schema.
+ */
+export function pickFilterFor(schema: JSONSchema | undefined): JSONSchema | undefined {
+  if (!schema || isAnySchema(schema)) return undefined;
+  return isAssignable(schema, SCALAR_FILTER) ? SCALAR_FILTER : schema;
+}
+
+/** The kind of a sample value, as a schema, or `undefined` without one. */
+function sampleSchema(node: PickerNode): JSONSchema | undefined {
+  if (!node.sample) return undefined;
+  const v = node.sample.value;
+  if (v === null || v === undefined) return undefined;
+  if (Array.isArray(v)) return { type: "array" };
+  switch (typeof v) {
+    case "string":
+      return { type: "string" };
+    case "number":
+      return { type: "number" };
+    case "boolean":
+      return { type: "boolean" };
+    case "object":
+      return { type: "object" };
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * True if a row's value can go into a field of type `filterType` (always, without a filter). An
+ * any-typed row is judged by its sample value when it has one (a text `paths[0]` doesn't fit a
+ * list), and fits otherwise.
+ */
 export function fitsFilter(node: PickerNode, filterType: JSONSchema | undefined): boolean {
   if (!filterType || isAnySchema(filterType)) return true;
-  if (isAnySchema(node.schema)) return true;
+  if (isAnySchema(node.schema)) {
+    const seen = sampleSchema(node);
+    return seen ? isAssignable(seen, filterType) : true;
+  }
   return isAssignable(node.schema, filterType);
 }
 

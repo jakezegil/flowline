@@ -213,9 +213,14 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
   const pick = (row: Row, via: PickVia) => {
     if (row.pickable) onPick(row.node.ref, row.node.typeLabel, via);
   };
-  /** Enter or click: a value inserts; a group opens or closes (while searching, inserts). */
+  /**
+   * Enter or click: a value inserts; a group opens or closes (while searching, inserts). A click
+   * on a field that is a list or object inserts it whole (its chevron opens it); Enter opens it,
+   * Shift+Enter inserts it.
+   */
   const activate = (row: Row, via: PickVia) => {
     if (!row.node.expandable) pick(row, via);
+    else if (via === "pointer" && row.node.depth > 0 && row.pickable) pick(row, via);
     else if (!query) toggle(row.node.id);
     else if (row.node.depth > 0) pick(row, via);
   };
@@ -295,6 +300,8 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
           ref={searchRef}
           type="text"
           role="combobox"
+          // Hosted in a field, the box is reached with ArrowDown, not as a Tab stop of its own.
+          {...(onExit ? { tabIndex: -1 } : {})}
           aria-expanded="true"
           aria-controls={treeId}
           aria-autocomplete="list"
@@ -335,6 +342,7 @@ export function DataPickerView(props: DataPickerViewProps): JSX.Element {
               onHover={() => setActiveId(row.node.id)}
               onActivate={() => activate(row, "pointer")}
               onInsert={() => pick(row, "pointer")}
+              onToggle={() => toggle(row.node.id)}
               icon={row.node.depth === 0 ? resolveIcon(row.node.entry.icon) : undefined}
               labels={labels}
             />
@@ -394,21 +402,23 @@ function PickerRow(props: {
   onHover(): void;
   onActivate(): void;
   onInsert(): void;
+  onToggle(): void;
   icon: IconComponent | undefined;
   labels: FlowkitLabels;
 }): JSX.Element {
-  const { id, row, active, onHover, onActivate, onInsert, icon: Icon, labels } = props;
+  const { id, row, active, onHover, onActivate, onInsert, onToggle, icon: Icon, labels } = props;
   const { node } = row;
   const section = node.depth === 0;
   const sample = node.sample && !section ? formatSample(node.sample.value, labels) : undefined;
-  const caption =
-    node.entry.kind === "trigger"
-      ? labels.scopeTrigger
-      : node.entry.kind === "loop"
-        ? labels.scopeLoop
-        : node.entry.disabled
-          ? labels.scopeDisabled
-          : labels.scopeStep;
+  // The trigger's section is headed like its pills ("Trigger › email"), with its own name ("Webhook") as the caption.
+  const trigger = node.entry.kind === "trigger";
+  const caption = trigger
+    ? node.name
+    : node.entry.kind === "loop"
+      ? labels.scopeLoop
+      : node.entry.disabled
+        ? labels.scopeDisabled
+        : labels.scopeStep;
   return (
     // biome-ignore lint/a11y/useFocusableInteractive: rows are reached with aria-activedescendant from the search box
     // biome-ignore lint/a11y/useKeyWithClickEvents: the search box handles the keyboard for the tree
@@ -426,7 +436,19 @@ function PickerRow(props: {
       onMouseMove={active ? undefined : onHover}
       onClick={onActivate}
     >
-      <span className="fk-dp__chevron" data-open={row.open || undefined} aria-hidden="true">
+      <span
+        className="fk-dp__chevron"
+        data-open={row.open || undefined}
+        aria-hidden="true"
+        onClick={
+          node.expandable
+            ? (e) => {
+                e.stopPropagation();
+                onToggle();
+              }
+            : undefined
+        }
+      >
         {node.expandable && <ChevronRight size={13} />}
       </span>
       {section ? (
@@ -435,7 +457,7 @@ function PickerRow(props: {
             {Icon && <Icon size={14} />}
           </span>
           <span className="fk-dp__section">
-            <span className="fk-dp__section-name">{node.name}</span>
+            <span className="fk-dp__section-name">{trigger ? labels.scopeTrigger : node.name}</span>
             <span className="fk-dp__caption">{row.empty ? labels.noKnownFields : caption}</span>
           </span>
         </>

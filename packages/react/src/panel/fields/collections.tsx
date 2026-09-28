@@ -8,7 +8,7 @@ import type { JSONSchema, ValueExpr } from "@flowkit/core";
 import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 import { type JSX, useEffect, useId, useRef, useState } from "react";
 import { useFlowkitAppearance } from "../../provider";
-import { type FieldProps, useFormEnv } from "../form-context";
+import { type FieldProps, fieldMetaOf, useFormEnv } from "../form-context";
 import { RefTextInput } from "../ref-text-input";
 import {
   discriminatedUnion,
@@ -19,7 +19,6 @@ import {
   itemsOf,
   labelOf,
   mapValueOf,
-  metaOf,
 } from "../schema";
 import { asObject, Field, ObjectFields, withKey } from "../schema-form";
 import { enumOptions, useRefMode } from "./controls";
@@ -175,7 +174,7 @@ function itemName(v: ValueExpr | undefined): string | undefined {
 export function ArrayField(p: FieldProps): JSX.Element {
   const env = useFormEnv();
   const { labels } = useFlowkitAppearance();
-  const meta = metaOf(p.schema);
+  const meta = fieldMetaOf(env, p.schema);
   const listRef = useRef<HTMLOListElement>(null);
   const items = itemsOf(env.root, p.schema);
   const objectItems = fieldKind(env.root, items) === "object";
@@ -227,6 +226,7 @@ export function ArrayField(p: FieldProps): JSX.Element {
           ariaLabel={p.label}
           singlePill
           readOnly={env.readOnly}
+          schema={p.schema}
         />
       ) : (
         <>
@@ -341,7 +341,7 @@ function objectOf(rows: MapRow[]): Record<string, ValueExpr> {
 export function MapField(p: FieldProps): JSX.Element {
   const env = useFormEnv();
   const { labels } = useFlowkitAppearance();
-  const meta = metaOf(p.schema);
+  const meta = fieldMetaOf(env, p.schema);
   const listRef = useRef<HTMLOListElement>(null);
   const valueSchema = mapValueOf(env.root, p.schema);
   const textValues = ["string", "any"].includes(fieldKind(env.root, valueSchema));
@@ -396,6 +396,7 @@ export function MapField(p: FieldProps): JSX.Element {
           ariaLabel={p.label}
           singlePill
           readOnly={env.readOnly}
+          schema={p.schema}
         />
       ) : (
         <>
@@ -432,6 +433,7 @@ export function MapField(p: FieldProps): JSX.Element {
                           placeholder={labels.mapValue}
                           ariaLabel={`${p.label}: ${r.key || labels.mapValue}`}
                           readOnly={env.readOnly}
+                          schema={valueSchema}
                         />
                       ) : (
                         <Field

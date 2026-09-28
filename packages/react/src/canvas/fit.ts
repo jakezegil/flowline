@@ -24,6 +24,11 @@ export const FIT_PADDING = 100;
  * workflow opens at its top (the rest is a pan away) rather than shrunk to fit.
  */
 export const FIT_MIN_ZOOM = 0.85;
+/**
+ * The Fit button never zooms out further than this: a very large workflow fits as far as it can
+ * while cards stay legible, anchored to the top, and the rest is a scroll away (M12).
+ */
+export const FIT_WHOLE_MIN_ZOOM = 0.5;
 /** The initial fit never zooms in past 100%. */
 export const FIT_MAX_ZOOM = 1;
 
@@ -31,8 +36,9 @@ export const FIT_MAX_ZOOM = 1;
  * The viewport that fits a laid-out tree (`width` × `height`, the trigger centered at x = 0,
  * y = 0 at its top) into a `paneW` × `paneH` pane: horizontally centered on the trigger, its top
  * `FIT_PADDING` below the pane's top (less on small panes). The zoom fits the tree, clamped to
- * [{@link FIT_MIN_ZOOM}, 1]; `whole` (the "Fit" button) lowers the floor to `minZoom` so the
- * entire tree shows.
+ * [{@link FIT_MIN_ZOOM}, 1]; `whole` (the "Fit" button) lowers the floor so the entire tree
+ * shows, but never below {@link FIT_WHOLE_MIN_ZOOM} (or `minZoom`, if higher): past that it
+ * stays anchored to the top and the rest pans.
  */
 export function fitViewport(
   pane: { width: number; height: number },
@@ -43,7 +49,7 @@ export function fitViewport(
   const padTop = Math.min(FIT_PADDING, pane.height / 8);
   const byWidth = (pane.width - 2 * padX) / Math.max(tree.width, 1);
   const byHeight = (pane.height - padTop - padX) / Math.max(tree.height, 1);
-  const floor = opts.whole ? opts.minZoom : FIT_MIN_ZOOM;
+  const floor = opts.whole ? Math.max(opts.minZoom, FIT_WHOLE_MIN_ZOOM) : FIT_MIN_ZOOM;
   const zoom = Math.min(FIT_MAX_ZOOM, Math.max(floor, Math.min(byWidth, byHeight)));
   return { x: pane.width / 2, y: padTop, zoom };
 }

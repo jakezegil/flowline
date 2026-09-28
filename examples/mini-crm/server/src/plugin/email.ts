@@ -17,9 +17,12 @@ export const sendEmail = defineNode({
   description: "Send an email from the CRM.",
   icon: "mail",
   category: "Email",
+  keywords: ["mail", "message", "notify"],
   summary: "Email {{to}}: {{subject}}",
   input: z.object({
-    to: ui(z.string().min(1, "Enter a recipient"), {
+    // `format: "email"` makes the editor warn about a To that isn't one address (such as a
+    // reference with the next field's text glued on); it isn't enforced when the step runs.
+    to: ui(z.string().min(1, "Enter a recipient").meta({ format: "email" }), {
       label: "To",
       placeholder: "grace@example.com",
     }),

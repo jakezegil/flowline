@@ -63,6 +63,10 @@ export {
   type TransformRuntime,
   type TriggerDefinition,
 } from "./define";
+export {
+  type UnreachableGroup,
+  unreachableSteps,
+} from "./design-checks";
 export { FatalError, type FatalErrorOptions, RetryableError } from "./errors";
 export {
   branchesFor,
@@ -79,6 +83,7 @@ export {
   subflowOutputFields,
   subflowOutputSchema,
 } from "./json-schema";
+export { isPrivateAddress, isPrivateHost, normalizeHost } from "./net";
 export {
   collectRefs,
   FlowkitRefError,
@@ -95,7 +100,12 @@ export {
   type TemplatePart,
 } from "./refs";
 export { createRegistry, type Registry } from "./registry";
-export { availableScope, type ScopeEntry, type ValidationContext } from "./scope";
+export {
+  availableScope,
+  describeSubflowOutput,
+  type ScopeEntry,
+  type ValidationContext,
+} from "./scope";
 export {
   dropHiddenFields,
   hiddenFields,
@@ -105,14 +115,17 @@ export {
 } from "./show-if";
 export {
   allStepIds,
+  codeBlocksRename,
   duplicateStep,
   FlowkitTreeError,
   type FoundStep,
   findStep,
   generateStepId,
   insertStep,
+  isGeneratedStepId,
   moveStep,
   removeStep,
+  renameStepId,
   type StepLocation,
   updateStep,
   walkSteps,
