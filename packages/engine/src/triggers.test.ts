@@ -101,32 +101,20 @@ const callEnded = defineTrigger({
   dedupe: { key: ({ payload }) => payload.call.id, window: "1h" },
 });
 
-/** Records the `event` argument `filter` and `dedupe.key` were called with. */
-const callEndedSpyEvents = {
-  filter: [] as (string | undefined)[],
-  dedupe: [] as (string | undefined)[],
-};
-
-/** A multi-event trigger used only to pin that `filter`/`dedupe.key` receive `event`. */
-const callEndedSpy = defineTrigger({
-  type: "crm.callEndedSpy",
-  name: "Call ended spy",
+/**
+ * A single-event trigger declaring `normalize` (Ruling 91: allowed without `events`). Maps a
+ * `deal_id` snake_case field onto the trigger's `dealId` payload shape.
+ */
+const dealNormalized = defineTrigger({
+  type: "crm.dealNormalized",
+  name: "Deal normalized",
   kind: "event",
-  events: ["ai_call.ended", "voip_call.ended"],
+  event: "deal.raw",
   config: z.object({}),
-  payload: z.object({ callId: z.string() }),
-  normalize: (_event, raw) => ({
-    callId: "callId" in (raw as object) ? (raw as { callId: string }).callId : "unknown",
-  }),
-  filter: ({ event }) => {
-    callEndedSpyEvents.filter.push(event);
-    return true;
-  },
-  dedupe: {
-    key: ({ event }) => {
-      callEndedSpyEvents.dedupe.push(event);
-      return undefined;
-    },
+  payload: z.object({ dealId: z.string() }),
+  normalize: (_event, raw) => {
+    const r = raw as { deal_id: string };
+    return { dealId: r.deal_id };
   },
 });
 
@@ -142,7 +130,7 @@ const registry = createRegistry([
     id: "crm",
     name: "CRM",
     nodes: [echo],
-    triggers: [dealUpdated, dealAmountChanged, throwy, dealKeyed, callEnded, callEndedSpy],
+    triggers: [dealUpdated, dealAmountChanged, throwy, dealKeyed, callEnded, dealNormalized],
   }),
 ]);
 
@@ -206,11 +194,11 @@ const callEndedDoc = (id: string, minSeconds = 0): WorkflowDoc => ({
   steps: callEndedSteps,
 });
 
-const callEndedSpyDoc = (id: string): WorkflowDoc => ({
+const dealNormalizedDoc = (id: string): WorkflowDoc => ({
   id,
   name: id,
-  trigger: { type: "crm.callEndedSpy", config: {} },
-  steps: [{ id: "e", type: "crm.echo", config: { value: { $ref: "trigger.callId" } } }],
+  trigger: { type: "crm.dealNormalized", config: {} },
+  steps: [{ id: "e", type: "crm.echo", config: { value: { $ref: "trigger.dealId" } } }],
 });
 
 /** A core.event workflow that waits 5 minutes on a delay before echoing. */
@@ -976,12 +964,58 @@ describe("multi-event triggers", () => {
   });
 
   it("dedupe.key and filter both receive the delivered event", async () => {
-    callEndedSpyEvents.filter.length = 0;
-    callEndedSpyEvents.dedupe.length = 0;
-    await deploy(callEndedSpyDoc("spy"));
-    await engine.emit("ai_call.ended", { callId: "s1" }, { tenantId: "t1" });
-    await engine.emit("voip_call.ended", { callId: "s2" }, { tenantId: "t1" });
-    expect(callEndedSpyEvents.filter).toEqual(["ai_call.ended", "voip_call.ended"]);
-    expect(callEndedSpyEvents.dedupe).toEqual(["ai_call.ended", "voip_call.ended"]);
+    // Self-contained: its own spy arrays, trigger, registry and engine, so nothing here leaks
+    // into (or depends on) module-level state shared with other tests.
+    const filterEvents: (string | undefined)[] = [];
+    const dedupeEvents: (string | undefined)[] = [];
+    const spyTrigger = defineTrigger({
+      type: "crm.callEndedSpy",
+      name: "Call ended spy",
+      kind: "event",
+      events: ["ai_call.ended", "voip_call.ended"],
+      config: z.object({}),
+      payload: z.object({ callId: z.string() }),
+      normalize: (_event, raw) => ({ callId: (raw as { callId: string }).callId }),
+      filter: ({ event }) => {
+        filterEvents.push(event);
+        return true;
+      },
+      dedupe: {
+        key: ({ event }) => {
+          dedupeEvents.push(event);
+          return undefined;
+        },
+      },
+    });
+    const spyRegistry = createRegistry([
+      definePlugin({ id: "crm", name: "CRM", nodes: [echo], triggers: [spyTrigger] }),
+    ]);
+    const spyEngine = createEngine({ registry: spyRegistry, storage, clock: () => now });
+    const doc: WorkflowDoc = {
+      id: "spy",
+      name: "spy",
+      trigger: { type: "crm.callEndedSpy", config: {} },
+      steps: [{ id: "e", type: "crm.echo", config: { value: { $ref: "trigger.callId" } } }],
+    };
+    const v = await spyEngine.saveWorkflow("t1", doc, "u");
+    await spyEngine.publish("t1", doc.id, v.version, "u");
+
+    await spyEngine.emit("ai_call.ended", { callId: "s1" }, { tenantId: "t1" });
+    await spyEngine.emit("voip_call.ended", { callId: "s2" }, { tenantId: "t1" });
+    expect(filterEvents).toEqual(["ai_call.ended", "voip_call.ended"]);
+    expect(dedupeEvents).toEqual(["ai_call.ended", "voip_call.ended"]);
+  });
+
+  it("runs normalize on a single-event trigger, not just multi-event ones (Ruling 91)", async () => {
+    await deploy(dealNormalizedDoc("normalized"));
+    const result = await engine.emit("deal.raw", { deal_id: "d9" }, { tenantId: "t1" });
+    expect(result.rejected).toEqual([]);
+    expect(result.started).toHaveLength(1);
+    const run = await storage.getRun("t1", result.started[0] as string);
+    expect(run).toMatchObject({
+      workflowId: "normalized",
+      trigger: { dealId: "d9" },
+      startedBy: { kind: "event", event: "deal.raw" },
+    });
   });
 });
