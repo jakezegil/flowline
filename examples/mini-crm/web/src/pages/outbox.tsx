@@ -4,11 +4,32 @@
  *
  * @module
  */
-import { Inbox } from "lucide-react";
+import { Activity, Inbox } from "lucide-react";
 import { type JSX, useState } from "react";
 import { Link } from "react-router";
-import { api, useQuery } from "../api";
+import { api, type OutboxMessage, useQuery, useWorkflowName } from "../api";
 import { Avatar, EmptyState, ErrorState, fullTime, PageHeader, timeAgo, useNow } from "../ui";
+
+/** Test steps run outside any run: their run IDs start with `test_` and have no run to open. */
+const isTestRun = (m: OutboxMessage) => m.runId?.startsWith("test_") ?? false;
+
+/** The workflow that sent `m`, linking to its run. */
+function SentBy(props: { message: OutboxMessage }): JSX.Element | null {
+  const workflowName = useWorkflowName();
+  const { runId, workflowId } = props.message;
+  if (!runId || !workflowId) return null;
+  if (isTestRun(props.message)) {
+    return (
+      <span className="mail__sent-by muted">Sent by a test step in {workflowName(workflowId)}</span>
+    );
+  }
+  return (
+    <Link to={`/runs/${runId}`} className="btn btn--sm mail__sent-by">
+      <Activity size={14} aria-hidden />
+      {workflowName(workflowId)} run
+    </Link>
+  );
+}
 
 /** The outbox page. */
 export function OutboxPage(): JSX.Element {
@@ -84,6 +105,7 @@ export function OutboxPage(): JSX.Element {
                     </span>
                     <span className="muted">Sent {fullTime(selected.sentAt)}</span>
                   </div>
+                  <SentBy message={selected} />
                 </div>
                 <div className="mail__body">{selected.body}</div>
                 <p className="mail__foot muted">

@@ -18,7 +18,7 @@ export function RunsPage(): JSX.Element {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const workflowId = params.get("workflow") ?? undefined;
-  const workflows = useQuery<WorkflowSummary[]>("runs", () => flowkit.listWorkflows());
+  const workflows = useQuery<WorkflowSummary[]>("workflows", () => flowkit.listWorkflows());
   const query = workflowId ? `?workflow=${encodeURIComponent(workflowId)}` : "";
 
   return (

@@ -19,6 +19,7 @@ import {
   runsStartedBy,
   useQuery,
   useUsers,
+  useWorkflowName,
 } from "../api";
 import {
   Blank,
@@ -136,6 +137,7 @@ export function DealsPage(): JSX.Element {
   const contacts = useQuery("contacts", api.listContacts);
   const { users } = useUsers();
   const { runs, add } = useDealRuns();
+  const workflowName = useWorkflowName();
   const toast = useToast();
   const [saving, setSaving] = useState<string | null>(null);
 
@@ -165,7 +167,7 @@ export function DealsPage(): JSX.Element {
         title: `${deal.name} moved to ${STAGE_LABELS[stage]}`,
         detail: first ? (
           <>
-            Started <Link to={`/runs/${first.id}`}>{first.workflowId}</Link>
+            Started <Link to={`/runs/${first.id}`}>{workflowName(first.workflowId)}</Link>
             {started.length > 1 ? ` and ${started.length - 1} more` : ""}.
           </>
         ) : (
@@ -243,7 +245,7 @@ export function DealsPage(): JSX.Element {
                       {run ? (
                         <span className="automation">
                           <RunBadge runId={run.id} status={run.status} />
-                          <span className="automation__wf">{run.workflowId}</span>
+                          <span className="automation__wf">{workflowName(run.workflowId)}</span>
                         </span>
                       ) : (
                         <Blank />

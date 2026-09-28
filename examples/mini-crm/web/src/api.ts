@@ -38,6 +38,8 @@ export class ApiError extends Error {
   }
 }
 
+const UNREACHABLE = "Can't reach the CRM server. Is it running on port 8787?";
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method, headers: { accept: "application/json" } };
   if (method !== "GET") {
@@ -49,8 +51,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   try {
     res = await fetch(path, init);
   } catch {
-    throw new ApiError("Can't reach the CRM server. Is it running on port 8787?", 0, null);
+    throw new ApiError(UNREACHABLE, 0, null);
   }
+  // Through the Vite proxy a stopped server answers 502 (or 503/504) instead of failing the fetch.
+  if (res.status >= 502 && res.status <= 504) throw new ApiError(UNREACHABLE, res.status, null);
   const text = await res.text();
   let parsed: unknown = null;
   if (text) {
@@ -102,7 +106,7 @@ export const api = {
 
 // ------------------------------------------------------------------ change notifications
 
-type Topic = "contacts" | "deals" | "approvals" | "outbox" | "runs" | "all";
+type Topic = "contacts" | "deals" | "approvals" | "outbox" | "workflows" | "all";
 const listeners = new Set<(topic: Topic) => void>();
 
 /** Tell every mounted {@link useQuery} on `topic` (or everything, with `"all"`) to refetch. */
@@ -160,7 +164,13 @@ export function useQuery<T>(topic: Topic, load: () => Promise<T>, pollMs?: numbe
     };
   }, [topic, pollMs, reload]);
 
-  return { data, error, reload, setData };
+  // A local update wins over any fetch already in flight, which would otherwise land on top of it.
+  const setLocal = useCallback((update: (prev: T | undefined) => T | undefined) => {
+    seq.current++;
+    setData(update);
+  }, []);
+
+  return { data, error, reload, setData: setLocal };
 }
 
 let usersPromise: Promise<User[]> | undefined;
@@ -184,6 +194,12 @@ export function useUsers(): { users: User[] | undefined; error: string | undefin
     };
   }, []);
   return { users, error };
+}
+
+/** Looks up a workflow's name by ID (the ID itself until the list loads, or if it is unknown). */
+export function useWorkflowName(): (id: string) => string {
+  const { data } = useQuery("workflows", () => flowkit.listWorkflows());
+  return useCallback((id: string) => data?.find((w) => w.id === id)?.name ?? id, [data]);
 }
 
 /**

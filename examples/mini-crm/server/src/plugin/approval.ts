@@ -37,7 +37,7 @@ export const requestApproval = defineNode({
     "Ask a user to approve, and wait for their decision. Takes Rejected if nobody decides in time.",
   icon: "badge-check",
   category: "Approvals",
-  summary: "Ask {{approverId}}: {{title}}",
+  summary: "Ask for approval: {{title}}",
   input: z.object({
     title: ui(z.string().min(1, "Enter what needs approving"), {
       label: "Title",

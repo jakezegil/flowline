@@ -4,36 +4,23 @@
  *
  * @module
  */
-import { RunViewer } from "@flowkit/react";
+import { RunViewer, useRun } from "@flowkit/react";
 import { Activity, BadgeCheck, Check, X } from "lucide-react";
-import { type JSX, useState } from "react";
+import { type JSX, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { ApiError, type Approval, api, invalidate, useQuery, useUsers } from "../api";
-import { EmptyState, useToast } from "../ui";
+import { type Approval, api, useQuery, useUsers } from "../api";
+import { useDecideApproval } from "../decide";
+import { EmptyState } from "../ui";
 
 /** Approve or reject `approval` without leaving the run. */
-function ApprovalBar(props: { approval: Approval }): JSX.Element {
-  const { approval } = props;
+function ApprovalBar(props: { approval: Approval; onDecided(): void }): JSX.Element {
+  const { approval, onDecided } = props;
   const { users } = useUsers();
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-  const approver = users?.find((u) => u.id === approval.approverId)?.name ?? approval.approverId;
+  const { busy, decide } = useDecideApproval();
+  const approver = users?.find((u) => u.id === approval.approverId)?.name ?? "the approver";
 
-  async function decide(decision: "approved" | "rejected") {
-    setBusy(true);
-    try {
-      await api.decide(approval.id, decision);
-      toast({ tone: "success", title: decision === "approved" ? "Approved" : "Rejected" });
-    } catch (err) {
-      toast({
-        tone: "danger",
-        title: "Couldn't record the decision",
-        detail: err instanceof ApiError ? err.message : String(err),
-      });
-    } finally {
-      setBusy(false);
-      invalidate("approvals");
-    }
+  async function onDecide(decision: "approved" | "rejected") {
+    if (await decide(approval, decision)) onDecided();
   }
 
   return (
@@ -46,8 +33,8 @@ function ApprovalBar(props: { approval: Approval }): JSX.Element {
       <button
         type="button"
         className="btn btn--sm"
-        disabled={busy}
-        onClick={() => decide("rejected")}
+        disabled={busy !== null}
+        onClick={() => onDecide("rejected")}
       >
         <X size={14} aria-hidden />
         Reject
@@ -55,8 +42,8 @@ function ApprovalBar(props: { approval: Approval }): JSX.Element {
       <button
         type="button"
         className="btn btn--sm btn--primary"
-        disabled={busy}
-        onClick={() => decide("approved")}
+        disabled={busy !== null}
+        onClick={() => onDecide("approved")}
       >
         <Check size={14} aria-hidden />
         Approve
@@ -65,10 +52,59 @@ function ApprovalBar(props: { approval: Approval }): JSX.Element {
   );
 }
 
+/**
+ * The pending CRM approval of run `runId`, while the run waits on it. The run's status comes from
+ * the same event stream the viewer uses, so the bar appears as the run suspends and goes as soon
+ * as it resumes or is cancelled, however that happened.
+ */
+function usePendingApproval(runId: string): {
+  approval: Approval | undefined;
+  markDecided(): void;
+} {
+  const { detail } = useRun(runId);
+  const waiting = detail?.run.status === "waiting";
+  const [decided, setDecided] = useState<string | null>(null);
+  const [lookFast, setLookFast] = useState(false);
+  // The approval is created right after the run suspends: poll quickly until it shows up.
+  const approvals = useQuery("approvals", api.listApprovals, lookFast ? 500 : 5000);
+  const approval = waiting
+    ? approvals.data?.find((a) => a.runId === runId && a.status === "pending" && a.id !== decided)
+    : undefined;
+  const { reload } = approvals;
+
+  useEffect(() => {
+    if (waiting) reload();
+  }, [waiting, reload]);
+
+  // Only a step waiting on a callback (in this CRM, Request approval) has an approval coming.
+  const expectsApproval =
+    waiting &&
+    Object.values(detail?.run.journal ?? {}).some(
+      (entry) => entry.status === "suspended" && entry.pending?.hasCallback === true,
+    );
+  const fast = expectsApproval && !approval;
+  useEffect(() => setLookFast(fast), [fast]);
+
+  return { approval, markDecided: () => setDecided(approval?.id ?? null) };
+}
+
+function Run(props: { runId: string; query: string }): JSX.Element {
+  const navigate = useNavigate();
+  const { approval, markDecided } = usePendingApproval(props.runId);
+  return (
+    <div className="run-detail">
+      {approval && <ApprovalBar key={approval.id} approval={approval} onDecided={markDecided} />}
+      <RunViewer
+        runId={props.runId}
+        className="run-detail__viewer"
+        onRetried={(next) => navigate(`/runs/${next}${props.query}`)}
+      />
+    </div>
+  );
+}
+
 /** The selected run, or an empty state. `query` is kept when a retry opens the new run. */
 export function RunDetail(props: { runId: string | undefined; query: string }): JSX.Element {
-  const navigate = useNavigate();
-  const approvals = useQuery("approvals", api.listApprovals, 4000);
   if (!props.runId) {
     return (
       <EmptyState icon={<Activity size={20} />} title="Pick a run">
@@ -77,16 +113,5 @@ export function RunDetail(props: { runId: string | undefined; query: string }): 
       </EmptyState>
     );
   }
-  const pending = approvals.data?.find((a) => a.runId === props.runId && a.status === "pending");
-  return (
-    <div className="run-detail">
-      {pending && <ApprovalBar key={pending.id} approval={pending} />}
-      <RunViewer
-        key={props.runId}
-        runId={props.runId}
-        className="run-detail__viewer"
-        onRetried={(next) => navigate(`/runs/${next}${props.query}`)}
-      />
-    </div>
-  );
+  return <Run key={props.runId} runId={props.runId} query={props.query} />;
 }

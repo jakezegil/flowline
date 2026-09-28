@@ -7,7 +7,8 @@
 import { BadgeCheck, Check, X } from "lucide-react";
 import { type JSX, useState } from "react";
 import { Link } from "react-router";
-import { ApiError, type Approval, api, invalidate, useQuery, useUsers } from "../api";
+import { type Approval, api, useQuery, useUsers } from "../api";
+import { useDecideApproval } from "../decide";
 import {
   Badge,
   EmptyState,
@@ -19,7 +20,6 @@ import {
   timeAgo,
   UserChip,
   useNow,
-  useToast,
 } from "../ui";
 
 const STATUS: Record<Approval["status"], { tone: Tone; label: string }> = {
@@ -35,45 +35,13 @@ type Tab = "pending" | "decided";
 export function ApprovalsPage(): JSX.Element {
   const approvals = useQuery("approvals", api.listApprovals, 4000);
   const { users } = useUsers();
-  const toast = useToast();
   const now = useNow();
   const [tab, setTab] = useState<Tab>("pending");
-  const [busy, setBusy] = useState<string | null>(null);
+  const { busy, decide } = useDecideApproval({ linkRun: true });
 
   const pending = approvals.data?.filter((a) => a.status === "pending") ?? [];
   const decided = approvals.data?.filter((a) => a.status !== "pending") ?? [];
   const rows = tab === "pending" ? pending : decided;
-
-  async function decide(a: Approval, decision: "approved" | "rejected") {
-    setBusy(a.id);
-    try {
-      await api.decide(a.id, decision);
-      toast({
-        tone: "success",
-        title: decision === "approved" ? "Approved" : "Rejected",
-        detail: (
-          <>
-            The run continues. <Link to={`/runs/${a.runId}`}>Open run</Link>
-          </>
-        ),
-      });
-    } catch (err) {
-      toast({
-        tone: "danger",
-        title: "Couldn't record the decision",
-        detail:
-          err instanceof ApiError && err.status === 410
-            ? "The run stopped waiting (it timed out or was cancelled)."
-            : err instanceof ApiError
-              ? err.message
-              : String(err),
-      });
-    } finally {
-      setBusy(null);
-      invalidate("approvals");
-      invalidate("outbox");
-    }
-  }
 
   return (
     <div className="page">

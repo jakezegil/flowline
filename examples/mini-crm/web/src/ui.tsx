@@ -282,7 +282,15 @@ export function Dialog(props: {
   const { open, onClose } = props;
   useEffect(() => {
     const d = ref.current;
-    if (open && d && !d.open) d.showModal();
+    if (!open || !d) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!d.open) d.showModal();
+    // Start on the first field rather than the close button.
+    d.querySelector<HTMLElement>(
+      "[autofocus], input:not([type=hidden]):not(.sr-only), select, textarea",
+    )?.focus();
+    // The dialog unmounts instead of calling close(), so hand focus back to whatever opened it.
+    return () => opener?.focus();
   }, [open]);
   if (!open) return null;
   return (

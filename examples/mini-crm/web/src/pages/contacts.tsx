@@ -5,7 +5,7 @@
  * @module
  */
 import { Plus, Search, Users } from "lucide-react";
-import { type FormEvent, type JSX, useMemo, useState } from "react";
+import { type FormEvent, type JSX, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { ApiError, api, type Contact, invalidate, runsStartedBy, useQuery, useUsers } from "../api";
 import {
@@ -31,6 +31,11 @@ function NewContactDialog(props: { open: boolean; onClose(): void }): JSX.Elemen
   const toast = useToast();
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+
+  // The dialog stays mounted while closed: start each opening without the last one's error.
+  useEffect(() => {
+    if (props.open) setError(undefined);
+  }, [props.open]);
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();

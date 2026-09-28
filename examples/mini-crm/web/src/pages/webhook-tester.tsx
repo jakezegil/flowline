@@ -6,7 +6,7 @@
  * @module
  */
 import type { WorkflowSummary } from "@flowkit/core/client";
-import { ArrowUpRight, Dices, LoaderCircle, Send, Webhook } from "lucide-react";
+import { ArrowUpRight, LoaderCircle, RefreshCw, Send, Webhook } from "lucide-react";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { api, flowkit, invalidate, useQuery } from "../api";
@@ -53,7 +53,7 @@ interface Sent {
 /** The webhook tester page. */
 export function WebhookTesterPage(): JSX.Element {
   const demo = useQuery("all", api.demo);
-  const workflows = useQuery<WorkflowSummary[]>("runs", () => flowkit.listWorkflows());
+  const workflows = useQuery<WorkflowSummary[]>("workflows", () => flowkit.listWorkflows());
   const hooks = useMemo(() => Object.entries(demo.data?.webhooks ?? {}), [demo.data]);
   const [workflowId, setWorkflowId] = useState<string | undefined>(undefined);
   const [sample, setSample] = useState<SampleKey>("enterprise");
@@ -224,7 +224,7 @@ export function WebhookTesterPage(): JSX.Element {
                   disabled={!sendId}
                   onClick={() => setRequestId(newRequestId())}
                 >
-                  <Dices size={15} aria-hidden />
+                  <RefreshCw size={14} aria-hidden />
                 </button>
               </div>
               <span className="field__hint">
@@ -285,7 +285,7 @@ export function WebhookTesterPage(): JSX.Element {
             </div>
 
             <div className="tester__actions">
-              <span className="muted tester__shortcut">⌘ Enter</span>
+              <span className="muted tester__shortcut">{IS_MAC ? "⌘ Enter" : "Ctrl+Enter"}</span>
               <button
                 type="button"
                 className="btn btn--primary"
@@ -360,6 +360,9 @@ export function WebhookTesterPage(): JSX.Element {
     </div>
   );
 }
+
+/** Apple platforms use ⌘ for the send shortcut; everything else uses Ctrl. */
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
 function statusText(status: number): string {
   const texts: Record<number, string> = {

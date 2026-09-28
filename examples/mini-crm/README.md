@@ -8,7 +8,7 @@ from one Hono app.
 
 ```sh
 pnpm install
-pnpm --filter @flowkit/example-mini-crm dev
+pnpm --filter @flowkit/example-mini-crm dev   # or: pnpm --filter ./examples/mini-crm dev
 ```
 
 `dev` runs the server on `http://localhost:8787` (reloading on change) and the web app on
@@ -35,11 +35,11 @@ data.
 | --- | --- |
 | Contacts | Contacts table. "New contact" reports `contact.created` |
 | Deals | Pipeline summary and deals table. The stage select PATCHes the deal (`deal.updated`), and each row links to the latest run a change started |
-| Workflows | Every workflow with its trigger and published version. "New workflow" picks a name and a trigger, then opens the editor |
+| Workflows | Every workflow with its trigger and published version. "New workflow" picks a name and a trigger, saves the workflow as a draft, then opens the editor |
 | Workflow editor | `<WorkflowEditor>`, full-bleed, with a breadcrumb in `headerLeft` |
-| Runs | `<RunList>` beside `<RunViewer>`. `/runs/:id` deep links a run, and `?workflow=` filters the list |
+| Runs | `<RunList>` beside `<RunViewer>`. `/runs/:id` deep links a run, and `?workflow=` filters the list. While a run waits on an approval, a bar above the viewer approves or rejects it |
 | Approvals | Pending and decided approvals, with Approve and Reject |
-| Outbox | Sent emails with a reading pane |
+| Outbox | Sent emails with a reading pane, each linking to the run that sent it |
 | Webhook tester | POSTs a JSON body to a webhook workflow, optionally with `X-Request-Id`, and links to the run |
 
 How it wires Flowkit (`web/src/app.tsx`):
@@ -148,7 +148,7 @@ statuses:
 | `GET /api/deals` | `Deal[]` |
 | `PATCH /api/deals/:id` `{ name?, stage?, amount?, ownerId? }` | `{ deal, changes }`, where `changes` names the fields that changed. Reports `deal.updated` when something changed |
 | `GET /api/users` | `User[]`. `role` is `rep` or `manager`, and `team` is `smb` or `enterprise` |
-| `GET /api/outbox` | `OutboxMessage[]`, newest first: every email a workflow sent |
+| `GET /api/outbox` | `OutboxMessage[]`, newest first: every email a workflow sent, with the `runId` and `workflowId` that sent it |
 | `GET /api/approvals` | `Approval[]`, newest first: `{ id, runId, stepPath, title, approverId, status, createdAt, decidedAt }`. `status` is `pending`, `approved`, `rejected` or `expired` |
 | `POST /api/approvals/:id/decision` `{ decision: "approved" \| "rejected" }` | 202 `{ approval }`, and the waiting run resumes. 409 `{ error, approval }` when it was already decided. 410 `{ error: "gone", approval }` when the run no longer waits, e.g. it was cancelled; the approval becomes `expired` |
 | `GET /api/demo` | `{ tenantId, userId, webhooks }`. `webhooks` maps workflow IDs to webhook paths, e.g. `webhooks["inbound-lead-routing"]` |

@@ -143,7 +143,7 @@ export const assignOwner = defineNode({
     "Pick a sales rep for the contact and make them its owner. Round robin rotates through every rep; Team rotates through one team's reps.",
   icon: "user-check",
   category: "Contacts",
-  summary: "Assign owner ({{strategy}} {{team}})",
+  summary: "Round robin",
   input: z
     .object({
       contactId: contactId(),

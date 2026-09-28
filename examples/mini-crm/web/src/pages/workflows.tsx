@@ -1,6 +1,6 @@
 /**
  * Workflows: every workflow with its trigger and published version, and a "New workflow" dialog
- * that picks a name and a trigger, then opens the editor.
+ * that picks a name and a trigger, saves the new workflow as a draft and opens the editor.
  *
  * @module
  */
@@ -10,7 +10,7 @@ import { useFlowkit } from "@flowkit/react";
 import { ChevronRight, Plus, Workflow } from "lucide-react";
 import { type FormEvent, type JSX, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { flowkit, useQuery } from "../api";
+import { flowkit, invalidate, useQuery } from "../api";
 import {
   Badge,
   Dialog,
@@ -70,6 +70,8 @@ function NewWorkflowDialog(props: {
   const [name, setName] = useState("");
   const [idEdited, setIdEdited] = useState<string | null>(null);
   const [trigger, setTrigger] = useState("crm.dealUpdated");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const id = idEdited ?? slugify(name);
   const idError = !id
     ? undefined
@@ -80,17 +82,28 @@ function NewWorkflowDialog(props: {
         : undefined;
   const triggers = (props.manifest?.triggers ?? []).filter((t) => t.kind !== "subflow");
 
-  function submit(e: FormEvent) {
+  // The workflow is saved as a draft before the editor opens, so it exists even if nobody
+  // presses Save there.
+  async function submit(e: FormEvent) {
     e.preventDefault();
     const def = props.manifest?.triggers.find((t) => t.type === trigger);
-    if (!def || !id || idError) return;
-    const initialDoc: WorkflowDoc = {
+    if (!def || !id || idError || saving) return;
+    const doc: WorkflowDoc = {
       id,
       name: name.trim() || "Untitled workflow",
       trigger: { type: def.type, config: defaultTriggerConfig(def) },
       steps: [],
     };
-    navigate(`/workflows/${id}`, { state: { initialDoc } });
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await flowkit.saveWorkflow(doc);
+      invalidate("workflows");
+      navigate(`/workflows/${id}`);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+      setSaving(false);
+    }
   }
 
   return (
@@ -163,12 +176,17 @@ function NewWorkflowDialog(props: {
             })}
           </div>
         </fieldset>
+        {saveError && (
+          <p className="form__error" role="alert">
+            Couldn't create the workflow: {saveError}
+          </p>
+        )}
         <div className="dialog__foot">
           <button type="button" className="btn" onClick={props.onClose}>
             Cancel
           </button>
-          <button type="submit" className="btn btn--primary" disabled={!id || !!idError}>
-            Create and open editor
+          <button type="submit" className="btn btn--primary" disabled={!id || !!idError || saving}>
+            {saving ? "Creating…" : "Create and open editor"}
           </button>
         </div>
       </form>
@@ -178,7 +196,7 @@ function NewWorkflowDialog(props: {
 
 /** The workflows page. */
 export function WorkflowsPage(): JSX.Element {
-  const workflows = useQuery<WorkflowSummary[]>("runs", () => flowkit.listWorkflows());
+  const workflows = useQuery<WorkflowSummary[]>("workflows", () => flowkit.listWorkflows());
   const manifest = useQuery<Manifest>("all", () => flowkit.getManifest());
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
