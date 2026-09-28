@@ -2510,54 +2510,11 @@
     margin: 0;
     border-width: 0 0 1px;
     flex: none;
+    /* Every chip stays reachable: they wrap onto a second row when the list is narrow. */
+    flex-wrap: wrap;
     gap: 4px;
-    /* One row that scrolls sideways when narrow, instead of wrapping onto two. */
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
     padding: 10px 10px 8px;
     border-bottom: 1px solid var(--fk-border);
-  }
-  .fk-runs__filters::-webkit-scrollbar {
-    display: none;
-  }
-  /*
-   * Scrollable: fade the edge(s) with more chips past them, so the row reads as cut off. The
-   * second mask layer keeps the bottom border (1px) unfaded.
-   */
-  .fk-runs__filters[data-overflow] {
-    -webkit-mask-image: var(--fk-runs-fade), linear-gradient(#000, #000);
-    mask-image: var(--fk-runs-fade), linear-gradient(#000, #000);
-    -webkit-mask-size:
-      100% 100%,
-      100% 1px;
-    mask-size:
-      100% 100%,
-      100% 1px;
-    -webkit-mask-position:
-      0 0,
-      0 100%;
-    mask-position:
-      0 0,
-      0 100%;
-    -webkit-mask-repeat: no-repeat;
-    mask-repeat: no-repeat;
-  }
-  .fk-runs__filters[data-overflow="end"] {
-    --fk-runs-fade: linear-gradient(to right, #000 calc(100% - 32px), transparent);
-  }
-  .fk-runs__filters[data-overflow="start"] {
-    --fk-runs-fade: linear-gradient(to left, #000 calc(100% - 32px), transparent);
-  }
-  .fk-runs__filters[data-overflow="both"] {
-    --fk-runs-fade: linear-gradient(
-      to right,
-      transparent,
-      #000 32px,
-      #000 calc(100% - 32px),
-      transparent
-    );
   }
   .fk-runs__filter {
     flex: none;
@@ -2655,7 +2612,16 @@
     color: var(--fk-text-muted);
   }
   .fk-runs__status {
+    flex: none;
     font-weight: 600;
+  }
+  .fk-runs__subject {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fk-text);
   }
   .fk-runs__time {
     flex: none;
@@ -2749,6 +2715,34 @@
     /* The inspector sheet already shows this step's status; don't spend canvas height on it. */
     .fk-banner[data-redundant] {
       display: none;
+    }
+    /* The sheet overlaps the canvas by its rounded top: keep the zoom controls clear of it. */
+    .fk-editor__body:has(> .fk-panel) .fk-controls.react-flow__panel {
+      margin-bottom: 30px;
+    }
+  }
+  /* A read-only run keeps its inspector beside the canvas down to tablet widths (a 1024px window
+     with an app sidebar): the canvas stays tall enough to follow the run. */
+  @container fk-app (min-width: 561px) and (max-width: 720px) {
+    .fk-run .fk-editor__body {
+      flex-direction: row;
+    }
+    .fk-run .fk-panel {
+      width: 300px;
+      max-width: 50%;
+      height: auto;
+      margin-top: 0;
+      border-top: 0;
+      border-left: 1px solid var(--fk-border);
+      border-radius: 0;
+      box-shadow: none;
+      animation-name: fk-panel-in;
+    }
+    .fk-run .fk-editor__body:has(> .fk-panel) .fk-controls.react-flow__panel {
+      margin-bottom: 15px;
+    }
+    .fk-run .fk-banner[data-redundant] {
+      display: flex;
     }
   }
   @container fk-app (max-width: 480px) {

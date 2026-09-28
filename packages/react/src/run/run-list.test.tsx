@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockClient, setupDom } from "../../test/dom";
 import { FlowkitProvider } from "../provider";
+import { publishRunChange } from "./run-changes";
 import { RunList } from "./run-list";
 
 const row = (
@@ -242,47 +243,85 @@ describe("RunList: stopped runs and narrow widths", () => {
     );
   });
 
-  it("keeps the filter chips on one row that scrolls sideways", async () => {
+  it("wraps the filter chips instead of clipping them", async () => {
     const { readFileSync } = await import("node:fs");
     const { resolve } = await import("node:path");
     const css = readFileSync(resolve(__dirname, "../styles.css"), "utf8");
     const rule = /\.fk-runs__filters \{([^}]*)\}/.exec(css)?.[1] ?? "";
-    expect(rule).toMatch(/flex-wrap: nowrap/);
-    expect(rule).toMatch(/overflow-x: auto/);
-    expect(css).toMatch(
-      /\.fk-runs__filters\[data-overflow\] \{[^}]*mask-image: var\(--fk-runs-fade\)/,
-    );
-    for (const edge of ["start", "end", "both"]) {
-      expect(css).toContain(`.fk-runs__filters[data-overflow="${edge}"] {\n    --fk-runs-fade:`);
-    }
+    expect(rule).toMatch(/flex-wrap: wrap/);
+    expect(rule).not.toMatch(/overflow-x/);
   });
+});
 
-  it("marks which ends of the chip row have more chips past them", async () => {
+describe("RunList: staying current", () => {
+  it("reloads when the window regains focus", async () => {
+    const listRuns = vi.fn(async () => [row("r1", "running")]);
     render(
-      <FlowkitProvider client={mockClient({ listRuns: async () => [] })}>
-        <RunList onSelect={() => {}} />
+      <FlowkitProvider client={mockClient({ listRuns })}>
+        <RunList onSelect={() => {}} pollMs={0} />
       </FlowkitProvider>,
     );
-    const row = screen.getByRole("group", { name: "Filter runs by status" });
+    await screen.findByRole("list", { name: "Runs" });
+    expect(listRuns).toHaveBeenCalledTimes(1);
+    fireEvent.focus(window);
+    await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(2));
+  });
+
+  it("updates a row at once when a viewer of the same client sees the run change", async () => {
+    const waiting = row("r1", "waiting");
+    const listRuns = vi
+      .fn()
+      .mockResolvedValueOnce([waiting])
+      .mockResolvedValue([{ ...waiting, status: "cancelled" }]);
+    const client = mockClient({ listRuns });
+    render(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} pollMs={0} />
+      </FlowkitProvider>,
+    );
+    const list = await screen.findByRole("list", { name: "Runs" });
+    expect(within(list).getByRole("button", { name: /Waiting/ })).toBeTruthy();
+    // What useRun (and so RunViewer) publishes after loading the run, e.g. once it was cancelled.
+    act(() => publishRunChange(client, { ...waiting, status: "cancelled" }));
+    expect(within(list).getByRole("button", { name: /Cancelled/ })).toBeTruthy();
+    await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(2));
+  });
+
+  it("drops a run that no longer matches the filter", async () => {
+    const waiting = row("r1", "waiting");
+    const listRuns = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([waiting])
+      .mockResolvedValue([]);
+    const client = mockClient({ listRuns });
+    render(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} pollMs={0} />
+      </FlowkitProvider>,
+    );
     await screen.findByText(/No runs yet/);
-    // Everything fits (jsdom's default: no layout).
-    expect(row.hasAttribute("data-overflow")).toBe(false);
-    const size = { scrollLeft: 0, clientWidth: 320, scrollWidth: 520 };
-    for (const key of Object.keys(size) as (keyof typeof size)[]) {
-      Object.defineProperty(row, key, { configurable: true, get: () => size[key] });
-    }
-    const scrollTo = (left: number) => {
-      size.scrollLeft = left;
-      fireEvent.scroll(row);
-    };
-    scrollTo(0);
-    expect(row.getAttribute("data-overflow")).toBe("end");
-    scrollTo(100);
-    expect(row.getAttribute("data-overflow")).toBe("both");
-    scrollTo(200);
-    expect(row.getAttribute("data-overflow")).toBe("start");
-    size.scrollWidth = 320;
-    scrollTo(0);
-    expect(row.hasAttribute("data-overflow")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Waiting" }));
+    const list = await screen.findByRole("list", { name: "Runs" });
+    expect(within(list).getByRole("button", { name: /Waiting/ })).toBeTruthy();
+    act(() => publishRunChange(client, { ...waiting, status: "cancelled" }));
+    expect(await screen.findByText("No waiting runs.")).toBeTruthy();
+  });
+
+  it("names what each run is about with describeRun", async () => {
+    const client = mockClient({
+      listRuns: vi.fn(async () => [row("r1", "waiting"), row("r2", "waiting")]),
+    });
+    render(
+      <FlowkitProvider client={client}>
+        <RunList
+          onSelect={() => {}}
+          describeRun={(r) => (r.id === "r1" ? "ada@example.com" : undefined)}
+        />
+      </FlowkitProvider>,
+    );
+    const list = await screen.findByRole("list", { name: "Runs" });
+    expect(within(list).getByRole("button", { name: /ada@example\.com/ })).toBeTruthy();
+    expect(within(list).getAllByRole("button")).toHaveLength(2);
   });
 });

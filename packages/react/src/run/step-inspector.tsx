@@ -247,7 +247,6 @@ export function StepInspector({
   resumeHint?: string;
 }): JSX.Element {
   const { labels } = useFlowkitAppearance();
-  const now = useNow(30_000);
   const step = stepIndex(detail.doc).get(selection);
   const info = inspect(detail, selection, path, overlay, labels, {
     ...(step ? { step } : {}),
@@ -256,6 +255,12 @@ export function StepInspector({
   });
   const status = selection === TRIGGER_KEY ? undefined : overlay.stepStatus[selection];
   const dimmed = overlay.dimmedSteps?.has(selection) ?? false;
+  const pending =
+    info.entry?.status === "suspended" && detail.run.status === "waiting"
+      ? info.entry.pending
+      : undefined;
+  // A timed wait counts down by the second; everything else is fine at half a minute.
+  const now = useNow(pending?.until !== undefined ? 1000 : 30_000);
   const [tab, setTab] = useState<Tab>(() =>
     info.error && (status?.status === "failed" || info.isTrigger)
       ? "error"
@@ -288,17 +293,14 @@ export function StepInspector({
     tabRefs.current[next]?.focus();
   };
 
-  const pending =
-    info.entry?.status === "suspended" && detail.run.status === "waiting"
-      ? info.entry.pending
-      : undefined;
   let waiting: string | undefined;
   if (pending?.hasCallback) {
-    waiting = labels.waitingForCallback(
-      pending.expiresAt !== undefined ? labels.relativeTime(pending.expiresAt - now) : undefined,
-    );
+    const expires =
+      pending.expiresAt !== undefined ? labels.relativeTime(pending.expiresAt - now) : undefined;
+    // A wait the host app resumes (it has a hint) is a decision, not a raw callback.
+    waiting = resumeHint ? labels.waitingForDecision(expires) : labels.waitingForCallback(expires);
   } else if (pending?.until !== undefined) {
-    waiting = labels.waitingUntil(labels.relativeTime(pending.until - now));
+    waiting = `${labels.waitingUntil(labels.dateTime(pending.until))} · ${labels.relativeTime(pending.until - now)}`;
   } else if (pending?.childRunId !== undefined) {
     waiting = labels.waitingForSubflow;
   }
@@ -320,7 +322,13 @@ export function StepInspector({
       <JsonTree value={info.output} label={tabName.output} />
     ) : (
       <p className="fk-empty">
-        {dimmed ? labels.notTaken : status?.status === "pending" ? labels.notRun : labels.noOutput}
+        {dimmed
+          ? labels.notTaken
+          : status?.status === "pending"
+            ? labels.notRun
+            : status?.status === "skipped" && !step?.disabled
+              ? labels.didNotRun
+              : labels.noOutput}
       </p>
     );
   } else if (tab === "error") {

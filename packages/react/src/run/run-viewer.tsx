@@ -1,7 +1,7 @@
 import type { Manifest, NodeManifest, RunDetail } from "@flowkit/core";
 import * as Popover from "@radix-ui/react-popover";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { CircleAlert, CircleStop, Hourglass, LoaderCircle, RotateCcw } from "lucide-react";
+import { Ban, CircleAlert, CircleStop, Hourglass, LoaderCircle, RotateCcw } from "lucide-react";
 import {
   type JSX,
   type ReactNode,
@@ -89,6 +89,7 @@ function RunBody({
   refresh,
   onRetried,
   resumeAction,
+  userName,
 }: {
   runId: string;
   detail: RunDetail;
@@ -96,6 +97,7 @@ function RunBody({
   refresh(): void;
   onRetried?(runId: string): void;
   resumeAction?: ResumeActionProp | undefined;
+  userName?: ((userId: string) => string | undefined) | undefined;
 }) {
   const { labels, resolveIcon } = useFlowkitAppearance();
   const { client } = useFlowkit();
@@ -208,6 +210,7 @@ function RunBody({
     const reason = out?.reason ?? (run.output as { reason?: unknown } | undefined)?.reason;
     return typeof reason === "string" && reason !== "" ? reason : undefined;
   })();
+  const cancelled = run.status === "cancelled" ? cancellation(detail) : undefined;
   const pending = waitingPath ? detail.run.journal[waitingPath] : undefined;
   const expiresAt = pending?.status === "suspended" ? pending.pending?.expiresAt : undefined;
   const waitingType = waitingStep ? stepIndex(detail.doc).get(waitingStep)?.type : undefined;
@@ -316,6 +319,38 @@ function RunBody({
           action={{ label: labels.showStep, run: () => store.getState().select(stoppedStep) }}
         />
       )}
+      {cancelled && (
+        <Banner
+          redundant={cancelled.stepId !== undefined && selection === cancelled.stepId}
+          tone="neutral"
+          icon={<Ban size={16} aria-hidden />}
+          title={
+            cancelled.stepId === undefined
+              ? labels.runState.cancelled
+              : cancelled.waiting
+                ? labels.cancelledWhileWaiting(nameOf(cancelled.stepId))
+                : labels.cancelledAt(nameOf(cancelled.stepId))
+          }
+          detail={[
+            cancelled.by !== undefined
+              ? labels.cancelledBy(userName?.(cancelled.by) ?? cancelled.by)
+              : undefined,
+            cancelled.reason,
+            labels.relativeTime(cancelled.at - now),
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+          detailTitle={labels.dateTime(cancelled.at)}
+          {...(cancelled.stepId !== undefined
+            ? {
+                action: {
+                  label: labels.showStep,
+                  run: () => store.getState().select(cancelled.stepId as string),
+                },
+              }
+            : {})}
+        />
+      )}
       {waitingStep && !cancelling && (
         <Banner
           // On narrow screens the inspector already says this while it shows the waiting step.
@@ -324,7 +359,7 @@ function RunBody({
           icon={<Hourglass size={16} aria-hidden />}
           title={nameOf(waitingStep)}
           detail={[
-            labels.waitingForCallback(
+            (resumeSpec?.hostHandled ? labels.waitingForDecision : labels.waitingForCallback)(
               expiresAt !== undefined ? labels.relativeTime(expiresAt - now) : undefined,
             ),
             resumeHint,
@@ -358,6 +393,30 @@ function RunBody({
       />
     </EditorContext.Provider>
   );
+}
+
+/** How a cancelled run was cancelled, from its `run.cancelled` event (or its last update). */
+function cancellation(detail: RunDetail): {
+  stepId?: string;
+  /** The step was waiting (not running) when the run was cancelled. */
+  waiting: boolean;
+  by?: string;
+  reason?: string;
+  at: number;
+} {
+  const { run } = detail;
+  const event = detail.events.findLast((e) => e.type === "run.cancelled");
+  const data = (event?.data ?? {}) as { by?: unknown; reason?: unknown };
+  const path = event?.stepPath;
+  const entry =
+    path !== undefined && Object.hasOwn(run.journal, path) ? run.journal[path] : undefined;
+  return {
+    ...(path !== undefined ? { stepId: stepIdOfEntry(path) } : {}),
+    waiting: entry?.status === "suspended",
+    ...(typeof data.by === "string" && data.by !== "" ? { by: data.by } : {}),
+    ...(typeof data.reason === "string" && data.reason !== "" ? { reason: data.reason } : {}),
+    at: event?.at ?? run.updatedAt,
+  };
 }
 
 function stepIdOfEntry(path: string): string {
@@ -441,6 +500,7 @@ function Banner({
   icon,
   title,
   detail,
+  detailTitle,
   action,
   redundant,
 }: {
@@ -450,6 +510,8 @@ function Banner({
   icon: ReactNode;
   title: string;
   detail?: string;
+  /** Tooltip of the detail line, e.g. the full date of a relative time. */
+  detailTitle?: string;
   action?: { label: string; run(): void };
 }) {
   return (
@@ -462,7 +524,11 @@ function Banner({
       <span className="fk-banner__icon">{icon}</span>
       <div className="fk-banner__text">
         <span className="fk-banner__title">{title}</span>
-        {detail && <span className="fk-banner__detail">{detail}</span>}
+        {detail && (
+          <span className="fk-banner__detail" title={detailTitle}>
+            {detail}
+          </span>
+        )}
       </div>
       {action && (
         <button type="button" className="fk-btn fk-btn--sm fk-btn--ghost" onClick={action.run}>
@@ -577,9 +643,14 @@ export function RunViewer(props: {
    * None by default.
    */
   notFoundAction?: NotFoundAction;
+  /**
+   * The display name of a user ID, e.g. who cancelled the run (the `run.cancelled` event's
+   * `data.by`). The ID itself is shown when omitted or when it returns `undefined`.
+   */
+  userName?(userId: string): string | undefined;
   className?: string;
 }): JSX.Element {
-  const { runId, onRetried, className, resumeAction, notFoundAction } = props;
+  const { runId, onRetried, className, resumeAction, notFoundAction, userName } = props;
   const { theme, labels } = useFlowkitAppearance();
   const { detail, error, refresh } = useRun(runId);
   const { manifest, error: manifestError, retry: retryManifest } = useManifest();
@@ -596,6 +667,7 @@ export function RunViewer(props: {
         manifest={manifest}
         refresh={refresh}
         resumeAction={resumeAction}
+        userName={userName}
         {...(onRetried ? { onRetried } : {})}
       />
     );
