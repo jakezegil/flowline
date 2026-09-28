@@ -207,11 +207,13 @@ describe("core.waitForCallback", () => {
 
     it("POSTs the resume URL, expiry and run ID, keyed by the token, without redirects", async () => {
       const { calls, ctx } = notifying(async () => new Response(null, { status: 204 }));
-      await (await suspendWith(ctx)).afterCommit?.();
+      const { signal } = new AbortController();
+      await (await suspendWith(ctx)).afterCommit?.({ signal });
       expect(calls).toHaveLength(1);
       const [call] = calls;
       expect(call?.url).toBe("https://hooks.example/approvals");
       expect(call?.init?.method).toBe("POST");
+      expect(call?.init?.signal).toBe(signal);
       expect(call?.init?.redirect).toBe("error");
       const headers = new Headers(call?.init?.headers);
       expect(headers.get("content-type")).toBe("application/json");
@@ -226,7 +228,7 @@ describe("core.waitForCallback", () => {
     const failure = async (respond: () => Promise<Response>) => {
       const { ctx } = notifying(respond);
       const hook = (await suspendWith(ctx)).afterCommit;
-      return (hook as () => Promise<void>)().then(
+      return (hook as NonNullable<typeof hook>)({ signal: new AbortController().signal }).then(
         () => undefined,
         (e: unknown) => e as Error,
       );

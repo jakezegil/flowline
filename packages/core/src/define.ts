@@ -121,6 +121,8 @@ export interface NodeContext {
    * `init.signal` defaults to {@link NodeContext.signal}. `init.credentialHeaders` names headers
    * (case-insensitive) that carry credentials: they never follow a redirect to another origin,
    * even when they would otherwise be kept (such as `Accept` or `Idempotency-Key`).
+   * Redirects are followed (each hop re-checked) unless `init.redirect` is `"error"` (a redirect
+   * throws a `FatalError` and nothing is re-sent) or `"manual"` (the 3xx response is returned).
    */
   http: {
     fetch(
@@ -157,11 +159,19 @@ export type SuspendSignal = {
   /**
    * Ephemeral side effect the engine runs once the suspension is committed (so, for a callback,
    * once its token is stored and the resume URL works), e.g. sending the resume URL elsewhere. It
-   * is never journaled. Best effort and at most once per suspension: a crash between the commit
-   * and the call skips it. Throwing a `RetryableError` retries it a few times inline; any other
-   * error, or the last retry, only records a `step.notifyFailed` event — the run keeps waiting.
+   * is never journaled. Contract:
+   * - Best effort, at most once per suspension: a crash between the commit and the call skips it.
+   * - It runs without a lease: by then the run may already have been resumed, moved on or been
+   *   cancelled. The engine re-checks before each retry and stops once the run no longer waits on
+   *   this suspension.
+   * - Each try is bounded by the node's `timeoutMs` (at most 30 s) and gets `signal`, aborted at
+   *   that timeout or when the worker stops; pass it to `fetch`. The handler's `ctx` belongs to a
+   *   finished invocation: `ctx.signal` is never aborted and `ctx.callback()` throws.
+   * - Throwing a `RetryableError` (or timing out) retries it: 3 tries, 100 ms then 200 ms apart.
+   *   Any other error, the last try, or a stopping worker records a `step.notifyFailed` event
+   *   (token and resume URL masked); the run keeps waiting either way.
    */
-  readonly afterCommit?: () => Promise<void>;
+  readonly afterCommit?: (opts: { signal: AbortSignal }) => Promise<void>;
 } & (
   | {
       /** Resume at this epoch ms time. */
@@ -228,7 +238,7 @@ export function branch<O = undefined>(id: string, output?: O): BranchSignal<O> {
  */
 export function suspend(
   opts: ({ until: number } | { callback: CallbackHandle }) & {
-    afterCommit?: () => Promise<void>;
+    afterCommit?: (opts: { signal: AbortSignal }) => Promise<void>;
   },
 ): SuspendSignal {
   const hook = opts.afterCommit ? { afterCommit: opts.afterCommit } : {};

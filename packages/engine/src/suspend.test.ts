@@ -14,7 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createEngine, type EngineOptions } from "./engine";
 import { FatalError, RetryableError } from "./errors";
-import type { StorageAdapter } from "./storage";
+import { createExecutor } from "./executor";
+import type { Lease, StorageAdapter } from "./storage";
 
 const TENANT = "t1";
 
@@ -38,6 +39,13 @@ const registry = createRegistry([
           const b = behaviours[ctx.stepId];
           return (b ? b(ctx) : { value: input.value }) as never;
         },
+      }),
+      defineNode({
+        type: "t.quick",
+        name: "Quick",
+        input: z.object({}),
+        timeoutMs: 40,
+        run: ({ ctx }) => behaviours[ctx.stepId]?.(ctx) as never,
       }),
     ],
   }),
@@ -735,5 +743,89 @@ describe("suspend afterCommit", () => {
       error: { message: "could not deliver [redacted] (token [redacted])" },
       attempts: 1,
     });
+  });
+
+  it("records attempts: 3 when every try fails retryably", async () => {
+    parkWith(async () => {
+      throw new RetryableError("still down");
+    });
+    const id = await startRun(wf([step("s")]));
+    await makeEngine().drain();
+    expect((await eventsOf(id)).find((e) => e.type === "step.notifyFailed")?.data).toEqual({
+      error: { message: "still down" },
+      attempts: 3,
+    });
+  });
+
+  /** Step `stepId`'s afterCommit never settles; returns the signals it got. */
+  function hangingHook(stepId = "q") {
+    const signals: AbortSignal[] = [];
+    behaviours[stepId] = () =>
+      suspend({
+        until: now + 5000,
+        afterCommit: ({ signal }) => {
+          signals.push(signal);
+          return new Promise<void>(() => {});
+        },
+      });
+    return signals;
+  }
+  /** A t.quick step: its timeoutMs of 40 bounds each afterCommit try. */
+  const quick: Step = { id: "q", type: "t.quick", config: {} };
+
+  it("times out a hook that never settles, aborting its signal, and records the failure", async () => {
+    const signals = hangingHook();
+    const id = await startRun(wf([quick]));
+    await makeEngine().drain();
+    expect(signals).toHaveLength(3);
+    expect(signals.every((s) => s.aborted)).toBe(true);
+    expect(await getRun(id)).toMatchObject({ status: "waiting", waitReason: "timer" });
+    expect((await eventsOf(id)).find((e) => e.type === "step.notifyFailed")?.data).toEqual({
+      error: { message: "afterCommit timed out after 40ms" },
+      attempts: 3,
+    });
+  });
+
+  it("aborts the hook when the worker stops", async () => {
+    // A t.node step: no timeoutMs, so only the stop can end the 30 s try.
+    const signals = hangingHook("s");
+    const id = await startRun(wf([step("s")]));
+    const executor = createExecutor({ registry, storage, clock });
+    const lease = await storage.claimRun({ workerId: "w1", leaseMs: 30_000, now });
+    const stop = new AbortController();
+    const done = executor.executeClaim(lease as Lease, "w1", stop.signal);
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    stop.abort();
+    await done;
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals).toHaveLength(1);
+    expect((await eventsOf(id)).find((e) => e.type === "step.notifyFailed")?.data).toEqual({
+      error: { message: "worker stopped" },
+      attempts: 1,
+    });
+  });
+
+  it("stops retrying once the run no longer waits on this suspension", async () => {
+    let engine: ReturnType<typeof makeEngine> | undefined;
+    let tries = 0;
+    behaviours.s = async (ctx) => {
+      if (ctx.resume) return { resumed: true };
+      const cb = await ctx.callback({ timeoutMs: 10_000 });
+      return suspend({
+        callback: cb,
+        afterCommit: async () => {
+          tries++;
+          // The receiver resumes the run before answering the notification with an error.
+          await engine?.resume(cb.token, { ok: true });
+          throw new RetryableError("502 after resuming");
+        },
+      });
+    };
+    engine = makeEngine();
+    const id = await startRun(wf([step("s")]));
+    await engine.drain();
+    expect(tries).toBe(1);
+    expect((await getRun(id)).status).toBe("completed");
+    expect((await eventsOf(id)).map((e) => e.type)).not.toContain("step.notifyFailed");
   });
 });

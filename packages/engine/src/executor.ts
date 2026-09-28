@@ -45,6 +45,8 @@ const DEFAULT_BASE_PATH = "/flowkit";
 const AFTER_COMMIT_ATTEMPTS = 3;
 /** Delay before the first `afterCommit` retry, doubling after each. */
 const AFTER_COMMIT_BACKOFF_MS = 100;
+/** Upper bound on one `afterCommit` try; a node's shorter `timeoutMs` applies instead. */
+const AFTER_COMMIT_TIMEOUT_MS = 30_000;
 /** @internal Run statuses that never change again (except through `retryRun`). */
 export const TERMINAL: ReadonlySet<Run["status"]> = new Set(["completed", "failed", "cancelled"]);
 
@@ -80,11 +82,17 @@ export interface Executor {
   /**
    * Advance a claimed run until it completes, fails, waits, loses its lease or exhausts the step
    * budget. Resolves once processing stopped; rejects only on infrastructure errors (storage, test
-   * hooks), leaving the lease to expire.
+   * hooks), leaving the lease to expire. `stop` (the worker shutting down) aborts a suspension's
+   * in-flight `afterCommit` hook.
    */
-  executeClaim(lease: Lease, workerId: string): Promise<void>;
+  executeClaim(lease: Lease, workerId: string, stop?: AbortSignal): Promise<void>;
   /** Report persisted events to the engine's `onEvent` listener. */
   publish(events: NewRunEvent[]): void;
+}
+
+/** An `afterCommit` hook aborted because the worker is stopping; never retried. */
+class WorkerStoppedError extends Error {
+  override readonly name = "WorkerStoppedError";
 }
 
 /** Signals that the lease was taken over; processing stops without committing. */
@@ -221,7 +229,7 @@ export function createExecutor(opts: EngineOptions): Executor {
     }
   };
 
-  async function executeClaim(lease: Lease, workerId: string): Promise<void> {
+  async function executeClaim(lease: Lease, workerId: string, stop?: AbortSignal): Promise<void> {
     const run = lease.run;
     let journal: Record<string, JournalEntry> = { ...run.journal };
     let attempt = run.attempt;
@@ -361,28 +369,76 @@ export function createExecutor(opts: EngineOptions): Executor {
       return ok;
     };
 
+    /** Whether the run still waits on the suspension `path` parked (with `issued`, if any). */
+    const stillParked = async (path: string, issued: CallbackHandle | undefined) => {
+      const latest = await storage.getRunById(run.id);
+      return (
+        latest?.status === "waiting" &&
+        latest.currentStep === path &&
+        (issued ? latest.callbackToken === issued.token : latest.waitReason === "timer")
+      );
+    };
+
+    /** One try of an `afterCommit` hook, rejecting at `timeoutMs` or when the worker stops. */
+    const tryHook = async (
+      hook: (opts: { signal: AbortSignal }) => Promise<void>,
+      timeoutMs: number,
+    ): Promise<void> => {
+      const controller = new AbortController();
+      const timer = setTimeout(
+        () => controller.abort(new RetryableError(`afterCommit timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      );
+      const onStop = () => controller.abort(new WorkerStoppedError("worker stopped"));
+      if (stop?.aborted) onStop();
+      else stop?.addEventListener("abort", onStop, { once: true });
+      const aborted = new Promise<never>((_, reject) => {
+        const fail = () => reject(controller.signal.reason);
+        if (controller.signal.aborted) fail();
+        else controller.signal.addEventListener("abort", fail, { once: true });
+      });
+      try {
+        const running = Promise.resolve().then(() => hook({ signal: controller.signal }));
+        running.catch(() => {});
+        await Promise.race([running, aborted]);
+      } finally {
+        clearTimeout(timer);
+        stop?.removeEventListener("abort", onStop);
+      }
+    };
+
     /**
      * Run a suspension's `afterCommit` once its park commit succeeded: best effort, at most once (a
-     * crash before this point skips it). Up to {@link AFTER_COMMIT_ATTEMPTS} tries, retrying only
-     * a `RetryableError`. The park released the lease, so a final failure appends a
-     * `step.notifyFailed` event (error message with the callback's token and URL masked) instead of
-     * a guarded commit, logs a warning and leaves the run waiting.
+     * crash before this point skips it). Up to {@link AFTER_COMMIT_ATTEMPTS} tries, each bounded
+     * by the node's `timeoutMs` (at most {@link AFTER_COMMIT_TIMEOUT_MS}) and aborted when the
+     * worker stops; only a `RetryableError` or a timeout is retried, and only while the run still
+     * waits on this suspension (it holds no lease, so it may have been resumed or cancelled
+     * meanwhile). The park released the lease, so a final failure appends a `step.notifyFailed`
+     * event (error message with the callback's token and URL masked) instead of a guarded commit,
+     * logs a warning and leaves the run waiting.
      */
     const runAfterCommit = async (
       path: string,
-      hook: () => Promise<void>,
+      hook: (opts: { signal: AbortSignal }) => Promise<void>,
       issued: CallbackHandle | undefined,
+      node: AnyNode,
     ): Promise<void> => {
+      const timeoutMs = Math.min(
+        node.timeoutMs ?? AFTER_COMMIT_TIMEOUT_MS,
+        AFTER_COMMIT_TIMEOUT_MS,
+      );
       for (let n = 1; ; n++) {
         try {
-          await hook();
+          await tryHook(hook, timeoutMs);
           return;
         } catch (err) {
           const retryable = err instanceof Error && err.name === "RetryableError";
           if (retryable && n < AFTER_COMMIT_ATTEMPTS) {
             await new Promise((r) => setTimeout(r, AFTER_COMMIT_BACKOFF_MS * 2 ** (n - 1)));
-            continue;
+            if (await stillParked(path, issued)) continue;
+            return;
           }
+          if (!(err instanceof WorkerStoppedError) && !(await stillParked(path, issued))) return;
           let message = errorMessage(err);
           for (const s of issued ? [issued.resumeUrl, issued.token] : []) {
             message = message.split(s).join("[redacted]");
@@ -910,7 +966,9 @@ export function createExecutor(opts: EngineOptions): Executor {
             [event("run.suspended", path, data)],
           );
           // Only now does the callback's token exist in storage, so its URL works.
-          if (parked && result.afterCommit) await runAfterCommit(path, result.afterCommit, issued);
+          if (parked && result.afterCommit) {
+            await runAfterCommit(path, result.afterCommit, issued, node);
+          }
           return "stop";
         }
         if (result.kind === "subflow") {

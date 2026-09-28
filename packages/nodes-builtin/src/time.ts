@@ -121,7 +121,12 @@ function isTransientStatus(status: number): boolean {
  * {@link RetryableError}; any other non-2xx, a redirect, or an error from the network guard (such
  * as a blocked address) throws a {@link FatalError}. Error messages never include the resume URL.
  */
-async function sendNotify(url: string, callback: CallbackHandle, ctx: NodeContext): Promise<void> {
+async function sendNotify(
+  url: string,
+  callback: CallbackHandle,
+  ctx: NodeContext,
+  signal: AbortSignal,
+): Promise<void> {
   const key = await sha256Hex(`${ctx.runId}:${ctx.stepPath}:${callback.token}`);
   let res: Response;
   try {
@@ -135,6 +140,7 @@ async function sendNotify(url: string, callback: CallbackHandle, ctx: NodeContex
       }),
       // The body carries the resume URL: never replay it to wherever a redirect points.
       redirect: "error",
+      signal,
       timeoutMs: NOTIFY_TIMEOUT_MS,
     });
   } catch (err) {
@@ -211,6 +217,9 @@ export const waitForCallbackNode = defineNode({
     const callback = await ctx.callback({ timeoutMs: durationMs(input.timeout) });
     const notify = input.notify;
     if (!notify) return suspend({ callback });
-    return suspend({ callback, afterCommit: () => sendNotify(notify.url, callback, ctx) });
+    return suspend({
+      callback,
+      afterCommit: ({ signal }) => sendNotify(notify.url, callback, ctx, signal),
+    });
   },
 });
