@@ -1,7 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import type { WorkflowDoc } from "@flowkit/core";
 import { FlowkitStorageError } from "@flowkit/engine";
-import { runStorageConformance } from "@flowkit/engine/testing";
+import { runStorageConformance } from "@flowkit/engine/conformance";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { createPostgresStorage, migrate, type PgStorageOptions } from "./index";

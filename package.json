@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "license": "MIT",
+  "packageManager": "pnpm@10.5.2",
   "engines": {
     "node": ">=22"
   },
@@ -11,10 +12,14 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "biome check .",
     "build": "pnpm -r build",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "pnpm build && pnpm -r publish --access public --tag next --no-git-checks"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.13",
+    "@changesets/cli": "3.0.3",
     "@types/node": "22.20.2",
     "jsdom": "30.0.1",
     "tsup": "8.5.1",

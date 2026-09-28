@@ -3,6 +3,24 @@
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
+  "description": "Built-in Flowkit nodes: conditionals, switch, forEach, stop, delay, waitForCallback, httpRequest, transform, callSubflow and triggers.",
+  "keywords": [
+    "workflow",
+    "automation",
+    "workflow-builder",
+    "workflow-nodes"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakezegil/flowkit.git",
+    "directory": "packages/nodes-builtin"
+  },
+  "homepage": "https://github.com/jakezegil/flowkit/tree/main/packages/nodes-builtin#readme",
+  "bugs": "https://github.com/jakezegil/flowkit/issues",
+  "engines": {
+    "node": ">=20.18.1"
+  },
+  "sideEffects": false,
   "exports": {
     ".": {
       "flowkit-source": "./src/index.ts",
@@ -16,6 +34,7 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
@@ -36,7 +55,7 @@
     "manifest:playground": "UPDATE_PLAYGROUND_MANIFEST=1 vitest run src/playground-manifest.test.ts && biome format --write ../react/playground/builtin-manifest.json"
   },
   "dependencies": {
-    "@flowkit/core": "workspace:*"
+    "@flowkit/core": "workspace:^"
   },
   "peerDependencies": {
     "zod": "^4"

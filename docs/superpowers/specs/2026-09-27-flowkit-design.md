@@ -206,7 +206,7 @@ Append-only `RunEvent { id, runId, tenantId, seq, type, stepPath?, at, workerId?
 Methods (all tenant-scoped where applicable):
 `saveWorkflowVersion, getWorkflowVersion, getPublishedVersion, publishVersion, listWorkflows, listWorkflowAudit, createRun, getRun, listRuns, claimRun, commitStep, suspendRun, failRun, completeRun, releaseRun, resumeByToken, wakeParent, appendEvents, listEvents, findPublishedByTrigger, recordDedupeKey`.
 
-`runStorageConformance(makeAdapter)` (exported from `@flowkit/engine/testing`) verifies: exclusive claims under concurrency, lease expiry reclaim, commit rejection with stale lease, wake-at ordering, single-use callback tokens, dedupe, event ordering by `seq`.
+`runStorageConformance(makeAdapter)` (exported from `@flowkit/engine/conformance`) verifies: exclusive claims under concurrency, lease expiry reclaim, commit rejection with stale lease, wake-at ordering, single-use callback tokens, dedupe, event ordering by `seq`.
 
 ### 5.9 HTTP handler routes (under a configurable base path)
 

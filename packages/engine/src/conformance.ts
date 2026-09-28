@@ -1,7 +1,15 @@
+/**
+ * The `StorageAdapter` conformance suite, exposed as `@flowkit/engine/conformance`. This is its
+ * own entry point (separate from `@flowkit/engine/testing`) because it requires `vitest`
+ * (an optional peer dependency) at import time; `@flowkit/engine/testing` must stay importable
+ * without vitest installed.
+ *
+ * @module
+ */
 import type { JournalEntry, RunEventType, WorkflowDoc } from "@flowkit/core";
 import { describe, expect, it } from "vitest";
-import { FlowkitStorageError } from "../errors";
-import type { Lease, NewRun, NewRunEvent, StorageAdapter } from "../storage";
+import { FlowkitStorageError } from "./errors";
+import type { Lease, NewRun, NewRunEvent, StorageAdapter } from "./storage";
 
 /** What a conformance factory returns: a fresh, empty adapter and an optional cleanup. */
 export interface ConformanceFixture {

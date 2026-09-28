@@ -3,6 +3,25 @@
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
+  "description": "Durable workflow engine for Flowkit: interprets workflow documents over a pluggable StorageAdapter, with retries, suspension, schedules and an audit trail.",
+  "keywords": [
+    "workflow",
+    "automation",
+    "workflow-engine",
+    "workflow-builder",
+    "durable-execution"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakezegil/flowkit.git",
+    "directory": "packages/engine"
+  },
+  "homepage": "https://github.com/jakezegil/flowkit/tree/main/packages/engine#readme",
+  "bugs": "https://github.com/jakezegil/flowkit/issues",
+  "engines": {
+    "node": ">=20.18.1"
+  },
+  "sideEffects": false,
   "exports": {
     ".": {
       "flowkit-source": "./src/index.ts",
@@ -13,9 +32,15 @@
       "flowkit-source": "./src/testing/index.ts",
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"
+    },
+    "./conformance": {
+      "flowkit-source": "./src/conformance.ts",
+      "types": "./dist/conformance.d.ts",
+      "default": "./dist/conformance.js"
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
@@ -24,6 +49,10 @@
       "./testing": {
         "types": "./dist/testing/index.d.ts",
         "default": "./dist/testing/index.js"
+      },
+      "./conformance": {
+        "types": "./dist/conformance.d.ts",
+        "default": "./dist/conformance.js"
       }
     }
   },
@@ -35,14 +64,14 @@
     "build": "tsup"
   },
   "dependencies": {
-    "@flowkit/core": "workspace:*",
-    "@flowkit/nodes-builtin": "workspace:*",
+    "@flowkit/core": "workspace:^",
+    "@flowkit/nodes-builtin": "workspace:^",
     "cron-parser": "5.10.1",
     "quickjs-emscripten": "0.32.0",
     "undici": "7.29.1"
   },
   "peerDependencies": {
-    "@flowkit/storage-memory": "workspace:*",
+    "@flowkit/storage-memory": "workspace:^",
     "vitest": ">=3",
     "zod": "^4"
   },

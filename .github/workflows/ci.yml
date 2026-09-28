@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # The docs-check package reads dist, so build must run before test.
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      # e2e (Playwright, examples/mini-crm) is intentionally not run in CI yet: it needs browser
+      # binaries installed and a dedicated job. Run it locally with
+      # `pnpm --filter @flowkit/example-mini-crm e2e`.

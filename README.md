@@ -528,7 +528,7 @@ To write your own adapter, implement `StorageAdapter` from `@flowkit/engine`, th
 the conformance suite (it requires Vitest):
 
 ```ts file=my-storage.conformance.ts
-import { runStorageConformance } from "@flowkit/engine/testing";
+import { runStorageConformance } from "@flowkit/engine/conformance";
 import { createMyStorage } from "./my-storage";
 
 runStorageConformance("my-storage", async () => {
@@ -599,7 +599,9 @@ needs `@flowkit/storage-memory`, which is an optional peer dependency of the eng
 as a dev dependency. Besides `plugins`, `services`, `trigger` and `clock`, it takes `secrets`
 (values by name, for `ctx.secrets`), `http` (the network policy; `{ allowPrivateNetworks: true }`
 reaches a local mock server) and `subflows` (docs published before the workflow that calls them).
-See [Testing your plugin](docs/guides/writing-a-plugin.md#testing).
+See [Testing your plugin](docs/guides/writing-a-plugin.md#testing). `@flowkit/engine/testing`
+never imports `vitest`; the storage conformance suite (`runStorageConformance`, see above) is its
+own entry point, `@flowkit/engine/conformance`, because it does.
 
 ## Examples
 
@@ -616,7 +618,7 @@ See [Testing your plugin](docs/guides/writing-a-plugin.md#testing).
 |---|---|
 | `@flowkit/core` | `defineNode`, `defineTrigger`, `definePlugin`, `createRegistry`, the doc types, references, the validator, the `workflow()` builder, and `@flowkit/core/client`. Isomorphic, with no I/O. |
 | `@flowkit/nodes-builtin` | The `core.*` nodes and triggers, and the rule helpers (`and`, `eq`, `isTrue`, ...). |
-| `@flowkit/engine` | `createEngine`: the interpreter, workers, HTTP handler, triggers, SSE and the QuickJS runtime. `@flowkit/engine/testing` holds the test helpers. |
+| `@flowkit/engine` | `createEngine`: the interpreter, workers, HTTP handler, triggers, SSE and the QuickJS runtime. `@flowkit/engine/testing` holds the test helpers; `@flowkit/engine/conformance` holds the storage conformance suite. |
 | `@flowkit/storage-memory` | The in-memory `StorageAdapter`. |
 | `@flowkit/storage-postgres` | The Postgres `StorageAdapter` and `migrate`. |
 | `@flowkit/react` | The editor, run viewer, run list, hooks and theme. |
@@ -654,5 +656,17 @@ pnpm build         # tsup
 If you add a TypeScript block without an annotation, the check fails.
 
 The design spec is `docs/superpowers/specs/2026-09-27-flowkit-design.md`.
+
+### Releasing
+
+Releases go through [Changesets](https://github.com/changesets/changesets): run `pnpm changeset`
+to add one, and `.github/workflows/release.yml` opens or updates a "Version Packages" PR on every
+push to `main` with pending changesets, then publishes once that PR is merged (via
+`changesets/action`, gated on the repo's own `install`/`build`/`test`/`typecheck`/`lint` run).
+
+**Do not add the `NPM_TOKEN` secret to this repo until the `@flowline` rename (ruling 79) has
+merged and a publish has been explicitly approved.** Adding it earlier would let the release job
+publish the six packages under the pre-rename `@flowkit` scope as soon as a "Version Packages" PR
+lands on `main` — see the comment at the top of `.github/workflows/release.yml`.
 
 MIT licensed.

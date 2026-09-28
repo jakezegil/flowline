@@ -1,7 +1,7 @@
 /**
  * The storage contract the engine runs on. Every adapter (memory, Postgres, third-party) must
  * implement {@link StorageAdapter} exactly as documented here and pass
- * `runStorageConformance` from `@flowkit/engine/testing`.
+ * `runStorageConformance` from `@flowkit/engine/conformance`.
  *
  * All timestamps are epoch milliseconds. Storage never reads a clock: every method that needs the
  * current time receives it as `now`.

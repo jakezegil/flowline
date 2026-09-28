@@ -3,6 +3,25 @@
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
+  "description": "In-memory StorageAdapter for the Flowkit engine, for tests and quick starts.",
+  "keywords": [
+    "workflow",
+    "automation",
+    "workflow-builder",
+    "storage",
+    "in-memory"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakezegil/flowkit.git",
+    "directory": "packages/storage-memory"
+  },
+  "homepage": "https://github.com/jakezegil/flowkit/tree/main/packages/storage-memory#readme",
+  "bugs": "https://github.com/jakezegil/flowkit/issues",
+  "engines": {
+    "node": ">=20.18.1"
+  },
+  "sideEffects": false,
   "exports": {
     ".": {
       "flowkit-source": "./src/index.ts",
@@ -11,6 +30,7 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
@@ -26,8 +46,8 @@
     "build": "tsup"
   },
   "dependencies": {
-    "@flowkit/engine": "workspace:*",
-    "@flowkit/core": "workspace:*"
+    "@flowkit/engine": "workspace:^",
+    "@flowkit/core": "workspace:^"
   },
   "devDependencies": {
     "vitest": "5.0.0",
