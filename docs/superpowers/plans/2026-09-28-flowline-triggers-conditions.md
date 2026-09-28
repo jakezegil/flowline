@@ -26,10 +26,10 @@
 ## Review Focus
 
 1. **One incompatible trigger among several matches** → the other matches start, the incompatible one is reported in `EmitResult.rejected`, logged, and delivered to `onTriggerEvent` exactly once; `emit` never throws for validation. (Tests in Task 1; poll-item variant in Task 9.)
-2. **Exactly-one-run under duplicates, with a TTL** → concurrent deliveries, sender retries and a crash between `claimDedupeKey` and `createRun` all yield one run with the pre-generated random ID; after the window a same-key delivery starts a *new* run even while the first still waits; legacy Postgres rows keep pointing at their derived-ID runs after migration v4. (Tests in Tasks 2, 3.)
+2. **Exactly-one-run under duplicates, with a TTL** → concurrent deliveries, sender retries and a crash between `claimDedupeKey` and `createRun` all yield one run with the pre-generated random ID; after the window a same-key delivery starts a *new* run even while the first still waits; Postgres migration v4 deletes pre-v4 dedupe rows (history reset once, no backfill). (Tests in Tasks 2, 3.)
 3. **Multi-event dedupe across sources** → an AI-call event and a VoIP-call event about the same call, or a booking cancellation and a cancelled-status change about the same booking, start one run under the `event:<wf>:<key>` namespace; `startedBy.event` records the raw source. (Tests in Tasks 4, 11.)
 4. **Strict never coerces, loose never regresses** → every row of spec §6.3/§6.4 is pinned in both modes; the host-chosen default reaches the manifest schema default and therefore the editor; a numeric-string literal on a number field under strict raises `rule.literalType`; a custom operator throwing fails the step fatally with its id. (Tests in Tasks 6, 7.)
-5. **Poll intervals never overlap or gap** → with two engines ticking, each `(since, until]` interval is claimed by one poller and intervals are contiguous; a failed poll re-covers the same interval; a crash after launching items and before `commitPoll` starts no duplicate item; a deal that moves out of the stage before the threshold never fires; one that moves while the run waits is cancelled with reason "Stage changed". (Tests in Tasks 8, 9, 11.)
+5. **Poll intervals never overlap or gap** → with two engines ticking, each `(since, until]` interval is claimed by one poller and intervals are contiguous; a failed poll re-covers the same interval; a crash after launching items and before `commitPoll` starts no duplicate item; a backlog longer than `maxInterval` is caught up in chunks of at most `maxInterval`, at most `maxCallsPerTick` per tick, resuming on the next tick from the committed `since`/`cursor`; a deal that moves out of the stage before the threshold never fires; one that moves while the run waits is cancelled with reason "Stage changed". (Tests in Tasks 8, 9, 11.)
 
 Also exercised: `window` of `0` rejected; item with empty key rejected; `normalize` returning `undefined` skips silently; trigger kind `poll` in every exhaustive `switch`.
 
@@ -141,7 +141,7 @@ interface StorageAdapter {
   // recordDedupeKey removed
 }
 // schema.ts
-{ version: 4, statements: v4(s) }   // ALTER dedupe_keys ADD run_id; backfill via sha256(); SET NOT NULL  (poll_states table added in Task 8's v4 extension — see note)
+{ version: 4, statements: v4(s) }   // ALTER dedupe_keys ADD run_id; DELETE rows WHERE run_id IS NULL (history reset once, no backfill); SET NOT NULL  (poll_states table added in Task 8's v4 extension — see note)
 ```
 Note: v4 is authored once. Task 2 creates `v4()` with the dedupe statements; Task 8 appends the `poll_states` statements to the same `v4()` (the migration has not shipped between tasks). Both parts are `IF NOT EXISTS`/idempotent.
 
@@ -150,7 +150,7 @@ Note: v4 is authored once. Task 2 creates `v4()` with the dedupe statements; Tas
 - Ten concurrent claims with distinct IDs → exactly one `claimed: true`; all ten `runId`s equal.
 - Same key, other tenant → independent.
 - A losing claim does not change the stored expiry (claim at 1400 with window 10 000, then claim at 1500 still wins with a new ID).
-- Postgres only: insert a v3-shaped row (`run_id` NULL) before `migrate()`; after migrate, `claimDedupeKey` on that unexpired key returns `claimed: false` with `runId === "run_" + sha256Hex("<tenant>\0<key>").slice(0, 32)` (computed with `node:crypto` in the test).
+- Postgres only: insert a v3-shaped row (`run_id` NULL, unexpired) before `migrate()`; after migrate the row is gone and `claimDedupeKey` on that key returns `claimed: true` with the new ID; running `migrate()` again is a no-op.
 
 - [ ] **Step 1:** Add the conformance cases; run against memory and PGlite → FAIL.
 - [ ] **Step 2:** Implement memory and Postgres adapters; write `v4()`; update the `StorageAdapter` TSDoc.
@@ -351,17 +351,17 @@ Produces:
 ```ts
 export interface PollState { tenantId: string; workflowId: string; since: number | null; cursor: unknown; nextAt: number; lastError?: string; leaseOwner?: string; leaseUntil?: number; updatedAt: number }
 export interface PollLease { state: PollState; token: string }
-export interface PollPatch { since?: number; cursor?: unknown; nextAt: number; lastError?: string | null }
+export interface PollPatch { since?: number; cursor?: unknown; nextAt: number; lastError?: string | null; keepLease?: boolean }
 interface StorageAdapter {
   claimPoll(tenantId: string, workflowId: string, opts: { workerId: string; leaseMs: number; now: number }): Promise<PollLease | null>;
   renewPollLease(lease: PollLease, leaseMs: number, now: number): Promise<boolean>;
-  commitPoll(lease: PollLease, patch: PollPatch, now: number): Promise<boolean>;
+  commitPoll(lease: PollLease, patch: PollPatch, now: number): Promise<boolean>;   // releases the lease unless patch.keepLease
   getPollState(tenantId: string, workflowId: string): Promise<PollState | null>;
 }
 // schema.ts v4(): + poll_states table and next_at index (spec §7.3)
 ```
 
-**Tests must pin** — every bullet of spec §7.4, on both adapters; plus Postgres: `cursor` stored as jsonb round-trips `{ a: [1, null] }`; `commitPoll` with a non-JSON cursor (a `BigInt`) rejects with `FlowlineStorageError` and changes nothing.
+**Tests must pin** — every bullet of spec §7.4, on both adapters, including `keepLease` (patch applied, token still current, a second `commitPoll` with the same lease succeeds, a concurrent `claimPoll` returns `null`, and a final `commitPoll` without `keepLease` releases); plus Postgres: `cursor` stored as jsonb round-trips `{ a: [1, null] }`; `commitPoll` with a non-JSON cursor (a `BigInt`) rejects with `FlowlineStorageError` and changes nothing.
 
 - [ ] **Step 1:** Conformance cases → FAIL. **Step 2:** Implement both adapters, extend `v4()`. **Step 3:** Commit `feat(storage): poll state with leases; schema v4 poll_states`.
 
@@ -383,19 +383,24 @@ export interface PollItem<P> { key: string; payload: P }
 export interface PollResult<P> { items: PollItem<P>[]; cursor?: unknown }
 export interface PollContext { tenantId: string; workflowId: string; services: FlowlineServices; logger?: Logger; signal: AbortSignal }
 export interface PollArgs<C> { config: C; since: number; until: number; cursor: unknown; ctx: PollContext }
-interface TriggerDefinition<C, P> { poll?(args: PollArgs<z.infer<C>>): Promise<PollResult<P>> | PollResult<P>; interval?: DurationInput }
-interface TriggerManifest { interval?: number }
+interface TriggerDefinition<C, P> { poll?(args: PollArgs<z.infer<C>>): Promise<PollResult<P>> | PollResult<P>; interval?: DurationInput; maxInterval?: DurationInput }
+interface TriggerManifest { interval?: number; maxInterval?: number }
 export type RunOrigin = /* existing variants */ | { kind: "poll"; since: number; until: number; itemKey: string };
 // @flowline/engine
-interface EngineOptions { poll?: { defaultInterval?: DurationInput /* "1m" */; leaseMs?: number /* 60_000 */ } }
+interface EngineOptions { poll?: { defaultInterval?: DurationInput /* "1m" */; defaultMaxInterval?: DurationInput /* "24h" */; maxCallsPerTick?: number /* 10 */; leaseMs?: number /* 60_000 */ } }
 interface Engine { tickPolls(): Promise<number> }
 interface WorkerOptions { pollEveryMs?: number /* 15_000 */ }
 ```
-Loop per spec §7.2; lease renewal every `leaseMs / 2`; `ctx.signal` aborted on renewal failure.
+Loop per spec §7.2 (including catch-up chunking under one lease with `commitPoll({ keepLease: true })` between calls); lease renewal every `leaseMs / 2`; `ctx.signal` aborted on renewal failure.
 
 **Tests must pin**
-- `defineTrigger`: `kind: "poll"` without `poll` throws; `poll`/`interval` on `event` throws; manifest `interval` is ms.
+- `defineTrigger`: `kind: "poll"` without `poll` throws; `poll`/`interval`/`maxInterval` on `event` throws; `maxInterval < interval` throws; manifest `interval`/`maxInterval` are ms; `createEngine({ poll: { maxCallsPerTick: 0 } })` throws `FlowlineDefinitionError`.
 - First tick after publish: `since === publishedAt`, `until === now`; state after: `since === until`, `nextAt === until + interval`; `poll.completed` event with counts.
+- Chunking (interval `1m`, `maxInterval` `24h`, `maxCallsPerTick` 10, fake clock): a 3-day gap → one tick makes exactly four `poll` calls with `(since, until]` = `(t0, t0+24h]`, `(t0+24h, t0+48h]`, `(t0+48h, t0+72h]`, `(t0+72h, now]`; each call receives the cursor the previous one returned; final state `since === now`, `nextAt === now + 1m`; `claimPoll` by a second engine during the chain returns `null`.
+- A 30-day gap → one tick makes exactly ten calls covering 10 days, final `nextAt === now`; the next tick (new lease) starts at `t0 + 10d` and makes ten more; intervals across the two ticks are contiguous with no overlap.
+- Gap of exactly `maxInterval` → one call, no catch-up call, `nextAt === until + interval`.
+- Chunk 2 of a chain throws → chunk 1's `since`/`cursor` are committed, state `since === t0 + 24h`, `nextAt === now + interval`, `lastError` set, `poll.failed.since === t0 + 24h`; the next tick re-covers `(t0+24h, …]`.
+- `maxCallsPerTick: 1` → one call per tick regardless of backlog; `nextAt === now` while behind.
 - Not due (`nextAt > now`) → poll not called; due at `nextAt === now` → called.
 - Two engines (shared memory storage) ticking concurrently → `poll` called once; intervals over five ticks are contiguous (`since_n === until_{n-1}`).
 - Poll throws → `since`/`cursor` unchanged, `nextAt === now + interval`, `lastError` set, `poll.failed` published, `warn` logged; next tick re-covers the same `since`.
@@ -403,7 +408,7 @@ Loop per spec §7.2; lease renewal every `leaseMs / 2`; `ctx.signal` aborted on 
 - Crash after launching the first item and before `commitPoll` (test hook `__testHooks.beforeCommitPoll`) → next tick re-polls the same interval and starts only the unstarted items.
 - Lease lost during a slow poll (`renewPollLease` forced false) → `ctx.signal.aborted`, `commitPoll` false, nothing started by this holder.
 - Worker: `pollEveryMs` ticks polls on the first loop only; `stop()` awaits an in-flight tick.
-- `until <= since` (clock stepped back) → no `poll` call; `nextAt === since + interval`.
+- `now <= since` (clock stepped back) → no `poll` call; `nextAt === since + interval`; state otherwise untouched, and once the clock passes `since` the next interval starts exactly there.
 
 - [ ] **Step 1:** Failing tests. **Step 2:** Implement core types/checks, manifest, `tickPolls`, worker option, engine options, TSDoc. **Step 3:** Commit `feat(engine): poll trigger kind driven over bounded, non-overlapping intervals`.
 

@@ -37,6 +37,8 @@ Breaking changes are acceptable before 1.0 and are listed in §11.
 | Typed literals | The rules widget stores the right-hand literal in the left operand's type (number field → `5`, boolean → `true`, `in` → a typed array). Strict mode never coerces; loose mode still accepts old string literals. |
 | Poll storage | One `PollState` row per `(tenantId, workflowId)` with `since`, `cursor`, `nextAt` and a lease; `claimPoll` / `commitPoll` are atomic and lease-guarded so intervals never overlap, even across processes. |
 | Poll items | `{ key, payload }[]`; each starts a run with dedupe key `poll:<workflowId>:<key>`; invalid items are rejected individually (same isolation rule as `emit`). |
+| Poll catch-up cap | One `poll` call covers at most `maxInterval` (per trigger; engine default `"24h"`); a backlog is caught up in successive calls within a tick, at most `maxCallsPerTick` (default 10) per workflow per tick, then resumes on the next tick from the saved `since`/`cursor`. |
+| Postgres v4 dedupe rows | Pre-1.0, nothing deployed: v4 adds `run_id` and deletes rows that have none. Dedupe history is reset once; no backfill. |
 | Poll run origin | `RunOrigin` gains `{ kind: "poll"; since; until; itemKey }`. |
 
 ## 3. Emit failure isolation
@@ -178,15 +180,13 @@ RETURNING run_id
 
 ```sql
 ALTER TABLE dedupe_keys ADD COLUMN IF NOT EXISTS run_id text;
--- Legacy rows: the run ID was derived as run_ + sha256("<tenant>\0<key>")[0:32]. Backfill it so
--- unexpired keys keep pointing at their runs (sha256() is built into Postgres 11+ and PGlite).
-UPDATE dedupe_keys SET run_id = 'run_' || left(encode(sha256(decode(
-  encode(convert_to(tenant_id, 'UTF8'), 'hex') || '00' || encode(convert_to(key, 'UTF8'), 'hex'),
-  'hex')), 'hex'), 32) WHERE run_id IS NULL;
+-- Pre-1.0, nothing is deployed: rows written before v4 have no run id, so dedupe history is
+-- reset once rather than reconstructed from the old derived-id scheme.
+DELETE FROM dedupe_keys WHERE run_id IS NULL;
 ALTER TABLE dedupe_keys ALTER COLUMN run_id SET NOT NULL;
 ```
 
-(The `UPDATE` is idempotent through its `WHERE`; the `SET NOT NULL` is safe to repeat.) The poll table also ships in v4 (§7.4).
+(All three statements are safe to repeat: after the first run there are no `NULL` rows.) The poll table also ships in v4 (§7.3). Consequence, documented in §11: a duplicate delivery whose key was recorded before the migration is not suppressed after it.
 
 ### 4.2 Engine launch protocol
 
@@ -274,7 +274,7 @@ Hosts that need "at most one active run per entity" express it in the workflow (
 - keys are per tenant;
 - a claim with the same run ID twice (idempotent retry) → second is `claimed: false` with that ID.
 
-The Postgres test also covers migration v4: a v3-shaped row (`run_id` null) is backfilled to `run_` + the first 32 hex chars of `sha256("<tenant>\0<key>")` computed in the test with `node:crypto`.
+The Postgres test also covers migration v4: a v3-shaped row (`run_id` null) inserted before `migrate()` is gone afterwards, and a claim on its key wins with the new run ID.
 
 ## 5. Multi-event triggers
 
@@ -552,31 +552,49 @@ interface TriggerDefinition<C, P> {
   poll?(args: PollArgs<z.infer<C>>): Promise<PollResult<P>> | PollResult<P>;
   /** Minimum time between polls of one workflow. Default: `EngineOptions.poll.defaultInterval` (`"1m"`). */
   interval?: DurationInput;
+  /**
+   * Longest interval one `poll` call covers (`until - since`). A longer backlog (after downtime)
+   * is caught up in successive calls. Default: `EngineOptions.poll.defaultMaxInterval` (`"24h"`).
+   */
+  maxInterval?: DurationInput;
 }
 ```
 
-`defineTrigger` throws when `kind: "poll"` lacks `poll`, or `poll`/`interval` appear on another kind. `TriggerManifest` gains `interval?: number` (ms). `TriggerKind` gains `"poll"`. `RunOrigin` gains `{ kind: "poll"; since: number; until: number; itemKey: string }`.
+`defineTrigger` throws when `kind: "poll"` lacks `poll`, when `poll`/`interval`/`maxInterval` appear on another kind, or when `maxInterval < interval`. `TriggerManifest` gains `interval?: number` and `maxInterval?: number` (ms). `TriggerKind` gains `"poll"`. `RunOrigin` gains `{ kind: "poll"; since: number; until: number; itemKey: string }`.
 
 ### 7.2 Engine loop
 
 ```ts
 interface Engine { tickPolls(): Promise<number> }         // runs started
 interface WorkerOptions { pollEveryMs?: number }          // default 15_000; first loop only, like tickSchedules
-interface EngineOptions { poll?: { defaultInterval?: DurationInput; leaseMs?: number /* default 60_000 */ } }
+interface EngineOptions {
+  poll?: {
+    defaultInterval?: DurationInput;      // "1m"
+    defaultMaxInterval?: DurationInput;   // "24h"
+    /** Upper bound on `poll` calls per workflow in one `tickPolls` while catching up. Default 10. */
+    maxCallsPerTick?: number;
+    leaseMs?: number;                     // 60_000
+  };
+}
 ```
 
 `tickPolls`, for every published workflow (all tenants) whose trigger kind is `poll`:
 
 1. `lease = storage.claimPoll(tenantId, workflowId, { workerId, leaseMs, now })`; `null` (not due, or leased elsewhere) → skip.
-2. `since = lease.state.since ?? publishedAt`, `until = now`. If `until <= since` → `commitPoll(lease, { nextAt: since + interval }, now)` and skip.
-3. Call `def.poll({ config, since, until, cursor: lease.state.cursor, ctx })` with a lease-renewing timer (like executor leases); losing the lease aborts `ctx.signal`.
-4. On throw (or lease lost): `commitPoll(lease, { nextAt: now + interval, lastError: message }, now)` — `since` and `cursor` are **not** advanced, so the next poll covers the same interval again; publish `poll.failed`; log `warn`.
+2. `since = lease.state.since ?? publishedAt`. If `now <= since` → `commitPoll(lease, { nextAt: since + interval }, now)` and skip.
+3. `until = min(now, since + maxInterval)`. Call `def.poll({ config, since, until, cursor, ctx })` with a lease-renewing timer (like executor leases); losing the lease aborts `ctx.signal`.
+4. On throw (or lease lost): `commitPoll(lease, { nextAt: now + interval, lastError: message }, now)` — `since` and `cursor` are **not** advanced, so the next poll covers the same interval again; publish `poll.failed`; log `warn`; stop this workflow for the tick.
 5. Per item, in array order: validate the payload against the trigger's payload schema → `trigger.rejected` (source `{ kind: "poll", itemKey }`) or `launch(v, payload, { kind: "poll", since, until, itemKey }, { key: "poll:<wf>:<itemKey>", windowMs })`.
-6. `commitPoll(lease, { since: until, cursor: result.cursor ?? null, nextAt: until + interval, lastError: null }, now)`; publish `poll.completed`.
+6. Advance: `since = until`, `cursor = result.cursor ?? null`; publish `poll.completed` for this call.
+7. **Catch-up:** if `until < now` (the call was capped by `maxInterval`) and fewer than `maxCallsPerTick` calls were made for this workflow in this tick, go to 3 with the new `since`/`cursor`. Otherwise `commitPoll(lease, { since, cursor, nextAt: until < now ? now : until + interval, lastError: null }, now)`.
 
-Non-overlap: the lease guarantees one poller per workflow at a time and `since`/`until` form a contiguous, gap-free sequence of half-open intervals `(since, until]`. Bounded: each interval ends at the claim time. After downtime the next interval is the whole gap (items that became due during downtime still fire once); there is no cap, so `poll` implementations must be able to answer for a long interval (a query on a due-time column does this naturally).
+The chain of calls in one tick runs under one lease. Each call's `since`/`cursor` are held in memory until the final `commitPoll`, except that a call's advance is committed **before** the next call starts (`commitPoll` keeps the lease when `patch.keepLease` is set — see §7.3), so a crash mid-chain loses at most the items of the call in flight, which the dedupe keys cover on the retry.
 
-Crash between launching items and `commitPoll`: the lease expires, the interval is polled again, and the per-item dedupe keys make the already-started items dedupe (within the window; the default 7 days comfortably exceeds any interval). Delivery is therefore at-least-once per item, exactly-once within the window.
+Non-overlap: the lease guarantees one poller per workflow at a time and `since`/`until` form a contiguous, gap-free sequence of half-open intervals `(since, until]`. Bounded: no call covers more than `maxInterval`, and no tick makes more than `maxCallsPerTick` calls per workflow. After downtime longer than `maxInterval`, the backlog is caught up in chunks of `maxInterval`: up to `maxCallsPerTick` chunks per tick, with `nextAt = now` so the next tick continues at once (rather than waiting `interval`). Items that became due during downtime still fire once; a `poll` implementation only ever answers for an interval of at most `maxInterval`.
+
+Crash between launching items and `commitPoll`: the lease expires, the interval is polled again, and the per-item dedupe keys make the already-started items dedupe (within the window; the default 7 days comfortably exceeds any `maxInterval`). Delivery is therefore at-least-once per item, exactly-once within the window.
+
+Worked timings (interval `1m`, `maxInterval` `24h`, `maxCallsPerTick` 10): after a 3-day outage the first tick makes calls for `(t0, t0+24h]`, `(t0+24h, t0+48h]`, `(t0+48h, t0+72h]` and the tail `(t0+72h, now]` (4 calls, `until` reached `now`), commits `nextAt = now + 1m`, and steady state resumes. After a 30-day outage the first tick makes 10 calls covering 10 days, commits `nextAt = now`, and the next tick (about `pollEveryMs` later) continues from day 10 with a fresh lease.
 
 Republishing a workflow keeps its poll state; changing the trigger to another kind leaves the row orphaned (harmless, never claimed). Deleting a workflow is out of scope, as today.
 
@@ -600,7 +618,14 @@ export interface PollState {
   updatedAt: number;
 }
 export interface PollLease { state: PollState; token: string }
-export interface PollPatch { since?: number; cursor?: unknown; nextAt: number; lastError?: string | null }
+export interface PollPatch {
+  since?: number;
+  cursor?: unknown;
+  nextAt: number;
+  lastError?: string | null;
+  /** Keep the lease (same token) instead of releasing it: used between catch-up calls of one tick. */
+  keepLease?: boolean;
+}
 
 interface StorageAdapter {
   /**
@@ -613,8 +638,9 @@ interface StorageAdapter {
   /** Renew the poll lease; `false` when the token is no longer current. */
   renewPollLease(lease: PollLease, leaseMs: number, now: number): Promise<boolean>;
   /**
-   * Apply `patch`, set `updatedAt = now` and release the lease, guarded by the token: `false`
-   * and no write when the token is stale. `cursor` is replaced (not merged); `lastError: null` clears.
+   * Apply `patch`, set `updatedAt = now` and release the lease (unless `patch.keepLease`, which
+   * keeps the same token current), guarded by the token: `false` and no write when the token is
+   * stale. `cursor` is replaced (not merged); `lastError: null` clears.
    */
   commitPoll(lease: PollLease, patch: PollPatch, now: number): Promise<boolean>;
   /** The state, or `null`. */
@@ -647,7 +673,7 @@ Under `describe("polls")`:
 - ten concurrent claims → exactly one lease;
 - `cursor` round-trips JSON (objects, arrays, `null`) and is replaced, not merged;
 - `lastError: null` clears; `since` unset in a patch leaves the value;
-- `renewPollLease` true while current, false after `commitPoll`;
+- `renewPollLease` true while current, false after `commitPoll`; still true after `commitPoll` with `keepLease: true`, whose patch is applied and whose token stays current (a second `commitPoll` with the same lease succeeds; a concurrent `claimPoll` returns `null` meanwhile);
 - tenant isolation (`getPollState` of the other tenant is `null`).
 
 ### 7.5 Worked example: "Deal stuck in stage for N days" (mini-crm)
@@ -708,7 +734,7 @@ Why this matches the customer's sweep and not a cron / "wait 3 days":
 | `recordDedupeKey` | **Removed.** |
 | `claimDedupeKey(tenantId, key, runId, now, windowMs) → DedupeClaim` | **New.** |
 | `claimPoll`, `renewPollLease`, `commitPoll`, `getPollState` | **New.** |
-| Postgres migration v4 | `dedupe_keys.run_id` (backfilled), `poll_states` table. |
+| Postgres migration v4 | `dedupe_keys.run_id` (pre-v4 rows deleted), `poll_states` table. |
 | Conformance | `dedupe` and `polls` suites (§4.6, §7.4). |
 
 Adapter rules (isolation, tenancy, atomicity, times, lease tokens never returned) apply to the new methods unchanged.
@@ -741,7 +767,7 @@ Adapter rules (isolation, tenancy, atomicity, times, lease tokens never returned
 | `defineTrigger({ dedupeKey })` | `defineTrigger({ dedupe: { key, window? } })` | Rename; `key` now also receives `event`. |
 | Run IDs derived from dedupe keys (reusing a key returned the original run forever) | random IDs; keys expire after the window (default 7 days) | Hosts that relied on permanent suppression set a long window per trigger. Hosts that relied on `run_<hash>` IDs being predictable must stop. |
 | `StorageAdapter.recordDedupeKey` | `claimDedupeKey`, plus poll methods | Third-party adapters implement the new methods and re-run the conformance suite. |
-| Postgres schema v3 | v4 (`migrate()` is idempotent; the backfill preserves unexpired legacy keys) | Run `migrate()` before starting upgraded workers; v4 is additive so old and new workers can overlap briefly, but old workers will not see `run_id` and could double-start within a window — prefer a short stop. |
+| Postgres schema v3 | v4 (`migrate()` is idempotent): adds `dedupe_keys.run_id` and **deletes every existing dedupe row**, adds `poll_states` | Dedupe history is reset once: a delivery whose key was recorded before the migration is not suppressed after it (pre-1.0, nothing is deployed, so no backfill). Stop workers, run `migrate()`, start upgraded workers. |
 | Rule literals stored as text | unchanged in loose mode | Nothing for loose hosts. Hosts switching the default to strict re-save conditions in the editor (typed literals) or rebuild them with typed values in code; a numeric-string literal under strict raises the `rule.literalType` warning. |
 | `builtinPlugin` only | `createBuiltinPlugin(opts)` | Only hosts wanting strict defaults or custom operators change anything. |
 | `core.event` / plugin event triggers listen to one event | `events` available | Additive. |
@@ -785,15 +811,20 @@ README and `docs/guides/writing-a-plugin.md` are updated with the new `emit` res
 - `poll` takes longer than `leaseMs` → the lease is renewed every `leaseMs / 2`; if renewal fails, `ctx.signal` aborts and the result is discarded (`commitPoll` returns `false`), and the other holder polls the same interval.
 - `interval` shorter than the worker's `pollEveryMs` → effective cadence is `pollEveryMs`.
 - Workflow unpublished between claim and commit → runs already launched keep the version they pinned; `commitPoll` still succeeds; the state stays and is claimable again only if republished (only published workflows are ticked).
-- Clock goes backwards (host bug): `until <= since` → nothing polled; `nextAt = since + interval`.
+- Clock goes backwards (host bug): `now <= since` → nothing polled; `nextAt = since + interval`; the state is untouched, so when the clock passes `since` again the next interval starts exactly there (no gap, no overlap). A clock that steps back *between* two catch-up calls of one tick ends the chain the same way: the committed `since` stands.
+- `interval` shorter than `maxInterval` (the normal case): steady-state calls cover `(since, now]`, far less than `maxInterval`; the cap only matters after a gap longer than `maxInterval`. `maxInterval` shorter than `interval` is rejected at definition time (`maxInterval < interval`).
+- Gap exactly `maxInterval`: one call covers it (`until = since + maxInterval = now`); `until < now` is false, so no catch-up call follows and `nextAt = until + interval`.
+- Backlog larger than `maxCallsPerTick × maxInterval`: the tick stops after `maxCallsPerTick` calls with `nextAt = now`, so the next tick (one `pollEveryMs` later) continues from the committed `since`/`cursor` under a fresh lease; intervals stay contiguous across ticks.
+- A call in the middle of a catch-up chain throws: earlier chunks are already committed (`keepLease`), the failing chunk is not advanced, `nextAt = now + interval`, `poll.failed` names its `since`/`until`; the next tick re-covers that chunk and continues.
+- `maxCallsPerTick` of `0` or a non-integer → `FlowlineDefinitionError` from `createEngine`; `maxInterval` shorter than 1 ms or longer than `MAX_DURATION_MS` → `FlowlineDefinitionError` from `defineTrigger`.
 - Cursor larger than a few KB or non-JSON → `commitPoll` rejects with `FlowlineStorageError`; the engine treats it like a thrown poll (state not advanced, `poll.failed`).
 
 ## 13. Testing
 
 - **core:** `defineTrigger` validation matrix (`event`/`events`/`normalize`/`poll`/`interval` combinations); manifest carries `events`, `interval`, `operators`.
 - **nodes-builtin:** every cell of §6.3/§6.4 pinned for both modes; `createBuiltinPlugin` default propagates into the manifest schema default; custom operator lookup, arity, throwing; helpers `strictly`/`loosely`/`custom`; switch `compare`.
-- **engine:** isolation (one invalid match, two valid → two started, one rejected, `onTriggerEvent` called once); dedupe window matrix (within/after window, crash recovery via `__testHooks`, concurrent deliveries, precedence table §4.4, expiry while a run waits → second run); multi-event (both events start one workflow, dedupe across events, raw event in `startedBy`, `normalize` skip/throw); poll loop (non-overlap under two engines, `since`/`until` contiguity, failure keeps `since`, item rejection isolation, lease loss aborts, crash after launch → duplicates suppressed).
-- **storage:** conformance suites §4.6/§7.4 on memory and PGlite (and `FLOWLINE_PG_URL`); migration v4 backfill.
+- **engine:** isolation (one invalid match, two valid → two started, one rejected, `onTriggerEvent` called once); dedupe window matrix (within/after window, crash recovery via `__testHooks`, concurrent deliveries, precedence table §4.4, expiry while a run waits → second run); multi-event (both events start one workflow, dedupe across events, raw event in `startedBy`, `normalize` skip/throw); poll loop (non-overlap under two engines, `since`/`until` contiguity, failure keeps `since`, item rejection isolation, lease loss aborts, crash after launch → duplicates suppressed, catch-up chunking: a 3-day gap with `maxInterval` 24h → four calls in one tick; a 30-day gap → ten calls then `nextAt === now`, next tick resumes at day 10; a throw in chunk 2 keeps chunk 1 committed).
+- **storage:** conformance suites §4.6/§7.4 on memory and PGlite (and `FLOWLINE_PG_URL`); migration v4 deletes pre-v4 dedupe rows and is idempotent.
 - **react:** rules widget stores typed literals; compare select toggles Match case; custom operator labels/arity; trigger card captions for multi-event and poll; origin label for poll.
 - **mini-crm e2e:** "Any call ended" (AI + VoIP → two runs; duplicate call ID → one) and "Deal stuck in stage" (advance the fake clock past the threshold → run nudges; change the stage while it waits → run cancelled with reason; a deal that moved before the threshold never fires).
 
@@ -805,4 +836,4 @@ README and `docs/guides/writing-a-plugin.md` are updated with the new `emit` res
 - A `GET /workflows/:id/poll` route and a "last checked" panel in the editor.
 - Multi-event support in `core.event` (config-declared event lists without `normalize`).
 - Custom operators in switch cases; a core-validator check for rule literal types (the widget warns instead).
-- Catch-up limits for very long poll intervals after downtime.
+- Backfilling pre-v4 dedupe rows (history is reset once instead).
