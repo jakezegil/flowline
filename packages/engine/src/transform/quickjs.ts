@@ -334,6 +334,11 @@ export function quickjsRuntime(opts: QuickjsRuntimeOptions = {}): TransformRunti
       try {
         inputJson = JSON.stringify(scope ?? null);
       } catch (err) {
+        // Circular and BigInt inputs throw TypeError; a RangeError is the host stack overflowing,
+        // which on smaller stacks (e.g. Linux CI workers) happens before the depth scan can run.
+        if (err instanceof RangeError) {
+          throw new FatalError(`Transform input is nested too deeply (max ${MAX_DEPTH} levels)`);
+        }
         throw new FatalError(`Transform input is not serializable: ${(err as Error).message}`);
       }
       if (nestedDeeperThan(inputJson, MAX_DEPTH)) {

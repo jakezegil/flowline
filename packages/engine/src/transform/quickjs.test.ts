@@ -186,6 +186,13 @@ describe("quickjsRuntime", () => {
     expect(await rt.run("return { n: 1 };", { ...scope, trigger: ok }, limits)).toEqual({ n: 1 });
   });
 
+  it("reports input too deep for the host's JSON.stringify as nested too deeply", async () => {
+    let deep: unknown = {};
+    for (let i = 0; i < 1_000_000; i++) deep = { o: deep };
+    const err = await failure(rt.run("return {};", { ...scope, trigger: deep }, limits));
+    expect(err.message).toBe("Transform input is nested too deeply (max 1000 levels)");
+  });
+
   it("replaces a caller-supplied module after a host-level abort", async () => {
     const modules: Awaited<ReturnType<typeof newQuickJSWASMModule>>[] = [];
     const factory = async () => {
