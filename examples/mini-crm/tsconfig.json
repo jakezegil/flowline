@@ -4,5 +4,5 @@
     "types": ["node", "vite/client"],
     "allowImportingTsExtensions": true
   },
-  "include": ["server/src", "web/src", "web/vite.config.ts", "vitest.config.ts"]
+  "include": ["server/src", "web/src", "web/vite.config.ts", "vitest.config.ts", "e2e"]
 }
