@@ -62,7 +62,9 @@ describe("RunList", () => {
     );
     await screen.findByText(/No runs yet/);
     fireEvent.click(screen.getByRole("button", { name: "Failed" }));
-    await waitFor(() => expect(client.listRuns).toHaveBeenLastCalledWith({ status: "failed" }));
+    await waitFor(() =>
+      expect(client.listRuns).toHaveBeenLastCalledWith({ status: "failed", topLevel: true }),
+    );
     expect(await screen.findByText("No failed runs.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Failed" }).getAttribute("aria-pressed")).toBe(
       "true",
@@ -107,6 +109,89 @@ describe("RunList", () => {
     } finally {
       hidden.mockRestore();
     }
+  });
+
+  it("reads a run a Stop step ended as Stopped", async () => {
+    const client = mockClient({
+      listRuns: vi.fn(async () => [
+        row("r1", "completed", { stoppedAt: "size/if/halt" }),
+        row("r2", "completed"),
+      ]),
+    });
+    render(
+      <FlowkitProvider client={client}>
+        <RunList workflowId="welcome" onSelect={() => {}} />
+      </FlowkitProvider>,
+    );
+    const list = await screen.findByRole("list", { name: "Runs" });
+    const [stopped, completed] = within(list).getAllByRole("button");
+    expect(stopped?.querySelector(".fk-runs__status")?.textContent).toBe("Stopped");
+    expect(stopped?.dataset.status).toBe("stopped");
+    expect(completed?.querySelector(".fk-runs__status")?.textContent).toBe("Completed");
+  });
+
+  it("across workflows, leaves out sub-flow runs and names each run's workflow", async () => {
+    const client = mockClient({
+      listRuns: vi.fn(async () => [
+        row("r1", "completed", { workflowId: "lead-routing" }),
+        row("r2", "failed", { workflowId: "gone" }),
+      ]),
+      listWorkflows: vi.fn(async () => [
+        {
+          id: "lead-routing",
+          name: "Inbound lead routing",
+          triggerType: "core.webhook",
+          latestVersion: 1,
+          publishedVersion: 1,
+          publishedAt: 0,
+          updatedAt: 0,
+        },
+      ]),
+    });
+    render(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} />
+      </FlowkitProvider>,
+    );
+    const list = await screen.findByRole("list", { name: "Runs" });
+    expect(client.listRuns).toHaveBeenCalledWith({ topLevel: true });
+    await waitFor(() =>
+      expect(within(list).getByRole("button", { name: /Completed/ }).textContent).toContain(
+        "Inbound lead routing · ",
+      ),
+    );
+    // An ID the list doesn't know stays as it is, and doesn't reload the names.
+    expect(within(list).getByRole("button", { name: /Failed/ }).textContent).toContain("gone · ");
+    expect(client.listWorkflows).toHaveBeenCalledTimes(1);
+  });
+
+  it("includeSubflowRuns lists sub-flow runs too; one workflow's list includes them by default", async () => {
+    const client = mockClient({ listRuns: vi.fn(async () => []) });
+    const { rerender } = render(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} includeSubflowRuns />
+      </FlowkitProvider>,
+    );
+    await waitFor(() => expect(client.listRuns).toHaveBeenLastCalledWith({}));
+    rerender(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} workflowId="get-contact" />
+      </FlowkitProvider>,
+    );
+    await waitFor(() =>
+      expect(client.listRuns).toHaveBeenLastCalledWith({ workflowId: "get-contact" }),
+    );
+    rerender(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} workflowId="get-contact" includeSubflowRuns={false} />
+      </FlowkitProvider>,
+    );
+    await waitFor(() =>
+      expect(client.listRuns).toHaveBeenLastCalledWith({
+        workflowId: "get-contact",
+        topLevel: true,
+      }),
+    );
   });
 
   it("shows a retryable error", async () => {

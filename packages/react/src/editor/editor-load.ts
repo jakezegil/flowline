@@ -1,0 +1,97 @@
+/**
+ * Loading for `WorkflowEditor`: the manifest, callable sub-flows and the workflow, turned
+ * into an editor store once. Also covers a workflow that isn't there (not found) and a new one
+ * (create mode, which never asks the server for it).
+ *
+ * @module
+ */
+
+import type { Manifest, ValidationContext, WorkflowDetail, WorkflowDoc } from "@flowkit/core";
+import { useEffect, useState } from "react";
+import type { FlowkitLabels } from "../labels";
+import { useFlowkit, useFlowkitAppearance } from "../provider";
+import { defaultConfig } from "../store/commands";
+import { createEditorStore, type EditorStore } from "../store/editor-store";
+import { errorText, httpStatus } from "../ui/primitives";
+
+/** A new workflow: a manual trigger (else the first trigger in the manifest) and no steps. */
+export function blankDoc(id: string, manifest: Manifest, labels: FlowkitLabels): WorkflowDoc {
+  const t = manifest.triggers.find((x) => x.kind === "manual") ?? manifest.triggers[0];
+  return {
+    id,
+    name: labels.untitledWorkflow,
+    trigger: { type: t?.type ?? "manual", config: t ? defaultConfig(t.config) : {} },
+    steps: [],
+  };
+}
+
+/** Where the editor's load is. */
+export type EditorLoadState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  /** No workflow with this ID, and no `initialDoc` to start one from. */
+  | { status: "notFound" }
+  | { status: "ready"; store: EditorStore };
+
+/**
+ * Loads the manifest, callable sub-flows and the workflow, and creates the editor store once.
+ *
+ * - `create`: a new workflow; the server isn't asked for it, and the draft starts from
+ *   `initialDoc`, else a blank manual workflow. The first save creates it.
+ * - Otherwise the workflow is loaded. If there is none (404) it starts from `initialDoc` when
+ *   given, else the state is `notFound`; `startNew()` then switches to create mode.
+ */
+export function useEditorLoad(
+  workflowId: string,
+  initialDoc: WorkflowDoc | undefined,
+  create = false,
+): { state: EditorLoadState; retry(): void; startNew(): void } {
+  const { client } = useFlowkit();
+  const { labels } = useFlowkitAppearance();
+  const [state, setState] = useState<EditorLoadState>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
+  // Create mode chosen after a not-found, for this workflow ID only.
+  const [createdId, setCreatedId] = useState<string | undefined>(undefined);
+  const creating = create || createdId === workflowId;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: initialDoc and labels are read once per load; changing them must not recreate the store.
+  useEffect(() => {
+    let active = true;
+    setState({ status: "loading" });
+    (async (): Promise<EditorLoadState> => {
+      const [manifest, subflows, detail] = await Promise.all([
+        client.getManifest(),
+        client.listSubflows().catch(() => []),
+        creating
+          ? Promise.resolve(null)
+          : client.getWorkflow(workflowId).catch((err: unknown): WorkflowDetail | null => {
+              if (httpStatus(err) === 404) return null;
+              throw err;
+            }),
+      ]);
+      if (!detail && !creating && !initialDoc) return { status: "notFound" };
+      const ctx: ValidationContext = {
+        subflows: Object.fromEntries(
+          subflows.map((s) => [s.id, { name: s.name, input: s.input, output: s.output }]),
+        ),
+      };
+      const doc = detail?.latest.doc ?? initialDoc ?? blankDoc(workflowId, manifest, labels);
+      const store = createEditorStore({ doc, manifest, ctx });
+      if (detail) {
+        store.getState().markSaved(detail.latest.version);
+        if (detail.published) store.getState().markPublished(detail.published.version);
+      }
+      return { status: "ready", store };
+    })().then(
+      (next) => active && setState(next),
+      (err: unknown) => active && setState({ status: "error", message: errorText(err) }),
+    );
+    return () => {
+      active = false;
+    };
+  }, [client, workflowId, attempt, creating]);
+  return {
+    state,
+    retry: () => setAttempt((n) => n + 1),
+    startNew: () => setCreatedId(workflowId),
+  };
+}

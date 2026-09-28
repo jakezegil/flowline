@@ -11,6 +11,8 @@ import { createContext, useContext } from "react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { FlowkitLabels } from "../labels";
+import type { FlowkitNotice, NotifyHandler } from "../provider";
+import { notifyHost } from "../ui/toaster";
 
 /** Per-step run state shown on the canvas in run mode. */
 export interface RunStepStatus {
@@ -68,6 +70,8 @@ export interface CanvasUiState {
   /** Step whose name is being edited inline. */
   renaming: string | null;
   toasts: Toast[];
+  /** The provider's `onNotify`: takes notices before this canvas shows them. */
+  notify: NotifyHandler | undefined;
 }
 
 /** Commands that change the canvas' UI state. */
@@ -92,10 +96,12 @@ export function createCanvasUiStore(init: {
   readOnly: boolean;
   overlay: RunOverlay | undefined;
   labels: FlowkitLabels;
+  notify?: NotifyHandler;
 }): CanvasUiStore {
   let nextToast = 1;
   return createStore<CanvasUiState & CanvasUiActions>()((set, get) => ({
     ...init,
+    notify: init.notify,
     picker: null,
     renaming: null,
     toasts: [],
@@ -108,6 +114,13 @@ export function createCanvasUiStore(init: {
       if (get().renaming !== null) set({ renaming: null });
     },
     toast(message, action) {
+      const notice: FlowkitNotice = {
+        message,
+        tone: "neutral",
+        source: "canvas",
+        ...(action ? { action } : {}),
+      };
+      if (notifyHost(get().notify, notice)) return;
       const id = nextToast++;
       // One toast at a time: a new notice replaces the previous one.
       set({ toasts: [{ id, message, ...(action ? { action } : {}) }] });

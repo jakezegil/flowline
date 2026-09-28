@@ -1,4 +1,4 @@
-import type { Manifest, RunDetail } from "@flowkit/core";
+import type { Manifest, NodeManifest, RunDetail } from "@flowkit/core";
 import * as Popover from "@radix-ui/react-popover";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { CircleAlert, Hourglass, LoaderCircle, RotateCcw } from "lucide-react";
@@ -20,8 +20,10 @@ import { EditorContext, stepIndex, useEditorStore, useRun } from "../hooks";
 import { useFlowkit, useFlowkitAppearance } from "../provider";
 import { createEditorStore, type EditorStore, TRIGGER_KEY } from "../store/editor-store";
 import { themeStyle } from "../theme";
-import { errorText, SmallDialog, useNow } from "../ui/primitives";
+import { type NotFoundAction, NotFoundState } from "../ui/not-found";
+import { errorText, httpStatus, useNow } from "../ui/primitives";
 import { ToasterProvider, useToast } from "../ui/toaster";
+import { ResumeDialog } from "./resume-dialog";
 import { type ResolvedRun, resolveRun } from "./run-overlay";
 import { displayState, isTerminal, RunStateChip } from "./run-status";
 import { StepInspector } from "./step-inspector";
@@ -56,79 +58,29 @@ function callbackStep(detail: RunDetail): string | undefined {
   return undefined;
 }
 
-/** "Resume run": sends a JSON callback body with the authorized resume route. */
-function ResumeDialog({
-  open,
-  onOpenChange,
-  onResume,
-}: {
-  open: boolean;
-  onOpenChange(open: boolean): void;
-  onResume(body: unknown): Promise<boolean>;
-}) {
-  const { labels } = useFlowkitAppearance();
-  const [text, setText] = useState("{}");
-  const [invalid, setInvalid] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const id = useId();
-  const bodyId = `${id}-body`;
-  const errId = `${id}-err`;
-  const submit = async () => {
-    let body: unknown;
-    try {
-      body = text.trim() === "" ? undefined : JSON.parse(text);
-    } catch {
-      setInvalid(true);
-      return;
-    }
-    setInvalid(false);
-    setBusy(true);
-    const ok = await onResume(body);
-    setBusy(false);
-    if (ok) onOpenChange(false);
-  };
-  return (
-    <SmallDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title={labels.resumeTitle}
-      description={labels.resumeDescription}
-      onSubmit={() => void submit()}
-      footer={
-        <>
-          <button type="button" className="fk-btn" onClick={() => onOpenChange(false)}>
-            {labels.cancel}
-          </button>
-          <button type="submit" className="fk-btn fk-btn--primary" disabled={busy}>
-            {busy && <LoaderCircle size={14} className="fk-spin" aria-hidden />}
-            {labels.resumeTitle}
-          </button>
-        </>
-      }
-    >
-      <div className="fk-field">
-        <label className="fk-field__label" htmlFor={bodyId}>
-          {labels.callbackBody}
-        </label>
-        <textarea
-          id={bodyId}
-          className="fk-input fk-input--mono"
-          rows={6}
-          spellCheck={false}
-          value={text}
-          aria-invalid={invalid || undefined}
-          aria-describedby={invalid ? errId : undefined}
-          onChange={(e) => setText(e.target.value)}
-        />
-        {invalid && (
-          <div id={errId} className="fk-field__error">
-            {labels.invalidJson}
-          </div>
-        )}
-      </div>
-    </SmallDialog>
-  );
+/** What a host's `resumeAction` gets for the step a run is waiting on. */
+export interface ResumeActionContext {
+  /** The run, as last loaded. */
+  run: RunDetail;
+  /** ID of the waiting step. */
+  stepId: string;
+  /** Journal path of the waiting step (pass it as `expectStep` when resuming). */
+  stepPath: string;
+  /** The waiting step's node type; its `resume` says how it expects to be resumed. */
+  node: NodeManifest | undefined;
+  /** Where the action is rendered: the viewer's header or the waiting step's inspector. */
+  placement: "header" | "inspector";
+  /** Opens the built-in Resume run dialog. */
+  openResumeDialog(): void;
+  /** Reloads the run, e.g. after the host resumed it. */
+  refresh(): void;
 }
+
+/**
+ * Replaces RunViewer's Resume… action for a waiting step: `false` hides it everywhere; a function
+ * renders your own control instead (return `null` to hide it for some steps).
+ */
+export type ResumeActionProp = false | ((ctx: ResumeActionContext) => ReactNode);
 
 function RunBody({
   runId,
@@ -136,12 +88,14 @@ function RunBody({
   manifest,
   refresh,
   onRetried,
+  resumeAction,
 }: {
   runId: string;
   detail: RunDetail;
   manifest: Manifest;
   refresh(): void;
   onRetried?(runId: string): void;
+  resumeAction?: ResumeActionProp | undefined;
 }) {
   const { labels, resolveIcon } = useFlowkitAppearance();
   const { client } = useFlowkit();
@@ -216,7 +170,8 @@ function RunBody({
   };
   const resume = async (body: unknown) => {
     try {
-      await client.resumeRun(run.id, body);
+      // Only the wait this dialog was opened for: 410 if the run moved on meanwhile.
+      await client.resumeRun(run.id, body, waitingPath ? { expectStep: waitingPath } : {});
       toast({ message: labels.resumed, tone: "success" });
       refresh();
       return true;
@@ -245,6 +200,39 @@ function RunBody({
   const waitingStep = waitingPath ? stepIdOfEntry(waitingPath) : undefined;
   const pending = waitingPath ? detail.run.journal[waitingPath] : undefined;
   const expiresAt = pending?.status === "suspended" ? pending.pending?.expiresAt : undefined;
+  const waitingType = waitingStep ? stepIndex(detail.doc).get(waitingStep)?.type : undefined;
+  const waitingNode = manifest.nodes.find((n) => n.type === waitingType);
+  const resumeSpec = waitingNode?.resume;
+  /** Guidance for a wait the host app resumes (the node declares `resume.hostHandled`). */
+  const resumeHint = resumeSpec?.hostHandled
+    ? (resumeSpec.hint ?? labels.resumeHandledByApp)
+    : undefined;
+  const canResume = waitingPath !== undefined && waitingStep !== undefined && !cancelling;
+  /** The resume control at `placement`: the host's, or Resume… unless the app resumes it. */
+  const resumeControl = (placement: "header" | "inspector", small: boolean): ReactNode => {
+    if (!canResume || resumeAction === false) return null;
+    if (typeof resumeAction === "function") {
+      return resumeAction({
+        run: detail,
+        stepId: waitingStep,
+        stepPath: waitingPath,
+        node: waitingNode,
+        placement,
+        openResumeDialog: () => setResumeOpen(true),
+        refresh,
+      });
+    }
+    if (resumeSpec?.hostHandled) return null;
+    return (
+      <button
+        type="button"
+        className={small ? "fk-btn fk-btn--sm" : "fk-btn"}
+        onClick={() => setResumeOpen(true)}
+      >
+        {labels.resume}
+      </button>
+    );
+  };
 
   const selection = useStoreSelection(store);
   const duration = (terminal ? run.updatedAt : now) - run.createdAt;
@@ -274,11 +262,7 @@ function RunBody({
           </span>
         </p>
         <div className="fk-header__actions">
-          {waitingPath && !cancelling && (
-            <button type="button" className="fk-btn" onClick={() => setResumeOpen(true)}>
-              {labels.resume}
-            </button>
-          )}
+          {resumeControl("header", false)}
           {canCancel && <CancelButton busy={busy} onConfirm={() => void cancel()} />}
           {run.status === "failed" && (
             <button
@@ -319,9 +303,14 @@ function RunBody({
           tone="warning"
           icon={<Hourglass size={16} aria-hidden />}
           title={nameOf(waitingStep)}
-          detail={labels.waitingForCallback(
-            expiresAt !== undefined ? labels.relativeTime(expiresAt - now) : undefined,
-          )}
+          detail={[
+            labels.waitingForCallback(
+              expiresAt !== undefined ? labels.relativeTime(expiresAt - now) : undefined,
+            ),
+            resumeHint,
+          ]
+            .filter(Boolean)
+            .join(". ")}
           action={{ label: labels.showStep, run: () => store.getState().select(waitingStep) }}
         />
       )}
@@ -333,11 +322,20 @@ function RunBody({
         nameOf={nameOf}
         manifest={manifest}
         resolveIcon={resolveIcon}
-        {...(waitingPath && !cancelling
-          ? { onResume: () => setResumeOpen(true), waitingStep }
+        {...(canResume
+          ? {
+              waitingStep,
+              resumeSlot: resumeControl("inspector", true),
+              ...(resumeHint ? { resumeHint } : {}),
+            }
           : {})}
       />
-      <ResumeDialog open={resumeOpen} onOpenChange={setResumeOpen} onResume={resume} />
+      <ResumeDialog
+        open={resumeOpen}
+        onOpenChange={setResumeOpen}
+        onResume={resume}
+        schema={resumeSpec?.body}
+      />
     </EditorContext.Provider>
   );
 }
@@ -463,7 +461,8 @@ function RunCanvasAndInspector({
   nameOf,
   manifest,
   resolveIcon,
-  onResume,
+  resumeSlot,
+  resumeHint,
   waitingStep,
 }: {
   store: EditorStore;
@@ -473,7 +472,10 @@ function RunCanvasAndInspector({
   nameOf(id: string): string;
   manifest: Manifest;
   resolveIcon(name?: string): React.ComponentType<{ size?: number }>;
-  onResume?: () => void;
+  /** The waiting step's resume control (shown in its inspector). */
+  resumeSlot?: ReactNode;
+  /** Guidance shown in the waiting step's inspector. */
+  resumeHint?: string;
   waitingStep?: string;
 }) {
   const { labels } = useFlowkitAppearance();
@@ -506,7 +508,9 @@ function RunCanvasAndInspector({
             name={name}
             {...(Icon ? { icon: <Icon size={16} /> } : {})}
             onClose={() => store.getState().select(null)}
-            {...(onResume && waitingStep === selection ? { onResume } : {})}
+            {...(waitingStep === selection
+              ? { resumeSlot, ...(resumeHint ? { resumeHint } : {}) }
+              : {})}
           />
         </aside>
       )}
@@ -522,16 +526,40 @@ function RunCanvasAndInspector({
  * Timeline tabs. Live runs update as their events arrive. Needs a `<FlowkitProvider>` and a sized
  * container.
  *
+ * Resume… posts a callback body to the waiting step. When the step's node declares
+ * `resume.body`, the dialog starts empty and checks the body against it; when it declares
+ * `resume.hostHandled` (e.g. an approval your app decides), the viewer shows its `hint` instead
+ * of Resume…. `resumeAction` hides or replaces the action altogether.
+ *
  * @example
- * <RunViewer runId={runId} onRetried={(next) => navigate(`/runs/${next}`)} />
+ * <RunViewer
+ *   runId={runId}
+ *   onRetried={(next) => navigate(`/runs/${next}`)}
+ *   notFoundAction={{ label: "Back to runs", onClick: () => navigate("/runs") }}
+ *   resumeAction={({ node }) =>
+ *     node?.type === "crm.requestApproval" ? <Link to="/approvals">Open approvals</Link> : null
+ *   }
+ * />
  */
 export function RunViewer(props: {
   runId: string;
   /** Called with the new run's ID after "Retry from failed step". */
   onRetried?(runId: string): void;
+  /**
+   * The Resume… action of a waiting run: `false` hides it (header and inspector); a function
+   * renders your own control in its place, for example a link to where your app resumes it.
+   * By default Resume… opens a dialog for the callback body, unless the waiting node declares
+   * `resume.hostHandled`.
+   */
+  resumeAction?: ResumeActionProp;
+  /**
+   * The action offered when there is no run with this ID (404), e.g. back to your run list.
+   * None by default.
+   */
+  notFoundAction?: NotFoundAction;
   className?: string;
 }): JSX.Element {
-  const { runId, onRetried, className } = props;
+  const { runId, onRetried, className, resumeAction, notFoundAction } = props;
   const { theme, labels } = useFlowkitAppearance();
   const { detail, error, refresh } = useRun(runId);
   const { manifest, error: manifestError, retry: retryManifest } = useManifest();
@@ -547,7 +575,16 @@ export function RunViewer(props: {
         detail={detail}
         manifest={manifest}
         refresh={refresh}
+        resumeAction={resumeAction}
         {...(onRetried ? { onRetried } : {})}
+      />
+    );
+  } else if (error && !detail && httpStatus(error) === 404) {
+    content = (
+      <NotFoundState
+        title={labels.runNotFound}
+        detail={labels.runNotFoundDetail(runId)}
+        action={notFoundAction}
       />
     );
   } else if ((error && !detail) || manifestError) {
@@ -583,7 +620,7 @@ export function RunViewer(props: {
     >
       <PortalContainerContext.Provider value={portal}>
         <Tooltip.Provider delayDuration={300} skipDelayDuration={100}>
-          <ToasterProvider>{content}</ToasterProvider>
+          <ToasterProvider source="runViewer">{content}</ToasterProvider>
         </Tooltip.Provider>
       </PortalContainerContext.Provider>
       <div ref={setPortal} className="fk-portal" />

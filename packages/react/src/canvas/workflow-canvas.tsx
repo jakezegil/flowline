@@ -35,6 +35,7 @@ import {
   useLabels,
 } from "./canvas-context";
 import { edgeTypes, type FlowEdgeData } from "./edges";
+import { fitViewport } from "./fit";
 import { edgeGeometries } from "./geometry";
 import { handleCanvasKey } from "./keyboard";
 import { EndNode, RejoinNode } from "./rejoin-node";
@@ -51,20 +52,6 @@ const nodeTypes = {
   end: EndNode,
 };
 
-const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
-
-/** Top padding (and side padding, space permitting) of the initial fit. */
-const FIT_PADDING = 100;
-/**
- * The initial fit never zooms out further than this: a big workflow opens readable at the top
- * (the rest is a pan away) rather than shrunk to fit.
- */
-const FIT_MIN_ZOOM = 0.6;
-/**
- * Width alone never asks for less than this, so on a narrow pane the fit is driven by height
- * (or the floor above), keeping the trigger readable and centered.
- */
-const FIT_MIN_ZOOM_FOR_WIDTH = 0.7;
 /** A selected card closer than this (px) to the pane's edge is panned back into view. */
 const PAN_MARGIN = 24;
 const MIN_ZOOM = 0.25;
@@ -308,14 +295,9 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
       const { width: W, height: H } = flowStore.getState();
       const l = layoutRef.current;
       if (!l || W === 0 || H === 0) return;
-      const padX = Math.min(FIT_PADDING, W / 16);
-      const padTop = Math.min(FIT_PADDING, H / 8);
-      const byWidth = (W - 2 * padX) / l.width;
-      const byHeight = (H - padTop - padX) / l.height;
-      const zoom = whole
-        ? Math.max(MIN_ZOOM, Math.min(1, byWidth, byHeight))
-        : clamp(Math.min(Math.max(byWidth, FIT_MIN_ZOOM_FOR_WIDTH), byHeight), FIT_MIN_ZOOM, 1);
-      rf.setViewport({ x: W / 2, y: padTop, zoom }, { duration });
+      rf.setViewport(fitViewport({ width: W, height: H }, l, { whole, minZoom: MIN_ZOOM }), {
+        duration,
+      });
     },
     [rf, flowStore, layoutRef],
   );
@@ -438,8 +420,10 @@ export function WorkflowCanvas(props: {
   onStepClick?(id: string): void;
 }): JSX.Element {
   const { store, readOnly = false, overlay, onStepClick } = props;
-  const { theme, labels } = useFlowkitAppearance();
-  const [ui] = useState(() => createCanvasUiStore({ readOnly, overlay, labels }));
+  const { theme, labels, onNotify } = useFlowkitAppearance();
+  const [ui] = useState(() =>
+    createCanvasUiStore({ readOnly, overlay, labels, ...(onNotify ? { notify: onNotify } : {}) }),
+  );
   const rootRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<ReturnType<typeof layoutTree> | null>(null);
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
@@ -454,6 +438,9 @@ export function WorkflowCanvas(props: {
   useEffect(() => {
     if (ui.getState().labels !== labels) ui.setState({ labels });
   }, [ui, labels]);
+  useEffect(() => {
+    if (ui.getState().notify !== onNotify) ui.setState({ notify: onNotify });
+  }, [ui, onNotify]);
 
   useEffect(() => {
     store.getState().hydrateLocal();

@@ -1824,6 +1824,12 @@
     min-width: 0;
     font-weight: 500;
   }
+  .fk-callout__hint {
+    display: block;
+    margin-top: 2px;
+    font-weight: 400;
+    color: var(--fk-text-muted);
+  }
   .fk-tabs {
     display: flex;
     flex: none;

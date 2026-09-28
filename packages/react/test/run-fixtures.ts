@@ -1,5 +1,14 @@
-import type { JournalEntry, RunDetail, RunEvent, RunStatus, WorkflowDoc } from "@flowkit/core";
-import { docWith, step } from "./fixtures";
+import type {
+  JournalEntry,
+  Manifest,
+  NodeManifest,
+  ResumeSpec,
+  RunDetail,
+  RunEvent,
+  RunStatus,
+  WorkflowDoc,
+} from "@flowkit/core";
+import { docWith, manifest, step } from "./fixtures";
 
 /**
  * A doc for run tests: load → cond (if: email, else: nudge) → each (body: tag) → off (disabled).
@@ -145,4 +154,117 @@ export function waitingRun(): RunDetail {
     [ev("run.started"), ev("run.suspended", "cond/if/email", { callback: true })],
     { wakeAt: 10_000_000 },
   );
+}
+
+/** A node that waits for a decision, like the mini-CRM's approval step. */
+export function approveNode(resume?: ResumeSpec): NodeManifest {
+  return {
+    type: "crm.approve",
+    plugin: "crm",
+    name: "Request approval",
+    icon: "badge-check",
+    input: { type: "object", properties: {} },
+    output: { kind: "schema", schema: { type: "object", properties: {} } },
+    branches: {
+      kind: "static",
+      branches: [
+        { id: "approved", label: "Approved" },
+        { id: "rejected", label: "Rejected" },
+      ],
+    },
+    ...(resume ? { resume } : {}),
+  };
+}
+
+/** The fixture manifest plus {@link approveNode}. */
+export function approvalManifest(resume?: ResumeSpec): Manifest {
+  return { ...manifest, nodes: [...manifest.nodes, approveNode(resume)] };
+}
+
+/**
+ * load → size (if: approval (approved: notify, rejected: halt → after_halt), else: welcome) → last.
+ */
+export function approvalDoc(): WorkflowDoc {
+  return docWith(
+    [
+      step("load", "crm.loadContact", { contactId: { $ref: "trigger.contactId" } }),
+      step(
+        "size",
+        "logic.condition",
+        { value: true },
+        {
+          branches: {
+            if: [
+              step(
+                "approval",
+                "crm.approve",
+                {},
+                {
+                  branches: {
+                    approved: [step("notify", "crm.sendEmail", { to: "a@b.c", subject: "Yes" })],
+                    rejected: [
+                      step("halt", "crm.sendEmail", { to: "a@b.c", subject: "Stop" }),
+                      step("after_halt", "crm.sendEmail", { to: "a@b.c", subject: "Never" }),
+                    ],
+                  },
+                },
+              ),
+            ],
+            else: [step("welcome", "crm.sendEmail", { to: "a@b.c", subject: "Hi" })],
+          },
+        },
+      ),
+      step("last", "crm.sendEmail", { to: "a@b.c", subject: "Last" }),
+    ],
+    "leads",
+  );
+}
+
+const branched = (branch: string, startedAt: number, at: number): JournalEntry => ({
+  status: "branched",
+  branch,
+  output: {},
+  startedAt,
+  at,
+  attempts: 1,
+});
+
+/** {@link approvalDoc} waiting at `size/if/approval`. */
+export function approvalWaitingRun(): RunDetail {
+  return {
+    ...runDetail(
+      "waiting",
+      {
+        load: done(1000, 1100),
+        size: branched("if", 1200, 1210),
+        "size/if/approval": {
+          status: "suspended",
+          pending: { hasCallback: true, expiresAt: 10_000_000 },
+          startedAt: 1300,
+          at: 1310,
+          attempts: 1,
+        },
+      },
+      [ev("run.started"), ev("run.suspended", "size/if/approval", { callback: true })],
+    ),
+    doc: approvalDoc(),
+  };
+}
+
+/** {@link approvalDoc} rejected: `halt` stopped the run inside both blocks. */
+export function approvalStoppedRun(): RunDetail {
+  return {
+    ...runDetail(
+      "completed",
+      {
+        load: done(1000, 1100),
+        size: branched("if", 1200, 1210),
+        "size/if/approval": branched("rejected", 1300, 4000),
+        "size/if/approval/rejected/halt": done(4100, 4200, { stopped: true, reason: "No" }),
+      },
+      [ev("run.started"), ev("run.stopped", "size/if/approval/rejected/halt")],
+      { output: { stoppedAt: "size/if/approval/rejected/halt", reason: "No" } },
+    ),
+    doc: approvalDoc(),
+  };
 }

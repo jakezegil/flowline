@@ -231,7 +231,8 @@ export function StepInspector({
   name,
   icon,
   onClose,
-  onResume,
+  resumeSlot,
+  resumeHint,
 }: {
   detail: RunDetail;
   selection: string;
@@ -240,8 +241,10 @@ export function StepInspector({
   name: string;
   icon?: ReactNode;
   onClose(): void;
-  /** Present when the run is waiting on this step's callback. */
-  onResume?: () => void;
+  /** The resume control, when the run is waiting on this step's callback. */
+  resumeSlot?: ReactNode;
+  /** How to resume this step when the host app does it (the node's `resume.hint`). */
+  resumeHint?: string;
 }): JSX.Element {
   const { labels } = useFlowkitAppearance();
   const now = useNow(30_000);
@@ -366,12 +369,13 @@ export function StepInspector({
       {waiting && (
         <div className="fk-callout" data-tone="warning">
           <Hourglass size={14} aria-hidden />
-          <span className="fk-callout__text">{waiting}</span>
-          {onResume && pending?.hasCallback && (
-            <button type="button" className="fk-btn fk-btn--sm" onClick={onResume}>
-              {labels.resume}
-            </button>
-          )}
+          <span className="fk-callout__text">
+            {waiting}
+            {pending?.hasCallback && resumeHint && (
+              <span className="fk-callout__hint">{resumeHint}</span>
+            )}
+          </span>
+          {pending?.hasCallback && resumeSlot}
         </div>
       )}
       {dimmed && (

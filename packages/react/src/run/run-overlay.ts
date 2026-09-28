@@ -93,6 +93,16 @@ export function resolveRun(
     return waiting ? "waiting" : undefined;
   }
 
+  /** The latest `at` among journal entries under `prefix`, at least `from`. */
+  function latestAt(prefix: string, from: number): number {
+    let latest = from;
+    for (const k of keys) {
+      const at = k.startsWith(prefix) ? journal[k]?.at : undefined;
+      if (at !== undefined && at > latest) latest = at;
+    }
+    return latest;
+  }
+
   function takeBranch(blockId: string, branch: string) {
     for (const e of layout.edges) {
       if (e.kind === "branch" && e.source === `step:${blockId}` && e.branchId === branch) {
@@ -125,12 +135,23 @@ export function resolveRun(
       case "skipped":
         return { status: "skipped" };
       default: {
+        // A block (branched or looping) whose children haven't all finished.
         const worst = descendantState(`${path}/`);
         if (worst === "failed" && !runActive) return { status: "failed", attempts: e.attempts };
         if (worst === "waiting" && run.status === "waiting") {
           return { status: "waiting", attempts: e.attempts };
         }
-        return { status: runActive ? "running" : "pending", attempts: e.attempts };
+        if (runActive) return { status: "running", attempts: e.attempts };
+        // A completed run left it unfinished: a Stop step inside it ended the run. The block
+        // itself ran (it chose its branch), so it is done, up to its last journaled child.
+        if (run.status === "completed") {
+          return {
+            status: "done",
+            durationMs: latestAt(`${path}/`, e.at) - e.startedAt,
+            attempts: e.attempts,
+          };
+        }
+        return { status: "pending", attempts: e.attempts };
       }
     }
   }

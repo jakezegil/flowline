@@ -34,12 +34,32 @@ export interface FieldWidgetProps {
 /** A custom config field control, selected by `x-flowkit.widget` in a field's schema. */
 export type FieldWidget = ComponentType<FieldWidgetProps>;
 
+/** A notice Flowkit would show as a toast (see `<FlowkitProvider onNotify>`). */
+export interface FlowkitNotice {
+  /** The text, already in the provider's `labels`. */
+  message: string;
+  /** `success` (saved, published, run started…), `danger` (a failed action) or `neutral`. */
+  tone: "neutral" | "success" | "danger";
+  /** An action to offer with it, e.g. Undo after deleting a step. */
+  action?: { label: string; run(): void };
+  /** The component that raised it. */
+  source: "editor" | "runViewer" | "canvas";
+}
+
+/**
+ * Receives Flowkit's notices instead of its built-in toast. Return `false` to let Flowkit show
+ * this one itself.
+ */
+// biome-ignore lint/suspicious/noConfusingVoidType: `void` so any plain handler (no return) fits; `false` opts back into the built-in toast.
+export type NotifyHandler = (notice: FlowkitNotice) => void | false;
+
 interface FlowkitContextValue {
   client: FlowkitClient;
   widgets: Record<string, FieldWidget>;
   theme: FlowkitTheme;
   labels: FlowkitLabels;
   resolveIcon(name?: string): IconComponent;
+  onNotify?: NotifyHandler;
 }
 
 const FlowkitContext = createContext<FlowkitContextValue | null>(null);
@@ -79,9 +99,18 @@ export function FlowkitProvider(props: {
    * @example icons={{ rocket: Rocket, "my-crm": CrmLogo }}
    */
   icons?: Record<string, ComponentType<{ size?: number }>>;
+  /**
+   * Routes Flowkit's notices ("Saved as v3", "Run resumed", "Step deleted · Undo", errors) to
+   * your app's own toasts instead of Flowkit's. Without it Flowkit shows them itself. Return
+   * `false` for a notice to have Flowkit show it after all.
+   *
+   * @example onNotify={(n) => toast[n.tone === "danger" ? "error" : "info"](n.message)}
+   */
+  onNotify?: NotifyHandler;
   children: ReactNode;
 }): JSX.Element {
   const { client, theme = NO_THEME, widgets = NO_WIDGETS, icons, labels, children } = props;
+  const { onNotify } = props;
   const resolved = useMemo(() => resolveLabels(labels), [labels]);
   const value = useMemo<FlowkitContextValue>(
     () => ({
@@ -90,8 +119,9 @@ export function FlowkitProvider(props: {
       theme,
       labels: resolved,
       resolveIcon: (name) => resolveIconIn(icons, name),
+      ...(onNotify ? { onNotify } : {}),
     }),
-    [client, widgets, theme, resolved, icons],
+    [client, widgets, theme, resolved, icons, onNotify],
   );
   return (
     <FlowkitClientContext.Provider value={client}>
@@ -120,14 +150,15 @@ const defaultIcon = (name?: string) => resolveIconIn(undefined, name);
 const NO_PROVIDER = { theme: NO_THEME, labels: defaultLabels, resolveIcon: defaultIcon };
 
 /**
- * Theme, text and icon resolver for components that also work without a provider (the
- * canvas): falls back to the default theme, English labels and the bundled icons.
+ * Theme, text, icon resolver and notice handler for components that also work without a
+ * provider (the canvas): falls back to the default theme, English labels and the bundled icons.
  * @internal
  */
 export function useFlowkitAppearance(): {
   theme: FlowkitTheme;
   labels: FlowkitLabels;
   resolveIcon(name?: string): IconComponent;
+  onNotify?: NotifyHandler;
 } {
   return useContext(FlowkitContext) ?? NO_PROVIDER;
 }

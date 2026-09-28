@@ -1,79 +1,19 @@
-import type { Manifest, ValidationContext, WorkflowDoc } from "@flowkit/core";
+import type { WorkflowDoc } from "@flowkit/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { TriangleAlert, X } from "lucide-react";
 import { type JSX, type ReactNode, useEffect, useMemo, useState } from "react";
 import { PortalContainerContext } from "../canvas/canvas-context";
 import { WorkflowCanvas } from "../canvas/workflow-canvas";
 import { EditorContext, useEditorStore, useStep } from "../hooks";
-import type { FlowkitLabels } from "../labels";
-import { useFlowkit, useFlowkitAppearance } from "../provider";
-import { defaultConfig } from "../store/commands";
-import { createEditorStore, type EditorStore, TRIGGER_KEY } from "../store/editor-store";
+import { useFlowkitAppearance } from "../provider";
+import { type EditorStore, TRIGGER_KEY } from "../store/editor-store";
 import { themeStyle } from "../theme";
-import { errorText, httpStatus } from "../ui/primitives";
+import { type NotFoundAction, NotFoundState } from "../ui/not-found";
 import { ToasterProvider } from "../ui/toaster";
+import { useEditorLoad } from "./editor-load";
 import { EditorHeader } from "./header";
 
-/** A new workflow: a manual trigger (else the first trigger in the manifest) and no steps. */
-export function blankDoc(id: string, manifest: Manifest, labels: FlowkitLabels): WorkflowDoc {
-  const t = manifest.triggers.find((x) => x.kind === "manual") ?? manifest.triggers[0];
-  return {
-    id,
-    name: labels.untitledWorkflow,
-    trigger: { type: t?.type ?? "manual", config: t ? defaultConfig(t.config) : {} },
-    steps: [],
-  };
-}
-
-type LoadState =
-  | { status: "loading" }
-  | { status: "error"; message: string }
-  | { status: "ready"; store: EditorStore };
-
-/**
- * Loads the manifest, callable sub-flows and the workflow, and creates the editor store once.
- * A workflow that doesn't exist yet (404) starts from `initialDoc`, else a blank manual workflow.
- */
-function useEditorLoad(workflowId: string, initialDoc: WorkflowDoc | undefined) {
-  const { client } = useFlowkit();
-  const { labels } = useFlowkitAppearance();
-  const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [attempt, setAttempt] = useState(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: initialDoc and labels are read once per load; changing them must not recreate the store.
-  useEffect(() => {
-    let active = true;
-    setState({ status: "loading" });
-    (async () => {
-      const [manifest, subflows, detail] = await Promise.all([
-        client.getManifest(),
-        client.listSubflows().catch(() => []),
-        client.getWorkflow(workflowId).catch((err: unknown) => {
-          if (httpStatus(err) === 404) return null;
-          throw err;
-        }),
-      ]);
-      const ctx: ValidationContext = {
-        subflows: Object.fromEntries(
-          subflows.map((s) => [s.id, { name: s.name, input: s.input, output: s.output }]),
-        ),
-      };
-      const doc = detail?.latest.doc ?? initialDoc ?? blankDoc(workflowId, manifest, labels);
-      const store = createEditorStore({ doc, manifest, ctx });
-      if (detail) {
-        store.getState().markSaved(detail.latest.version);
-        if (detail.published) store.getState().markPublished(detail.published.version);
-      }
-      return store;
-    })().then(
-      (store) => active && setState({ status: "ready", store }),
-      (err: unknown) => active && setState({ status: "error", message: errorText(err) }),
-    );
-    return () => {
-      active = false;
-    };
-  }, [client, workflowId, attempt]);
-  return { state, retry: () => setAttempt((n) => n + 1) };
-}
+export { blankDoc } from "./editor-load";
 
 /** Warns before leaving the page while there are unsaved changes. */
 function useUnsavedGuard(store: EditorStore) {
@@ -164,8 +104,10 @@ function EditorBody({
  * Publish), the canvas, and a side panel for the selected step that hides when nothing is
  * selected. Needs a `<FlowkitProvider>` above it and a sized container.
  *
- * Loads the manifest, callable sub-flows and the workflow by ID. A workflow that doesn't exist yet
- * starts from `initialDoc` (or a blank manual workflow) and is created by its first save.
+ * Loads the manifest, callable sub-flows and the workflow by ID. A workflow that doesn't exist
+ * starts from `initialDoc` if given, else shows "Workflow not found" with `notFoundAction`. Pass
+ * `create` for a new workflow: it isn't fetched, starts from `initialDoc` (or a blank manual
+ * workflow) and is created by its first save.
  *
  * @example
  * <div style={{ height: "100vh" }}>
@@ -180,6 +122,17 @@ export function WorkflowEditor(props: {
   workflowId: string;
   /** Starting doc when the workflow doesn't exist on the server yet. */
   initialDoc?: WorkflowDoc;
+  /**
+   * A new workflow: don't load it (no request for an ID that isn't there yet), start a draft
+   * from `initialDoc` or a blank manual workflow. The first save creates it.
+   */
+  create?: boolean;
+  /**
+   * The action offered when the workflow doesn't exist (and there is no `initialDoc`), e.g.
+   * back to your list. By default "Create this workflow", which opens a new draft with this ID;
+   * `null` offers none.
+   */
+  notFoundAction?: NotFoundAction | null;
   /** Called after a successful publish with the published version. */
   onPublish?(version: number): void;
   /** Called after every successful save with the new version. */
@@ -197,7 +150,7 @@ export function WorkflowEditor(props: {
 }): JSX.Element {
   const { workflowId, initialDoc, className, headerLeft, renderPanel } = props;
   const { theme, labels } = useFlowkitAppearance();
-  const { state, retry } = useEditorLoad(workflowId, initialDoc);
+  const { state, retry, startNew } = useEditorLoad(workflowId, initialDoc, props.create);
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
   const style = useMemo(() => themeStyle(theme.tokens), [theme.tokens]);
   const callbacks = {
@@ -213,6 +166,18 @@ export function WorkflowEditor(props: {
         <EditorHeader headerLeft={headerLeft} callbacks={callbacks} />
         <EditorBody store={state.store} {...(renderPanel ? { renderPanel } : {})} />
       </EditorContext.Provider>
+    );
+  } else if (state.status === "notFound") {
+    content = (
+      <NotFoundState
+        title={labels.workflowNotFound}
+        detail={labels.workflowNotFoundDetail(workflowId)}
+        action={
+          props.notFoundAction === undefined
+            ? { label: labels.createWorkflow, onClick: startNew }
+            : props.notFoundAction
+        }
+      />
     );
   } else if (state.status === "error") {
     content = (

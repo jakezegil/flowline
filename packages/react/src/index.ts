@@ -33,13 +33,15 @@ export { type LayoutEdge, type LayoutNode, layoutTree } from "./layout/layout-tr
 export {
   type FieldWidget,
   type FieldWidgetProps,
+  type FlowkitNotice,
   FlowkitProvider,
+  type NotifyHandler,
   useFlowkit,
 } from "./provider";
 export { RunList } from "./run/run-list";
 export { buildRunOverlay } from "./run/run-overlay";
 export type { RunDisplayState } from "./run/run-status";
-export { RunViewer } from "./run/run-viewer";
+export { type ResumeActionContext, type ResumeActionProp, RunViewer } from "./run/run-viewer";
 export {
   createEditorStore,
   type EditorActions,
@@ -50,3 +52,4 @@ export {
   TRIGGER_KEY,
 } from "./store/editor-store";
 export type { FlowkitTheme, ThemeToken } from "./theme";
+export type { NotFoundAction } from "./ui/not-found";
