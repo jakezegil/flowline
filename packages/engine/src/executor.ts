@@ -6,28 +6,33 @@
  */
 import {
   branchesFor,
+  type CallbackHandle,
   collectRefs,
+  configValueAt,
   isRef,
   isSignal,
   isTpl,
   type JournalEntry,
   type NodeDefinition,
   type NodeManifest,
+  type ResumeInfo,
   type RetryPolicy,
   type RunError,
   type RunEventType,
   resolveValue,
   type Step,
+  type SubflowSignal,
   type ValueExpr,
+  type WorkflowDoc,
   type WorkflowVersion,
 } from "@flowkit/core";
 import type { z } from "zod";
-import { createNodeContext, sha256Hex } from "./context";
+import { createNodeContext, newCallbackToken, sha256Hex } from "./context";
 import type { EngineOptions } from "./engine";
-import { RetryableError } from "./errors";
+import { FatalError, RetryableError } from "./errors";
 import { buildScope, childSteps, entryAt, type NextAction, nextAction } from "./interpreter";
 import { redactBySchema } from "./redact";
-import type { Lease, NewRunEvent, RunPatch } from "./storage";
+import type { Lease, NewRun, NewRunEvent, Run, RunPatch } from "./storage";
 
 const DEFAULT_LEASE_MS = 30_000;
 const DEFAULT_STEPS_PER_CLAIM = 100;
@@ -36,6 +41,11 @@ const DEFAULT_RETRY: RetryPolicy = { max: 3, backoff: "exponential", initialMs: 
 const MAX_BACKOFF_MS = 3_600_000;
 /** Consecutive `renewLease` rejections tolerated before the claim is abandoned. */
 const MAX_RENEWAL_ERRORS = 3;
+/** Sub-flow levels allowed below a root run. */
+const MAX_SUBFLOW_DEPTH = 8;
+const DEFAULT_BASE_PATH = "/flowkit";
+/** @internal Run statuses that never change again (except through `retryRun`). */
+export const TERMINAL: ReadonlySet<Run["status"]> = new Set(["completed", "failed", "cancelled"]);
 
 /** @internal Advances claimed runs. Shared by the engine and crash-injection tests. */
 export interface Executor {
@@ -49,6 +59,8 @@ export interface Executor {
    * hooks), leaving the lease to expire.
    */
   executeClaim(lease: Lease, workerId: string): Promise<void>;
+  /** Report persisted events to the engine's `onEvent` listener. */
+  publish(events: NewRunEvent[]): void;
 }
 
 /** Signals that the lease was taken over; processing stops without committing. */
@@ -61,6 +73,48 @@ type AnyNode = NodeDefinition<any, any>;
 
 /** The outcome of one executed step: keep going within this claim, or stop. */
 type Flow = "continue" | "stop";
+
+type Pending = Extract<JournalEntry, { status: "suspended" }>["pending"];
+
+/** `a` overridden by the defined fields of `b`. */
+function mergePatch(a: RunPatch, b: RunPatch): RunPatch {
+  const out: Record<string, unknown> = { ...a };
+  for (const [k, v] of Object.entries(b)) if (v !== undefined) out[k] = v;
+  return out as RunPatch;
+}
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+const FIELD_CHECKS: Record<string, (v: unknown) => boolean> = {
+  string: (v) => typeof v === "string",
+  number: (v) => typeof v === "number" && Number.isFinite(v),
+  boolean: (v) => typeof v === "boolean",
+  object: isPlainObject,
+  array: (v) => Array.isArray(v),
+  date: (v) => typeof v === "string" && !Number.isNaN(Date.parse(v)),
+};
+
+/**
+ * Why `value` does not match user-declared trigger fields (core's `FieldDecl` list), or
+ * `undefined` if it does. Malformed declarations are ignored, as in the editor.
+ */
+function fieldsProblem(decls: unknown, value: unknown): string | undefined {
+  if (!isPlainObject(value)) return "must be an object";
+  const record = value;
+  for (const decl of Array.isArray(decls) ? decls : []) {
+    const { name, type, required } = (decl ?? {}) as Record<string, unknown>;
+    if (typeof name !== "string" || typeof type !== "string") continue;
+    const v = Object.hasOwn(record, name) ? record[name] : undefined;
+    if (v === undefined) {
+      if (required === true) return `field "${name}" is required`;
+      continue;
+    }
+    const check = FIELD_CHECKS[type];
+    if (check && !check(v)) return `field "${name}" must be of type ${type}`;
+  }
+  return undefined;
+}
 
 /** Delay before retrying after failed attempt number `attempt` (1-based). */
 function backoffMs(policy: RetryPolicy, attempt: number): number {
@@ -171,16 +225,52 @@ export function createExecutor(opts: EngineOptions): Executor {
     const run = lease.run;
     let journal: Record<string, JournalEntry> = { ...run.journal };
     let attempt = run.attempt;
-    let resume = run.resume;
     let leaseUntil = run.leaseUntil ?? clock() + leaseMs;
-    let clearWakeAt = run.wakeAt !== undefined;
 
-    const event = (type: RunEventType, stepPath?: string, data?: unknown): NewRunEvent => {
-      const e: NewRunEvent = { runId: run.id, tenantId: run.tenantId, type, at: clock(), workerId };
+    // `ctx.resume` is derived from why the run was waiting, never from token presence. A resume set
+    // by storage (callback, subflow, subflowFailed) is used as is; a timer or callback run woken by
+    // its `wakeAt` resumes with `timer` / `timeout`. The first commit of this claim (the start
+    // commit of the resumed step) persists the derived resume, clears the wake time and — for
+    // timeouts — the dead token, and carries the one `run.resumed` event, so a retry or a lost
+    // worker later sees the same `ctx.resume` without a second event. A `retry` wait keeps whatever
+    // `run.resume` holds. Callback resumes get their `run.resumed` event from `engine.resume`.
+    let resume: ResumeInfo | undefined = run.resume;
+    let wakePatch: RunPatch | undefined = run.wakeAt !== undefined ? { wakeAt: null } : undefined;
+    let resumedKind: ResumeInfo["kind"] | undefined;
+    if (!resume && (run.waitReason === "timer" || run.waitReason === "callback")) {
+      resume = run.waitReason === "timer" ? { kind: "timer" } : { kind: "timeout" };
+      wakePatch = { ...wakePatch, resume, callbackToken: null, callbackExpiresAt: null };
+      resumedKind = resume.kind;
+    } else if (resume && run.waitReason === "subflow") {
+      resumedKind = resume.kind;
+    }
+
+    const eventFor = (
+      runId: string,
+      type: RunEventType,
+      stepPath?: string,
+      data?: unknown,
+    ): NewRunEvent => {
+      const e: NewRunEvent = { runId, tenantId: run.tenantId, type, at: clock(), workerId };
       if (stepPath !== undefined) e.stepPath = stepPath;
       if (data !== undefined) e.data = data;
       return opts.redact ? opts.redact(e) : e;
     };
+    const event = (type: RunEventType, stepPath?: string, data?: unknown) =>
+      eventFor(run.id, type, stepPath, data);
+
+    /** A wake-up of the parent run in this (terminal) commit, for sub-flow runs. */
+    const wakeParent = (info: ResumeInfo): Pick<RunPatch, "wakeParent"> =>
+      run.parent
+        ? {
+            wakeParent: {
+              runId: run.parent.runId,
+              stepPath: run.parent.stepPath,
+              childRunId: run.id,
+              resume: info,
+            },
+          }
+        : {};
 
     /** Commit under the lease; `false` means the lease was lost and processing must stop. */
     const commit = async (
@@ -190,11 +280,16 @@ export function createExecutor(opts: EngineOptions): Executor {
       phase: "start" | "result" = "result",
     ) => {
       await hooks?.beforeCommit?.(run.id, stepPath, phase);
-      const full = clearWakeAt && patch.wakeAt === undefined ? { ...patch, wakeAt: null } : patch;
-      const ok = await storage.commit(lease, full, events, clock());
+      const full = wakePatch ? mergePatch(wakePatch, patch) : patch;
+      const all =
+        resumedKind !== undefined
+          ? [event("run.resumed", run.currentStep, { kind: resumedKind }), ...events]
+          : events;
+      const ok = await storage.commit(lease, full, all, clock());
       if (ok) {
-        clearWakeAt = false;
-        publish(events);
+        wakePatch = undefined;
+        resumedKind = undefined;
+        publish(all);
       }
       return ok;
     };
@@ -219,7 +314,16 @@ export function createExecutor(opts: EngineOptions): Executor {
     };
 
     const failRun = async (error: RunError, failed?: { path: string; entry: JournalEntry }) => {
-      const patch: RunPatch = { status: "failed", error, currentStep: null, waitReason: null };
+      const patch: RunPatch = {
+        status: "failed",
+        error,
+        currentStep: null,
+        waitReason: null,
+        resume: null,
+        callbackToken: null,
+        callbackExpiresAt: null,
+        ...wakeParent({ kind: "subflowFailed", error: { message: error.message } }),
+      };
       const events = [event("run.failed", error.stepPath, { error })];
       if (failed) {
         events.unshift(event("step.failed", failed.path, { error }));
@@ -271,7 +375,22 @@ export function createExecutor(opts: EngineOptions): Executor {
         path: string;
         scope: ReturnType<typeof buildScope>;
       },
-    ): Promise<unknown> => {
+    ): Promise<{ result: unknown; issued: CallbackHandle | undefined }> => {
+      // The callback issued by this invocation. Its token lives only here until the suspend
+      // commit stores it on the run; it is never journaled or put into events.
+      let issued: CallbackHandle | undefined;
+      const callback = async ({ timeoutMs }: { timeoutMs: number }) => {
+        if (typeof timeoutMs !== "number" || !(timeoutMs > 0) || !Number.isFinite(timeoutMs)) {
+          throw new FatalError("ctx.callback() needs a positive timeoutMs");
+        }
+        const token = newCallbackToken();
+        issued = {
+          token,
+          resumeUrl: `${opts.publicUrl ?? ""}${opts.basePath ?? DEFAULT_BASE_PATH}/resume/${token}`,
+          expiresAt: clock() + timeoutMs,
+        };
+        return { ...issued };
+      };
       const controller = new AbortController();
       const timeoutMs = node.timeoutMs ?? DEFAULT_TIMEOUT_MS;
       // The handler is not killed at the timeout: it may keep running while the retry starts, which
@@ -323,20 +442,174 @@ export function createExecutor(opts: EngineOptions): Executor {
           scope: ctxArgs.scope,
           ...(opts.secrets ? { secrets: opts.secrets } : {}),
           ...(opts.transform ? { transform: opts.transform } : {}),
+          callback,
         });
         const handler = Promise.resolve().then(() => node.run({ input, ctx }));
         handler.catch(() => {});
-        return await Promise.race([handler, aborted]);
+        const result = await Promise.race([handler, aborted]);
+        return { result, issued };
       } finally {
         clearTimeout(timer);
         clearInterval(renewal);
       }
     };
 
+    /**
+     * Evaluate the workflow's output mapping against `j`'s end-of-run scope. `strict` also requires
+     * every referenced value to exist (used for stopped sub-flows, whose later steps never ran).
+     */
+    const mapOutput = (
+      j: Record<string, JournalEntry>,
+      { strict = false } = {},
+    ): { ok: true; output: unknown } | { ok: false; message: string } => {
+      if (!doc.output) return { ok: true, output: undefined };
+      try {
+        const scope = buildScope(doc, j, "", run.trigger, run.id);
+        const entries = Object.entries(doc.output);
+        if (strict) {
+          const missing = entries
+            .flatMap(([, v]) => collectRefs(v))
+            .find((ref) => resolveValue({ $ref: ref }, scope) === undefined);
+          if (missing !== undefined) return { ok: false, message: `"${missing}" is not set` };
+        }
+        return {
+          ok: true,
+          output: Object.fromEntries(entries.map(([k, v]) => [k, resolveValue(v, scope)])),
+        };
+      } catch (err) {
+        return { ok: false, message: errorMessage(err) };
+      }
+    };
+
+    /** Number of ancestors of this run (0 for a root run), counted up to the nesting cap. */
+    const nestingDepth = async (): Promise<number> => {
+      let depth = 0;
+      let parent = run.parent;
+      while (parent && depth < MAX_SUBFLOW_DEPTH) {
+        depth++;
+        parent = (await storage.getRunById(parent.runId))?.parent;
+      }
+      return depth;
+    };
+
+    /**
+     * The trigger payload for a run of `child`, checked against the child trigger's payload schema
+     * or declared fields.
+     */
+    const subflowPayload = async (
+      child: WorkflowDoc,
+      input: unknown,
+    ): Promise<{ ok: true; value: unknown } | { ok: false; message: string }> => {
+      let value: unknown;
+      try {
+        value = structuredClone(input);
+      } catch {
+        return { ok: false, message: "must be JSON-serializable" };
+      }
+      const trigger = registry.getTrigger(child.trigger.type);
+      if (trigger?.payload) {
+        const res = await (trigger.payload as z.ZodType).safeParseAsync(value);
+        if (res.success) return { ok: true, value: res.data };
+        const issue = res.error.issues[0];
+        const field = issue && issue.path.length > 0 ? `field "${issue.path.join(".")}" ` : "";
+        return { ok: false, message: `${field}${issue?.message ?? "is invalid"}` };
+      }
+      if (trigger?.dynamicPayload?.kind === "fields") {
+        const decls = configValueAt(child.trigger.config, trigger.dynamicPayload.configPath);
+        const problem = fieldsProblem(decls, value);
+        if (problem !== undefined) return { ok: false, message: problem };
+      }
+      return { ok: true, value };
+    };
+
+    /**
+     * The child run id for the step at `path`: `sub_` + the first 24 hex digits of
+     * sha256(`runId:path:attempt`), so re-executing the same call names the same child. If that id
+     * already belongs to a finished run (the step was retried with `retryRun`, or the handler
+     * starts another sub-flow after resuming), the seed gets a `:n` suffix until the id is free.
+     */
+    const subflowRunId = async (path: string, stepAttempt: number): Promise<string> => {
+      for (let n = 0; ; n++) {
+        const seed = `${run.id}:${path}:${stepAttempt}${n === 0 ? "" : `:${n}`}`;
+        const id = `sub_${(await sha256Hex(seed)).slice(0, 24)}`;
+        const existing = await storage.getRunById(id);
+        if (!existing || !TERMINAL.has(existing.status)) return id;
+      }
+    };
+
+    /**
+     * Start the child run of an `invokeSubflow` signal and suspend the step on it: the child is
+     * created in the same atomic commit as the parent's suspension, so a crash leaves either both
+     * or neither.
+     */
+    const startSubflow = async (
+      sig: SubflowSignal,
+      s: {
+        path: string;
+        attempt: number;
+        shownInput: unknown;
+        base: { at: number; startedAt: number; input: unknown };
+        fatal: (message: string, input?: unknown, code?: string) => Promise<Flow>;
+      },
+    ): Promise<Flow> => {
+      const child = await storage.getPublishedVersion(run.tenantId, sig.workflowId);
+      if (!child) {
+        return s.fatal(
+          `Sub-flow "${sig.workflowId}" is not published`,
+          s.shownInput,
+          "subflow.unknown",
+        );
+      }
+      if ((await nestingDepth()) >= MAX_SUBFLOW_DEPTH) {
+        return s.fatal("Sub-flow nesting too deep", s.shownInput, "subflow.depth");
+      }
+      const payload = await subflowPayload(child.doc, sig.input);
+      if (!payload.ok) {
+        return s.fatal(
+          `Sub-flow "${sig.workflowId}" input: ${payload.message}`,
+          s.shownInput,
+          "subflow.input",
+        );
+      }
+      const childRunId = await subflowRunId(s.path, s.attempt);
+      const childRun: NewRun = {
+        id: childRunId,
+        tenantId: run.tenantId,
+        workflowId: child.workflowId,
+        version: child.version,
+        status: "queued",
+        trigger: payload.value,
+        journal: {},
+        attempt: 1,
+        startedBy: { kind: "subflow", parentRunId: run.id, parentStepPath: s.path },
+        parent: { runId: run.id, stepPath: s.path },
+      };
+      await commitEntry(
+        s.path,
+        { status: "suspended", pending: { childRunId }, attempts: s.attempt, ...s.base },
+        {
+          status: "waiting",
+          waitReason: "subflow",
+          wakeAt: null,
+          currentStep: s.path,
+          attempt: 1,
+          resume: null,
+          createChild: childRun,
+        },
+        [
+          event("run.suspended", s.path, { workflowId: child.workflowId, childRunId }),
+          eventFor(childRunId, "run.started"),
+        ],
+      );
+      return "stop";
+    };
+
     const execStep = async (action: Extract<NextAction, { type: "exec" }>): Promise<Flow> => {
       const { step, path } = action;
       const label = step.name ?? step.id;
-      const startedAt = clock();
+      // A resumed step keeps the start time of its first invocation.
+      const prior = entryAt(journal, path);
+      const startedAt = prior?.status === "suspended" ? prior.startedAt : clock();
       const fatal = (message: string, input?: unknown, code?: string) => {
         const error: RunError = { message, stepPath: path, fatal: true };
         if (code !== undefined) error.code = code;
@@ -407,8 +680,9 @@ export function createExecutor(opts: EngineOptions): Executor {
       if (!startOk) return "stop";
 
       let result: unknown;
+      let issued: CallbackHandle | undefined;
       try {
-        result = await invoke(node, input, { step, path, scope });
+        ({ result, issued } = await invoke(node, input, { step, path, scope }));
       } catch (err) {
         if (err instanceof LeaseLostError) return "stop";
         const message = errorMessage(err);
@@ -473,10 +747,24 @@ export function createExecutor(opts: EngineOptions): Executor {
             output.reason = result.reason;
             runOutput.reason = result.reason;
           }
+          const entry: JournalEntry = { status: "done", output, attempts: attempt, ...base };
+          // A stopped sub-flow hands the parent its mapped output when every value it maps exists;
+          // otherwise the parent step sees a failed sub-flow.
+          const mapped = mapOutput({ ...journal, [path]: entry }, { strict: true });
+          const reason = result.reason === undefined ? "" : `: ${result.reason}`;
           await commitEntry(
             path,
-            { status: "done", output, attempts: attempt, ...base },
-            { ...settled, status: "completed", output: runOutput },
+            entry,
+            {
+              ...settled,
+              status: "completed",
+              output: runOutput,
+              ...wakeParent(
+                mapped.ok
+                  ? { kind: "subflow", output: mapped.output }
+                  : { kind: "subflowFailed", error: { message: `Sub-flow stopped${reason}` } },
+              ),
+            },
             [
               event("step.completed", path, { input: eventInput, output }),
               event("run.stopped", path, runOutput),
@@ -514,7 +802,57 @@ export function createExecutor(opts: EngineOptions): Executor {
           if (ok) settle();
           return ok ? "continue" : "stop";
         }
-        return fatal(`Step "${label}": ${result.kind} is not supported`, shownInput);
+        if (result.kind === "suspend") {
+          // A suspended step is not settled: `currentStep` stays set, and the wait reason marks it
+          // as waiting rather than lost. The resumed invocation starts a fresh attempt count.
+          const patch: RunPatch = {
+            status: "waiting",
+            currentStep: path,
+            attempt: 1,
+            resume: null,
+          };
+          let pending: Pending;
+          let data: Record<string, unknown>;
+          if ("until" in result) {
+            if (typeof result.until !== "number" || !Number.isFinite(result.until)) {
+              return fatal(
+                `Step "${label}": suspend({ until }) needs an epoch ms time`,
+                shownInput,
+              );
+            }
+            pending = { until: result.until };
+            data = { until: result.until };
+            Object.assign(patch, { waitReason: "timer", wakeAt: result.until });
+          } else {
+            if (!issued || result.callback?.token !== issued.token) {
+              return fatal(
+                `Step "${label}": suspend({ callback }) needs the handle ctx.callback() returned`,
+                shownInput,
+              );
+            }
+            const { expiresAt } = issued;
+            // Only the run row holds the token; the journal and events never see it (nor the URL).
+            pending = { hasCallback: true, expiresAt };
+            data = { callback: true, expiresAt };
+            Object.assign(patch, {
+              waitReason: "callback",
+              wakeAt: expiresAt,
+              callbackToken: issued.token,
+              callbackExpiresAt: expiresAt,
+            });
+          }
+          await commitEntry(
+            path,
+            { status: "suspended", pending, attempts: attempt, ...base },
+            patch,
+            [event("run.suspended", path, data)],
+          );
+          return "stop";
+        }
+        if (result.kind === "subflow") {
+          return startSubflow(result, { path, attempt, shownInput, base, fatal });
+        }
+        return fatal(`Step "${label}": unsupported signal`, shownInput);
       }
 
       if (kind === "static" || kind === "fromConfig") {
@@ -616,28 +954,19 @@ export function createExecutor(opts: EngineOptions): Executor {
     };
 
     const completeRun = async (): Promise<void> => {
-      let output: unknown;
-      if (doc.output) {
-        try {
-          const scope = buildScope(doc, journal, "", run.trigger, run.id);
-          output = Object.fromEntries(
-            Object.entries(doc.output).map(([k, v]) => [k, resolveValue(v, scope)]),
-          );
-        } catch (err) {
-          await failRun({ message: `Workflow output: ${errorMessage(err)}`, fatal: true });
-          return;
-        }
+      const mapped = mapOutput(journal);
+      if (!mapped.ok) {
+        await failRun({ message: `Workflow output: ${mapped.message}`, fatal: true });
+        return;
       }
-      const patch: RunPatch = { status: "completed", currentStep: null, waitReason: null };
+      const { output } = mapped;
+      const patch: RunPatch = {
+        status: "completed",
+        currentStep: null,
+        waitReason: null,
+        ...wakeParent({ kind: "subflow", output }),
+      };
       if (output !== undefined) patch.output = output;
-      if (run.parent) {
-        patch.wakeParent = {
-          runId: run.parent.runId,
-          stepPath: run.parent.stepPath,
-          childRunId: run.id,
-          resume: { kind: "subflow", output },
-        };
-      }
       await commit(
         patch,
         // The output mapping may carry sensitive step values, so the event does not copy it.
@@ -668,7 +997,7 @@ export function createExecutor(opts: EngineOptions): Executor {
     await commit({ status: "queued", release: true }, [], "");
   }
 
-  return { leaseMs, clock, executeClaim };
+  return { leaseMs, clock, executeClaim, publish };
 }
 
 /** The node's static output schema, or `{}` (nothing to mask) for dynamic outputs. */
