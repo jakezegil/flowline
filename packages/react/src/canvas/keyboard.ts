@@ -1,0 +1,177 @@
+/**
+ * Canvas keyboard shortcuts. Arrow keys move the selection in tree order (never nudge cards);
+ * shortcuts are ignored while typing in inputs, editors and open menus.
+ *
+ * @module
+ */
+
+import { findStep } from "@flowkit/core";
+import type { KeyboardEvent } from "react";
+import type { LayoutEdge, LayoutNode } from "../layout/layout-tree";
+import { type EditorStore, TRIGGER_KEY } from "../store/editor-store";
+import { focusNode, locationAfter, nodeElement, nodeIdOf, stepActions } from "./actions";
+import type { CanvasUiStore } from "./canvas-context";
+
+/** Whether the platform uses ⌘ (rather than Ctrl) for shortcuts. */
+export function isMac(): boolean {
+  const nav = globalThis.navigator as
+    | (Navigator & { userAgentData?: { platform?: string } })
+    | undefined;
+  const platform = nav?.userAgentData?.platform ?? nav?.platform ?? "";
+  return /mac|iphone|ipad/i.test(platform);
+}
+
+/**
+ * Whether a key event comes from somewhere keys mean text or menu navigation: form fields,
+ * contenteditable, CodeMirror, and open menus, dialogs or the step picker.
+ */
+export function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target instanceof HTMLElement && target.isContentEditable) return true;
+  return (
+    target.closest(
+      'input, textarea, select, [contenteditable]:not([contenteditable="false"]), .cm-editor, [role="menu"], [role="dialog"], [role="listbox"], [cmdk-root]',
+    ) !== null
+  );
+}
+
+/** Selection keys (step IDs and {@link TRIGGER_KEY}) in pre-order, from the layout's node order. */
+export function treeOrder(nodes: LayoutNode[]): string[] {
+  const out: string[] = [];
+  for (const nd of nodes) {
+    if (nd.kind === "trigger") out.push(TRIGGER_KEY);
+    else if (nd.kind === "step") out.push(nd.stepId);
+  }
+  return out;
+}
+
+/**
+ * The step to move to with ←/→ from `id`: in the neighbouring branch column (skipping empty
+ * ones) of the step's parent, the direct child closest in height. `undefined` at the edges or
+ * outside branches.
+ */
+export function siblingColumnStep(
+  store: EditorStore,
+  nodes: LayoutNode[],
+  edges: LayoutEdge[],
+  id: string,
+  dir: -1 | 1,
+): string | undefined {
+  const { doc } = store.getState();
+  const found = findStep(doc, id);
+  if (!found || found.location.parentId === null) return undefined;
+  const parent = found.ancestors[found.ancestors.length - 1]?.step;
+  if (!parent) return undefined;
+  const columns = edges
+    .filter((e) => e.kind === "branch" && e.source === `step:${parent.id}`)
+    .map((e) => (e.kind === "branch" ? e.branchId : ""));
+  const y = new Map<string, number>();
+  for (const nd of nodes) if (nd.kind === "step") y.set(nd.stepId, nd.y);
+  const here = y.get(id) ?? 0;
+  for (
+    let i = columns.indexOf(found.location.branch as string) + dir;
+    i >= 0 && i < columns.length;
+    i += dir
+  ) {
+    const list = parent.branches?.[columns[i] as string] ?? [];
+    if (list.length === 0) continue;
+    let best = list[0]?.id as string;
+    for (const s of list) {
+      if (Math.abs((y.get(s.id) ?? 0) - here) < Math.abs((y.get(best) ?? 0) - here)) best = s.id;
+    }
+    return best;
+  }
+  return undefined;
+}
+
+/** What the keyboard handler needs from the canvas. */
+export interface KeyboardDeps {
+  store: EditorStore;
+  ui: CanvasUiStore;
+  root(): HTMLElement | null;
+  layout(): { nodes: LayoutNode[]; edges: LayoutEdge[] };
+  onStepClick?(id: string): void;
+}
+
+/**
+ * Handles a keydown on the canvas root. Returns `true` when the key was a canvas shortcut.
+ *
+ * ↑/↓ previous/next in tree order · ←/→ neighbouring branch column · Enter open selection ·
+ * Delete/Backspace delete (with an undo toast) · ⌘Z/⇧⌘Z undo/redo · ⌘C/⌘V copy/paste after ·
+ * ⌘D duplicate · ⌘K add step after the selection · F2 rename · Esc deselect. Read-only canvases
+ * only navigate.
+ */
+export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
+  if (e.defaultPrevented || isEditableTarget(e.target)) return false;
+  const { store, ui } = deps;
+  const state = store.getState();
+  const { readOnly } = ui.getState();
+  const selection = state.selection;
+  const mod = isMac() ? e.metaKey : e.ctrlKey;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const stepSelected = selection !== null && selection !== TRIGGER_KEY;
+  const select = (id: string | undefined) => {
+    if (id === undefined) return;
+    state.select(id);
+    focusNode(deps.root(), id);
+  };
+
+  if (!mod && !e.altKey && (key === "ArrowUp" || key === "ArrowDown")) {
+    const order = treeOrder(deps.layout().nodes);
+    const at = selection === null ? -1 : order.indexOf(selection);
+    const next = at === -1 ? 0 : at + (key === "ArrowDown" ? 1 : -1);
+    select(order[Math.max(0, Math.min(order.length - 1, next))]);
+    return true;
+  }
+  if (!mod && !e.altKey && (key === "ArrowLeft" || key === "ArrowRight")) {
+    if (!stepSelected) return false;
+    const { nodes, edges } = deps.layout();
+    select(siblingColumnStep(store, nodes, edges, selection, key === "ArrowLeft" ? -1 : 1));
+    return true;
+  }
+  if (key === "Enter" && !mod && selection !== null) {
+    state.select(selection);
+    deps.onStepClick?.(selection);
+    return true;
+  }
+  if (key === "Escape" && selection !== null) {
+    state.select(null);
+    return true;
+  }
+  if (readOnly) return false;
+
+  const actions = stepSelected ? stepActions(store, ui, deps.root, selection) : undefined;
+  if ((key === "Delete" || key === "Backspace") && !mod && actions) {
+    actions.remove();
+    return true;
+  }
+  if (key === "F2" && actions) {
+    actions.rename();
+    return true;
+  }
+  if (!mod) return false;
+  if (key === "z" || (key === "y" && !isMac())) {
+    if (key === "z" && !e.shiftKey) state.undo();
+    else state.redo();
+    return true;
+  }
+  if (key === "c" && actions && !e.shiftKey) {
+    actions.copy();
+    return true;
+  }
+  if (key === "v" && !e.shiftKey && state.clipboard) {
+    const id = state.paste(locationAfter(store, selection));
+    if (id) focusNode(deps.root(), id);
+    return true;
+  }
+  if (key === "d" && actions) {
+    actions.duplicate();
+    return true;
+  }
+  if (key === "k") {
+    const anchor = selection ? nodeElement(deps.root(), nodeIdOf(selection)) : null;
+    ui.getState().openPicker({ mode: "insert", loc: locationAfter(store, selection) }, anchor);
+    return true;
+  }
+  return false;
+}
