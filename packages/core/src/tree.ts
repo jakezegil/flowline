@@ -300,11 +300,12 @@ export function isGeneratedStepId(id: string, nodeType: string): boolean {
 }
 
 /**
- * The config keys of `step` that hold code (`widget: "code"`, like a Transform's `code`), or
- * `undefined` without a manifest: then every top-level text value is treated as code.
+ * The config keys of `step` that hold code (`widget: "code"`, like a Transform's `code`). Without
+ * a manifest none do: a plain string there could be an email body that just says `steps.a`, so
+ * it isn't touched.
  */
-function codeKeys(step: Step, manifest: Manifest | undefined): Set<string> | undefined {
-  if (!manifest) return undefined;
+function codeKeys(step: Step, manifest: Manifest | undefined): Set<string> {
+  if (!manifest) return new Set();
   const node = manifest.nodes.find((n) => n.type === step.type);
   const props = (node?.input as { properties?: Record<string, Record<string, unknown>> })
     ?.properties;
@@ -320,9 +321,7 @@ function codeKeys(step: Step, manifest: Manifest | undefined): Set<string> | und
 function codeValues(step: Step, manifest: Manifest | undefined): [string, string][] {
   const keys = codeKeys(step, manifest);
   return Object.entries(step.config).flatMap(([k, v]) =>
-    typeof v === "string" && (keys === undefined || keys.has(k))
-      ? [[k, v] as [string, string]]
-      : [],
+    typeof v === "string" && keys.has(k) ? [[k, v] as [string, string]] : [],
   );
 }
 
@@ -331,7 +330,7 @@ function codeValues(step: Step, manifest: Manifest | undefined): [string, string
  * {@link renameStepId} can't rewrite: `steps[key]`, `const { a } = steps` and the like, with the
  * ID also written in the code. Renaming the step would then break that code silently, so callers
  * that rename on their own (Replace regenerating a generated ID) keep the ID instead.
- * `manifest` tells code fields apart; without it every top-level text value counts.
+ * `manifest` tells code fields apart; without it no field is code, so this is always false.
  */
 export function codeBlocksRename(doc: WorkflowDoc, id: string, manifest?: Manifest): boolean {
   let blocked = false;
@@ -353,8 +352,9 @@ export function codeBlocksRename(doc: WorkflowDoc, id: string, manifest?: Manife
  * Renames step `id` to `newId`, rewriting every reference to it: in step configs anywhere in the
  * tree, in the workflow's output mapping, and in code (`steps.<id>`, `steps?.<id>`,
  * `steps['<id>']`, `steps["<id>"]`, also after `input.`, found with a tokenizer so comments and
- * strings are left alone). `manifest` tells code fields (`widget: "code"`) apart; without it every
- * top-level text value is treated as code. Code that reads `steps` dynamically can't be
+ * strings are left alone). `manifest` tells code fields (`widget: "code"`) apart; without it only
+ * `{{ }}` references (`$ref`/`$tpl`) are rewritten and no plain string is touched, since
+ * nothing says which strings are code. Code that reads `steps` dynamically can't be
  * rewritten; check {@link codeBlocksRename} first. Returns `doc` itself when the IDs are equal.
  *
  * @throws {FlowkitTreeError} If `id` doesn't exist, or `newId` is taken or not a valid step ID.

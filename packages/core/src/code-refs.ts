@@ -11,7 +11,9 @@ type Tok =
   | { kind: "ident"; text: string; start: number; end: number }
   | { kind: "str"; text: string; start: number; end: number }
   | { kind: "punct"; text: string; start: number; end: number }
-  | { kind: "other"; text: string; start: number; end: number };
+  | { kind: "other"; text: string; start: number; end: number }
+  /** A chunk of text in a template literal with `${…}` in it. */
+  | { kind: "tpl"; text: string; start: number; end: number };
 
 /** Keywords after which a `/` starts a regular expression rather than dividing. */
 const REGEX_AFTER = new Set([
@@ -53,14 +55,20 @@ function tokenize(code: string): Tok[] {
 
   /** Reads template text from `i` (just after a backtick or a closing `}`) to `${` or the end. */
   const templateText = (): void => {
+    const from = i;
+    const chunk = () => {
+      if (i > from) out.push({ kind: "tpl", text: code.slice(from, i), start: from, end: i });
+    };
     while (i < n) {
       const c = code[i];
       if (c === "\\") i += 2;
       else if (c === "`") {
+        chunk();
         i++;
         out.push({ kind: "other", text: "`", start: i - 1, end: i });
         return;
       } else if (c === "$" && code[i + 1] === "{") {
+        chunk();
         i += 2;
         templates.push(depth);
         depth++;
@@ -68,6 +76,18 @@ function tokenize(code: string): Tok[] {
         return;
       } else i++;
     }
+    chunk();
+  };
+
+  /** Where a template literal starting at `from` (its backtick) ends, if it has no `${…}`. */
+  const plainTemplateEnd = (from: number): number | undefined => {
+    for (let j = from + 1; j < n; j++) {
+      const c = code[j];
+      if (c === "\\") j++;
+      else if (c === "`") return j;
+      else if (c === "$" && code[j + 1] === "{") return undefined;
+    }
+    return undefined;
   };
 
   while (i < n) {
@@ -89,8 +109,15 @@ function tokenize(code: string): Tok[] {
       i++;
       out.push({ kind: "str", text, start, end: Math.min(i, n) });
     } else if (c === "`") {
-      i++;
-      templateText();
+      // Without `${…}` a template literal is a string like any other (`steps[`id`]`).
+      const close = plainTemplateEnd(i);
+      if (close !== undefined) {
+        out.push({ kind: "str", text: code.slice(i + 1, close), start: i, end: close + 1 });
+        i = close + 1;
+      } else {
+        i++;
+        templateText();
+      }
     } else if (c === "/" && regexAllowed()) {
       const start = i++;
       let inClass = false;
@@ -204,7 +231,7 @@ export function rewriteCodeStepRefs(code: string, idMap: ReadonlyMap<string, str
     const written = code.slice(ref.start, ref.end);
     let replacement: string;
     if (written.endsWith("]")) {
-      const quote = written.includes("'") ? "'" : '"';
+      const quote = written.charAt(written.indexOf("[") + 1);
       replacement = `${ref.optional ? "?." : ""}[${quote}${to}${quote}]`;
     } else if (JS_IDENT.test(to)) {
       replacement = `${ref.optional ? "?." : "."}${to}`;
@@ -224,5 +251,11 @@ export function rewriteCodeStepRefs(code: string, idMap: ReadonlyMap<string, str
 export function codeReadsStepOpaquely(code: string, stepId: string): boolean {
   const { opaque } = scan(code);
   if (!opaque) return false;
-  return tokenize(code).some((t) => (t.kind === "ident" || t.kind === "str") && t.text === stepId);
+  // A dynamic key may be built from template text too (`steps[`${prefix}Request`]`).
+  const word = new RegExp(`(^|[^\\w$])${stepId.replace(/[$]/g, "\\$&")}($|[^\\w$])`);
+  return tokenize(code).some(
+    (t) =>
+      ((t.kind === "ident" || t.kind === "str") && t.text === stepId) ||
+      (t.kind === "tpl" && word.test(t.text)),
+  );
 }
