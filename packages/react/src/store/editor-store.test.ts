@@ -319,6 +319,30 @@ describe("test state and samples", () => {
     expect(s().testState.__trigger).toBe("needs-test");
   });
 
+  test("a sample records its node type; changing the type marks needs-test", () => {
+    const store = storeFor();
+    const s = store.getState;
+    s().setSample("email", { messageId: "m" });
+    expect(s().sampleTypes.email).toBe("crm.sendEmail");
+    s().replaceStep("email", "crm.loadContact");
+    expect(s().testState.email).toBe("needs-test");
+    s().setSample("__trigger", { contactId: "c9" });
+    expect(s().sampleTypes.__trigger).toBe(s().doc.trigger.type);
+  });
+
+  test("a stored sample of another node type loads as needs-test", () => {
+    localStorage.setItem(
+      "flowkit:samples:welcome",
+      JSON.stringify({
+        samples: { email: {}, load: {} },
+        testState: { email: "tested", load: "tested" },
+        sampleTypes: { email: "crm.somethingElse", load: "crm.loadContact" },
+      }),
+    );
+    const store = storeFor();
+    expect(store.getState().testState).toEqual({ email: "needs-test", load: "tested" });
+  });
+
   test("setConfig with an unchanged value is a no-op", () => {
     const store = storeFor();
     store.getState().setSample("email", {});
