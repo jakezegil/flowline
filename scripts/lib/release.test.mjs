@@ -12,13 +12,16 @@ import {
   extractChangelogSection,
   fetchPublishedVersions,
   isAlreadyPublishedError,
+  isEmptyChangeset,
   listPendingChangesets,
+  listReleasableChangesets,
   planRelease,
   RELEASE_COMMIT_SUBJECT,
   readPublishablePackages,
   releaseGroups,
   tagsFor,
   topoSort,
+  waitForVersion,
 } from "./release.mjs";
 
 const pkg = (name, deps = {}, extra = {}) => ({ name, manifest: { dependencies: deps, ...extra } });
@@ -93,10 +96,103 @@ describe("fetchPublishedVersions", () => {
     expect((await fetchPublishedVersions("@f/x", { fetch: fakeFetch(404, {}) })).size).toBe(0);
   });
 
-  it("throws on other errors instead of guessing", async () => {
-    await expect(fetchPublishedVersions("@f/x", { fetch: fakeFetch(503, {}) })).rejects.toThrow(
-      /503/,
+  it("throws on 4xx errors instead of guessing", async () => {
+    await expect(fetchPublishedVersions("@f/x", { fetch: fakeFetch(401, {}) })).rejects.toThrow(
+      /401/,
     );
+  });
+
+  // A scripted fetch: each call takes the next response (or throws it if it's an Error).
+  const scripted = (...responses) => {
+    const calls = [];
+    const f = async (url, init) => {
+      calls.push({ url, init });
+      const r = responses.shift();
+      if (r instanceof Error) throw r;
+      return { status: r.status, ok: r.status < 300, json: async () => r.body ?? {} };
+    };
+    return { f, calls };
+  };
+  const noSleep = async () => {};
+
+  it("retries 5xx and network errors with backoff, then gives up", async () => {
+    const delays = [];
+    const sleep = async (ms) => void delays.push(ms);
+    const { f } = scripted({ status: 503 }, new TypeError("fetch failed"), {
+      status: 200,
+      body: { versions: { "1.0.0": {} } },
+    });
+    const v = await fetchPublishedVersions("@f/x", { fetch: f, sleep, delayMs: 100 });
+    expect([...v]).toEqual(["1.0.0"]);
+    expect(delays).toEqual([100, 200]);
+
+    const { f: always503 } = scripted(...Array(5).fill({ status: 503 }));
+    await expect(
+      fetchPublishedVersions("@f/x", { fetch: always503, sleep: noSleep, retries: 2 }),
+    ).rejects.toThrow(/503/);
+  });
+
+  it("bypasses the CDN when fresh", async () => {
+    const { f, calls } = scripted({ status: 404 });
+    await fetchPublishedVersions("@f/x", { fetch: f, registry: "https://r.example", fresh: true });
+    expect(calls[0].url).toMatch(/^https:\/\/r\.example\/@f%2Fx\?cache-bust=\d+-0$/);
+    expect(calls[0].init.headers["cache-control"]).toBe("no-cache");
+  });
+});
+
+describe("waitForVersion", () => {
+  const seq = (...bodies) => {
+    const calls = [];
+    const f = async (url) => {
+      calls.push(url);
+      const b = bodies.shift();
+      return b === 404
+        ? { status: 404, ok: false, json: async () => ({}) }
+        : { status: 200, ok: true, json: async () => ({ versions: b }) };
+    };
+    return { f, calls };
+  };
+
+  it("polls with fresh reads until a just-published version shows up (CDN lag)", async () => {
+    const delays = [];
+    const { f, calls } = seq(404, { "0.1.0": {} }, { "0.1.0": {}, "0.2.0": {} });
+    const ok = await waitForVersion("@f/x", "0.2.0", {
+      fetch: f,
+      delayMs: 10,
+      sleep: async (ms) => void delays.push(ms),
+    });
+    expect(ok).toBe(true);
+    expect(calls).toHaveLength(3);
+    expect(calls.every((u) => u.includes("?cache-bust="))).toBe(true);
+    expect(delays).toEqual([10, 20]);
+  });
+
+  it("returns false after the last attempt", async () => {
+    const { f, calls } = seq(404, 404, 404);
+    expect(
+      await waitForVersion("@f/x", "0.2.0", { fetch: f, attempts: 3, sleep: async () => {} }),
+    ).toBe(false);
+    expect(calls).toHaveLength(3);
+  });
+});
+
+describe("empty changesets", () => {
+  it("recognises `changeset --empty` output", () => {
+    expect(isEmptyChangeset("---\n---\n")).toBe(true);
+    expect(isEmptyChangeset("---\n---\n\nNo release: refactor only.\n")).toBe(true);
+    expect(isEmptyChangeset("---\r\n\r\n---\r\n")).toBe(true);
+    expect(isEmptyChangeset("---\n'@f/core': patch\n---\n\nFix.\n")).toBe(false);
+    expect(isEmptyChangeset("no frontmatter")).toBe(false);
+  });
+
+  it("aren't releasable on their own", () => {
+    const root = mkdtempSync(join(tmpdir(), "release-empty-"));
+    mkdirSync(join(root, ".changeset"));
+    writeFileSync(join(root, ".changeset/quiet-owls-nap.md"), "---\n---\n\nrefactor\n");
+    expect(listPendingChangesets(root)).toEqual(["quiet-owls-nap.md"]);
+    expect(listReleasableChangesets(root)).toEqual([]);
+    writeFileSync(join(root, ".changeset/loud-dogs-bark.md"), "---\n'@f/core': patch\n---\n\nx\n");
+    expect(listReleasableChangesets(root)).toEqual(["loud-dogs-bark.md"]);
   });
 });
 
@@ -124,7 +220,24 @@ describe("distTagFor", () => {
 });
 
 describe("classifyTip", () => {
-  const bot = { email: BOT_EMAIL, subject: `${RELEASE_COMMIT_SUBJECT} v0.2.0 [skip ci]` };
+  const bot = {
+    email: BOT_EMAIL,
+    subject: `${RELEASE_COMMIT_SUBJECT} v0.2.0 [skip ci]`,
+    files: [
+      ".changeset/brave-lions-sing.md",
+      "packages/core/CHANGELOG.md",
+      "packages/core/package.json",
+      "pnpm-lock.yaml",
+    ],
+  };
+  it("doesn't trust a bot-identity commit that touches code", () => {
+    const forged = { ...bot, files: [...bot.files, "packages/core/src/index.ts"] };
+    expect(classifyTip({ isAncestor: true, ahead: [forged] })).toBe("superseded");
+    expect(classifyTip({ isAncestor: true, ahead: [{ ...bot, files: [] }] })).toBe("superseded");
+    expect(
+      classifyTip({ isAncestor: true, ahead: [{ ...bot, files: [".github/workflows/x.yml"] }] }),
+    ).toBe("superseded");
+  });
   it("is current when nothing is ahead", () => {
     expect(classifyTip({ isAncestor: true, ahead: [] })).toBe("current");
   });

@@ -87,24 +87,87 @@ export function listPendingChangesets(root) {
 }
 
 /**
+ * True for a changeset that names no packages (`pnpm changeset --empty`). Those record "no
+ * release needed" and must not trigger a version commit on their own.
+ * @param {string} content
+ */
+export function isEmptyChangeset(content) {
+  const m = /^---\r?\n([\s\S]*?)^---\s*$/m.exec(content);
+  return m !== null && m[1].trim() === "";
+}
+
+/**
+ * Pending changesets that actually release something (non-empty frontmatter).
+ * @param {string} root
+ * @returns {string[]}
+ */
+export function listReleasableChangesets(root) {
+  return listPendingChangesets(root).filter(
+    (f) => !isEmptyChangeset(readFileSync(join(root, ".changeset", f), "utf8")),
+  );
+}
+
+const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
  * Versions of `name` on the registry. A 404 means the package does not exist yet (empty set).
- * Any other failure throws: guessing "unpublished" could cause a spurious publish attempt, and
- * guessing "published" could silently skip a release.
+ * Network errors and 5xx are retried with backoff; anything else throws. Guessing "unpublished"
+ * could cause a spurious publish attempt, and guessing "published" could skip a release.
+ *
+ * `fresh` bypasses the registry CDN (the abbreviated packument is served with max-age=300, and a
+ * brand-new package's earlier 404 can be cached too): a unique query string plus no-cache.
  * @param {string} name
- * @param {{ fetch?: typeof fetch, registry?: string }} [opts]
+ * @param {{ fetch?: typeof fetch, registry?: string, fresh?: boolean, retries?: number,
+ *   delayMs?: number, sleep?: (ms: number) => Promise<void> }} [opts]
  * @returns {Promise<Set<string>>}
  */
 export async function fetchPublishedVersions(name, opts = {}) {
   const doFetch = opts.fetch ?? fetch;
+  const sleep = opts.sleep ?? defaultSleep;
+  const retries = opts.retries ?? 3;
+  const delayMs = opts.delayMs ?? 1000;
   const registry = (opts.registry ?? DEFAULT_REGISTRY).replace(/\/$/, "");
-  const url = `${registry}/${name.replace("/", "%2F")}`;
-  const res = await doFetch(url, {
-    headers: { accept: "application/vnd.npm.install-v1+json" },
-  });
-  if (res.status === 404) return new Set();
-  if (!res.ok) throw new Error(`GET ${url} -> ${res.status}`);
-  const body = await res.json();
-  return new Set(Object.keys(body.versions ?? {}));
+  const base = `${registry}/${name.replace("/", "%2F")}`;
+  const headers = { accept: "application/vnd.npm.install-v1+json" };
+  if (opts.fresh) headers["cache-control"] = "no-cache";
+  for (let attempt = 0; ; attempt++) {
+    const url = opts.fresh ? `${base}?cache-bust=${Date.now()}-${attempt}` : base;
+    let res;
+    try {
+      res = await doFetch(url, { headers });
+    } catch (e) {
+      if (attempt >= retries) throw e;
+      await sleep(delayMs * 2 ** attempt);
+      continue;
+    }
+    if (res.status === 404) return new Set();
+    if (res.status >= 500 && attempt < retries) {
+      await sleep(delayMs * 2 ** attempt);
+      continue;
+    }
+    if (!res.ok) throw new Error(`GET ${base} -> ${res.status}`);
+    const body = await res.json();
+    return new Set(Object.keys(body.versions ?? {}));
+  }
+}
+
+/**
+ * Waits until `name@version` is visible on the registry, polling with fresh (uncached) reads and
+ * backoff. Used right after a publish, when a cached "not found" is expected for a little while.
+ * @param {string} name
+ * @param {string} version
+ * @param {Parameters<typeof fetchPublishedVersions>[1] & { attempts?: number }} [opts]
+ * @returns {Promise<boolean>}
+ */
+export async function waitForVersion(name, version, opts = {}) {
+  const sleep = opts.sleep ?? defaultSleep;
+  const attempts = opts.attempts ?? 6;
+  const delayMs = opts.delayMs ?? 5000;
+  for (let i = 0; i < attempts; i++) {
+    if ((await fetchPublishedVersions(name, { ...opts, fresh: true })).has(version)) return true;
+    if (i < attempts - 1) await sleep(delayMs * 2 ** i);
+  }
+  return false;
 }
 
 /**
@@ -131,11 +194,23 @@ export function distTagFor(version) {
   return version.includes("-") ? "next" : "latest";
 }
 
+/** Paths a version commit may touch: manifests, changelogs, changesets, the lockfile. */
+const RELEASE_COMMIT_PATH =
+  /^(\.changeset\/[^/]+|pnpm-lock\.yaml|(packages|examples)\/[^/]+\/(package\.json|CHANGELOG\.md))$/;
+
 /**
- * @param {{ email: string, subject: string }} commit
+ * Our own version commit: bot identity, our subject, and only version-bump files. The file check
+ * means a commit that merely imitates the bot can't carry ungated code past `sync`.
+ * @param {{ email: string, subject: string, files: string[] }} commit
  */
 export function isReleaseCommit(commit) {
-  return commit.email === BOT_EMAIL && commit.subject.startsWith(RELEASE_COMMIT_SUBJECT);
+  return (
+    commit.email === BOT_EMAIL &&
+    commit.subject.startsWith(RELEASE_COMMIT_SUBJECT) &&
+    Array.isArray(commit.files) &&
+    commit.files.length > 0 &&
+    commit.files.every((f) => RELEASE_COMMIT_PATH.test(f))
+  );
 }
 
 /**
@@ -145,7 +220,7 @@ export function isReleaseCommit(commit) {
  *   pushed the version bump and then failed); continue from the tip so the re-run publishes.
  * - `superseded`: main has other new commits (or was rewritten). A newer queued run covers them,
  *   so this run does nothing.
- * @param {{ isAncestor: boolean, ahead: { email: string, subject: string }[] }} input
+ * @param {{ isAncestor: boolean, ahead: { email: string, subject: string, files: string[] }[] }} input
  * @returns {"current" | "fast-forward" | "superseded"}
  */
 export function classifyTip({ isAncestor, ahead }) {

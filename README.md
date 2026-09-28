@@ -672,7 +672,8 @@ Releases are automatic. Add a changeset to any PR that changes a published packa
 There is no Version PR. Publishing uses npm trusted publishing (GitHub Actions OIDC), so the repo
 holds no npm token.
 
-The very first publish, and the one-time trusted-publisher setup on npmjs.com, are manual. See
-[docs/releasing.md](docs/releasing.md), which also covers recovering from a failed release.
+A **new** package needs a one-time manual bootstrap: its first publish, and its trusted-publisher
+setup on npmjs.com. See [docs/releasing.md](docs/releasing.md), which also covers recovering from
+a failed release.
 
 MIT licensed.

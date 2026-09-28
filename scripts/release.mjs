@@ -7,7 +7,7 @@
 //   node scripts/release.mjs push                 push the bot commit to main
 //   node scripts/release.mjs pack --out DIR [--only-unpublished]
 //   node scripts/release.mjs publish [--dir DIR] [--dry-run] [--otp CODE] [-- <npm publish args>]
-//   node scripts/release.mjs github-release --sha SHA
+//   node scripts/release.mjs github-release --sha SHA [--published "<name@version> ..."]
 //   node scripts/release.mjs changeset-check --base REF
 //
 // Publishing goes through `npm publish <tarball>`: pnpm packs (rewriting `workspace:` ranges and
@@ -16,7 +16,8 @@
 // releases are left alone.
 //
 // Overridable for tests/simulation: RELEASE_ROOT, RELEASE_REGISTRY, NPM_BIN, PNPM_BIN,
-// CHANGESET_BIN, GH_BIN, GIT_REMOTE (default origin), RELEASE_BRANCH (default main).
+// CHANGESET_BIN, GH_BIN, GIT_REMOTE (default origin), RELEASE_BRANCH (default main),
+// RELEASE_WAIT_MS. GIT_AUTH_TOKEN authenticates fetch/push without persisting credentials.
 
 import { spawnSync } from "node:child_process";
 import {
@@ -41,13 +42,14 @@ import {
   distTagFor,
   fetchPublishedVersions,
   isAlreadyPublishedError,
-  listPendingChangesets,
+  listReleasableChangesets,
   MIN_OIDC_NPM,
   planRelease,
   RELEASE_COMMIT_SUBJECT,
   readPublishablePackages,
   releaseGroups,
   tagsFor,
+  waitForVersion,
 } from "./lib/release.mjs";
 
 const root = resolve(
@@ -59,6 +61,8 @@ const branch = process.env.RELEASE_BRANCH ?? "main";
 const NPM = process.env.NPM_BIN ?? "npm";
 const PNPM = process.env.PNPM_BIN ?? "pnpm";
 const GH = process.env.GH_BIN ?? "gh";
+// Base delay for waiting on registry visibility after a publish (tests shrink it).
+const WAIT_MS = Number(process.env.RELEASE_WAIT_MS ?? 5000);
 
 function log(msg) {
   process.stderr.write(`[release] ${msg}\n`);
@@ -100,7 +104,32 @@ function run(cmd, args, { cwd = root, capture = false, allowFail = false, env } 
   return out;
 }
 
-const git = (args, opts) => run("git", args, { capture: true, ...opts });
+/**
+ * Git auth for the steps that talk to the remote. The workflow checks out with
+ * persist-credentials: false, so no token sits in .git/config while dependencies install and
+ * build. GIT_AUTH_TOKEN is passed only to the steps that fetch or push, and reaches git through
+ * GIT_CONFIG_* environment variables (never argv, never disk).
+ */
+let gitAuth;
+function gitAuthEnv() {
+  if (gitAuth) return gitAuth;
+  const token = process.env.GIT_AUTH_TOKEN;
+  if (!token) {
+    gitAuth = {};
+    return gitAuth;
+  }
+  const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
+  if (process.env.GITHUB_ACTIONS === "true") process.stdout.write(`::add-mask::${basic}\n`);
+  gitAuth = {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: `http.${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/.extraheader`,
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}`,
+  };
+  return gitAuth;
+}
+
+const git = (args, opts = {}) =>
+  run("git", args, { capture: true, ...opts, env: { ...gitAuthEnv(), ...opts.env } });
 
 function parseArgs(argv) {
   const flags = {};
@@ -141,7 +170,9 @@ function tarballName(name, version) {
 // ---------------------------------------------------------------------------------------------
 
 async function cmdPlan() {
-  const pending = listPendingChangesets(root);
+  // Empty changesets (`pnpm changeset --empty`) release nothing on their own. They stay until a
+  // real changeset comes along and `changeset version` consumes them together.
+  const pending = listReleasableChangesets(root);
   const pkgs = await withPublishState(readPublishablePackages(root));
   const mode = planRelease({ pendingChangesets: pending, packages: pkgs });
   const unpublished = pkgs.filter((p) => !p.published).map((p) => `${p.name}@${p.version}`);
@@ -162,12 +193,13 @@ function cmdSync() {
   const isAncestor =
     git(["merge-base", "--is-ancestor", "HEAD", tip], { allowFail: true }).status === 0;
   const ahead = isAncestor
-    ? git(["log", "--format=%ae%x09%s", `HEAD..${tip}`])
-        .stdout.split("\n")
-        .filter(Boolean)
-        .map((line) => {
-          const [email, ...subject] = line.split("\t");
-          return { email, subject: subject.join("\t") };
+    ? git(["log", "--name-only", "--format=%x00%ae%x09%s", `HEAD..${tip}`])
+        .stdout.split("\0")
+        .filter((chunk) => chunk.trim())
+        .map((chunk) => {
+          const [header, ...files] = chunk.split("\n");
+          const [email, ...subject] = header.split("\t");
+          return { email, subject: subject.join("\t"), files: files.filter(Boolean) };
         })
     : [];
   const status = classifyTip({ isAncestor, ahead });
@@ -175,7 +207,12 @@ function cmdSync() {
     log(`${branch} is ahead only by release commits; continuing from ${tip}`);
     git(["checkout", "--detach", tip]);
   } else if (status === "superseded") {
-    log(`${branch} has moved on; a newer release run will handle it`);
+    const msg =
+      `${branch} has moved on since this run's commit, so this run releases nothing. The run ` +
+      "for the newer commit normally does. If none is queued (for example, this was a re-run " +
+      "that replaced it), start one with Actions > Release > Run workflow.";
+    process.stdout.write(`::warning title=Release superseded::${msg}\n`);
+    summary(`### Release superseded\n\n${msg}`);
   }
   output("status", status);
   output("sha", git(["rev-parse", "HEAD"]).stdout.trim());
@@ -183,9 +220,8 @@ function cmdSync() {
 }
 
 function cmdVersion() {
-  const pending = listPendingChangesets(root);
-  if (pending.length === 0) {
-    log("no pending changesets");
+  if (listReleasableChangesets(root).length === 0) {
+    log("no pending changesets that release anything");
     output("committed", "false");
     return;
   }
@@ -301,8 +337,10 @@ async function cmdPublish(flags, extra) {
     args.push("--registry", registry);
     if (dryRun) args.push("--dry-run");
     if (typeof flags.otp === "string") args.push(`--otp=${flags.otp}`);
+    // A job re-run with debug logging surfaces npm's OIDC exchange errors (logged at verbose).
+    if (process.env.RUNNER_DEBUG === "1") args.push("--loglevel", "verbose");
     args.push(...extra);
-    log(`${NPM} ${args.join(" ")}`);
+    log(`${NPM} ${args.join(" ").replace(/--otp=\S+/, "--otp=***")}`);
     // Interactive (local bootstrap): stream so npm can prompt for an OTP. CI: capture to inspect.
     const interactive = Boolean(process.stdin.isTTY) && process.env.CI !== "true";
     const res = run(NPM, args, { cwd: dir, capture: !interactive, allowFail: true, env });
@@ -311,29 +349,53 @@ async function cmdPublish(flags, extra) {
       results.push({ id, result: dryRun ? "dry-run" : "published" });
       continue;
     }
-    const nowPublished = (await fetchPublishedVersions(entry.name, { registry })).has(
+    const nowPublished = (await fetchPublishedVersions(entry.name, { registry, fresh: true })).has(
       entry.version,
     );
     if (nowPublished || isAlreadyPublishedError(res.stdout + res.stderr)) {
       log(`${id} was published concurrently; treating as done`);
       results.push({ id, result: "skipped" });
     } else {
-      process.stderr.write(`::error::npm publish failed for ${id}\n`);
+      process.stderr.write(
+        `::error::npm publish failed for ${id}. E404/ENEEDAUTH here usually means the package ` +
+          "has no trusted publisher, or its trusted publisher names a different repo or " +
+          "workflow file (docs/releasing.md). Re-run with debug logging for npm's OIDC details.\n",
+      );
       results.push({ id, result: "failed" });
     }
   }
   summary(`### npm publish\n\n${results.map((r) => `- \`${r.id}\`: ${r.result}`).join("\n")}`);
+  // Versions known to be on npm, for github-release (the registry CDN can lag behind a publish).
+  output(
+    "done",
+    results
+      .filter((r) => r.result === "published" || r.result === "skipped")
+      .map((r) => r.id)
+      .join(" "),
+  );
   process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
   if (results.some((r) => r.result === "failed")) process.exit(1);
 }
 
 async function cmdGithubRelease(flags) {
   const sha = typeof flags.sha === "string" ? flags.sha : git(["rev-parse", "HEAD"]).stdout.trim();
+  // Versions the publish job just confirmed (--published) are trusted as-is. Anything else is
+  // checked on the registry, and a miss is re-checked with uncached reads and backoff: right
+  // after a publish the CDN can still serve the old packument (max-age=300), or a cached 404 for
+  // a brand-new package.
+  const confirmed = new Set(
+    typeof flags.published === "string" ? flags.published.split(/\s+/).filter(Boolean) : [],
+  );
   const pkgs = await withPublishState(readPublishablePackages(root));
-  const missing = pkgs.filter((p) => !p.published);
-  if (missing.length) {
-    fail(`not on the registry yet: ${missing.map((p) => `${p.name}@${p.version}`).join(", ")}`);
+  const missing = [];
+  for (const p of pkgs) {
+    const id = `${p.name}@${p.version}`;
+    if (p.published || confirmed.has(id)) continue;
+    log(`${id} is not visible on the registry yet; waiting`);
+    if (await waitForVersion(p.name, p.version, { registry, delayMs: WAIT_MS })) continue;
+    missing.push(id);
   }
+  if (missing.length) fail(`not on the registry: ${missing.join(", ")}`);
 
   for (const tag of tagsFor(pkgs)) {
     const remoteRef = git(["ls-remote", "--tags", remote, `refs/tags/${tag}`]).stdout.trim();

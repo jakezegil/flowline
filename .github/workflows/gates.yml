@@ -48,6 +48,7 @@ jobs:
           name: gate-tarballs
           path: ${{ runner.temp }}/tarballs
           retention-days: 3
+          overwrite: true # "Re-run all jobs" uploads again under the same name
           if-no-files-found: error
 
   smoke:
@@ -122,4 +123,5 @@ jobs:
           path: examples/mini-crm/node_modules/.e2e-results
           include-hidden-files: true
           retention-days: 7
+          overwrite: true
           if-no-files-found: ignore

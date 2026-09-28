@@ -9,31 +9,59 @@ npm authenticates through **trusted publishing**: GitHub Actions presents a shor
 identity, and npm accepts it for packages that name this repo and workflow as a trusted
 publisher. There is no long-lived npm token in the repo.
 
-## One-time bootstrap
+## Bootstrapping a package (first publish + trusted publisher)
 
-npm can only attach a trusted publisher to a package that already exists, so the very first
-version of each package has to be published another way. Do this **before merging the CI/CD
-change to `main`**. If you merge first, the first release run fails at `publish` with a 404, and
-you re-run it after finishing the steps below.
+npm can only attach a trusted publisher to a package that **already exists** on the registry,
+so the first version of every package has to be published once by hand. After that, CI publishes
+it through OIDC.
 
-### 1. Publish 0.1.0 from your machine
+The six current packages were bootstrapped at 0.1.0 (published by hand from `main` 1bf1d5c).
+Use this procedure whenever a **new** package is added under `packages/`. It also covers
+re-creating the whole setup from scratch.
+
+### 1. Add the package to the release group
+
+Add the new package's name to the `fixed` group in `.changeset/config.json`, so it versions
+together with the others. Give it `"publishConfig": { "access": "public" }` and a `files` list,
+like the existing packages.
+
+### 2. Merge, and expect one red Release run
+
+Merge the PR as usual. The Release run on `main` will:
+
+- version (if changesets are pending);
+- publish every package that already has a trusted publisher;
+- **fail at `publish` for the new package** (`npm publish failed for @flowlinejs/<new>@X.Y.Z`,
+  usually E404), because it doesn't exist on npm yet.
+
+Tags and the GitHub Release are not created, because the `publish` job failed. That is expected.
+Leave the run as it is.
+
+### 3. Publish the new package from your machine
 
 You need to be logged in to npm as an owner of the `flowlinejs` org (`npm whoami`, then
-`npm org ls flowlinejs`). From a clean checkout of the `main` commit you want to ship:
+`npm org ls flowlinejs`). Use npm 10.9 or newer. Your local npm doesn't need OIDC. Check out the
+**current `main`**, which includes the version commit from step 2:
 
 ```sh
+git switch main && git pull --ff-only
 pnpm install --frozen-lockfile
-pnpm release:dry-run   # builds, packs, runs `npm publish --dry-run` for every unpublished package
-pnpm release           # the same for real: pnpm pack, then npm publish <tarball> --access public --tag latest
+pnpm release:dry-run   # builds, packs, `npm publish --dry-run` for every version not on npm yet
+pnpm release           # the same for real
 ```
 
-npm asks you to authenticate each publish in the browser, or you can pass a code with
-`pnpm release --otp=123456`. It is safe to run again: versions that are already on npm are
-skipped. Use npm 10.9 or newer. Your local npm doesn't need OIDC.
+`pnpm release` publishes only versions that are missing from npm, which is just the new package.
+It publishes with `--access public --tag latest` (prereleases go to `next`). Everything already
+on npm is skipped, so running it again is safe.
 
-### 2. Add the trusted publisher to each package
+npm asks you to authenticate each publish in the browser. Alternatively, pass a one-time code
+with `pnpm release --otp=123456`. A code expires after about 30 seconds and the build runs
+first, so if npm reports `EOTP`, run the command again with a fresh code. Packages that already
+went out are skipped.
 
-For **each** of these packages:
+### 4. Add the trusted publisher
+
+Do this for the new package, or for **each** package when setting up from scratch:
 
 - `@flowlinejs/core`
 - `@flowlinejs/engine`
@@ -54,18 +82,33 @@ Under **Trusted Publisher**, choose **GitHub Actions** and enter:
 
 If the form offers a choice of allowed actions, allow `npm publish`. Save.
 
-You can also do this from the CLI. `npm trust` needs npm 11.15 or newer and 2FA on your account:
+You can also do this from the CLI. `npm trust` needs npm 11.15 or newer, 2FA on your account,
+and at least one permission flag (`--allow-publish`):
 
 ```sh
+# one package:
+npx -y npm@11.19.1 trust github "@flowlinejs/<name>" --repo jakezegil/flowline --file release.yml --allow-publish --yes
+
+# all six:
 for p in core engine nodes-builtin react storage-memory storage-postgres; do
-  npx -y npm@11.19.1 trust github "@flowlinejs/$p" --repo jakezegil/flowline --file release.yml --yes
+  npx -y npm@11.19.1 trust github "@flowlinejs/$p" --repo jakezegil/flowline --file release.yml --allow-publish --yes
 done
 ```
 
 A trusted-publisher connection can't be edited later, only deleted and re-created. If you rename
-`release.yml`, or move publishing into a GitHub environment, update all six packages.
+`release.yml`, or move publishing into a GitHub environment, update every package.
 
-### 3. Optional: lock down token publishing
+### 5. Re-run the red Release run
+
+Open the failed run from step 2 and choose **Re-run all jobs**. `sync` fast-forwards over the
+version commit, `publish` skips everything already on npm, and `github-release` creates the tags
+and the GitHub Release. The run goes green.
+
+If newer commits reached `main` since then, the re-run reports **Release superseded** and does
+nothing. That's fine: the next push releases, and so does starting the workflow by hand with
+**Actions → Release → Run workflow**.
+
+### 6. Optional: lock down token publishing
 
 Once a CI release has succeeded through OIDC, you can set each package's **Settings →
 Publishing access** to *Require two-factor authentication and disallow tokens*. Trusted
@@ -75,15 +118,34 @@ publishing keeps working. Only classic and granular tokens are refused.
 
 If you can't publish from a machine, the publish job also accepts an `NPM_TOKEN` repository
 secret. npm still tries OIDC first, and falls back to the token only when the exchange fails, for
-example because no trusted publisher exists yet. To bootstrap this way:
+example because the package doesn't exist yet. This replaces steps 2, 3 and 5:
 
 1. Create a granular token with read-write access to `@flowlinejs`.
 2. Add it as the `NPM_TOKEN` secret.
-3. Merge. The first run publishes 0.1.0 with the token.
-4. Do step 2 above.
+3. Merge. The Release run publishes the new package with the token and goes green.
+4. Do step 4 above.
 5. **Delete the secret and revoke the token.**
 
 This is for bootstrapping only. Don't keep the secret around.
+
+### Tags after a publish by hand
+
+`github-release` tags the commit its run released. If the next green run on `main` is the first
+to see a version that was published by hand, it tags **that run's commit**. The registry doesn't
+record which commit a tarball came from.
+
+The 0.1.0 bootstrap is an example: it was published from 1bf1d5c. Before the first CI run, you
+can pin the tags to that commit yourself, and CI then leaves existing tags alone:
+
+```sh
+for p in core engine nodes-builtin react storage-memory storage-postgres; do
+  git tag "@flowlinejs/$p@0.1.0" 1bf1d5c
+done
+git tag v0.1.0 1bf1d5c
+git push origin --tags
+```
+
+The GitHub Release for `v0.1.0` is then still created by the next run.
 
 ## Everyday flow
 
@@ -101,16 +163,18 @@ Because the group is `fixed`, one changeset that names any package bumps all six
 version.
 
 If a change needs no release (a refactor, a test, internal tooling), add
-`pnpm changeset --empty` to say so. On PRs that touch `packages/**`, the **Changeset present**
-CI job warns when no changeset is included. It is advisory and never blocks a merge.
+`pnpm changeset --empty` to say so. An empty changeset never triggers a release or a version
+commit by itself. It stays in `.changeset/` until the next real changeset, and is then consumed
+along with it. On PRs that touch `packages/**`, the **Changeset present** CI job warns when no
+changeset is included. It is advisory and never blocks a merge.
 
 While the packages are `0.x`, a `minor` bump is the one for breaking changes, and `patch` is for
 everything else.
 
 ### What happens on merge
 
-`release.yml` runs on every push to `main`, one run at a time. A newer push waits for the
-running release; it never cancels it.
+`release.yml` runs on every push to `main` of `jakezegil/flowline`, one run at a time. Forks
+never release. A newer push waits for the running release; it never cancels it.
 
 1. **gates** runs the same reusable `gates.yml` as PRs:
    - install with a frozen lockfile, then build, test, the release-tooling tests, typecheck and lint (Node 22);
@@ -135,7 +199,14 @@ running release; it never cancels it.
    script, with no dependency install. Versions already on npm are skipped.
 4. **github-release** pushes the tags (`@flowlinejs/<pkg>@X.Y.Z` for each package, plus
    `vX.Y.Z`) and creates one GitHub Release, `vX.Y.Z`, whose notes are the CHANGELOG sections of
-   all six packages. Tags and releases that already exist are left alone.
+   all six packages. Tags and releases that already exist are left alone. It trusts the versions
+   the publish job just confirmed. It re-checks any other version on the registry, with uncached
+   reads and backoff for up to about 2.5 minutes, because npm's CDN can serve stale metadata for
+   a few minutes after a publish.
+
+The version commit, the tags and the GitHub Release are pushed with `GITHUB_TOKEN`. The checkout
+doesn't persist credentials: only the steps that fetch or push receive the token, so dependency
+install and build never see a write token on disk.
 
 **Dist-tags.** Stable versions, including every `0.x`, go to `latest`, so `npm install
 @flowlinejs/core` gets the newest release. Prerelease versions (`1.0.0-rc.0`, from
@@ -157,7 +228,7 @@ Every step is idempotent, so the answer is almost always **Re-run all jobs** on 
 | **gates** | Nothing versioned or published. | Fix `main` with a normal PR. The next push releases. |
 | **prepare: Push version commit** | `main` moved during the run. Nothing published. | Nothing to do. The run queued for the newer push releases everything. |
 | **prepare**, after the push | The version commit is on `main`. Nothing published. | Re-run. The re-run sees `main` is ahead only by its own release commit, fast-forwards to it (`sync: fast-forward`) and publishes. |
-| **publish** (E404 / E403 / ENEEDAUTH) | Some or none of the versions on npm. | Usually a missing or mistyped trusted publisher: check the package's Settings page against the table above, then re-run. Versions that did get published are skipped. |
+| **publish** (E404 / E403 / ENEEDAUTH) | Some or none of the versions on npm. | Usually a missing or mistyped trusted publisher (or a package that doesn't exist yet; see [Bootstrapping](#bootstrapping-a-package-first-publish--trusted-publisher)). Check the package's Settings page against the table above, then re-run. Versions that did get published are skipped. npm logs the reason an OIDC exchange failed only at verbose level: choose **Re-run jobs → Enable debug logging**, and the publish step adds `--loglevel verbose`. |
 | **github-release** | Everything on npm. Tags or the GitHub Release are missing. | Re-run. It also runs on every later push to `main`, so missing tags and releases heal on their own. |
 
 Things to know:
@@ -165,11 +236,19 @@ Things to know:
 - **npm versions are immutable.** A version can't be published twice, and unpublishing is
   restricted. If a bad version ships, fix forward with a new changeset (a patch). Use
   `npm deprecate "@flowlinejs/<pkg>@X.Y.Z" "reason"` if needed.
-- **A run is marked superseded** (`sync: superseded`) when newer commits reached `main` after it
-  started. It does nothing on purpose, because the newer run releases the combined changes.
+- **A run is marked superseded** (the **Release superseded** warning, `sync: superseded`) when
+  newer commits reached `main` after it started. It does nothing on purpose, because the run for
+  the newer commit releases the combined changes. There is one exception. If you re-run an old
+  run while a newer one is queued, GitHub drops the queued run in favour of the re-run, and the
+  re-run is then superseded too. When you see the warning and no newer Release run is queued or
+  running, start one with **Actions → Release → Run workflow** (branch `main`).
+- **Only genuine version commits are fast-forwarded.** A commit ahead of the run counts as
+  "our own version commit" only if it has the bot identity and subject **and** it touches
+  nothing but `package.json`, `CHANGELOG.md`, `.changeset/` and `pnpm-lock.yaml`. Anything else
+  makes the run superseded, so ungated code is never released.
 - **To publish by hand in an emergency,** check out the release commit and run `pnpm release`
   as in the bootstrap. The next CI run sees the versions on npm and only adds the tags and GitHub
-  Release.
+  Release, at that run's commit (see [Tags after a publish by hand](#tags-after-a-publish-by-hand)).
 - **To simulate locally,** run `pnpm release:dry-run` (nothing is published) or
   `node scripts/release.mjs plan` (read-only registry query). `pnpm test:scripts` runs the unit
   tests and an end-to-end simulation against a fake registry and git remote.

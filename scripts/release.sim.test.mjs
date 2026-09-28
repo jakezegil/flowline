@@ -80,6 +80,8 @@ appendFileSync(file, JSON.stringify({ tool: "gh", args, notes: i >= 0 ? readFile
 
 let server;
 let env;
+let staleReads = 0;
+let registryLog = [];
 
 async function release(args, extraEnv = {}) {
   try {
@@ -128,8 +130,13 @@ beforeAll(async () => {
   chmodSync(join(bin, "gh"), 0o755);
 
   server = createServer((req, res) => {
-    const name = decodeURIComponent(req.url.slice(1));
-    const pkg = registry()[name];
+    const url = new URL(req.url, "http://registry.test");
+    const name = decodeURIComponent(url.pathname.slice(1));
+    registryLog.push(url.search);
+    // CDN lag: the next `staleReads` requests see a cached 404, whatever the registry holds.
+    const stale = staleReads > 0;
+    if (stale) staleReads--;
+    const pkg = stale ? undefined : registry()[name];
     if (!pkg) {
       res.writeHead(404).end("{}");
       return;
@@ -202,6 +209,7 @@ beforeAll(async () => {
     GH_BIN: join(bin, "gh"),
     CHANGESET_BIN: realpathSync(join(repoRoot, "node_modules/.bin/changeset")),
     RELEASE_SKIP_LOCKFILE: "1",
+    RELEASE_WAIT_MS: "10",
     GITHUB_ACTIONS: "true",
     CI: "true",
     NPM_TOKEN: "",
@@ -316,7 +324,9 @@ describe("release simulation", { timeout: 60_000 }, () => {
     });
     const pack3 = join(base, "pack3");
     expect((await outputsOf(["pack", "--out", pack3, "--only-unpublished"])).out.count).toBe("1");
-    expect((await release(["publish", "--dir", pack3])).code).toBe(0);
+    const pub3 = await outputsOf(["publish", "--dir", pack3]);
+    expect(pub3.code).toBe(0);
+    expect(pub3.out.done).toBe("@sim/b@0.2.0"); // passed on to github-release
     expect(registry()["@sim/b"]["0.2.0"].manifest.dependencies["@sim/a"]).toBe("^0.2.0");
 
     expect((await release(["github-release", "--sha", sync.out.sha])).code).toBe(0);
@@ -332,6 +342,70 @@ describe("release simulation", { timeout: 60_000 }, () => {
     expect(v2.notes).toContain("## @sim/a@0.2.0\n\n### Minor Changes");
     expect(v2.notes).toContain("Add a thing.");
     expect((await outputsOf(["plan"])).out.mode).toBe("none");
+  });
+
+  describe("github-release right after a publish, while the registry CDN is stale", () => {
+    it("waits with uncached reads until the versions show up", async () => {
+      staleReads = 3; // both cached reads miss, and so does the first uncached re-check
+      registryLog = [];
+      const res = await release(["github-release"]);
+      expect(res.code).toBe(0);
+      expect(res.stderr).toMatch(/@sim\/a@0\.2\.0 is not visible on the registry yet; waiting/);
+      expect(registryLog.filter((q) => q.startsWith("?cache-bust=")).length).toBeGreaterThan(0);
+    });
+
+    it("trusts versions the publish job confirmed, without polling", async () => {
+      staleReads = 1000;
+      registryLog = [];
+      const res = await release(["github-release", "--published", "@sim/a@0.2.0 @sim/b@0.2.0"]);
+      staleReads = 0;
+      expect(res.code).toBe(0);
+      expect(registryLog.some((q) => q.startsWith("?cache-bust="))).toBe(false);
+    });
+
+    it("still fails when a version never appears", async () => {
+      staleReads = 1000;
+      const res = await release(["github-release", "--published", "@sim/a@0.2.0"]);
+      staleReads = 0;
+      expect(res.code).toBe(1);
+      expect(res.stderr).toMatch(/not on the registry: @sim\/b@0\.2\.0/);
+    });
+  });
+
+  it("an empty changeset alone creates no version commit", async () => {
+    await git("checkout", "main");
+    await git("reset", "--hard", "origin/main");
+    writeFileSync(join(work, ".changeset/quiet-owls-nap.md"), "---\n---\n\nRefactor only.\n");
+    await git("add", "-A");
+    await git("commit", "-m", "refactor: no release");
+    // Push through the release CLI with GIT_AUTH_TOKEN set (env-only git auth).
+    expect((await release(["push"], { GIT_AUTH_TOKEN: "t0ken" })).code).toBe(0);
+    const head = await git("rev-parse", "HEAD");
+    expect(await git("rev-parse", "origin/main")).toBe(head);
+    expect(await git("config", "--get-regexp", "extraheader").catch(() => "")).toBe("");
+
+    expect((await outputsOf(["plan"])).out).toMatchObject({ mode: "none", pending: "0" });
+    expect((await outputsOf(["version"])).out.committed).toBe("false");
+    expect(await git("rev-parse", "HEAD")).toBe(head);
+  });
+
+  it("a commit that merely imitates the bot is not fast-forwarded", async () => {
+    const stale = await git("rev-parse", "HEAD");
+    writeFileSync(join(work, "packages/a/dist/index.js"), "export const x = 99;\n");
+    await exec("git", ["commit", "-am", "chore(release): version packages v0.2.0 [skip ci]"], {
+      cwd: work,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "github-actions[bot]",
+        GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com",
+      },
+    });
+    await git("push", "origin", "main");
+    await git("checkout", "--detach", stale);
+    const sync = await outputsOf(["sync"]);
+    expect(sync.out.status).toBe("superseded");
+    expect(sync.stdout).toMatch(/::warning title=Release superseded::/);
+    await git("checkout", "main");
   });
 
   it("a run whose commit is no longer the tip (other commits landed) is superseded", async () => {
