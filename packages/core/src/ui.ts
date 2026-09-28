@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { FieldDecl, UiMeta } from "./types";
+import { assertZod4 } from "./zod-check";
 
 /** JSON Schema / Zod metadata key under which {@link UiMeta} travels. */
 export const UI_META_KEY = "x-flowkit";
@@ -18,6 +19,7 @@ export const UI_META_KEY = "x-flowkit";
  * ```
  */
 export function ui<T extends z.ZodType>(schema: T, meta: UiMeta): T {
+  assertZod4(schema, "ui() (or secret()/sensitive())", true);
   const previous = schema.meta()?.[UI_META_KEY] as UiMeta | undefined;
   return schema.meta({ [UI_META_KEY]: { ...previous, ...meta } });
 }
