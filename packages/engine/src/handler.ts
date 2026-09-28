@@ -331,7 +331,9 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
         return json(outcome === "cancelled" ? 200 : 202, { status: outcome });
       }
       if (method === "POST" && n === 3 && action === "resume") {
-        const outcome = await engine.resumeRun(tenantId, id, await readJson(req), userId);
+        const step = url.searchParams.get("step");
+        const opts = step === null ? {} : { expectStep: step };
+        const outcome = await engine.resumeRun(tenantId, id, await readJson(req), userId, opts);
         return outcome === "resumed" ? json(202, {}) : json(410, { error: "gone" });
       }
     }
