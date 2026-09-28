@@ -35,9 +35,15 @@ At the end, one app event produces a completed run. `examples/docs-check` runs e
 snippets on every `pnpm test`.
 
 ```sh
-pnpm add @flowkit/core @flowkit/nodes-builtin @flowkit/engine @flowkit/storage-postgres @flowkit/react zod pg
+pnpm add @flowkit/core @flowkit/nodes-builtin @flowkit/engine @flowkit/storage-postgres zod@^4 pg
 pnpm add hono @hono/node-server # or any other fetch-style server
+pnpm add @flowkit/react react react-dom # the editor (step 7), in your React app
+pnpm add -D @types/react @types/react-dom vite @vitejs/plugin-react # or your own bundler
+pnpm add -D @flowkit/storage-memory # for tests and prototypes
 ```
+
+`zod` 4 is a peer dependency of `@flowkit/core`, `@flowkit/nodes-builtin` and `@flowkit/engine`:
+install it once, so your schemas and flowkit's share one copy. Zod 3 is not supported.
 
 ### 1. Define a node
 
@@ -198,8 +204,20 @@ export function WorkflowPage() {
 ```
 
 This page opens the workflow from step 6. Users can edit it and publish new versions from the
-editor's header. For a `workflowId` that does not exist yet, the editor opens a blank workflow
-with a manual trigger.
+editor's header. For a `workflowId` that doesn't exist, the editor shows "Workflow not found"
+with a "Go back" button, so a mistyped link can't create a workflow under the typo. To start
+a new workflow instead:
+
+- `create` opens a new draft without loading anything. It starts from `initialDoc`, or a blank
+  workflow with a manual trigger. The first save creates the workflow, and only if the ID is
+  still free.
+- `initialDoc` alone is the starting doc when the ID turns out not to exist.
+- `notFoundAction` replaces the not-found button: your own `{ label, onClick }` (e.g. back to
+  your list), `"create"` for "Create this workflow", or `null` for none.
+
+The editor and viewer add a few hundred KB of JavaScript (CodeMirror and React Flow). Load the
+editor route lazily, with `React.lazy(() => import("./WorkflowPage"))`, so the rest of your app
+doesn't wait for it.
 
 The browser receives only the JSON manifest. `@flowkit/core` and `@flowkit/react` never import
 the engine or any server-only code.
@@ -235,9 +253,16 @@ branches rejoin and execution continues with the next step. You can build a doc 
 in code:
 
 ```ts file=flowkit/welcome-vip.ts
-import { ref, tpl, workflow } from "@flowkit/core";
-import { and, conditionNode, isTrue, manualTrigger, stopNode } from "@flowkit/nodes-builtin";
-import { sendEmail } from "./email"; // defined in the plugin guide
+// flowkit/welcome-vip.ts
+import { ref, workflow } from "@flowkit/core";
+import {
+  and,
+  conditionNode,
+  delayNode,
+  isTrue,
+  manualTrigger,
+  stopNode,
+} from "@flowkit/nodes-builtin";
 import { engine } from "./engine";
 import { loadContact } from "./nodes";
 
@@ -249,19 +274,20 @@ const doc = workflow("welcome-vip", { name: "Welcome VIPs" })
     conditionNode,
     { rules: and(isTrue(ref("steps.contact.vip"))) },
     {
-      if: (b) =>
-        b.step("email", sendEmail, {
-          to: ref("steps.contact.email"),
-          subject: tpl("Hi {{steps.contact.name}}"),
-        }),
+      if: (b) => b.step("wait", delayNode, { duration: "1d" }),
       else: (b) => b.step("halt", stopNode, { reason: "Not a VIP" }),
     },
   )
+  // The branches rejoin here: only VIPs get this far, a day later.
+  .step("refresh", loadContact, { contactId: ref("steps.contact.id") })
   .build();
 
 const { version } = await engine.saveWorkflow("acme", doc, "user_1");
 await engine.publish("acme", doc.id, version, "user_1"); // throws FlowkitValidationError if invalid
 ```
+
+This uses only the quick start's `crm.loadContact` and built-in nodes, so it publishes against
+the engine from step 3. `examples/docs-check` publishes it on every `pnpm test`.
 
 Text comparisons in rules (`core.condition`) and in `core.switch` are case-insensitive by default,
 so `"VIP"` equals `"vip"`. They are also loose: `"5"` equals `5`. To match case, set
@@ -386,6 +412,59 @@ export const requestApproval = defineNode({
   because the run ID is derived from the key. If you reuse a key, even much later, you get the
   original run ID back.
 
+### Calling a webhook
+
+A webhook workflow declares the body fields it expects, and optionally a signing secret and a
+deduplication header:
+
+```ts file=flowkit/webhook.ts
+// flowkit/webhook.ts
+import { createHmac } from "node:crypto";
+import { ref, workflow } from "@flowkit/core";
+import { webhookTrigger } from "@flowkit/nodes-builtin";
+import { engine } from "./engine";
+import { loadContact } from "./nodes";
+
+export const leadReceived = workflow("lead-received", { name: "Lead received" })
+  .trigger(webhookTrigger, {
+    fields: [{ name: "contactId", type: "string", required: true }],
+    secret: "partner-webhook", // a secret's *name*; the engine calls secrets.get(tenantId, name)
+    dedupeHeader: "X-Request-Id", // a repeated value returns the first run instead of a new one
+  })
+  // The payload is { body, headers }: declared fields are under trigger.body.
+  .step("contact", loadContact, { contactId: ref("trigger.body.contactId") })
+  .build();
+
+/** Publish the workflow and return its webhook URL. */
+export async function publishLeadWebhook(tenantId: string): Promise<string> {
+  const saved = await engine.saveWorkflow(tenantId, leadReceived, "setup");
+  await engine.publish(tenantId, saved.workflowId, saved.version, "setup");
+  // The engine generates the slug on the first save and keeps it in later versions.
+  const slug = String(saved.doc.trigger.config.slug);
+  return `https://app.example.com/flowkit/hooks/${tenantId}/${saved.workflowId}/${slug}`;
+}
+
+/** What the sending system does: sign the exact body bytes with the secret's value. */
+export function signedRequest(url: string, signingKey: string, requestId: string): Request {
+  const body = JSON.stringify({ contactId: "c_42" });
+  const signature = createHmac("sha256", signingKey).update(body).digest("hex");
+  return new Request(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-flowkit-signature": `sha256=${signature}`,
+      "x-request-id": requestId,
+    },
+    body,
+  });
+}
+```
+
+Send the request with `fetch(signedRequest(url, key, id))`. The signature is HMAC-SHA256 of the
+raw request body, keyed with the value `secrets.get` returns for the secret's name, so sign the
+bytes you send, not a re-serialized copy. A signing secret must be a literal name: a reference
+there is a validation error. The responses are listed under [Triggers](#triggers).
+
 ### Sub-flows
 
 A workflow with a `core.subflow` trigger declares input and output fields. `core.callSubflow` then
@@ -458,7 +537,9 @@ runStorageConformance("my-storage", async () => {
   transforms are heavy and the API and the worker share a process, run the worker in its own
   process.
 - **Secrets.** Secrets come from your `secrets.get(tenantId, name)`. The editor sees only secret
-  names, from `secrets.list`.
+  names, from `secrets.list`, and validation warns about a name that isn't listed. `secret()`
+  fields are literal-only: the validator and the engine both refuse a reference there, so trigger
+  data can't pick which tenant secret is resolved and sent.
 
 ## Editor
 
@@ -478,7 +559,8 @@ The provider accepts `client`, `theme`, `labels`, `icons` and `widgets`.
   `--fk-*` custom properties directly.
 - **Labels.** `labels` overrides any visible or accessible text, for translations or rewording.
 - **Icons.** `icons` maps a manifest icon name to a component. A set of common Lucide icons is
-  included (see `bundledIconNames`).
+  included (see `bundledIconNames`). Any other name, or a URL, shows a generic box until you
+  add it to `icons`.
 - **Widgets.** `widgets` registers custom config-field controls, selected by
   `ui(schema, { widget })`. See the [plugin guide](docs/guides/writing-a-plugin.md#custom-widgets).
 
@@ -487,7 +569,10 @@ The provider accepts `client`, `theme`, `labels`, `icons` and `widgets`.
 `@flowkit/engine/testing` exports `testNode`, which runs one handler, and `runWorkflowInMemory`,
 which saves, publishes, starts and drains a doc, skipping through timers. `runWorkflowInMemory`
 needs `@flowkit/storage-memory`, which is an optional peer dependency of the engine, so install it
-as a dev dependency. See [Testing your plugin](docs/guides/writing-a-plugin.md#testing).
+as a dev dependency. Besides `plugins`, `services`, `trigger` and `clock`, it takes `secrets`
+(values by name, for `ctx.secrets`), `http` (the network policy; `{ allowPrivateNetworks: true }`
+reaches a local mock server) and `subflows` (docs published before the workflow that calls them).
+See [Testing your plugin](docs/guides/writing-a-plugin.md#testing).
 
 ## Examples
 

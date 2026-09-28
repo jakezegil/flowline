@@ -334,7 +334,7 @@ export interface NodeDefinition<I extends z.ZodObject = z.ZodObject, O = unknown
   name: string;
   /** Longer description. */
   description?: string;
-  /** Lucide icon name or URL. */
+  /** A bundled icon name (`bundledIconNames`) or a `<FlowkitProvider icons>` key; else a box. */
   icon?: string;
   /** Step picker category. */
   category?: string;
@@ -446,7 +446,7 @@ export interface TriggerDefinition<C extends z.ZodObject = z.ZodObject, P = unkn
   name: string;
   /** Longer description. */
   description?: string;
-  /** Lucide icon name or URL. */
+  /** A bundled icon name (`bundledIconNames`) or a `<FlowkitProvider icons>` key; else a box. */
   icon?: string;
   /** How the trigger fires. */
   kind: TriggerKind;
@@ -492,7 +492,7 @@ export interface PluginDefinition {
   id: string;
   /** Display name. */
   name: string;
-  /** Lucide icon name or URL. */
+  /** A bundled icon name (`bundledIconNames`) or a `<FlowkitProvider icons>` key; else a box. */
   icon?: string;
   /** Longer description. */
   description?: string;

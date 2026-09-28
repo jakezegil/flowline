@@ -30,7 +30,7 @@ export interface ScopeEntry {
   stepId?: string;
   /** Display label: the step's name override, else the node/trigger name. */
   label: string;
-  /** Lucide icon name or URL of the node/trigger. */
+  /** Icon name of the node/trigger (see `NodeManifest.icon`). */
   icon?: string;
   /** Schema of the value at `refBase`. `{}` means any. */
   schema: JSONSchema;

@@ -70,6 +70,10 @@ beforeAll(() => {
   generate("guide");
 });
 
+/** The Hono app server.ts passes to (mocked) `serve`, captured by the quick-start test. */
+type HonoApp = { fetch(req: Request): Promise<Response> };
+let app: HonoApp;
+
 describe("docs", () => {
   it("annotates every TypeScript block with file= (or nocheck)", () => {
     expect(unannotated).toEqual([]);
@@ -85,7 +89,7 @@ describe("docs", () => {
     const { engine } = (await load("flowkit/engine.ts")) as { engine: Engine };
     await load("server.ts");
     const { serve } = await import("@hono/node-server");
-    const app = vi.mocked(serve).mock.calls[0]?.[0] as { fetch(req: Request): Promise<Response> };
+    app = vi.mocked(serve).mock.calls[0]?.[0] as HonoApp;
 
     await load("app.ts"); // publishes welcome-contact and emits contact.created
     const { worker } = (await load("worker.ts")) as { worker: { stop(): Promise<void> } };
@@ -112,4 +116,40 @@ describe("docs", () => {
       output: { id: "c_42", name: "Ada" },
     });
   }, 20_000);
+
+  it("publishes the tree-model sample against the quick-start engine", async () => {
+    const { engine } = (await load("flowkit/engine.ts")) as { engine: Engine };
+    await load("flowkit/welcome-vip.ts"); // saves and publishes, throwing if invalid
+    const detail = await engine.storage.getPublishedVersion("acme", "welcome-vip");
+    expect(detail?.doc.steps.map((s) => s.id)).toEqual(["contact", "check", "refresh"]);
+  });
+
+  it("calls the README's signed webhook through the mounted handler", async () => {
+    const { engine } = (await load("flowkit/engine.ts")) as { engine: Engine };
+    const { publishLeadWebhook, signedRequest } = (await load("flowkit/webhook.ts")) as {
+      publishLeadWebhook(tenantId: string): Promise<string>;
+      signedRequest(url: string, key: string, requestId: string): Request;
+    };
+    const { WEBHOOK_KEY } = (await load("vault.ts")) as { WEBHOOK_KEY: string };
+
+    const url = await publishLeadWebhook("acme");
+    expect(url).toMatch(/^https:\/\/app\.example\.com\/flowkit\/hooks\/acme\/lead-received\/\S+$/);
+
+    const first = await app.fetch(signedRequest(url, WEBHOOK_KEY, "req-1"));
+    expect(first.status).toBe(202);
+    const { runId } = (await first.json()) as { runId: string };
+
+    const repeat = await app.fetch(signedRequest(url, WEBHOOK_KEY, "req-1"));
+    expect(repeat.status).toBe(200);
+    expect(await repeat.json()).toEqual({ runId, deduped: true });
+
+    const forged = await app.fetch(signedRequest(url, "not-the-key", "req-2"));
+    expect(forged.status).toBe(401);
+
+    const detail = await engine.getRunDetail("acme", runId);
+    expect(detail?.run.trigger).toMatchObject({
+      body: { contactId: "c_42" },
+      headers: { "x-request-id": "req-1" },
+    });
+  });
 });
