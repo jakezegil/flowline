@@ -437,9 +437,9 @@ export const requestApproval = defineNode({
   | The body does not match the declared fields | 400 `{ issues }` |
 - **Schedules.** Cron expressions with a time zone. Schedules do not catch up after downtime: only
   the most recent missed fire runs.
-- **Deduplication.** Dedupe keys are scoped to a workflow, and they are effectively permanent,
-  because the run ID is derived from the key. If you reuse a key, even much later, you get the
-  original run ID back.
+- **Deduplication.** Dedupe keys are scoped to a workflow. Each key claims a randomly generated run
+  ID for a dedupe window; a repeat delivery within that window gets the same run ID back, and a
+  delivery after the window expires starts a new run with a fresh ID.
 
 ### Calling a webhook
 

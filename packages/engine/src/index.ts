@@ -21,6 +21,7 @@ export {
 export { buildScope, type Frame, type NextAction, nextAction } from "./interpreter";
 export {
   type CancelRequest,
+  type DedupeClaim,
   type Lease,
   type ListRunsFilter,
   type NewRun,

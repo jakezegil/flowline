@@ -229,6 +229,14 @@ export interface WorkflowAuditEntry {
   at: number;
 }
 
+/** The outcome of {@link StorageAdapter.claimDedupeKey}. */
+export interface DedupeClaim {
+  /** The run the key belongs to: `runId` as given when `claimed`, else the earlier claimant's. */
+  runId: string;
+  /** Whether this call recorded the key. */
+  claimed: boolean;
+}
+
 /**
  * Persistence for workflow versions, runs, events and dedupe keys.
  *
@@ -466,9 +474,16 @@ export interface StorageAdapter {
   listEvents(tenantId: string, runId: string): Promise<RunEvent[]>;
 
   /**
-   * Record `key` for the tenant until `now + ttlMs`. Returns `true` if it was newly recorded (absent
-   * or expired, i.e. its previous expiry `<= now`), `false` if an unexpired record exists (which is
-   * then left unchanged). Atomic: of concurrent calls with the same key, exactly one gets `true`.
+   * Insert-or-get for the tenant's `key`. When the key is absent or expired (`expiresAt <= now`),
+   * record `{ runId, expiresAt: now + windowMs }` and return `{ runId, claimed: true }`; otherwise
+   * leave the record unchanged and return its `runId` with `claimed: false`. Atomic: of concurrent
+   * calls with one key, exactly one claims, and every other call returns the claimant's `runId`.
    */
-  recordDedupeKey(tenantId: string, key: string, now: number, ttlMs: number): Promise<boolean>;
+  claimDedupeKey(
+    tenantId: string,
+    key: string,
+    runId: string,
+    now: number,
+    windowMs: number,
+  ): Promise<DedupeClaim>;
 }

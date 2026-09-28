@@ -116,7 +116,7 @@ describe("migrate", () => {
     const { rows } = await litePool.query<{ version: number; applied_at: unknown }>(
       "SELECT version, applied_at FROM idem.schema_migrations ORDER BY version",
     );
-    expect(rows.map((r) => r.version)).toEqual([1, 2, 3]);
+    expect(rows.map((r) => r.version)).toEqual([1, 2, 3, 4]);
     expect(rows[0]?.applied_at).not.toBeNull();
   });
 
@@ -127,7 +127,7 @@ describe("migrate", () => {
     const versions = await litePool.query<{ version: number }>(
       "SELECT version FROM bare.schema_migrations",
     );
-    expect(versions.rows.map((r) => r.version)).toEqual([1, 2, 3]);
+    expect(versions.rows.map((r) => r.version)).toEqual([1, 2, 3, 4]);
     const locks = await litePool.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory'",
     );
@@ -137,11 +137,40 @@ describe("migrate", () => {
   it("uses the flowline schema by default", async () => {
     await migrate(litePool);
     const s = createPostgresStorage({ pool: litePool });
-    expect(await s.recordDedupeKey("t", "k", 0, 10)).toBe(true);
+    expect(await s.claimDedupeKey("t", "k", "run_a", 0, 10)).toEqual({
+      runId: "run_a",
+      claimed: true,
+    });
     const { rows } = await litePool.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM flowline.dedupe_keys",
     );
     expect(rows[0]?.n).toBe(1);
+  });
+
+  it("v4 resets dedupe history: pre-v4 rows are deleted, and a claim on that key wins fresh", async () => {
+    // Recreate the v3 state: only migrations 1-3 applied, no run_id column.
+    await migrate(litePool, "predv4");
+    await litePool.query("ALTER TABLE predv4.dedupe_keys DROP COLUMN IF EXISTS run_id");
+    await litePool.query("DELETE FROM predv4.schema_migrations WHERE version >= 4");
+    await litePool.query(
+      "INSERT INTO predv4.dedupe_keys (tenant_id, key, expires_at) VALUES ('t', 'k', 999999999999)",
+    );
+    await migrate(litePool, "predv4");
+    const { rows } = await litePool.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM predv4.dedupe_keys",
+    );
+    expect(rows[0]?.n).toBe(0);
+    const s = createPostgresStorage({ pool: litePool, schema: "predv4" });
+    expect(await s.claimDedupeKey("t", "k", "run_new", 0, 1000)).toEqual({
+      runId: "run_new",
+      claimed: true,
+    });
+    // Running migrate() again is a no-op: the claimed row survives.
+    await migrate(litePool, "predv4");
+    expect(await s.claimDedupeKey("t", "k", "run_other", 1, 1000)).toEqual({
+      runId: "run_new",
+      claimed: false,
+    });
   });
 
   it("rejects unsafe schema names", async () => {
@@ -176,7 +205,10 @@ describe("createPostgresStorage", () => {
       schema: "noconnect",
     });
     // Single-statement methods work on a bare Queryable.
-    expect(await s.recordDedupeKey("t", "k", 0, 10)).toBe(true);
+    expect(await s.claimDedupeKey("t", "k", "run_a", 0, 10)).toEqual({
+      runId: "run_a",
+      claimed: true,
+    });
     await expect(
       s.appendEvents([{ runId: "r", tenantId: "t", type: "run.started", at: 1 }]),
     ).rejects.toThrow(/connect/);
@@ -275,7 +307,9 @@ describe("createPostgresStorage", () => {
       await expect(s.createRun(run, [], 1)).rejects.toThrow(/NUL/);
       expect(await s.getRun("t", "r1")).toBeNull();
       // NUL inside a text column (SQLSTATE 22021).
-      await expect(s.recordDedupeKey("t", "k\u0000", 0, 10)).rejects.toThrow(FlowlineStorageError);
+      await expect(s.claimDedupeKey("t", "k\u0000", "run_a", 0, 10)).rejects.toThrow(
+        FlowlineStorageError,
+      );
       // Other database errors pass through unchanged.
       const other = createPostgresStorage({ pool: litePool, schema: "does_not_exist" });
       const err = await other.getRun("t", "r1").catch((e: unknown) => e);

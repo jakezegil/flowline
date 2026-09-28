@@ -286,8 +286,14 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
       expect((await s.saveWorkflowVersion(T1, doc("a"), "u", 6)).version).toBe(2);
 
       // Dedupe keys are per tenant.
-      expect(await s.recordDedupeKey(T1, "k", 10, 1000)).toBe(true);
-      expect(await s.recordDedupeKey(T2, "k", 10, 1000)).toBe(true);
+      expect(await s.claimDedupeKey(T1, "k", "run_a", 10, 1000)).toEqual({
+        runId: "run_a",
+        claimed: true,
+      });
+      expect(await s.claimDedupeKey(T2, "k", "run_b", 10, 1000)).toEqual({
+        runId: "run_b",
+        claimed: true,
+      });
 
       // getRunById is deliberately not tenant-scoped.
       expect((await s.getRunById("r1"))?.tenantId).toBe(T1);
@@ -1349,17 +1355,57 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
       });
     });
 
-    test("recordDedupeKey is true once, then false, then true again after the ttl", async (s) => {
-      expect(await s.recordDedupeKey(T1, "schedule:wf:100", 1000, 500)).toBe(true);
-      expect(await s.recordDedupeKey(T1, "schedule:wf:100", 1200, 500)).toBe(false);
-      expect(await s.recordDedupeKey(T1, "schedule:wf:100", 1499, 500)).toBe(false);
-      expect(await s.recordDedupeKey(T1, "other", 1200, 500)).toBe(true);
-      expect(await s.recordDedupeKey(T1, "schedule:wf:100", 1500, 500)).toBe(true);
-      expect(await s.recordDedupeKey(T1, "schedule:wf:100", 1600, 500)).toBe(false);
-      const concurrent = await Promise.all(
-        Array.from({ length: 10 }, () => s.recordDedupeKey(T1, "race", 0, 1000)),
-      );
-      expect(concurrent.filter(Boolean)).toHaveLength(1);
+    describe("dedupe", () => {
+      test("first claim wins; a claim within the window loses; at expiry a new claim wins", async (s) => {
+        expect(await s.claimDedupeKey(T1, "k", "run_a", 1000, 500)).toEqual({
+          runId: "run_a",
+          claimed: true,
+        });
+        expect(await s.claimDedupeKey(T1, "k", "run_b", 1200, 500)).toEqual({
+          runId: "run_a",
+          claimed: false,
+        });
+        expect(await s.claimDedupeKey(T1, "k", "run_c", 1500, 500)).toEqual({
+          runId: "run_c",
+          claimed: true,
+        });
+      });
+
+      test("ten concurrent claims with distinct IDs: exactly one wins, all report its runId", async (s) => {
+        const claims = await Promise.all(
+          Array.from({ length: 10 }, (_, i) => s.claimDedupeKey(T1, "race", `run_${i}`, 0, 1000)),
+        );
+        expect(claims.filter((c) => c.claimed)).toHaveLength(1);
+        expect(new Set(claims.map((c) => c.runId)).size).toBe(1);
+      });
+
+      test("the same key is independent per tenant", async (s) => {
+        expect(await s.claimDedupeKey(T1, "k", "run_a", 1000, 500)).toEqual({
+          runId: "run_a",
+          claimed: true,
+        });
+        expect(await s.claimDedupeKey(T2, "k", "run_b", 1000, 500)).toEqual({
+          runId: "run_b",
+          claimed: true,
+        });
+      });
+
+      test("a losing claim does not change the stored expiry", async (s) => {
+        expect(await s.claimDedupeKey(T1, "k2", "run_a", 1000, 500)).toEqual({
+          runId: "run_a",
+          claimed: true,
+        });
+        // A losing claim with a much longer window must not extend the stored expiry.
+        expect(await s.claimDedupeKey(T1, "k2", "run_b", 1400, 10_000)).toEqual({
+          runId: "run_a",
+          claimed: false,
+        });
+        // At the original expiry (1500) the key is expired again: a new claim wins.
+        expect(await s.claimDedupeKey(T1, "k2", "run_c", 1500, 500)).toEqual({
+          runId: "run_c",
+          claimed: true,
+        });
+      });
     });
   });
 }

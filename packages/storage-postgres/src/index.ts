@@ -13,6 +13,7 @@ import type {
   WorkflowVersion,
 } from "@flowlinejs/core";
 import {
+  type DedupeClaim,
   FlowlineStorageError,
   type NewRun,
   type NewRunEvent,
@@ -757,15 +758,18 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
       return rows.map(toEvent);
     },
 
-    async recordDedupeKey(tenantId, key, now, ttlMs) {
-      const { rows } = await pool.query(
-        `INSERT INTO ${s}.dedupe_keys AS d (tenant_id, key, expires_at) VALUES ($1, $2, $3)
-         ON CONFLICT (tenant_id, key) DO UPDATE SET expires_at = EXCLUDED.expires_at
-         WHERE d.expires_at <= $4
-         RETURNING 1`,
-        [tenantId, key, now + ttlMs, now],
+    async claimDedupeKey(tenantId, key, runId, now, windowMs): Promise<DedupeClaim> {
+      const { rows } = await pool.query<{ run_id: string }>(
+        `INSERT INTO ${s}.dedupe_keys AS d (tenant_id, key, run_id, expires_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (tenant_id, key) DO UPDATE SET
+           run_id     = CASE WHEN d.expires_at <= $5 THEN EXCLUDED.run_id     ELSE d.run_id     END,
+           expires_at = CASE WHEN d.expires_at <= $5 THEN EXCLUDED.expires_at ELSE d.expires_at END
+         RETURNING run_id`,
+        [tenantId, key, runId, now + windowMs, now],
       );
-      return rows.length > 0;
+      const wonRunId = rows[0]?.run_id as string;
+      return { runId: wonRunId, claimed: wonRunId === runId };
     },
   };
 }

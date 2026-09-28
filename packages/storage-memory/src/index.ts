@@ -13,6 +13,7 @@ import type {
   WorkflowVersion,
 } from "@flowlinejs/core";
 import {
+  type DedupeClaim,
   FlowlineStorageError,
   type Lease,
   type NewRun,
@@ -129,7 +130,7 @@ export function createMemoryStorage(): StorageAdapter {
   const audit: WorkflowAuditEntry[] = [];
   const runs = new Map<string, StoredRun>();
   const events = new Map<string, RunEvent[]>();
-  const dedupe = new Map<string, number>();
+  const dedupe = new Map<string, { runId: string; expiresAt: number }>();
 
   const newStoredRun = (input: NewRun, now: number): StoredRun => {
     const run: Run = { ...clone(input), createdAt: now, updatedAt: now };
@@ -451,12 +452,14 @@ export function createMemoryStorage(): StorageAdapter {
       return (events.get(runId) ?? []).filter((e) => e.tenantId === tenantId).map((e) => clone(e));
     },
 
-    async recordDedupeKey(tenantId, key, now, ttlMs) {
+    async claimDedupeKey(tenantId, key, runId, now, windowMs): Promise<DedupeClaim> {
       const k = wfKey(tenantId, key);
-      const expiresAt = dedupe.get(k);
-      if (expiresAt !== undefined && expiresAt > now) return false;
-      dedupe.set(k, now + ttlMs);
-      return true;
+      const existing = dedupe.get(k);
+      if (existing !== undefined && existing.expiresAt > now) {
+        return { runId: existing.runId, claimed: false };
+      }
+      dedupe.set(k, { runId, expiresAt: now + windowMs });
+      return { runId, claimed: true };
     },
   };
 }
