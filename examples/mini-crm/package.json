@@ -1,0 +1,31 @@
+{
+  "name": "@flowkit/example-mini-crm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Example CRM embedding Flowkit: a crm plugin, demo workflows and a Hono server.",
+  "scripts": {
+    "dev": "tsx watch server/src/index.ts",
+    "start": "tsx server/src/index.ts",
+    "dev:server": "tsx watch server/src/index.ts",
+    "start:server": "tsx server/src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@flowkit/core": "workspace:*",
+    "@flowkit/engine": "workspace:*",
+    "@flowkit/nodes-builtin": "workspace:*",
+    "@flowkit/storage-memory": "workspace:*",
+    "@flowkit/storage-postgres": "workspace:*",
+    "@hono/node-server": "2.1.1",
+    "hono": "4.13.7",
+    "pg": "8.23.0",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "tsx": "4.23.13",
+    "vitest": "5.0.0"
+  }
+}

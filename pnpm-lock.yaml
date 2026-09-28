@@ -103,6 +103,46 @@ importers:
         specifier: 5.0.0
         version: 5.0.0(@types/node@22.20.2)(jsdom@30.0.1)(vite@8.3.1(@types/node@22.20.2)(esbuild@0.28.2)(tsx@4.23.13))
 
+  examples/mini-crm:
+    dependencies:
+      '@flowkit/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@flowkit/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
+      '@flowkit/nodes-builtin':
+        specifier: workspace:*
+        version: link:../../packages/nodes-builtin
+      '@flowkit/storage-memory':
+        specifier: workspace:*
+        version: link:../../packages/storage-memory
+      '@flowkit/storage-postgres':
+        specifier: workspace:*
+        version: link:../../packages/storage-postgres
+      '@hono/node-server':
+        specifier: 2.1.1
+        version: 2.1.1(hono@4.13.7)
+      hono:
+        specifier: 4.13.7
+        version: 4.13.7
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+      zod:
+        specifier: ^4
+        version: 4.6.5
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
+      vitest:
+        specifier: 5.0.0
+        version: 5.0.0(@types/node@22.20.2)(jsdom@30.0.1)(vite@8.3.1(@types/node@22.20.2)(esbuild@0.28.2)(tsx@4.23.13))
+
   packages/core:
     dependencies:
       zod:
