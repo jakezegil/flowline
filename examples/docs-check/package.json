@@ -1,0 +1,28 @@
+{
+  "name": "docs-check",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Typechecks the README and plugin-guide code blocks and runs the README quick start.",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@flowkit/core": "workspace:*",
+    "@flowkit/engine": "workspace:*",
+    "@flowkit/nodes-builtin": "workspace:*",
+    "@flowkit/react": "workspace:*",
+    "@flowkit/storage-memory": "workspace:*",
+    "@flowkit/storage-postgres": "workspace:*",
+    "@hono/node-server": "2.1.1",
+    "@types/node": "22.20.2",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "hono": "4.13.7",
+    "pg": "8.23.0",
+    "react": "19.3.0",
+    "typescript": "5.9.3",
+    "vitest": "5.0.0",
+    "zod": "^4"
+  }
+}

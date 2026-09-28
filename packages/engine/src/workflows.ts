@@ -7,6 +7,7 @@
 import {
   configValueAt,
   type FieldDecl,
+  type FlowkitServices,
   fieldsToJsonSchema,
   hasErrors,
   type Issue,
@@ -311,7 +312,7 @@ export function createWorkflows(core: EngineCore): Workflows {
           stepPath: step.id,
           attempt: 1,
           idempotencyKey: runId,
-          services: core.opts.services ?? ({} as NonNullable<typeof core.opts.services>),
+          services: core.opts.services ?? ({} as FlowkitServices),
           ...(core.logger ? { logger: core.logger } : {}),
           signal: controller.signal,
           clock,

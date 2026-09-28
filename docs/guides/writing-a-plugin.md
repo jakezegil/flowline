@@ -5,7 +5,7 @@ for example, owns `crm.loadContact`, `crm.sendEmail` and `crm.contactCreated`. Y
 `createRegistry`. The registry turns them into a JSON manifest, and the editor renders its step
 picker, config forms and data picker from that manifest.
 
-```ts
+```ts file=plugin.ts
 import { createRegistry, definePlugin } from "@flowkit/core";
 import { contactCreated } from "./triggers";
 import { loadContact, sendEmail } from "./nodes";
@@ -24,7 +24,7 @@ registry.manifest(); // what the browser gets
 
 ## Nodes
 
-```ts
+```ts file=load-contact.ts
 import { defineNode, ui } from "@flowkit/core";
 import { z } from "zod";
 
@@ -70,7 +70,7 @@ Steps run **at least once**. A worker can crash, or a step can time out, after a
 has already succeeded. The step then runs again, and in some cases the first attempt is still
 running. So key every side effect on `ctx.idempotencyKey`:
 
-```ts
+```ts file=send-email.ts
 import { defineNode, sensitive, ui } from "@flowkit/core";
 import { z } from "zod";
 
@@ -100,7 +100,7 @@ export const sendEmail = defineNode({
 
 To call an HTTP API with a credential, use a `secret()` field together with `ctx.http`:
 
-```ts
+```ts file=enrich.ts
 import { defineNode, FatalError, RetryableError, secret } from "@flowkit/core";
 import { z } from "zod";
 
@@ -128,7 +128,7 @@ The workflow doc stores only the secret's name (for example `"ENRICH_KEY"`). The
 
 Declare the branches, then return `branch(id, output)`:
 
-```ts
+```ts file=deal-size.ts
 import { branch, defineNode } from "@flowkit/core";
 import { z } from "zod";
 
@@ -161,7 +161,7 @@ call. When the run resumes, the handler is called again with `ctx.resume` set. A
 URL from `afterCommit`. It runs only after the suspension is committed, so the URL already works
 when it is sent.
 
-```ts
+```ts file=approval.ts
 import { defineNode, suspend } from "@flowkit/core";
 import { z } from "zod";
 
@@ -193,7 +193,7 @@ or times out, it is retried, up to 3 tries. If it finally fails, the engine reco
 
 ## Triggers
 
-```ts
+```ts file=triggers.ts
 import { defineTrigger, ui } from "@flowkit/core";
 import { z } from "zod";
 
@@ -261,16 +261,24 @@ These widgets are built in:
 A widget is a React component that receives `FieldWidgetProps`. Give it a namespaced ID in the
 schema, then register it on the provider:
 
-```ts
-// in the node definition (server and shared code)
-input: z.object({
-  ownerId: ui(z.string(), { label: "Owner", widget: "crm.userSelect" }),
-}),
+```ts file=assign-owner.ts
+// assign-owner.ts: the node names the widget (server and shared code)
+import { defineNode, ui } from "@flowkit/core";
+import { z } from "zod";
+
+export const assignOwner = defineNode({
+  type: "crm.assignOwner",
+  name: "Assign owner",
+  input: z.object({ ownerId: ui(z.string(), { label: "Owner", widget: "crm.userSelect" }) }),
+  output: z.object({ ownerId: z.string() }),
+  run: ({ input }) => ({ ownerId: input.ownerId }),
+});
 ```
 
-```tsx
-// in the browser
-import type { FieldWidgetProps } from "@flowkit/react";
+```tsx file=user-select.tsx
+// user-select.tsx: in the browser
+import { createClient } from "@flowkit/core/client";
+import { type FieldWidgetProps, FlowkitProvider, WorkflowEditor } from "@flowkit/react";
 import { useUsers } from "./api";
 
 export function UserSelect({ value, onChange, meta, readOnly }: FieldWidgetProps) {
@@ -292,7 +300,16 @@ export function UserSelect({ value, onChange, meta, readOnly }: FieldWidgetProps
   );
 }
 
-// <FlowkitProvider client={client} widgets={{ "crm.userSelect": UserSelect }}>
+const widgets = { "crm.userSelect": UserSelect }; // module scope keeps it stable
+const client = createClient({ baseUrl: "/flowkit" });
+
+export function Editor() {
+  return (
+    <FlowkitProvider client={client} widgets={widgets}>
+      <WorkflowEditor workflowId="assign-deals" />
+    </FlowkitProvider>
+  );
+}
 ```
 
 - `value` is any `ValueExpr`: a literal, a `{ $ref }` or a `{ $tpl }`. If your widget handles only
@@ -308,7 +325,7 @@ export function UserSelect({ value, onChange, meta, readOnly }: FieldWidgetProps
 
 Tell TypeScript what `ctx.services` holds, once, anywhere in your server code:
 
-```ts
+```ts file=services-types.ts
 import type { Db, Mailer } from "./services";
 
 declare module "@flowkit/core" {
@@ -319,8 +336,9 @@ declare module "@flowkit/core" {
 }
 ```
 
-`createEngine({ services: { db, mailer } })` is then type-checked, and so is every handler's
-`ctx.services`.
+With this in place, TypeScript checks every handler's `ctx.services`, and it checks the `services`
+you pass to `createEngine({ services: { db, mailer } })`. The `services` option itself stays
+optional, though, so TypeScript does not catch a call that leaves it out entirely.
 
 ## Testing
 
@@ -333,7 +351,7 @@ declare module "@flowkit/core" {
   in-memory engine. It moves the clock forward through delays and retries, so a `2d` delay finishes
   at once. It needs `@flowkit/storage-memory` as a dev dependency.
 
-```ts
+```ts file=plugin.test.ts
 import { ref, workflow } from "@flowkit/core";
 import { runWorkflowInMemory, testNode } from "@flowkit/engine/testing";
 import { manualTrigger } from "@flowkit/nodes-builtin";

@@ -1,5 +1,6 @@
+import { testNode } from "@flowkit/engine/testing";
 import { describe, expect, it } from "vitest";
-import { main } from "./main";
+import { type Message, main, notify } from "./main";
 
 const silent = () => {};
 
@@ -32,5 +33,26 @@ describe("headless example", () => {
     expect(lines[0]).toMatch(/^Run \S+ completed$/);
     expect(lines).toContainEqual(expect.stringMatching(/^\s+1 run\.started\s*$/));
     expect(lines).toContainEqual(expect.stringMatching(/^\s*\d+ step\.completed\s+lookupUser$/));
+    expect(lines.slice(-2)).toEqual(["Outbox (1)", "  to ada@example.com: Welcome back, Ada!"]);
+  });
+
+  it("prints why a run failed", async () => {
+    const lines: string[] = [];
+    const { status } = await main({ userId: "nobody", log: (line) => lines.push(line) });
+
+    expect(status).toBe("failed");
+    expect(lines[0]).toMatch(/^Run \S+ failed: No user nobody$/);
+  });
+
+  it("notify sends once per idempotency key, however often the step runs", async () => {
+    const outbox: Message[] = [];
+    const services = { users: new Map(), outbox };
+    const input = { to: "ada@example.com", text: "Hi" };
+
+    await testNode(notify, input, { services, idempotencyKey: "run-1:notify" });
+    await testNode(notify, input, { services, idempotencyKey: "run-1:notify" }); // a retry
+    await testNode(notify, input, { services, idempotencyKey: "run-2:notify" });
+
+    expect(outbox.map((m) => m.idempotencyKey)).toEqual(["run-1:notify", "run-2:notify"]);
   });
 });

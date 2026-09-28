@@ -22,13 +22,26 @@ workflows over your own database and records an audit trail.
 
 ## Quick start
 
+The quick start sets up the following:
+
+- a node and a trigger
+- an engine on Postgres
+- the HTTP API
+- a worker
+- one published workflow
+- the editor
+
+At the end, one app event produces a completed run. `examples/docs-check` runs exactly these
+snippets on every `pnpm test`.
+
 ```sh
-pnpm add @flowkit/core @flowkit/engine @flowkit/storage-postgres @flowkit/react zod pg
+pnpm add @flowkit/core @flowkit/nodes-builtin @flowkit/engine @flowkit/storage-postgres @flowkit/react zod pg
+pnpm add hono @hono/node-server # or any other fetch-style server
 ```
 
 ### 1. Define a node
 
-```ts
+```ts file=flowkit/nodes.ts
 // flowkit/nodes.ts
 import { defineNode, ui } from "@flowkit/core";
 import { z } from "zod";
@@ -54,9 +67,9 @@ export const loadContact = defineNode({
 
 ### 2. Group nodes into a plugin
 
-```ts
+```ts file=flowkit/plugin.ts
 // flowkit/plugin.ts
-import { createRegistry, defineTrigger, definePlugin } from "@flowkit/core";
+import { createRegistry, definePlugin, defineTrigger } from "@flowkit/core";
 import { z } from "zod";
 import { loadContact } from "./nodes";
 
@@ -80,13 +93,13 @@ export const registry = createRegistry([crm]);
 
 ### 3. Create the engine
 
-```ts
+```ts file=flowkit/engine.ts
 // flowkit/engine.ts
 import { createEngine } from "@flowkit/engine";
 import { createPostgresStorage, migrate } from "@flowkit/storage-postgres";
 import pg from "pg";
-import { db } from "../db";
 import { getSession } from "../auth";
+import { db } from "../db";
 import { vault } from "../vault";
 import { registry } from "./plugin";
 
@@ -111,9 +124,11 @@ For tests and prototypes, use `createMemoryStorage()` from `@flowkit/storage-mem
 ### 4. Mount the HTTP handler
 
 `engine.handler` is a `(Request) => Promise<Response>` function, so it works with any server that
-speaks `fetch`. This example uses Hono:
+speaks `fetch`. It serves every route under `basePath`. The default is `/flowkit`, and you can
+change it with `createEngine({ basePath })`. Mount the handler at the same path. This example uses
+Hono:
 
-```ts
+```ts file=server.ts
 // server.ts
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
@@ -126,17 +141,44 @@ serve({ fetch: app.fetch, port: 3000 });
 
 ### 5. Start a worker
 
-```ts
-const worker = engine.startWorker({ concurrency: 4 });
+```ts file=worker.ts
+// worker.ts (or at the end of server.ts)
+import { engine } from "./flowkit/engine";
+
+export const worker = engine.startWorker({ concurrency: 4 });
 process.on("SIGTERM", () => void worker.stop()); // waits for in-flight steps
 ```
 
 The worker can share a process with the API or run on its own. Every worker polls the same
 storage, so you can run as many as you need.
 
-### 6. Embed the editor
+### 6. Publish a workflow
 
-```tsx
+Triggers only start *published* workflows. You can build and publish a workflow in the editor
+(step 7), or in code:
+
+```ts file=flowkit/workflows.ts
+// flowkit/workflows.ts
+import { ref, workflow } from "@flowkit/core";
+import { engine } from "./engine";
+import { loadContact } from "./nodes";
+import { contactCreated } from "./plugin";
+
+export const welcomeContact = workflow("welcome-contact", { name: "Welcome new contacts" })
+  .trigger(contactCreated, {})
+  .step("contact", loadContact, { contactId: ref("trigger.contactId") })
+  .build();
+
+/** Save a new version and publish it. Throws FlowkitValidationError if the doc is invalid. */
+export async function publishWorkflows(tenantId: string) {
+  const { version } = await engine.saveWorkflow(tenantId, welcomeContact, "setup");
+  await engine.publish(tenantId, welcomeContact.id, version, "setup");
+}
+```
+
+### 7. Embed the editor
+
+```tsx file=WorkflowPage.tsx
 // WorkflowPage.tsx
 import { createClient } from "@flowkit/core/client";
 import { FlowkitProvider, WorkflowEditor } from "@flowkit/react";
@@ -155,19 +197,29 @@ export function WorkflowPage() {
 }
 ```
 
+This page opens the workflow from step 6. Users can edit it and publish new versions from the
+editor's header. For a `workflowId` that does not exist yet, the editor opens a blank workflow
+with a manual trigger.
+
 The browser receives only the JSON manifest. `@flowkit/core` and `@flowkit/react` never import
 the engine or any server-only code.
 
-### 7. Start runs from your app
+### 8. Start runs from your app
 
-```ts
+```ts file=app.ts
+// app.ts, e.g. wherever your app creates contacts
+import { engine } from "./flowkit/engine";
+import { publishWorkflows } from "./flowkit/workflows";
+
+await publishWorkflows("acme"); // once, at deploy or startup. Each call saves a new version.
 await engine.emit("contact.created", { contactId: "c_42" }, { tenantId: "acme" });
-await engine.start({ tenantId: "acme", workflowId: "welcome-contact", input: { name: "Ada" } });
 ```
 
-Workflows run only once they are published. `emit` starts every published workflow whose trigger
-listens for the event. `start` runs a single workflow directly, and validates `input` against the
-fields that the workflow's trigger declares.
+`emit` starts every published workflow whose trigger listens for the event. It validates the
+payload and returns the new run IDs. The worker then runs the steps. To see the completed run, use
+`GET /flowkit/runs` or `<RunList>` and `<RunViewer>`. For a workflow with a manual trigger, call
+`engine.start({ tenantId, workflowId, input })`. It validates `input` against the trigger's
+declared fields.
 
 To see all of this without a UI or a database, run the headless example with
 `pnpm --filter headless start`.
@@ -182,10 +234,12 @@ A `WorkflowDoc` is plain JSON with a single trigger and a list of steps. Branchi
 branches rejoin and execution continues with the next step. You can build a doc in the editor or
 in code:
 
-```ts
+```ts file=flowkit/welcome-vip.ts
 import { ref, tpl, workflow } from "@flowkit/core";
 import { and, conditionNode, isTrue, manualTrigger, stopNode } from "@flowkit/nodes-builtin";
-import { loadContact, sendEmail } from "./nodes";
+import { sendEmail } from "./email"; // defined in the plugin guide
+import { engine } from "./engine";
+import { loadContact } from "./nodes";
 
 const doc = workflow("welcome-vip", { name: "Welcome VIPs" })
   .trigger(manualTrigger, { fields: [{ name: "contactId", type: "string", required: true }] })
@@ -208,6 +262,11 @@ const doc = workflow("welcome-vip", { name: "Welcome VIPs" })
 const { version } = await engine.saveWorkflow("acme", doc, "user_1");
 await engine.publish("acme", doc.id, version, "user_1"); // throws FlowkitValidationError if invalid
 ```
+
+Text comparisons in rules (`core.condition`) and in `core.switch` are case-insensitive by default,
+so `"VIP"` equals `"vip"`. They are also loose: `"5"` equals `5`. To match case, set
+`caseSensitive: true` on a rule, or on the whole switch in its config. The rule helpers take it as
+an option too: `eq(ref("trigger.tier"), "VIP", { caseSensitive: true })`.
 
 Every save creates an immutable, numbered version. Triggers start only the published version, and
 each run stays pinned to the version it started on.
@@ -252,7 +311,7 @@ A handler can return `suspend({ until })` to wait until a time, or `suspend({ ca
 for an HTTP call. When the run resumes, the engine calls the same handler again, with
 `ctx.resume` set to one of `timer`, `callback`, `timeout`, `subflow` or `subflowFailed`.
 
-```ts
+```ts file=flowkit/approval.ts
 import { defineNode, suspend } from "@flowkit/core";
 import { z } from "zod";
 
@@ -342,7 +401,7 @@ may hold PII. Each place that stores or shows values masks them differently:
 To write your own adapter, implement `StorageAdapter` from `@flowkit/engine`, then check it against
 the conformance suite (it requires Vitest):
 
-```ts
+```ts file=my-storage.conformance.ts
 import { runStorageConformance } from "@flowkit/engine/testing";
 import { createMyStorage } from "./my-storage";
 
@@ -369,7 +428,10 @@ runStorageConformance("my-storage", async () => {
 - **The transform sandbox.** `core.transform` runs user JavaScript in QuickJS (WebAssembly), with
   limits on memory (64 MB), time (1 s) and stack. The code has no access to the network, the file
   system or timers. Its result goes through JSON, and any key named `__proto__`, `constructor` or
-  `prototype` is dropped. To swap the runtime, pass `createEngine({ transform })`.
+  `prototype` is dropped. To swap the runtime, pass `createEngine({ transform })`. QuickJS runs
+  synchronously, so a transform blocks the worker's event loop for up to its time limit. If
+  transforms are heavy and the API and the worker share a process, run the worker in its own
+  process.
 - **Secrets.** Secrets come from your `secrets.get(tenantId, name)`. The editor sees only secret
   names, from `secrets.list`.
 
@@ -442,6 +504,15 @@ pnpm -r typecheck
 pnpm lint          # biome
 pnpm build         # tsup
 ```
+
+`pnpm test` includes `examples/docs-check`, which checks the docs in two ways:
+
+- It extracts every `ts` or `tsx` block in this README and in the plugin guide, and typechecks
+  them. A block's fence names its file, for example `ts file=flowkit/nodes.ts`. Blocks from the
+  same document can import each other. Add `nocheck` to the fence to skip a block.
+- It runs the quick start on memory storage.
+
+If you add a TypeScript block without an annotation, the check fails.
 
 The design spec is `docs/superpowers/specs/2026-09-27-flowkit-design.md`.
 

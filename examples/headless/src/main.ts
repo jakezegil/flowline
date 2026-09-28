@@ -45,7 +45,7 @@ const lookupUser = defineNode({
   },
 });
 
-const notify = defineNode({
+export const notify = defineNode({
   type: "demo.notify",
   name: "Notify",
   input: z.object({ to: z.string(), text: z.string() }),
@@ -101,10 +101,13 @@ export async function main({ userId = "u1", log = console.log } = {}) {
 
   const detail = await engine.getRunDetail(tenantId, runId);
   if (!detail) throw new Error(`Run ${runId} not found`);
-  log(`Run ${runId} ${detail.run.status}`);
+  const { status, error } = detail.run;
+  log(`Run ${runId} ${status}${error ? `: ${error.message}` : ""}`);
   for (const e of detail.events) {
     log(`${String(e.seq).padStart(3)} ${e.type.padEnd(15)} ${e.stepPath ?? ""}`.trimEnd());
   }
+  log(`Outbox (${outbox.length})`);
+  for (const m of outbox) log(`  to ${m.to}: ${m.text}`);
   return { status: detail.run.status, events: detail.events, outbox };
 }
 
