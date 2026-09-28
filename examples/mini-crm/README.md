@@ -17,7 +17,7 @@ pnpm --filter @flowkit/example-mini-crm dev   # or: pnpm --filter ./examples/min
 A two-minute tour:
 
 1. **Webhook tester**: send the prefilled enterprise lead. The response links to its run.
-2. **Runs**: the run waits at "Request approval". Approve it from the bar above the canvas, or
+2. **Runs**: the run waits at "Manager approval". Approve it from the bar above the canvas, or
    from **Approvals**.
 3. **Outbox**: the lead's new owner got "Enterprise lead approved".
 4. **Deals**: set "Navy Labs expansion" to Won. The row shows the follow-up run it started, which
