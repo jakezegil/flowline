@@ -45,7 +45,12 @@ function triggerFilters(
     if (Array.isArray(value) ? !value.every(primitive) || value.length === 0 : !primitive(value))
       continue;
     const meta = metaOf(field);
-    if (meta.secret || meta.sensitive) continue;
+    if (meta.secret || meta.sensitive || value === false) continue;
+    // A switch that's on reads as its label ("Only when the stage changes").
+    if (value === true) {
+      out.push(labelOf(field, key));
+      continue;
+    }
     const text = Array.isArray(value)
       ? value.map((v) => optionLabel(v, meta)).join(", ")
       : optionLabel(value, meta);

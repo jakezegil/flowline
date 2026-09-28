@@ -265,6 +265,8 @@ describe("WorkflowCanvas", () => {
             "x-flowkit": { enumLabels: { won: "Won" } },
           },
           minAmount: { type: "number" },
+          onlyChanges: { type: "boolean", "x-flowkit": { label: "Only on changes" } },
+          skipTests: { type: "boolean" },
           apiKey: { type: "string", "x-flowkit": { secret: true } },
         },
       },
@@ -273,7 +275,16 @@ describe("WorkflowCanvas", () => {
     store = createEditorStore({
       doc: {
         ...doc,
-        trigger: { ...doc.trigger, config: { stage: "won", minAmount: 5000, apiKey: "KEY" } },
+        trigger: {
+          ...doc.trigger,
+          config: {
+            stage: "won",
+            minAmount: 5000,
+            apiKey: "KEY",
+            onlyChanges: true,
+            skipTests: false,
+          },
+        },
       },
       manifest: { ...manifest, triggers: [trigger, ...rest] },
     });
@@ -282,7 +293,7 @@ describe("WorkflowCanvas", () => {
       `.react-flow__node[data-id="trigger"] .fk-card__summary`,
     );
     expect(summary?.textContent).toBe(
-      "When contact.created happens · Stage: Won · Min amount: 5000",
+      "When contact.created happens · Stage: Won · Min amount: 5000 · Only on changes",
     );
   });
 
