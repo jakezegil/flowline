@@ -194,7 +194,8 @@ export function createExecutor(opts: EngineOptions): Executor {
   const clock = opts.clock ?? Date.now;
   const leaseMs = opts.leaseMs ?? DEFAULT_LEASE_MS;
   const stepsPerClaim = opts.stepsPerClaim ?? DEFAULT_STEPS_PER_CLAIM;
-  const services = opts.services ?? {};
+  // Hosts augment FlowkitServices with required members; without services they are simply absent.
+  const services = opts.services ?? ({} as NonNullable<EngineOptions["services"]>);
   const hooks = opts.__testHooks;
   const http = createGuardedFetch({
     ...opts.http,
