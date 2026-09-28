@@ -25,6 +25,7 @@ import { CronExpressionParser } from "cron-parser";
 import { parseWindow } from "./duration";
 import type { EngineCore } from "./engine";
 import { FlowlineValidationError } from "./errors";
+import type { NewRunEvent } from "./storage";
 import { checkTriggerPayload, visibleTriggerConfig } from "./subflow";
 import { errorMessage } from "./util";
 
@@ -165,9 +166,10 @@ export function createTriggers(core: EngineCore): Triggers {
   }
 
   /**
-   * Create a queued run of `v` with its `run.started` event (spec §4.2). With `dedupe`, starts
-   * nothing if the key is still claimed by an earlier delivery whose run exists, reporting
-   * `trigger.deduped`. `created` is whether this call started the run.
+   * Create a queued run of `v` with its `run.started` event (spec §4.2). With `dedupe`, a
+   * delivery that loses the claim starts nothing (recreating the claimant's run if it is missing)
+   * and reports `trigger.deduped`. `created` is whether this call started the run: true exactly
+   * for the claimant, or for every call without `dedupe`.
    */
   const launch = async (
     v: WorkflowVersion,
@@ -213,14 +215,34 @@ export function createTriggers(core: EngineCore): Triggers {
       events,
       now,
     );
-    // Only the delivery that claimed the key counts as creating the run: a concurrent duplicate
-    // can reach this point before that delivery's insert, and must not report or publish it too.
-    // So a run recovered after a crash is created without its `run.started` reaching `onEvent`,
-    // and its delivery is answered (and reported) as a duplicate; the run executes normally.
-    const created = claimed && run.createdAt === now && run.workflowId === v.workflowId;
-    if (created) core.publish(events);
-    else if (dedupe !== undefined) reportDeduped(v, runId, dedupe.key, startedBy, now);
+    // Exactly the delivery that claimed the key (or the only delivery, without one) counts as
+    // creating the run, even if a concurrent loser inserted it first: run IDs are random, so the
+    // run under a claimed ID is always this delivery's. A loser that inserted it (recovering a
+    // crash, or racing ahead of the claimant) is answered and reported as a duplicate, and its
+    // `run.started` never reaches `onEvent`; the run executes normally.
+    if (dedupe !== undefined && !claimed) {
+      reportDeduped(v, runId, dedupe.key, startedBy, now);
+      return { runId, created: false };
+    }
+    const created = run.workflowId === v.workflowId;
+    if (created) core.publish(await storedStart(run, now, events));
     return { runId, created };
+  };
+
+  /**
+   * The `run.started` to publish for `run`: `own` when this delivery inserted it (`createdAt ===
+   * now`), else the stored one a concurrent loser inserted (so `onEvent` sees what storage holds).
+   */
+  const storedStart = async (
+    run: { id: string; tenantId: string; createdAt: number },
+    now: number,
+    own: NewRunEvent[],
+  ): Promise<NewRunEvent[]> => {
+    if (run.createdAt === now) return own;
+    const stored = (await storage.listEvents(run.tenantId, run.id)).find(
+      (e) => e.type === "run.started",
+    );
+    return stored ? [stored] : own;
   };
 
   /** Report a delivery suppressed because `key` already belongs to run `runId`. */
@@ -270,28 +292,32 @@ export function createTriggers(core: EngineCore): Triggers {
 
   /**
    * The dedupe of one delivery: `key` namespaced as `<namespace>:<workflowId>:<key>`, and the
-   * window from `callWindow`, else the trigger's `dedupe.window`, else the engine default. No key
-   * → `undefined`.
+   * window `callWindowMs` (already parsed), else the trigger's `dedupe.window`, else the engine
+   * default. No key → `undefined`.
    */
   const dedupeFor = (
     namespace: string,
     v: WorkflowVersion,
     key: string | undefined,
-    callWindow: DurationInput | undefined,
+    callWindowMs: number | undefined,
   ): LaunchDedupe | undefined => {
     if (key === undefined) return undefined;
     const triggerWindow = registry.getTrigger(v.doc.trigger.type)?.dedupe?.window;
     return {
       key: `${namespace}:${v.workflowId}:${key}`,
-      windowMs: parseWindow(callWindow ?? triggerWindow, defaultWindowMs),
+      windowMs: callWindowMs ?? parseWindow(triggerWindow, defaultWindowMs),
     };
   };
+
+  /** A call-site window in ms (`undefined` when not given); throws if invalid. */
+  const callWindowOf = (window: DurationInput | undefined): number | undefined =>
+    window === undefined ? undefined : parseWindow(window, defaultWindowMs);
 
   return {
     async emit(event, payload, { tenantId, dedupe }) {
       // An invalid call-site window is the caller's mistake, not one match's: throw before any
       // match starts.
-      if (dedupe?.window !== undefined) parseWindow(dedupe.window, defaultWindowMs);
+      const callWindowMs = callWindowOf(dedupe?.window);
       const callKey = nonEmpty(dedupe?.key);
       const versions = (await storage.listPublished({ tenantId }))
         .filter((v) => {
@@ -360,7 +386,7 @@ export function createTriggers(core: EngineCore): Triggers {
           continue;
         }
         try {
-          launchDedupe = dedupeFor("event", v, key ?? callKey, dedupe?.window);
+          launchDedupe = dedupeFor("event", v, key ?? callKey, callWindowMs);
         } catch (err) {
           reject(v, err); // an invalid window on a trigger defined without `defineTrigger`
           continue;
@@ -380,11 +406,11 @@ export function createTriggers(core: EngineCore): Triggers {
     },
 
     async start({ tenantId, workflowId, input, dedupe, startedBy }) {
-      if (dedupe?.window !== undefined) parseWindow(dedupe.window, defaultWindowMs);
+      const callWindowMs = callWindowOf(dedupe?.window);
       const v = await storage.getPublishedVersion(tenantId, workflowId);
       if (!v) throw new Error(`Workflow "${workflowId}" is not published`);
       const payload = await payloadFor(v, input ?? {}, "Input");
-      const launchDedupe = dedupeFor("start", v, nonEmpty(dedupe?.key), dedupe?.window);
+      const launchDedupe = dedupeFor("start", v, nonEmpty(dedupe?.key), callWindowMs);
       const r = await launch(v, payload, startedBy ?? { kind: "manual" }, launchDedupe);
       return r.runId;
     },
@@ -505,7 +531,7 @@ export function createTriggers(core: EngineCore): Triggers {
       );
       const launchDedupe =
         headerKey !== undefined
-          ? dedupeFor("webhook", v, headerKey, configString(visible, "dedupeWindow"))
+          ? dedupeFor("webhook", v, headerKey, callWindowOf(configString(visible, "dedupeWindow")))
           : dedupeFor(
               "webhook",
               v,

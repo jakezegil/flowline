@@ -99,6 +99,18 @@ async function readBytes(req: Request): Promise<Uint8Array> {
   return out;
 }
 
+/**
+ * Whether `v` has the shape of {@link RunWorkflowRequest}'s `dedupe`. The window's value is
+ * checked by the engine (`FlowlineValidationError`, a 400).
+ */
+function isDedupeBody(v: unknown): v is NonNullable<RunWorkflowRequest["dedupe"]> {
+  return (
+    isPlainObject(v) &&
+    (v.key === undefined || typeof v.key === "string") &&
+    (v.window === undefined || typeof v.window === "string" || typeof v.window === "number")
+  );
+}
+
 /** The JSON request body; `undefined` when the body is empty. */
 async function readJson(req: Request): Promise<unknown> {
   const text = new TextDecoder().decode(await readBytes(req));
@@ -273,14 +285,7 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
           throw new HttpError(400, "Body must be { input, dedupe }");
         }
         const dedupe = body?.dedupe;
-        if (
-          dedupe !== undefined &&
-          (!isPlainObject(dedupe) ||
-            (dedupe.key !== undefined && typeof dedupe.key !== "string") ||
-            (dedupe.window !== undefined &&
-              typeof dedupe.window !== "string" &&
-              typeof dedupe.window !== "number"))
-        ) {
+        if (dedupe !== undefined && !isDedupeBody(dedupe)) {
           throw new HttpError(400, "dedupe must be { key?: string, window?: string | number }");
         }
         if (!(await storage.getPublishedVersion(tenantId, id))) {
@@ -291,7 +296,7 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
           tenantId,
           workflowId: id,
           input: body?.input,
-          dedupe: dedupe as RunWorkflowRequest["dedupe"],
+          dedupe,
           startedBy: { kind: "manual", userId },
         });
         return json(202, { runId });

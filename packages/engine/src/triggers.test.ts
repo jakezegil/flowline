@@ -529,6 +529,49 @@ describe("dedupe windows", () => {
     expect(runStarted).toEqual(started);
   });
 
+  it("the claimant counts as started even when a loser inserts the run first on a later clock", async () => {
+    // The claimant stalls between its claim and its `createRun` while the clock moves on; the
+    // losers find the run missing and insert it themselves (with a later `createdAt`).
+    let reached!: () => void;
+    const claimantStalled = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { triggerEvents, runStarted } = observed({
+      __testHooks: {
+        afterDedupeClaim: async () => {
+          now += 1000;
+          reached();
+          await gate;
+        },
+      },
+    });
+    await deploy(eventDoc("on-signup", "user.signedUp"));
+    const emit = () => engine.emit("user.signedUp", {}, { tenantId: "t1", dedupe: { key: "k" } });
+
+    const claimant = emit();
+    await claimantStalled;
+    const losers = await Promise.all(Array.from({ length: 4 }, emit));
+    const runs = await storage.listRuns("t1", {});
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.createdAt).toBe(t0 + 1000);
+    release();
+    const winner = await claimant;
+
+    const runId = runs[0]?.id as string;
+    expect(winner).toEqual({ started: [runId], rejected: [] });
+    for (const r of losers) expect(r).toEqual({ started: [], rejected: [] });
+    const deduped = triggerEvents.filter((e) => e.type === "trigger.deduped");
+    expect(deduped).toHaveLength(4);
+    for (const e of deduped) expect(e).toMatchObject({ runId });
+    expect(runStarted).toEqual([runId]);
+    const stored = (await storage.listEvents("t1", runId)).filter((e) => e.type === "run.started");
+    expect(stored).toHaveLength(1);
+  });
+
   it("ten concurrent starts with one key all resolve the one run's ID", async () => {
     const { triggerEvents } = observed();
     await deploy(manualDoc("m"));
