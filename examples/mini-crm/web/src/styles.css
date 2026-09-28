@@ -469,6 +469,26 @@
   gap: 8px;
 }
 
+.welcome {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 10px 10px 14px;
+  margin-bottom: 12px;
+  background: var(--c-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--c-accent) 25%, transparent);
+  border-radius: 8px;
+}
+.welcome__icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--c-accent-text);
+}
+.welcome__text {
+  flex: 1;
+  margin: 0;
+  line-height: 1.45;
+}
 .toolbar {
   display: flex;
   gap: 8px;
@@ -1382,7 +1402,12 @@ tr[data-stage="lost"] td:first-child {
   gap: 8px;
   justify-content: space-between;
 }
+.mail__flag {
+  flex: none;
+  margin-right: auto;
+}
 .mail__to {
+  min-width: 0;
   overflow: hidden;
   font-weight: 550;
   text-overflow: ellipsis;

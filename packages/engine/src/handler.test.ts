@@ -587,6 +587,9 @@ describe("runs", () => {
     const res = await call("POST", `/runs/${queued}/cancel`);
     expect(res.status).toBe(200);
     expect((await storage.getRun("a", queued))?.status).toBe("cancelled");
+    // The cancel records who asked for it.
+    const events = await storage.listEvents("a", queued);
+    expect(events.find((e) => e.type === "run.cancelled")?.data).toEqual({ by: "user-a" });
     const again = await call("POST", `/runs/${queued}/cancel`);
     expect(again.status).toBe(409);
     expect(await again.json()).toEqual({ error: "finished" });
@@ -596,6 +599,21 @@ describe("runs", () => {
     const requested = await call("POST", `/runs/${running}/cancel`);
     expect(requested.status).toBe(202);
     expect((await call("POST", "/runs/nope/cancel")).status).toBe(404);
+  });
+
+  it("records no actor on a cancel without authorize (nobody is signed in)", async () => {
+    // Same storage, so the open engine sees the run the authorized one started.
+    const open = makeEngine({ authorize: undefined });
+    await deploy(manualDoc("wf"), "default");
+    const runId = await engine.start({
+      tenantId: "default",
+      workflowId: "wf",
+      input: { name: "x" },
+    });
+    const res = await call("POST", `/runs/${runId}/cancel`, { tenant: null }, open);
+    expect(res.status).toBe(200);
+    const events = await storage.listEvents("default", runId);
+    expect(events.find((e) => e.type === "run.cancelled")?.data).toBeUndefined();
   });
 });
 

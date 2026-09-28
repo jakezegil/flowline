@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { Plus, Search, Users } from "lucide-react";
+import { Plus, Search, Sparkles, Users, X } from "lucide-react";
 import { type FormEvent, type JSX, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { ApiError, api, type Contact, invalidate, runsStartedBy, useQuery, useUsers } from "../api";
@@ -25,6 +25,50 @@ import {
 } from "../ui";
 
 const SOURCES = ["web", "referral", "event", "outbound"] as const;
+
+const WELCOME_KEY = "mini-crm.welcome-dismissed";
+
+/**
+ * The first page a visitor lands on is Contacts: point them at where the automations are, until
+ * they dismiss it (remembered in this browser).
+ */
+export function WelcomeHint(): JSX.Element | null {
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem(WELCOME_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  if (hidden) return null;
+  function dismiss() {
+    setHidden(true);
+    try {
+      localStorage.setItem(WELCOME_KEY, "1");
+    } catch {
+      // Private mode: it comes back on the next visit.
+    }
+  }
+  return (
+    <aside className="welcome" aria-label="Getting started">
+      <Sparkles size={16} aria-hidden className="welcome__icon" />
+      <p className="welcome__text">
+        <strong>New here?</strong> Automations live in <Link to="/workflows">Workflows</Link>. To
+        watch one run, send a sample lead from the <Link to="/webhook-tester">Webhook tester</Link>{" "}
+        and follow it in <Link to="/runs">Runs</Link>.
+      </p>
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label="Dismiss"
+        title="Dismiss"
+        onClick={dismiss}
+      >
+        <X size={14} aria-hidden />
+      </button>
+    </aside>
+  );
+}
 
 function NewContactDialog(props: { open: boolean; onClose(): void }): JSX.Element {
   const { users } = useUsers();
@@ -182,6 +226,7 @@ export function ContactsPage(): JSX.Element {
           </button>
         }
       />
+      <WelcomeHint />
       <div className="toolbar">
         <label className="search">
           <Search size={14} aria-hidden />

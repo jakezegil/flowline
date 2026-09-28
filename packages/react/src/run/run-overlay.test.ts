@@ -48,8 +48,8 @@ describe("buildRunOverlay", () => {
     const first = buildRunOverlay(detail, manifest, { each: 0 });
     expect(first.loopIteration.each?.index).toBe(0);
     expect(first.stepStatus.tag).toMatchObject({ status: "done", durationMs: 90 });
-    // An iteration that hasn't run yet shows its steps as not run.
-    expect(buildRunOverlay(detail, manifest, { each: 2 }).stepStatus.tag?.status).toBe("pending");
+    // The run failed, so an iteration it never reached shows its steps as skipped.
+    expect(buildRunOverlay(detail, manifest, { each: 2 }).stepStatus.tag?.status).toBe("skipped");
     // Out-of-range choices are clamped.
     expect(buildRunOverlay(detail, manifest, { each: 99 }).loopIteration.each?.index).toBe(2);
   });
@@ -73,10 +73,10 @@ describe("buildRunOverlay", () => {
     expect(o.stepStatus.off?.status).toBe("skipped");
   });
 
-  test("a suspended step is waiting, and so is the block around it", () => {
+  test("a suspended step is waiting; the condition around it is done", () => {
     const o = buildRunOverlay(waitingRun(), manifest, {});
     expect(o.stepStatus.email?.status).toBe("waiting");
-    expect(o.stepStatus.cond?.status).toBe("waiting");
+    expect(o.stepStatus.cond?.status).toBe("done");
     expect(o.stepStatus.each?.status).toBe("pending");
     expect(o.takenEdges.has("step:cond->step:email")).toBe(true);
   });
@@ -140,29 +140,29 @@ describe("runs that stop or wait inside nested blocks", () => {
     expect(o.stepStatus.halt).toEqual({ status: "stopped", attempts: 1 });
     expect(resolveRun(approvalStoppedRun(), approvalManifest(), {}).focusStepId).toBe("halt");
     // What came after the Stop never ran; the untaken branches are dimmed.
-    expect(o.stepStatus.after_halt?.status).toBe("pending");
-    expect(o.stepStatus.last?.status).toBe("pending");
+    expect(o.stepStatus.after_halt?.status).toBe("skipped");
+    expect(o.stepStatus.last?.status).toBe("skipped");
     expect(o.dimmedSteps?.has("notify")).toBe(true);
     expect(o.dimmedSteps?.has("welcome")).toBe(true);
     expect(o.takenEdges.has("step:approval->step:halt")).toBe(true);
   });
 
-  test("a branching step waiting inside a block: both read as waiting", () => {
+  test("a branching step waiting inside a block: it waits, the block around it is done", () => {
     const o = buildRunOverlay(approvalWaitingRun(), approvalManifest(), {});
     expect(o.stepStatus.approval?.status).toBe("waiting");
-    expect(o.stepStatus.size?.status).toBe("waiting");
+    expect(o.stepStatus.size?.status).toBe("done");
     expect(o.stepStatus.notify?.status).toBe("pending");
     expect(o.stepStatus.last?.status).toBe("pending");
     expect(resolveRun(approvalWaitingRun(), approvalManifest(), {}).focusStepId).toBe("approval");
   });
 
-  test("a run cancelled while waiting: the wait and its blocks read Cancelled, not Waiting", () => {
+  test("a run cancelled while waiting: the wait reads Cancelled, later steps Skipped", () => {
     const detail = { ...approvalWaitingRun() };
     detail.run = { ...detail.run, status: "cancelled" };
     const o = buildRunOverlay(detail, approvalManifest(), {});
     expect(o.stepStatus.approval?.status).toBe("cancelled");
-    expect(o.stepStatus.size?.status).toBe("cancelled");
-    expect(o.stepStatus.last?.status).toBe("pending");
+    expect(o.stepStatus.size?.status).toBe("done");
+    expect(o.stepStatus.last?.status).toBe("skipped");
     expect(resolveRun(detail, approvalManifest(), {}).focusStepId).toBeUndefined();
   });
 
@@ -170,7 +170,7 @@ describe("runs that stop or wait inside nested blocks", () => {
     const detail = { ...approvalWaitingRun() };
     detail.run = { ...detail.run, status: "failed" };
     expect(buildRunOverlay(detail, approvalManifest(), {}).stepStatus.approval?.status).toBe(
-      "pending",
+      "skipped",
     );
   });
 

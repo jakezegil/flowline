@@ -25,6 +25,7 @@ import { useShallow } from "zustand/react/shallow";
 
 export { useShallow };
 
+import { publishRunChange, type RunChange, subscribeRunChanges } from "./run/run-changes";
 import type { EditorActions, EditorState, EditorStore, TestState } from "./store/editor-store";
 
 /**
@@ -284,6 +285,7 @@ export function useRun(runId: string): {
         (detail) => {
           if (!active || request !== latest) return;
           setState({ runId, detail });
+          publishRunChange(client, detail.run);
           // A finished run doesn't change until it is retried (same run id): stop listening,
           // and listen again once a refresh shows it running.
           if (TERMINAL_RUN_STATUSES.has(detail.run.status)) stopListening();
@@ -314,4 +316,36 @@ export function useRun(runId: string): {
     ...(current.error ? { error: current.error } : {}),
     refresh,
   };
+}
+
+export type { RunChange };
+
+/**
+ * Calls `listener` whenever a run's status changes as this app sees it: a `<RunViewer>` or
+ * {@link useRun} loading a run (after its live events, a cancel, a retry or a resume), or a
+ * `<RunList>` poll finding a listed run in a new state. `<RunList>` uses it to update at once; use
+ * it to refresh data of your own that depends on runs, e.g. a count of pending approvals. Needs a
+ * `<FlowkitProvider>`.
+ *
+ * `previous` is the status this app last saw the run in, or `undefined` the first time it sees
+ * the run (a viewer opening it): compare the two to react only to real transitions.
+ *
+ * @example
+ * useRunChanges((run, previous) => {
+ *   if (previous !== undefined && (previous === "waiting") !== (run.status === "waiting")) {
+ *     approvals.reload();
+ *   }
+ * });
+ */
+export function useRunChanges(
+  listener: (run: RunChange, previous: RunChange["status"] | undefined) => void,
+): void {
+  const client = useContext(FlowkitClientContext);
+  if (!client) throw new Error("useRunChanges must be used inside <FlowkitProvider>");
+  const ref = useRef(listener);
+  ref.current = listener;
+  useEffect(
+    () => subscribeRunChanges(client, (run, previous) => ref.current(run, previous)),
+    [client],
+  );
 }

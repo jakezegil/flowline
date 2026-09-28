@@ -2,6 +2,7 @@
 export const VERSION = "0.1.0";
 
 export {
+  type CancelRunOptions,
   createEngine,
   type Engine,
   type EngineOptions,
@@ -19,6 +20,7 @@ export {
 } from "./errors";
 export { buildScope, type Frame, type NextAction, nextAction } from "./interpreter";
 export {
+  type CancelRequest,
   type Lease,
   type ListRunsFilter,
   type NewRun,

@@ -321,20 +321,31 @@ export function createExecutor(opts: EngineOptions): Executor {
      * cancel, including the parent's `subflowFailed` wake-up. A `run.resumed` still owed by this
      * claim is dropped, since the run never resumes.
      */
-    const cancelUnderLease = async (stepPath: string): Promise<void> => {
+    const cancelUnderLease = async (
+      stepPath: string,
+      request?: Run["cancelRequest"],
+    ): Promise<void> => {
       resumedKind = undefined;
-      await commit(
-        cancelPatch(run),
-        [event("run.cancelled", stepPath === "" ? undefined : stepPath)],
-        stepPath,
-      );
+      // Who asked and why come with the request (read from the row unless the caller has it).
+      const req = request ?? (await storage.getRunById(run.id))?.cancelRequest;
+      await commit(cancelPatch(run), [cancelledEvent(stepPath, req)], stepPath);
     };
+
+    /** The `run.cancelled` event at `stepPath`, with the request's `by` and `reason` as data. */
+    const cancelledEvent = (stepPath: string, request: Run["cancelRequest"]) =>
+      event(
+        "run.cancelled",
+        stepPath === "" ? undefined : stepPath,
+        request && (request.by !== undefined || request.reason !== undefined)
+          ? { ...request }
+          : undefined,
+      );
 
     /** After parking the run: cancel it (unleased CAS) if a cancel request is pending. */
     const cancelParked = async (stepPath: string): Promise<void> => {
       const latest = await storage.getRun(run.tenantId, run.id);
       if (latest?.cancelRequestedAt === undefined) return;
-      const events = [event("run.cancelled", stepPath === "" ? undefined : stepPath)];
+      const events = [cancelledEvent(stepPath, latest.cancelRequest)];
       const ok = await storage.updateRunUnleased(
         run.tenantId,
         run.id,
@@ -496,7 +507,7 @@ export function createExecutor(opts: EngineOptions): Executor {
 
     // Cancellation requested while the run was leased (or parked, see `Engine.cancelRun`).
     if (run.cancelRequestedAt !== undefined) {
-      await cancelUnderLease(run.currentStep ?? "");
+      await cancelUnderLease(run.currentStep ?? "", run.cancelRequest ?? {});
       return;
     }
 

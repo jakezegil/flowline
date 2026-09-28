@@ -11,6 +11,8 @@ export default defineConfig({
   resolve: { conditions: ["flowkit-source", ...defaultClientConditions] },
   root: fileURLToPath(new URL(".", import.meta.url)),
   plugins: [react()],
+  // In dev, the "can't reach the server" message names the address `/api` is proxied to.
+  define: { "import.meta.env.VITE_CRM_API_TARGET": JSON.stringify(target) },
   server: {
     port: Number(process.env.WEB_PORT ?? 5173),
     proxy: {

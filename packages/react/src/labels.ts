@@ -420,6 +420,19 @@ export interface FlowkitLabels {
   failedAt(step: string): string;
   /** Title of a stopped run's banner, e.g. "Stopped at Reject lead". */
   stoppedAt(step: string): string;
+  /**
+   * The waiting line of a step the host app resumes (`resume.hostHandled`, e.g. an approval), in
+   * place of {@link FlowkitLabels.waitingForCallback}: "Waiting for a decision · expires in 3 days".
+   */
+  waitingForDecision(expires: string | undefined): string;
+  /** Title of a cancelled run's banner when it was waiting at a step. */
+  cancelledWhileWaiting(step: string): string;
+  /** Title of a cancelled run's banner when a step was running (or queued) as it was cancelled. */
+  cancelledAt(step: string): string;
+  /** Who cancelled a run, in its banner: "By Ava Chen". */
+  cancelledBy(who: string): string;
+  /** A step a finished run never reached (its Output tab). */
+  didNotRun: string;
   iterationOf(i: number, n: number): string;
   showStep: string;
   runSummary: string;
@@ -877,6 +890,12 @@ export const defaultLabels: FlowkitLabels = {
   waitingForSubflow: "Waiting for a called workflow to finish",
   failedAt: (step) => `Failed at ${step}`,
   stoppedAt: (step) => `Stopped at ${step}`,
+  waitingForDecision: (expires) =>
+    expires ? `Waiting for a decision · expires ${expires}` : "Waiting for a decision",
+  cancelledWhileWaiting: (step) => `Cancelled while waiting at ${step}`,
+  cancelledAt: (step) => `Cancelled at ${step}`,
+  cancelledBy: (who) => `By ${who}`,
+  didNotRun: "This step didn't run: the run ended before reaching it.",
   iterationOf: (i, n) => `iteration ${i} of ${n}`,
   showStep: "Show step",
   runSummary: "Run details",
@@ -938,10 +957,11 @@ export const defaultLabels: FlowkitLabels = {
   callbackBodyExpects: (type) => `Expects ${type}`,
 };
 
-/** "just now", "5 min ago", "in 6 days". */
+/** "just now", "5 min ago", "in a few seconds", "in 6 days". */
 function relativeTime(deltaMs: number): string {
   const abs = Math.abs(deltaMs);
-  if (abs < 45_000) return "just now";
+  // A moment ahead is still ahead: a wait ending in 30s isn't "just now".
+  if (abs < 45_000) return deltaMs > 1_000 ? "in a few seconds" : "just now";
   const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto", style: "short" });
   const units: [Intl.RelativeTimeFormatUnit, number][] = [
     ["minute", 60_000],

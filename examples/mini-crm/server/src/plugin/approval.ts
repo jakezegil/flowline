@@ -65,7 +65,7 @@ export const requestApproval = defineNode({
   resume: {
     body: z.object({ decision: z.enum(["approved", "rejected"]) }),
     hostHandled: true,
-    hint: "Approve or reject it in Approvals.",
+    hint: "Decide it in the approval bar above, or on the Approvals page.",
   },
   branches: {
     kind: "static",

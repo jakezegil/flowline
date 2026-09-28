@@ -120,7 +120,8 @@ export function resolveRun(
   function statusOf(step: Step, path: string, e: JournalEntry | undefined): RunStepStatus {
     if (!e) {
       if (runActive && inFlight.has(path)) return { status: "running" };
-      return { status: step.disabled ? "skipped" : "pending" };
+      // A finished run will never reach it: skipped, not "not run yet".
+      return { status: step.disabled || !runActive ? "skipped" : "pending" };
     }
     switch (e.status) {
       case "done":
@@ -134,10 +135,19 @@ export function resolveRun(
       case "suspended":
         // The journal keeps the wait after a cancel (or any other end): it isn't waiting now.
         if (run.status === "cancelled") return { status: "cancelled", attempts: e.attempts };
-        if (!runActive) return { status: "pending", attempts: e.attempts };
+        if (!runActive) return { status: "skipped", attempts: e.attempts };
         return { status: "waiting", attempts: e.attempts };
       case "skipped":
         return { status: "skipped" };
+      case "branched":
+        // A condition or switch is done once it chose its branch: it doesn't read "waiting" or
+        // "running" while the steps inside that branch do (they carry their own status). Its
+        // duration runs to its last journaled child, as it does once the block completes.
+        return {
+          status: "done",
+          durationMs: latestAt(`${path}/`, e.at) - e.startedAt,
+          attempts: e.attempts,
+        };
       default: {
         // A block (branched or looping) whose children haven't all finished.
         const worst = descendantState(`${path}/`);

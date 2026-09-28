@@ -7,11 +7,13 @@ export { WorkflowEditor } from "./editor/workflow-editor";
 export {
   EditorContext,
   FlowkitClientContext,
+  type RunChange,
   useDataPicker,
   useEditorStore,
   useEditorStoreApi,
   useIssues,
   useRun,
+  useRunChanges,
   useSelection,
   useShallow,
   useStep,

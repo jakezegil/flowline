@@ -48,7 +48,13 @@ export function migrations(s: string): Migration[] {
   return [
     { version: 1, statements: v1(s) },
     { version: 2, statements: v2(s) },
+    { version: 3, statements: v3(s) },
   ];
+}
+
+/** v3: who requested a run's cancellation, and why (`requestCancel`'s `request`). */
+function v3(s: string): string[] {
+  return [`ALTER TABLE ${s}.runs ADD COLUMN IF NOT EXISTS cancel_request jsonb`];
 }
 
 /** v2: cooperative cancellation of executing runs (`requestCancel`). */
