@@ -15,7 +15,8 @@
  * - `GET  /runs/:id` → {@link RunDetail}
  * - `POST /runs/:id/retry` → {@link RunStartedResponse} (409 when the run is not failed)
  * - `POST /runs/:id/cancel` → 200 cancelled, 202 cancellation requested, 409 `{ error: "finished" }`
- * - `POST /runs/:id/resume` body = callback body → 202 (410 `{ error: "gone" }` when not waiting)
+ * - `POST /runs/:id/resume?step=<stepPath>` body = callback body → 202 (410 `{ error: "gone" }`
+ *   when not waiting on a callback, or, with `step`, not waiting at that step)
  * - `GET  /runs/:id/stream?after=<seq>` → `text/event-stream` of `event: run`, `id: <seq>`,
  *   `data: <RunEvent JSON>` frames; ends once the run's latest event is
  *   `run.completed|failed|cancelled|stopped` (a retried run's earlier `run.failed` does not end it)

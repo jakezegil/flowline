@@ -583,6 +583,19 @@ describe("resume", () => {
     });
     expect((await call("POST", `/runs/${runId}/resume`, { body: {} })).status).toBe(410);
   });
+
+  it("resumes only at the step named by ?step", async () => {
+    const { runId } = await waitingRun();
+    const wrong = await call("POST", `/runs/${runId}/resume?step=elsewhere`, { body: {} });
+    expect(wrong.status).toBe(410);
+    expect(await wrong.json()).toEqual({ error: "gone" });
+    expect((await storage.getRun("a", runId))?.status).toBe("waiting");
+
+    const res = await call("POST", `/runs/${runId}/resume?step=approval`, { body: { ok: 1 } });
+    expect(res.status).toBe(202);
+    await engine.drain();
+    expect((await storage.getRun("a", runId))?.status).toBe("completed");
+  });
 });
 
 describe("webhooks", () => {

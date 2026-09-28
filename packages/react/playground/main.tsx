@@ -2,7 +2,8 @@
  * Dev playground: `pnpm --filter @flowkit/react playground`. URL params pick the state, so the
  * screenshot script can drive it: `?theme=light|dark|system&doc=nested|empty&mode=edit|readonly|run`
  * for the bare canvas, `?page=editor&wf=deal-won|onboarding|inbound-lead` for the editor, and
- * `?page=run&run=running|waiting|failed|loop` for the run viewer beside the run list.
+ * `?page=run&run=running|waiting|failed|loop` for the run viewer beside the run list, and
+ * `?page=picker` (or `/picker`) for the reference input, data picker and code editor.
  */
 import type { FlowkitClient } from "@flowkit/core/client";
 import { StrictMode, useMemo, useState } from "react";
@@ -19,6 +20,7 @@ import {
 import "../src/styles.css";
 import { emptyDoc, manifest, nestedDoc } from "./fixtures";
 import { mockClient, runIdOf } from "./mock-client";
+import { PickerPage } from "./picker-page";
 
 type Theme = "light" | "dark" | "system";
 type DocName = "nested" | "empty";
@@ -202,6 +204,7 @@ function AppPage({ page }: { page: "editor" | "run" }) {
 function App() {
   const page = params.get("page");
   if (page === "editor" || page === "run") return <AppPage page={page} />;
+  if (page === "picker" || location.pathname.endsWith("/picker")) return <PickerPage />;
   return <CanvasPage />;
 }
 
