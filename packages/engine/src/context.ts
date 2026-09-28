@@ -4,6 +4,7 @@
  * @module
  */
 import type {
+  CallbackHandle,
   FlowkitServices,
   Logger,
   NodeContext,
@@ -30,6 +31,8 @@ export interface ContextArgs {
   scope: ResolveScope;
   secrets?: { get(tenantId: string, name: string): Promise<string | undefined> };
   transform?: TransformRuntime;
+  /** Issues a callback for this invocation (`ctx.callback`); unsupported when omitted. */
+  callback?: (opts: { timeoutMs: number }) => Promise<CallbackHandle>;
 }
 
 const noopLogger: Logger = { debug() {}, info() {}, warn() {}, error() {} };
@@ -46,6 +49,15 @@ function deepFreeze<T>(value: T): T {
 export async function sha256Hex(text: string): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** @internal A fresh 32-byte random callback token, base64url-encoded without padding. */
+export function newCallbackToken(): string {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
 /** @internal The context handed to a node handler. */
@@ -76,8 +88,9 @@ export function createNodeContext(a: ContextArgs): NodeContext {
         return value;
       },
     },
-    async callback() {
-      throw new FatalError("ctx.callback() is not supported yet");
+    async callback(opts) {
+      if (!a.callback) throw new FatalError("ctx.callback() is not available here");
+      return a.callback(opts);
     },
     transform: a.transform ?? {
       async run() {

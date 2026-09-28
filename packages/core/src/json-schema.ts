@@ -49,6 +49,48 @@ export function fieldsToJsonSchema(fields: FieldDecl[]): JSONSchema {
   };
 }
 
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** Runtime value checks per {@link FieldType}, matching {@link fieldsToJsonSchema}. */
+const FIELD_VALUE_CHECKS: Record<FieldType, (v: unknown) => boolean> = {
+  string: (v) => typeof v === "string",
+  number: (v) => typeof v === "number" && Number.isFinite(v),
+  boolean: (v) => typeof v === "boolean",
+  object: isPlainObject,
+  array: Array.isArray,
+  date: (v) => typeof v === "string" && !Number.isNaN(Date.parse(v)),
+};
+
+/**
+ * Check `value` against user-declared fields: it must be an object, every `required` field must
+ * be present (not `undefined`), and present fields must have their declared type (`date` = a
+ * parseable date string). Extra properties are allowed, as in {@link fieldsToJsonSchema};
+ * malformed declarations are ignored.
+ *
+ * @returns Why the value does not match (e.g. `field "email" is required`), or `undefined`.
+ *
+ * @example
+ * ```ts
+ * checkFields([{ name: "n", type: "number", required: true }], { n: "1" });
+ * // 'field "n" must be of type number'
+ * ```
+ */
+export function checkFields(fields: readonly FieldDecl[], value: unknown): string | undefined {
+  if (!isPlainObject(value)) return "must be an object";
+  for (const field of fields) {
+    const check = isPlainObject(field) ? FIELD_VALUE_CHECKS[field.type] : undefined;
+    if (!check || typeof field.name !== "string") continue;
+    const v = Object.hasOwn(value, field.name) ? value[field.name] : undefined;
+    if (v === undefined) {
+      if (field.required === true) return `field "${field.name}" is required`;
+    } else if (!check(v)) {
+      return `field "${field.name}" must be of type ${field.type}`;
+    }
+  }
+  return undefined;
+}
+
 /** Keys that constrain a schema. A schema with none of them accepts any JSON value. */
 const CONSTRAINT_KEYS = [
   "type",

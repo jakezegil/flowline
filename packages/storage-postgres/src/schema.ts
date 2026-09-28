@@ -45,7 +45,15 @@ export function bootstrapStatements(s: string): string[] {
  * Statements are also `IF NOT EXISTS`, so re-running one on a partially migrated database is safe.
  */
 export function migrations(s: string): Migration[] {
-  return [{ version: 1, statements: v1(s) }];
+  return [
+    { version: 1, statements: v1(s) },
+    { version: 2, statements: v2(s) },
+  ];
+}
+
+/** v2: cooperative cancellation of executing runs (`requestCancel`). */
+function v2(s: string): string[] {
+  return [`ALTER TABLE ${s}.runs ADD COLUMN IF NOT EXISTS cancel_requested_at bigint`];
 }
 
 /** v1: the initial tables and indexes. */

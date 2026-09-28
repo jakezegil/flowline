@@ -6,6 +6,7 @@
  */
 import {
   branchesFor,
+  type CallbackHandle,
   collectRefs,
   isRef,
   isSignal,
@@ -13,6 +14,7 @@ import {
   type JournalEntry,
   type NodeDefinition,
   type NodeManifest,
+  type ResumeInfo,
   type RetryPolicy,
   type RunError,
   type RunEventType,
@@ -22,12 +24,13 @@ import {
   type WorkflowVersion,
 } from "@flowkit/core";
 import type { z } from "zod";
-import { createNodeContext, sha256Hex } from "./context";
+import { createNodeContext, newCallbackToken, sha256Hex } from "./context";
 import type { EngineOptions } from "./engine";
-import { RetryableError } from "./errors";
+import { FatalError, RetryableError } from "./errors";
 import { buildScope, childSteps, entryAt, type NextAction, nextAction } from "./interpreter";
 import { redactBySchema } from "./redact";
-import type { Lease, NewRunEvent, RunPatch } from "./storage";
+import type { Lease, NewRunEvent, Run, RunPatch } from "./storage";
+import { startSubflow } from "./subflow";
 
 const DEFAULT_LEASE_MS = 30_000;
 const DEFAULT_STEPS_PER_CLAIM = 100;
@@ -36,6 +39,32 @@ const DEFAULT_RETRY: RetryPolicy = { max: 3, backoff: "exponential", initialMs: 
 const MAX_BACKOFF_MS = 3_600_000;
 /** Consecutive `renewLease` rejections tolerated before the claim is abandoned. */
 const MAX_RENEWAL_ERRORS = 3;
+const DEFAULT_BASE_PATH = "/flowkit";
+/** @internal Run statuses that never change again (except through `retryRun`). */
+export const TERMINAL: ReadonlySet<Run["status"]> = new Set(["completed", "failed", "cancelled"]);
+
+/**
+ * @internal The patch that cancels `run`, whichever path cancels it: wake-up and callback state
+ * cleared and, for a sub-flow run, the parent woken with `subflowFailed` ("Sub-flow cancelled").
+ */
+export function cancelPatch(run: Pick<Run, "id" | "parent">): RunPatch {
+  const patch: RunPatch = {
+    status: "cancelled",
+    wakeAt: null,
+    resume: null,
+    callbackToken: null,
+    callbackExpiresAt: null,
+  };
+  if (run.parent) {
+    patch.wakeParent = {
+      runId: run.parent.runId,
+      stepPath: run.parent.stepPath,
+      childRunId: run.id,
+      resume: { kind: "subflowFailed", error: { message: "Sub-flow cancelled" } },
+    };
+  }
+  return patch;
+}
 
 /** @internal Advances claimed runs. Shared by the engine and crash-injection tests. */
 export interface Executor {
@@ -49,6 +78,8 @@ export interface Executor {
    * hooks), leaving the lease to expire.
    */
   executeClaim(lease: Lease, workerId: string): Promise<void>;
+  /** Report persisted events to the engine's `onEvent` listener. */
+  publish(events: NewRunEvent[]): void;
 }
 
 /** Signals that the lease was taken over; processing stops without committing. */
@@ -56,11 +87,25 @@ class LeaseLostError extends Error {
   override readonly name = "LeaseLostError";
 }
 
+/** Signals that `cancelRun` flagged the run while a handler ran; the run is cancelled. */
+class CancelRequestedError extends Error {
+  override readonly name = "CancelRequestedError";
+}
+
 // biome-ignore lint/suspicious/noExplicitAny: definitions of any input/output types
 type AnyNode = NodeDefinition<any, any>;
 
 /** The outcome of one executed step: keep going within this claim, or stop. */
 type Flow = "continue" | "stop";
+
+type Pending = Extract<JournalEntry, { status: "suspended" }>["pending"];
+
+/** `a` overridden by the defined fields of `b`. */
+function mergePatch(a: RunPatch, b: RunPatch): RunPatch {
+  const out: Record<string, unknown> = { ...a };
+  for (const [k, v] of Object.entries(b)) if (v !== undefined) out[k] = v;
+  return out as RunPatch;
+}
 
 /** Delay before retrying after failed attempt number `attempt` (1-based). */
 function backoffMs(policy: RetryPolicy, attempt: number): number {
@@ -171,32 +216,128 @@ export function createExecutor(opts: EngineOptions): Executor {
     const run = lease.run;
     let journal: Record<string, JournalEntry> = { ...run.journal };
     let attempt = run.attempt;
-    let resume = run.resume;
     let leaseUntil = run.leaseUntil ?? clock() + leaseMs;
-    let clearWakeAt = run.wakeAt !== undefined;
 
-    const event = (type: RunEventType, stepPath?: string, data?: unknown): NewRunEvent => {
-      const e: NewRunEvent = { runId: run.id, tenantId: run.tenantId, type, at: clock(), workerId };
+    // `ctx.resume` is derived from why the run was waiting, never from token presence. A resume set
+    // by storage (callback, subflow, subflowFailed) is used as is; a timer or callback run woken by
+    // its `wakeAt` resumes with `timer` / `timeout`. The first commit of this claim (the start
+    // commit of the resumed step) persists the derived resume, clears the wake time and — for
+    // timeouts — the dead token, and carries the one `run.resumed` event, so a retry or a lost
+    // worker later sees the same `ctx.resume` without a second event. A `retry` wait keeps whatever
+    // `run.resume` holds. Callback resumes get their `run.resumed` event from `engine.resume`.
+    let resume: ResumeInfo | undefined = run.resume;
+    let wakePatch: RunPatch | undefined = run.wakeAt !== undefined ? { wakeAt: null } : undefined;
+    let resumedKind: ResumeInfo["kind"] | undefined;
+    if (!resume && (run.waitReason === "timer" || run.waitReason === "callback")) {
+      resume = run.waitReason === "timer" ? { kind: "timer" } : { kind: "timeout" };
+      wakePatch = { ...wakePatch, resume, callbackToken: null, callbackExpiresAt: null };
+      resumedKind = resume.kind;
+    } else if (resume && run.waitReason === "subflow") {
+      resumedKind = resume.kind;
+    }
+
+    const eventFor = (
+      runId: string,
+      type: RunEventType,
+      stepPath?: string,
+      data?: unknown,
+    ): NewRunEvent => {
+      const e: NewRunEvent = { runId, tenantId: run.tenantId, type, at: clock(), workerId };
       if (stepPath !== undefined) e.stepPath = stepPath;
       if (data !== undefined) e.data = data;
       return opts.redact ? opts.redact(e) : e;
     };
+    const event = (type: RunEventType, stepPath?: string, data?: unknown) =>
+      eventFor(run.id, type, stepPath, data);
 
-    /** Commit under the lease; `false` means the lease was lost and processing must stop. */
+    /** A wake-up of the parent run in this (terminal) commit, for sub-flow runs. */
+    const wakeParent = (info: ResumeInfo): Pick<RunPatch, "wakeParent"> =>
+      run.parent
+        ? {
+            wakeParent: {
+              runId: run.parent.runId,
+              stepPath: run.parent.stepPath,
+              childRunId: run.id,
+              resume: info,
+            },
+          }
+        : {};
+
+    /**
+     * Commit under the lease; `false` means processing must stop (the lease was lost, or the run
+     * was cancelled instead). A commit that gives the run up without finishing it (`waiting`, or
+     * `queued` again) first honours a pending cancel request, so a flagged run is not parked.
+     */
     const commit = async (
       patch: RunPatch,
       events: NewRunEvent[],
       stepPath: string,
       phase: "start" | "result" = "result",
-    ) => {
+    ): Promise<boolean> => {
+      if (
+        (patch.status === "waiting" || patch.status === "queued") &&
+        (await cancelIfRequested(stepPath))
+      ) {
+        return false;
+      }
       await hooks?.beforeCommit?.(run.id, stepPath, phase);
-      const full = clearWakeAt && patch.wakeAt === undefined ? { ...patch, wakeAt: null } : patch;
-      const ok = await storage.commit(lease, full, events, clock());
+      const full = wakePatch ? mergePatch(wakePatch, patch) : patch;
+      const all =
+        resumedKind !== undefined
+          ? [event("run.resumed", run.currentStep, { kind: resumedKind }), ...events]
+          : events;
+      const ok = await storage.commit(lease, full, all, clock());
       if (ok) {
-        clearWakeAt = false;
-        publish(events);
+        wakePatch = undefined;
+        resumedKind = undefined;
+        publish(all);
+        // A request that arrived after the check above but before this park found the run still
+        // leased (so `cancelRun` only flagged it). The run is unleased now: cancel it directly.
+        if (patch.status === "waiting" || patch.status === "queued") await cancelParked(stepPath);
       }
       return ok;
+    };
+
+    /**
+     * Cancel the run under the lease (see `Engine.cancelRun`): the same transition as an unleased
+     * cancel, including the parent's `subflowFailed` wake-up. A `run.resumed` still owed by this
+     * claim is dropped, since the run never resumes.
+     */
+    const cancelUnderLease = async (stepPath: string): Promise<void> => {
+      resumedKind = undefined;
+      await commit(
+        cancelPatch(run),
+        [event("run.cancelled", stepPath === "" ? undefined : stepPath)],
+        stepPath,
+      );
+    };
+
+    /** After parking the run: cancel it (unleased CAS) if a cancel request is pending. */
+    const cancelParked = async (stepPath: string): Promise<void> => {
+      const latest = await storage.getRun(run.tenantId, run.id);
+      if (latest?.cancelRequestedAt === undefined) return;
+      const events = [event("run.cancelled", stepPath === "" ? undefined : stepPath)];
+      const ok = await storage.updateRunUnleased(
+        run.tenantId,
+        run.id,
+        { status: ["waiting", "queued"] },
+        cancelPatch(run),
+        events,
+        clock(),
+      );
+      // Losing the CAS means another worker claimed the run; its after-claim check cancels it.
+      if (ok) publish(events);
+    };
+
+    /** Whether cancellation of this run was requested; reads the run row. */
+    const cancelRequested = async (): Promise<boolean> =>
+      (await storage.getRunById(run.id))?.cancelRequestedAt !== undefined;
+
+    /** Cancel the run if that was requested; `true` when it was (processing must stop). */
+    const cancelIfRequested = async (stepPath: string): Promise<boolean> => {
+      if (!(await cancelRequested())) return false;
+      await cancelUnderLease(stepPath);
+      return true;
     };
 
     /** Commit a journal entry for `path` and adopt it locally. */
@@ -219,7 +360,16 @@ export function createExecutor(opts: EngineOptions): Executor {
     };
 
     const failRun = async (error: RunError, failed?: { path: string; entry: JournalEntry }) => {
-      const patch: RunPatch = { status: "failed", error, currentStep: null, waitReason: null };
+      const patch: RunPatch = {
+        status: "failed",
+        error,
+        currentStep: null,
+        waitReason: null,
+        resume: null,
+        callbackToken: null,
+        callbackExpiresAt: null,
+        ...wakeParent({ kind: "subflowFailed", error: { message: error.message } }),
+      };
       const events = [event("run.failed", error.stepPath, { error })];
       if (failed) {
         events.unshift(event("step.failed", failed.path, { error }));
@@ -229,6 +379,12 @@ export function createExecutor(opts: EngineOptions): Executor {
       }
       return "stop" as const;
     };
+
+    // Cancellation requested while the run was leased (or parked, see `Engine.cancelRun`).
+    if (run.cancelRequestedAt !== undefined) {
+      await cancelUnderLease(run.currentStep ?? "");
+      return;
+    }
 
     const version = await loadVersion(run.tenantId, run.workflowId, run.version);
     if (!version) {
@@ -271,7 +427,23 @@ export function createExecutor(opts: EngineOptions): Executor {
         path: string;
         scope: ReturnType<typeof buildScope>;
       },
-    ): Promise<unknown> => {
+    ): Promise<{ result: unknown; issued: CallbackHandle | undefined }> => {
+      // The callback issued by this invocation. Its token lives only here until the suspend
+      // commit stores it on the run; it is never journaled or put into events.
+      let issued: CallbackHandle | undefined;
+      const callback = async ({ timeoutMs }: { timeoutMs: number }) => {
+        if (typeof timeoutMs !== "number" || !(timeoutMs > 0) || !Number.isFinite(timeoutMs)) {
+          throw new FatalError("ctx.callback() needs a positive timeoutMs");
+        }
+        if (issued) throw new FatalError("callback already issued for this step");
+        const token = newCallbackToken();
+        issued = {
+          token,
+          resumeUrl: `${opts.publicUrl ?? ""}${opts.basePath ?? DEFAULT_BASE_PATH}/resume/${token}`,
+          expiresAt: clock() + timeoutMs,
+        };
+        return { ...issued };
+      };
       const controller = new AbortController();
       const timeoutMs = node.timeoutMs ?? DEFAULT_TIMEOUT_MS;
       // The handler is not killed at the timeout: it may keep running while the retry starts, which
@@ -280,10 +452,21 @@ export function createExecutor(opts: EngineOptions): Executor {
       let renewalErrors = 0;
       const renewal = setInterval(() => {
         storage.renewLease(lease, leaseMs, clock()).then(
-          (ok) => {
+          async (ok) => {
             renewalErrors = 0;
-            if (ok) leaseUntil = clock() + leaseMs;
-            else controller.abort(new LeaseLostError("lease lost"));
+            if (!ok) {
+              controller.abort(new LeaseLostError("lease lost"));
+              return;
+            }
+            leaseUntil = clock() + leaseMs;
+            // Each renewal also polls for a cancel request, so a long handler is aborted promptly.
+            try {
+              if (await cancelRequested()) {
+                controller.abort(new CancelRequestedError("run cancelled"));
+              }
+            } catch (err) {
+              opts.logger?.warn("cancel check failed", { runId: run.id, error: errorMessage(err) });
+            }
           },
           (err: unknown) => {
             // A transient storage error: keep the claim and try again on the next tick.
@@ -323,20 +506,51 @@ export function createExecutor(opts: EngineOptions): Executor {
           scope: ctxArgs.scope,
           ...(opts.secrets ? { secrets: opts.secrets } : {}),
           ...(opts.transform ? { transform: opts.transform } : {}),
+          callback,
         });
         const handler = Promise.resolve().then(() => node.run({ input, ctx }));
         handler.catch(() => {});
-        return await Promise.race([handler, aborted]);
+        const result = await Promise.race([handler, aborted]);
+        return { result, issued };
       } finally {
         clearTimeout(timer);
         clearInterval(renewal);
       }
     };
 
+    /**
+     * Evaluate the workflow's output mapping against `j`'s end-of-run scope. `strict` also requires
+     * every referenced value to exist (used for stopped sub-flows, whose later steps never ran).
+     */
+    const mapOutput = (
+      j: Record<string, JournalEntry>,
+      { strict = false } = {},
+    ): { ok: true; output: unknown } | { ok: false; message: string } => {
+      if (!doc.output) return { ok: true, output: undefined };
+      try {
+        const scope = buildScope(doc, j, "", run.trigger, run.id);
+        const entries = Object.entries(doc.output);
+        if (strict) {
+          const missing = entries
+            .flatMap(([, v]) => collectRefs(v))
+            .find((ref) => resolveValue({ $ref: ref }, scope) === undefined);
+          if (missing !== undefined) return { ok: false, message: `"${missing}" is not set` };
+        }
+        return {
+          ok: true,
+          output: Object.fromEntries(entries.map(([k, v]) => [k, resolveValue(v, scope)])),
+        };
+      } catch (err) {
+        return { ok: false, message: errorMessage(err) };
+      }
+    };
+
     const execStep = async (action: Extract<NextAction, { type: "exec" }>): Promise<Flow> => {
       const { step, path } = action;
       const label = step.name ?? step.id;
-      const startedAt = clock();
+      // A resumed step keeps the start time of its first invocation.
+      const prior = entryAt(journal, path);
+      const startedAt = prior?.status === "suspended" ? prior.startedAt : clock();
       const fatal = (message: string, input?: unknown, code?: string) => {
         const error: RunError = { message, stepPath: path, fatal: true };
         if (code !== undefined) error.code = code;
@@ -396,6 +610,7 @@ export function createExecutor(opts: EngineOptions): Executor {
       const eventOutput = (v: unknown) => redactBySchema(v, outSchema, { mask: "all" });
 
       if (!(await renewIfDue())) return "stop";
+      if (await cancelIfRequested(path)) return "stop";
       // Mark the step in flight (lease-guarded) so a worker that later finds it unsettled knows an
       // attempt was lost.
       const startOk = await commit(
@@ -407,10 +622,15 @@ export function createExecutor(opts: EngineOptions): Executor {
       if (!startOk) return "stop";
 
       let result: unknown;
+      let issued: CallbackHandle | undefined;
       try {
-        result = await invoke(node, input, { step, path, scope });
+        ({ result, issued } = await invoke(node, input, { step, path, scope }));
       } catch (err) {
         if (err instanceof LeaseLostError) return "stop";
+        if (err instanceof CancelRequestedError) {
+          await cancelUnderLease(path);
+          return "stop";
+        }
         const message = errorMessage(err);
         const code = errorCode(err);
         if (isFatal(err)) return fatal(message, shownInput, code);
@@ -473,10 +693,24 @@ export function createExecutor(opts: EngineOptions): Executor {
             output.reason = result.reason;
             runOutput.reason = result.reason;
           }
+          const entry: JournalEntry = { status: "done", output, attempts: attempt, ...base };
+          // A stopped sub-flow hands the parent its mapped output when every value it maps exists;
+          // otherwise the parent step sees a failed sub-flow.
+          const mapped = mapOutput({ ...journal, [path]: entry }, { strict: true });
+          const reason = result.reason === undefined ? "" : `: ${result.reason}`;
           await commitEntry(
             path,
-            { status: "done", output, attempts: attempt, ...base },
-            { ...settled, status: "completed", output: runOutput },
+            entry,
+            {
+              ...settled,
+              status: "completed",
+              output: runOutput,
+              ...wakeParent(
+                mapped.ok
+                  ? { kind: "subflow", output: mapped.output }
+                  : { kind: "subflowFailed", error: { message: `Sub-flow stopped${reason}` } },
+              ),
+            },
             [
               event("step.completed", path, { input: eventInput, output }),
               event("run.stopped", path, runOutput),
@@ -514,7 +748,94 @@ export function createExecutor(opts: EngineOptions): Executor {
           if (ok) settle();
           return ok ? "continue" : "stop";
         }
-        return fatal(`Step "${label}": ${result.kind} is not supported`, shownInput);
+        if (result.kind === "suspend") {
+          // A suspended step is not settled: `currentStep` stays set, and the wait reason marks it
+          // as waiting rather than lost. The resumed invocation starts a fresh attempt count.
+          const patch: RunPatch = {
+            status: "waiting",
+            currentStep: path,
+            attempt: 1,
+            resume: null,
+          };
+          let pending: Pending;
+          let data: Record<string, unknown>;
+          if ("until" in result) {
+            if (typeof result.until !== "number" || !Number.isFinite(result.until)) {
+              return fatal(
+                `Step "${label}": suspend({ until }) needs an epoch ms time`,
+                shownInput,
+              );
+            }
+            pending = { until: result.until };
+            data = { until: result.until };
+            Object.assign(patch, { waitReason: "timer", wakeAt: result.until });
+          } else {
+            if (!issued || result.callback?.token !== issued.token) {
+              return fatal(
+                `Step "${label}": suspend({ callback }) needs the handle ctx.callback() returned`,
+                shownInput,
+              );
+            }
+            const { expiresAt } = issued;
+            // Only the run row holds the token; the journal and events never see it (nor the URL).
+            pending = { hasCallback: true, expiresAt };
+            data = { callback: true, expiresAt };
+            Object.assign(patch, {
+              waitReason: "callback",
+              wakeAt: expiresAt,
+              callbackToken: issued.token,
+              callbackExpiresAt: expiresAt,
+            });
+          }
+          await commitEntry(
+            path,
+            { status: "suspended", pending, attempts: attempt, ...base },
+            patch,
+            [event("run.suspended", path, data)],
+          );
+          return "stop";
+        }
+        if (result.kind === "subflow") {
+          // The child is created in the same atomic commit as the parent's suspension, so a crash
+          // leaves either both or neither.
+          return startSubflow<Flow>(result, {
+            storage,
+            registry,
+            run,
+            path,
+            attempt,
+            fail: (message, code) => fatal(message, shownInput, code),
+            suspend: async (child) => {
+              await commitEntry(
+                path,
+                {
+                  status: "suspended",
+                  pending: { childRunId: child.id },
+                  attempts: attempt,
+                  ...base,
+                },
+                {
+                  status: "waiting",
+                  waitReason: "subflow",
+                  wakeAt: null,
+                  currentStep: path,
+                  attempt: 1,
+                  resume: null,
+                  createChild: child,
+                },
+                [
+                  event("run.suspended", path, {
+                    workflowId: child.workflowId,
+                    childRunId: child.id,
+                  }),
+                  eventFor(child.id, "run.started"),
+                ],
+              );
+              return "stop";
+            },
+          });
+        }
+        return fatal(`Step "${label}": unsupported signal`, shownInput);
       }
 
       if (kind === "static" || kind === "fromConfig") {
@@ -616,28 +937,19 @@ export function createExecutor(opts: EngineOptions): Executor {
     };
 
     const completeRun = async (): Promise<void> => {
-      let output: unknown;
-      if (doc.output) {
-        try {
-          const scope = buildScope(doc, journal, "", run.trigger, run.id);
-          output = Object.fromEntries(
-            Object.entries(doc.output).map(([k, v]) => [k, resolveValue(v, scope)]),
-          );
-        } catch (err) {
-          await failRun({ message: `Workflow output: ${errorMessage(err)}`, fatal: true });
-          return;
-        }
+      const mapped = mapOutput(journal);
+      if (!mapped.ok) {
+        await failRun({ message: `Workflow output: ${mapped.message}`, fatal: true });
+        return;
       }
-      const patch: RunPatch = { status: "completed", currentStep: null, waitReason: null };
+      const { output } = mapped;
+      const patch: RunPatch = {
+        status: "completed",
+        currentStep: null,
+        waitReason: null,
+        ...wakeParent({ kind: "subflow", output }),
+      };
       if (output !== undefined) patch.output = output;
-      if (run.parent) {
-        patch.wakeParent = {
-          runId: run.parent.runId,
-          stepPath: run.parent.stepPath,
-          childRunId: run.id,
-          resume: { kind: "subflow", output },
-        };
-      }
       await commit(
         patch,
         // The output mapping may carry sensitive step values, so the event does not copy it.
@@ -668,7 +980,7 @@ export function createExecutor(opts: EngineOptions): Executor {
     await commit({ status: "queued", release: true }, [], "");
   }
 
-  return { leaseMs, clock, executeClaim };
+  return { leaseMs, clock, executeClaim, publish };
 }
 
 /** The node's static output schema, or `{}` (nothing to mask) for dynamic outputs. */

@@ -10,7 +10,6 @@ import {
   secret,
   sensitive,
   stop,
-  suspend,
   type WorkflowDoc,
 } from "@flowkit/core";
 import { createMemoryStorage } from "@flowkit/storage-memory";
@@ -160,12 +159,6 @@ const registry = createRegistry([
         input: z.object({}),
         output: z.object({ n: z.number() }),
         run: () => ({ n: "nope" }) as never,
-      }),
-      defineNode({
-        type: "test.suspend",
-        name: "Suspend",
-        input: z.object({}),
-        run: ({ ctx }) => suspend({ until: ctx.now() + 1000 }),
       }),
     ],
   }),
@@ -720,14 +713,6 @@ describe("executor: errors and retries", () => {
     const run = await getRun(id);
     expect(run.status).toBe("failed");
     expect(run.error).toMatchObject({ fatal: true, stepPath: "bad" });
-  });
-
-  it("fails fatally for signals that are not supported yet", async () => {
-    const id = await startRun(wf([step("s", "test.suspend")]));
-    await makeEngine().drain();
-    const run = await getRun(id);
-    expect(run.status).toBe("failed");
-    expect(run.error?.message).toContain("not supported");
   });
 
   it("aborts the handler signal at its timeout and retries as 'timed out'", async () => {

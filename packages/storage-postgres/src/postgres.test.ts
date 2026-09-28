@@ -116,7 +116,7 @@ describe("migrate", () => {
     const { rows } = await litePool.query<{ version: number; applied_at: unknown }>(
       "SELECT version, applied_at FROM idem.schema_migrations ORDER BY version",
     );
-    expect(rows.map((r) => r.version)).toEqual([1]);
+    expect(rows.map((r) => r.version)).toEqual([1, 2]);
     expect(rows[0]?.applied_at).not.toBeNull();
   });
 
@@ -127,7 +127,7 @@ describe("migrate", () => {
     const versions = await litePool.query<{ version: number }>(
       "SELECT version FROM bare.schema_migrations",
     );
-    expect(versions.rows.map((r) => r.version)).toEqual([1]);
+    expect(versions.rows.map((r) => r.version)).toEqual([1, 2]);
     const locks = await litePool.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory'",
     );
@@ -147,6 +147,21 @@ describe("migrate", () => {
   it("rejects unsafe schema names", async () => {
     await expect(migrate(litePool, 'x"; DROP TABLE y; --')).rejects.toThrow(/schema/i);
     expect(() => createPostgresStorage({ pool: litePool, schema: "a b" })).toThrow(/schema/i);
+  });
+
+  it("upgrades a v1 schema to v2, keeping existing runs", async () => {
+    // Recreate the v1 state: only migration 1 applied.
+    await migrate(litePool, "upgrade");
+    await litePool.query("ALTER TABLE upgrade.runs DROP COLUMN cancel_requested_at");
+    await litePool.query("DELETE FROM upgrade.schema_migrations WHERE version = 2");
+    await litePool.query(
+      `INSERT INTO upgrade.runs (id, tenant_id, workflow_id, version, status, attempt, started_by,
+         created_at, updated_at) VALUES ('old', 't', 'wf', 1, 'queued', 1, '{"kind":"manual"}', 1, 1)`,
+    );
+    await migrate(litePool, "upgrade");
+    const s = createPostgresStorage({ pool: litePool, schema: "upgrade" });
+    expect(await s.requestCancel("t", "old", 5)).toBe(true);
+    expect((await s.getRun("t", "old"))?.cancelRequestedAt).toBe(5);
   });
 });
 

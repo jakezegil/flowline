@@ -3,6 +3,7 @@ import { z } from "zod";
 import { manifest, step } from "../test/fixtures";
 import {
   branchesFor,
+  checkFields,
   describeType,
   fieldsToJsonSchema,
   isAssignable,
@@ -233,5 +234,52 @@ describe("real Zod output", () => {
     expect(schemaAtPath(s, ["tree", "nope"])).toBeUndefined();
     expect(isAssignable(schemaAtPath(s, ["home"])!, { type: "string" })).toBe(false);
     expect(describeType(schemaAtPath(s, ["tree", "children"])!)).toBe("{ name, children }[]");
+  });
+});
+
+describe("checkFields", () => {
+  const fields = [
+    { name: "email", type: "string", required: true },
+    { name: "age", type: "number" },
+    { name: "vip", type: "boolean" },
+    { name: "address", type: "object" },
+    { name: "tags", type: "array" },
+    { name: "born", type: "date" },
+  ] as const;
+
+  test("accepts matching values, missing optional fields and extra properties", () => {
+    expect(checkFields([...fields], { email: "a@x.test" })).toBeUndefined();
+    expect(
+      checkFields([...fields], {
+        email: "a@x.test",
+        age: 3,
+        vip: false,
+        address: { city: "x" },
+        tags: [],
+        born: "2020-01-02T03:04:05Z",
+        extra: 1,
+      }),
+    ).toBeUndefined();
+  });
+
+  test("names the first missing required field or mistyped value", () => {
+    expect(checkFields([...fields], {})).toBe('field "email" is required');
+    expect(checkFields([...fields], { email: 1 })).toBe('field "email" must be of type string');
+    expect(checkFields([...fields], { email: "a", age: Number.NaN })).toBe(
+      'field "age" must be of type number',
+    );
+    expect(checkFields([...fields], { email: "a", address: [] })).toBe(
+      'field "address" must be of type object',
+    );
+    expect(checkFields([...fields], { email: "a", born: "yesterday" })).toBe(
+      'field "born" must be of type date',
+    );
+  });
+
+  test("requires an object and ignores malformed declarations", () => {
+    expect(checkFields([], [])).toBe("must be an object");
+    expect(checkFields([], null)).toBe("must be an object");
+    const malformed = [{ name: "x", type: "nope" }, null] as never;
+    expect(checkFields(malformed, { x: 1 })).toBeUndefined();
   });
 });

@@ -16,6 +16,7 @@ import {
   FlowkitStorageError,
   type NewRun,
   type NewRunEvent,
+  type ResumeEvent,
   type Run,
   type RunPatch,
   type StorageAdapter,
@@ -81,6 +82,7 @@ const RUN_INSERT_COLUMNS = [
   "output",
   "error",
   "started_by",
+  "cancel_requested_at",
   "created_at",
   "updated_at",
 ].join(", ");
@@ -113,6 +115,7 @@ function toRun(row: Row): Run {
   if (row.parent !== null) run.parent = row.parent;
   if (row.has_output) run.output = row.output;
   if (row.error !== null) run.error = row.error;
+  if (row.cancel_requested_at !== null) run.cancelRequestedAt = num(row.cancel_requested_at);
   if (row.lease_owner !== null) run.leaseOwner = row.lease_owner;
   if (row.lease_until !== null) run.leaseUntil = num(row.lease_until);
   return run;
@@ -236,6 +239,7 @@ function patchAssignments(patch: RunPatch, now: number, p: Params): string[] {
   optJson("resume", patch.resume);
   if (patch.output !== undefined) sets.push(`output = ${p.add(json(patch.output))}::jsonb`);
   optJson("error", patch.error);
+  opt("cancel_requested_at", patch.cancelRequestedAt);
   sets.push(`updated_at = ${p.add(now)}`);
   return sets;
 }
@@ -278,6 +282,7 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
       `${p.add(json(run.output))}::jsonb`,
       `${p.add(json(run.error))}::jsonb`,
       `${p.add(json(run.startedBy))}::jsonb`,
+      p.add(run.cancelRequestedAt ?? null),
       p.add(now),
       p.add(now),
     ];
@@ -374,24 +379,40 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
     await appendIn(q, childExisted ? events.filter((e) => e.runId !== child?.id) : events);
   };
 
-  /** Resume a `waiting` run matched by `where` (the shared waiting → queued transition). */
-  const resumeWhere = async (
-    q: Queryable,
+  /**
+   * Resume a `waiting` run matched by `where` (the shared waiting → queued transition) and append
+   * `event` to it, in one transaction.
+   */
+  const resumeWhere = (
     where: string,
     params: unknown[],
     resume: unknown,
     now: number,
-  ): Promise<Row | undefined> => {
-    const n = params.length;
-    const { rows } = await q.query(
-      `UPDATE ${s}.runs AS r SET status = 'queued', resume = $${n + 1}::jsonb, wake_at = NULL,
-         callback_token = NULL, callback_expires_at = NULL, updated_at = $${n + 2}
-       WHERE r.status = 'waiting' AND ${where}
-       RETURNING ${RUN_COLUMNS}`,
-      [...params, json(resume), now],
-    );
-    return rows[0];
-  };
+    event: ResumeEvent | undefined,
+  ): Promise<Row | undefined> =>
+    tx(async (q) => {
+      const n = params.length;
+      const { rows } = await q.query(
+        `UPDATE ${s}.runs AS r SET status = 'queued', resume = $${n + 1}::jsonb, wake_at = NULL,
+           callback_token = NULL, callback_expires_at = NULL, updated_at = $${n + 2}
+         WHERE r.status = 'waiting' AND ${where}
+         RETURNING ${RUN_COLUMNS}`,
+        [...params, json(resume), now],
+      );
+      const row = rows[0];
+      if (row && event) {
+        const e: NewRunEvent = {
+          runId: row.id,
+          tenantId: row.tenant_id,
+          type: event.type,
+          at: now,
+        };
+        if (row.current_step !== null) e.stepPath = row.current_step;
+        if (event.data !== undefined) e.data = event.data;
+        await appendIn(q, [e]);
+      }
+      return row;
+    });
 
   return {
     async saveWorkflowVersion(tenantId, doc, actor, now) {
@@ -618,26 +639,37 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
       });
     },
 
-    async resumeByToken(token, resume, now) {
+    async resumeByToken(token, resume, now, event) {
       const row = await resumeWhere(
-        pool,
         "r.callback_token = $1 AND (r.callback_expires_at IS NULL OR r.callback_expires_at > $2)",
         [token, now],
         resume,
         now,
+        event,
       );
       return row ? toRun(row) : null;
     },
 
-    async resumeRun(runId, expectCurrentStep, resume, now) {
+    async resumeRun(runId, expectCurrentStep, resume, now, event) {
       const row = await resumeWhere(
-        pool,
         "r.id = $1 AND r.current_step = $2",
         [runId, expectCurrentStep],
         resume,
         now,
+        event,
       );
       return row !== undefined;
+    },
+
+    async requestCancel(tenantId, runId, now) {
+      const { rows } = await pool.query(
+        `UPDATE ${s}.runs SET cancel_requested_at = coalesce(cancel_requested_at, $3),
+           updated_at = $3
+         WHERE id = $1 AND tenant_id = $2 AND status NOT IN ('completed', 'failed', 'cancelled')
+         RETURNING id`,
+        [runId, tenantId, now],
+      );
+      return rows.length > 0;
     },
 
     async updateRunUnleased(tenantId, runId, expect, patch, events, now) {

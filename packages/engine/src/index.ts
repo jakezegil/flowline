@@ -13,6 +13,7 @@ export type {
   Lease,
   NewRun,
   NewRunEvent,
+  ResumeEvent,
   Run,
   RunPatch,
   StorageAdapter,

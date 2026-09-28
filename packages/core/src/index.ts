@@ -62,6 +62,7 @@ export {
 } from "./define";
 export {
   branchesFor,
+  checkFields,
   configValueAt,
   describeType,
   fieldsToJsonSchema,
