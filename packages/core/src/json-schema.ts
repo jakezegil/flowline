@@ -8,8 +8,10 @@ import type {
   Step,
   TriggerConfig,
   TriggerManifest,
+  UiMeta,
   ValueExpr,
 } from "./types";
+import { UI_META_KEY } from "./ui";
 
 const FIELD_TYPE_SCHEMA: Record<FieldType, JSONSchema> = {
   string: { type: "string" },
@@ -22,7 +24,10 @@ const FIELD_TYPE_SCHEMA: Record<FieldType, JSONSchema> = {
 
 /**
  * Build the JSON Schema of an object whose properties are the given user-declared fields.
- * `date` fields become `{ type: "string", format: "date-time" }`. Extra properties are allowed.
+ * `date` fields become `{ type: "string", format: "date-time" }`. Extra properties are allowed
+ * unless `closed` is set (`additionalProperties: false`). The validator resolves references into
+ * trigger input fields, declared webhook bodies and sub-flow inputs and outputs as closed, so a
+ * reference to an undeclared field is an error there.
  *
  * @example
  * ```ts
@@ -31,7 +36,10 @@ const FIELD_TYPE_SCHEMA: Record<FieldType, JSONSchema> = {
  * //   required: ["a"], additionalProperties: true }
  * ```
  */
-export function fieldsToJsonSchema(fields: FieldDecl[]): JSONSchema {
+export function fieldsToJsonSchema(
+  fields: FieldDecl[],
+  opts: { closed?: boolean } = {},
+): JSONSchema {
   const properties: Record<string, JSONSchema> = {};
   const required: string[] = [];
   for (const field of fields) {
@@ -45,7 +53,7 @@ export function fieldsToJsonSchema(fields: FieldDecl[]): JSONSchema {
     type: "object",
     properties,
     ...(required.length > 0 ? { required } : {}),
-    additionalProperties: true,
+    additionalProperties: opts.closed !== true,
   };
 }
 
@@ -280,6 +288,97 @@ export function schemaAtPath(
   return carryDefs(schema, cur);
 }
 
+function isSecretField(schema: JSONSchema): boolean {
+  const meta = schema[UI_META_KEY];
+  return typeof meta === "object" && meta !== null && (meta as UiMeta).secret === true;
+}
+
+/** Subschemas a value of `schema` may be checked against (properties, items, union members…). */
+function childSchemas(schema: JSONSchema): unknown[] {
+  const out: unknown[] = [];
+  const props = schema.properties;
+  if (typeof props === "object" && props !== null) out.push(...Object.values(props));
+  for (const key of ["additionalProperties", "items", "not"] as const) out.push(schema[key]);
+  for (const key of ["prefixItems", "anyOf", "oneOf", "allOf"] as const) {
+    const list = schema[key];
+    if (Array.isArray(list)) out.push(...list);
+  }
+  return out.filter((c) => typeof c === "object" && c !== null);
+}
+
+/**
+ * @internal True if `schema`, or any schema nested in it, marks a {@link secret} field. A
+ * reference or template standing for such a value would let run data choose the secret.
+ */
+export function containsSecret(root: JSONSchema, schema: JSONSchema): boolean {
+  const seen = new Set<unknown>();
+  const visit = (raw: unknown, depth: number): boolean => {
+    if (depth > MAX_REF_DEPTH || seen.has(raw)) return false;
+    seen.add(raw);
+    const s = deref(root, asSchema(raw));
+    if (isSecretField(s)) return true;
+    if (s !== raw && seen.has(s)) return false;
+    seen.add(s);
+    return childSchemas(s).some((c) => visit(c, depth + 1));
+  };
+  return visit(schema, 0);
+}
+
+/**
+ * The config path (e.g. `"auth.secret"`, `"auth"`) of the first `$ref` or `$tpl` in `config` that
+ * stands for a {@link secret} field or for a value containing one; `undefined` if there is none.
+ * Secret fields are literal-only: the engine refuses to run a step for which this returns a path,
+ * so trigger data can never choose which secret is resolved.
+ *
+ * @example
+ * ```ts
+ * secretExprPath({ token: { $ref: "trigger.body.which" } }, manifest.input); // "token"
+ * ```
+ */
+export function secretExprPath(
+  config: Record<string, ValueExpr>,
+  schema: JSONSchema,
+): string | undefined {
+  const visit = (value: unknown, raw: unknown, path: string, depth: number): string | undefined => {
+    if (depth > MAX_REF_DEPTH) return undefined;
+    const s = deref(schema, asSchema(raw));
+    if (isRef(value) || isTpl(value)) return containsSecret(schema, s) ? path : undefined;
+    for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+      const members = s[key];
+      if (!Array.isArray(members)) continue;
+      for (const m of members) {
+        const found = visit(value, m, path, depth + 1);
+        if (found !== undefined) return found;
+      }
+    }
+    if (Array.isArray(value)) {
+      const prefix = Array.isArray(s.prefixItems) ? s.prefixItems : [];
+      for (const [i, item] of value.entries()) {
+        const found = visit(
+          item,
+          i < prefix.length ? prefix[i] : s.items,
+          `${path}[${i}]`,
+          depth + 1,
+        );
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    }
+    if (typeof value === "object" && value !== null) {
+      const props = (
+        typeof s.properties === "object" && s.properties !== null ? s.properties : {}
+      ) as Record<string, unknown>;
+      for (const [key, v] of Object.entries(value)) {
+        const sub = Object.hasOwn(props, key) ? props[key] : s.additionalProperties;
+        const found = visit(v, sub, path === "" ? key : `${path}.${key}`, depth + 1);
+        if (found !== undefined) return found;
+      }
+    }
+    return undefined;
+  };
+  return visit(config, schema, "", 0);
+}
+
 /** @internal JSON Schema value kinds (`integer` for whole numbers). */
 export type Kind = "string" | "number" | "integer" | "boolean" | "object" | "array" | "null";
 
@@ -488,8 +587,14 @@ export function configValueAt(config: Record<string, ValueExpr>, path: string): 
 
 const FIELD_TYPES = new Set<string>(Object.keys(FIELD_TYPE_SCHEMA));
 
-/** Parses a config value as a literal {@link FieldDecl} list, dropping malformed entries. */
-function fieldDeclsAt(config: Record<string, ValueExpr>, path: string): FieldDecl[] | undefined {
+/**
+ * @internal Parses a config value as a literal {@link FieldDecl} list, dropping malformed
+ * entries; `undefined` when the value isn't a literal array.
+ */
+export function fieldDeclsAt(
+  config: Record<string, ValueExpr>,
+  path: string,
+): FieldDecl[] | undefined {
   const value = configValueAt(config, path);
   if (!Array.isArray(value)) return undefined;
   return value.filter(
@@ -502,11 +607,12 @@ function fieldDeclsAt(config: Record<string, ValueExpr>, path: string): FieldDec
   );
 }
 
+/** A webhook payload: the body is closed when fields are declared, any JSON when none are. */
 function webhookSchema(fields: FieldDecl[] | undefined): JSONSchema {
   return {
     type: "object",
     properties: {
-      body: fields ? fieldsToJsonSchema(fields) : {},
+      body: fields && fields.length > 0 ? fieldsToJsonSchema(fields, { closed: true }) : {},
       headers: { type: "object", additionalProperties: { type: "string" } },
     },
     required: ["body", "headers"],
@@ -547,8 +653,10 @@ export function outputSchemaFor(
 
 /**
  * The JSON Schema of a trigger's payload (the `trigger` scope entry). `fields` payloads are built
- * from the trigger config's literal field declarations; `webhook` payloads are
- * `{ body: <fields>, headers: Record<string, string> }`. Unknown shapes are `{}` (any).
+ * from the trigger config's literal field declarations and are closed: a reference to an
+ * undeclared field doesn't resolve. `webhook` payloads are
+ * `{ body: <fields>, headers: Record<string, string> }`, with a closed body when at least one
+ * field is declared and any JSON when none is. Unknown shapes are `{}` (any).
  */
 export function payloadSchemaFor(t: TriggerManifest, trigger: TriggerConfig): JSONSchema {
   const spec = t.payload;
@@ -557,13 +665,27 @@ export function payloadSchemaFor(t: TriggerManifest, trigger: TriggerConfig): JS
       return spec.schema;
     case "fields": {
       const decls = fieldDeclsAt(trigger.config, spec.configPath);
-      return decls ? fieldsToJsonSchema(decls) : {};
+      return decls ? fieldsToJsonSchema(decls, { closed: true }) : {};
     }
     case "webhook":
       return webhookSchema(fieldDeclsAt(trigger.config, spec.configPath));
     default:
       return {};
   }
+}
+
+/**
+ * The declared output of a sub-flow: for a trigger of kind `subflow`, the closed schema of the
+ * {@link FieldDecl} list at config path `"output"` (the contract of every sub-flow trigger).
+ * `undefined` for other triggers, or when `output` isn't a literal list.
+ */
+export function subflowOutputSchema(
+  t: TriggerManifest,
+  trigger: TriggerConfig,
+): JSONSchema | undefined {
+  if (t.kind !== "subflow") return undefined;
+  const decls = fieldDeclsAt(trigger.config, "output");
+  return decls ? fieldsToJsonSchema(decls, { closed: true }) : undefined;
 }
 
 /**

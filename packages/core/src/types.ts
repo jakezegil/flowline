@@ -153,7 +153,7 @@ export interface NodeManifest {
   name: string;
   /** Longer description. */
   description?: string;
-  /** Lucide icon name or URL. */
+  /** A bundled icon name (`bundledIconNames`) or a `<FlowkitProvider icons>` key; else a box. */
   icon?: string;
   /** Step picker category. */
   category?: string;
@@ -209,7 +209,7 @@ export interface TriggerManifest {
   name: string;
   /** Longer description. */
   description?: string;
-  /** Lucide icon name or URL. */
+  /** A bundled icon name (`bundledIconNames`) or a `<FlowkitProvider icons>` key; else a box. */
   icon?: string;
   /** How the trigger fires. */
   kind: TriggerKind;
@@ -227,7 +227,7 @@ export interface PluginManifest {
   id: string;
   /** Display name. */
   name: string;
-  /** Lucide icon name or URL. */
+  /** A bundled icon name (`bundledIconNames`) or a `<FlowkitProvider icons>` key; else a box. */
   icon?: string;
   /** Longer description. */
   description?: string;

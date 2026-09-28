@@ -53,17 +53,19 @@ export type DeepExpr<T> = T extends readonly (infer E)[]
  * The config accepted by {@link StepsBuilder.step} for node `N`: its input schema's input type
  * (`z.input`, so fields with defaults are optional) with references allowed at any depth.
  */
-export type ConfigOf<N extends { input: z.ZodType }> = {
-  [K in keyof z.input<N["input"]>]: DeepExpr<z.input<N["input"]>[K]>;
-};
+export type ConfigOf<N extends { input: z.ZodType }> = StepConfig<z.input<N["input"]>>;
 
 /**
  * The config accepted by {@link WorkflowBuilder.trigger} for trigger `T`: its config schema's
  * input type with references (rooted at `trigger.`) allowed at any depth.
  */
-export type TriggerConfigOf<T extends { config: z.ZodType }> = {
-  [K in keyof z.input<T["config"]>]: DeepExpr<z.input<T["config"]>[K]>;
-};
+export type TriggerConfigOf<T extends { config: z.ZodType }> = StepConfig<z.input<T["config"]>>;
+
+/**
+ * A config object with fields `I` where references may stand in at any depth. Compile errors
+ * name it with the plain field types, e.g. `StepConfig<{ baseUrl: string; token: string }>`.
+ */
+export type StepConfig<I> = { [K in keyof I]: DeepExpr<I[K]> };
 
 /**
  * The config arguments of a builder method: optional when `{}` is a valid config (an empty
@@ -229,14 +231,18 @@ class WorkflowBuilderImpl extends StepsBuilderImpl implements WorkflowBuilder {
  *
  * @example
  * ```ts
+ * import { ref, workflow } from "@flowkit/core";
+ * import { and, conditionNode, delayNode, eq, eventTrigger, stopNode } from "@flowkit/nodes-builtin";
+ *
  * const dealWon = workflow("deal-won", { name: "Deal won follow-up" })
- *   .trigger(dealUpdated, { onlyWhenStageChanges: true })
- *   .step("check", condition, { rules: [{ left: ref("trigger.deal.stage"), op: "eq", right: "won" }] }, {
- *     if: (b) => b.step("wait", delay, { duration: "2d" }),
- *     else: (b) => b.step("halt", stop, { reason: "Not won" }),
+ *   .trigger(eventTrigger, { event: "deal.updated" })
+ *   .step("check", conditionNode, { rules: and(eq(ref("trigger.stage"), "won")) }, {
+ *     if: (b) => b.step("wait", delayNode, { duration: "2d" }),
+ *     else: (b) => b.step("halt", stopNode, { reason: "Not won" }),
  *   })
  *   .build();
  * ```
+ * (This example is compiled by `@flowkit/nodes-builtin`'s `builder-example.test.ts`.)
  */
 export function workflow(
   id: string,

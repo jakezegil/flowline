@@ -86,7 +86,7 @@ const combinator = () =>
   );
 
 /** Zod schema of a {@link RuleGroup}; groups nest to any depth. */
-export const RuleGroupSchema: z.ZodType<RuleGroup> = z.object({
+export const RuleGroupSchema: z.ZodType<RuleGroup, RuleGroup> = z.object({
   combinator: combinator(),
   get rules() {
     return ui(z.array(z.union([RuleSchema, RuleGroupSchema])), { label: "Rules" });
@@ -97,7 +97,7 @@ export const RuleGroupSchema: z.ZodType<RuleGroup> = z.object({
  * Zod schema of the top-level group of a condition: a {@link RuleGroup} for which the validator
  * warns when it has no rules.
  */
-export const ConditionRulesSchema: z.ZodType<RuleGroup> = z.object({
+export const ConditionRulesSchema: z.ZodType<RuleGroup, RuleGroup> = z.object({
   combinator: combinator(),
   rules: ui(z.array(z.union([RuleSchema, RuleGroupSchema])), {
     label: "Rules",

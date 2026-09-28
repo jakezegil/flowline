@@ -6,4 +6,9 @@
  * @module
  */
 export { type ConformanceFixture, runStorageConformance } from "./conformance";
-export { runWorkflowInMemory, testNode } from "./helpers";
+export {
+  type RunWorkflowInMemoryOptions,
+  runWorkflowInMemory,
+  type TestNodeResult,
+  testNode,
+} from "./helpers";

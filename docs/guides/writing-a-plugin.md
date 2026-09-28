@@ -7,8 +7,9 @@ picker, config forms and data picker from that manifest.
 
 ```ts file=plugin.ts
 import { createRegistry, definePlugin } from "@flowkit/core";
+import { loadContact } from "./load-contact";
+import { sendEmail } from "./send-email";
 import { contactCreated } from "./triggers";
-import { loadContact, sendEmail } from "./nodes";
 
 export const crm = definePlugin({
   id: "crm",
@@ -32,7 +33,7 @@ export const loadContact = defineNode({
   type: "crm.loadContact", // "<pluginId>.<name>", globally unique
   name: "Load contact",
   description: "Fetch a contact by ID.",
-  icon: "user", // a Lucide name, or a key of <FlowkitProvider icons>
+  icon: "user", // a bundled icon (bundledIconNames) or a <FlowkitProvider icons> key
   category: "Contacts", // the step picker tab
   summary: "Load {{contactId}}", // a template rendered against config, shown on the card
   input: z.object({ contactId: ui(z.string(), { label: "Contact" }) }),
@@ -234,14 +235,16 @@ helpers:
   inner schema and chain modifiers afterwards: `ui(z.string(), { label: "Email" }).optional()`.
 - `.describe(text)` becomes help text under the field.
 - `secret()` is a string field that holds a secret's name. The editor picks it from
-  `GET /secrets`.
+  `GET /secrets`. It is literal-only: a reference (into it, or into an object that holds one) is
+  a validation error, and the engine refuses one at runtime too, so trigger data can never choose
+  which secret is sent. A name that `secrets.list` doesn't return is a warning.
 - `sensitive(schema)` masks the value in events and in the run viewer.
 - `fields()` is a list of `{ name, type, required? }` declarations. Pair it with
   `dynamicOutput: { kind: "fields", configPath }`.
 
 | `UiMeta` key | Effect |
 |---|---|
-| `label`, `placeholder`, `group` | The field label (by default a humanized key), the placeholder, and a section heading. |
+| `label`, `placeholder`, `group` | The field label (by default a humanized key), the placeholder, and a collapsible section the field goes in (`"Advanced"` starts collapsed). |
 | `widget` | Chooses a control: a built-in one or one you register. |
 | `multiline` | Makes a text input multi-line. |
 | `hidden` | Leaves the field out of the form. |
@@ -354,17 +357,24 @@ optional, though, so TypeScript does not catch a call that leaves it out entirel
 
 - `testNode(node, input, ctx?)` parses `input`, runs the handler with a default context (which your
   `ctx` overrides), and parses the output. It returns signals such as `branch()` or `suspend()` as
-  they are.
+  they are. The result is typed as the node's output (or a signal), so no casts are needed.
 - `runWorkflowInMemory(doc, { plugins, services, trigger })` runs a whole workflow on a fresh
   in-memory engine. It moves the clock forward through delays and retries, so a `2d` delay finishes
-  at once. It needs `@flowkit/storage-memory` as a dev dependency.
+  at once. It needs `@flowkit/storage-memory` as a dev dependency. It also takes:
+  - `secrets: { name: "value" }`, the values `ctx.secrets.get(name)` returns. A name that isn't
+    listed is "not configured", as in production.
+  - `http`, the network policy of `ctx.http.fetch`. The default blocks private addresses, so set
+    `http: { allowPrivateNetworks: true }` to reach a mock server on `localhost`.
+  - `subflows: [doc, …]`, sub-flows the workflow calls. They are published first and run along
+    with it.
 
 ```ts file=plugin.test.ts
 import { ref, workflow } from "@flowkit/core";
 import { runWorkflowInMemory, testNode } from "@flowkit/engine/testing";
 import { manualTrigger } from "@flowkit/nodes-builtin";
 import { describe, expect, it } from "vitest";
-import { dealSize, loadContact } from "./nodes";
+import { dealSize } from "./deal-size";
+import { loadContact } from "./load-contact";
 import { crm } from "./plugin";
 import { fakeServices } from "./test-utils"; // returns a complete FlowkitServices
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { FieldDecl, UiMeta } from "./types";
+import { assertZod4 } from "./zod-check";
 
 /** JSON Schema / Zod metadata key under which {@link UiMeta} travels. */
 export const UI_META_KEY = "x-flowkit";
@@ -18,16 +19,19 @@ export const UI_META_KEY = "x-flowkit";
  * ```
  */
 export function ui<T extends z.ZodType>(schema: T, meta: UiMeta): T {
+  assertZod4(schema, "ui() (or secret()/sensitive())", true);
   const previous = schema.meta()?.[UI_META_KEY] as UiMeta | undefined;
   return schema.meta({ [UI_META_KEY]: { ...previous, ...meta } });
 }
 
 /**
  * A string field holding the *name* of a host-provided secret (resolved at runtime via
- * `ctx.secrets.get(name)`). Secret values never appear in workflow docs.
+ * `ctx.secrets.get(name)`). Secret values never appear in workflow docs. The field is
+ * literal-only: the name is chosen by the workflow's author, never by run data, so a reference or
+ * template there is a validation error and the engine refuses to run it.
  */
 export function secret(schema: z.ZodString = z.string()): z.ZodString {
-  return ui(schema, { secret: true, widget: "secret" });
+  return ui(schema, { secret: true, widget: "secret", literalOnly: true });
 }
 
 /** Mark a field as sensitive: its value is masked in run inspection and audit output. */

@@ -788,6 +788,24 @@ describe("webhooks", () => {
     expect(ok.status).toBe(202);
   });
 
+  it("won't publish a signing secret taken from the payload, and fails closed if one is stored", async () => {
+    const doc = webhookDoc("hook", { secret: { $ref: "trigger.body.which" } });
+    const v = await engine.saveWorkflow("a", doc, "setup");
+    await expect(engine.publish("a", "hook", v.version, "setup")).rejects.toMatchObject({
+      issues: [expect.objectContaining({ code: "config.invalid", field: "trigger.secret" })],
+    });
+    // Published behind the validator's back: no signature can match, so nothing starts.
+    await storage.publishVersion("a", "hook", v.version, now);
+    const slug = (v.doc.trigger.config as { slug: string }).slug;
+    const body = JSON.stringify({ email: "a@b.c", which: "HOOK_KEY" });
+    const sig = createHmac("sha256", "key-of-a").update(body).digest("hex");
+    const res = await post(`/hooks/a/hook/${slug}`, body, {
+      "x-flowkit-signature": `sha256=${sig}`,
+    });
+    expect(res.status).toBe(401);
+    expect(await storage.listRuns("a", {})).toEqual([]);
+  });
+
   it("rejects a body that does not match the declared fields with 400", async () => {
     const slug = await hook();
     const res = await post(`/hooks/a/hook/${slug}`, JSON.stringify({ name: "no email" }));
@@ -1153,5 +1171,95 @@ describe("test-step", () => {
       samples: {},
     });
     expect(unknown).toMatchObject({ ok: false });
+  });
+
+  it("refuses to test a step whose secret field is a reference", async () => {
+    const get = vi.fn(async () => "key");
+    const e = makeEngine({ secrets: { get } });
+    const out = await e.testStep("a", {
+      step: {
+        id: "h",
+        type: "core.httpRequest",
+        config: {
+          method: "GET",
+          url: "https://api.example.com",
+          auth: { type: "bearer", secret: { $ref: "trigger.which" } },
+        },
+      },
+      doc: manualDoc("wf"),
+      triggerSample: { which: "HOOK_KEY" },
+      samples: {},
+    });
+    expect(out).toMatchObject({
+      ok: false,
+      error: 'Step "h": field "auth.secret" holds a secret name and can\'t use a reference',
+    });
+    expect(get).not.toHaveBeenCalled();
+  });
+});
+
+describe("validation through the engine", () => {
+  it("warns about secret names that secrets.list doesn't know", async () => {
+    const doc = webhookDoc("hook", { secret: "HOOK_KEY" });
+    expect(await engine.validate("a", doc)).toEqual([]);
+    const typo = webhookDoc("hook", { secret: "HOOK_KYE" });
+    expect(await engine.validate("a", typo)).toEqual([
+      expect.objectContaining({ code: "secret.unknown", severity: "warning" }),
+    ]);
+    // Without list, or when it fails, names aren't checked (and a failure is logged).
+    const noList = makeEngine({ secrets: { get: async () => undefined } });
+    expect(await noList.validate("a", typo)).toEqual([]);
+    const failing = makeEngine({
+      secrets: {
+        get: async () => undefined,
+        list: async () => {
+          throw new Error("vault down");
+        },
+      },
+    });
+    expect(await failing.validate("a", typo)).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "secrets.list failed; secret names are not checked",
+      expect.objectContaining({ error: "vault down" }),
+    );
+  });
+
+  it("names the first error in a rejected publish's message", async () => {
+    const doc = manualDoc("wf", [
+      { id: "a", type: "t.echo", config: { value: { $ref: "trigger.nmae" } } },
+      { id: "b", type: "t.echo", config: { value: { $ref: "steps.zzz" } } },
+    ]);
+    const v = await engine.saveWorkflow("a", doc, "setup");
+    await expect(engine.publish("a", "wf", v.version, "setup")).rejects.toThrow(
+      'Workflow "wf" has errors: step "a": "value" references field "nmae", which doesn\'t exist on the trigger (+1 more)',
+    );
+  });
+
+  it("checks references into a published sub-flow's declared input and output", async () => {
+    await deploy({
+      id: "notify",
+      name: "Notify",
+      trigger: {
+        type: "core.subflow",
+        config: {
+          input: [{ name: "dealName", type: "string", required: true }],
+          output: [{ name: "messageId", type: "string", required: true }],
+        },
+      },
+      steps: [{ id: "e", type: "t.echo", config: { value: { $ref: "trigger.dealName" } } }],
+      output: { messageId: { $ref: "steps.e.value" } },
+    });
+    const caller = (ref: string, input: Record<string, string> = { dealName: "Big" }) =>
+      manualDoc("caller", [
+        { id: "n", type: "core.callSubflow", config: { workflowId: "notify", input } },
+        { id: "use", type: "t.echo", config: { value: { $ref: ref } } },
+      ]);
+    expect(await engine.validate("a", caller("steps.n.messageId"))).toEqual([]);
+    expect(await engine.validate("a", caller("steps.n.msgId"))).toEqual([
+      expect.objectContaining({ code: "ref.unresolved", stepId: "use" }),
+    ]);
+    expect(
+      await engine.validate("a", caller("steps.n.messageId", { dealName: "Big", dealNme: "x" })),
+    ).toEqual([expect.objectContaining({ code: "config.invalid", field: "input.dealNme" })]);
   });
 });

@@ -124,7 +124,9 @@ describe("ctx.http.fetch SSRF guard", () => {
       warn: (message: string, data?: unknown) => logged.push({ message, data }),
     };
     const err = await fatal(ctxWith({ resolve, logger }).http.fetch("http://evil.test/"));
-    expect(err.message).toBe("blocked private network address: evil.test");
+    expect(err.message).toBe(
+      "blocked private network address: evil.test (to reach private or local hosts, e.g. a mock API, set createEngine({ http: { allowPrivateNetworks: true } }); allowHosts only restricts)",
+    );
     expect(err.message).not.toContain("127.0.0.1");
     expect(logged).toEqual([
       {

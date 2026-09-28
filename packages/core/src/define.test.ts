@@ -282,7 +282,11 @@ describe("ui helpers", () => {
   });
 
   test("secret, sensitive and fields", () => {
-    expect(json(secret())["x-flowkit"]).toEqual({ secret: true, widget: "secret" });
+    expect(json(secret())["x-flowkit"]).toEqual({
+      secret: true,
+      widget: "secret",
+      literalOnly: true,
+    });
     expect(json(secret(z.string().min(3)))).toMatchObject({ minLength: 3 });
     expect(json(sensitive(z.number()))["x-flowkit"]).toEqual({ sensitive: true });
     const f = fields();

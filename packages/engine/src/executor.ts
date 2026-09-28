@@ -21,6 +21,7 @@ import {
   type RunEventType,
   resolveValue,
   type Step,
+  secretExprPath,
   type ValueExpr,
   type WorkflowVersion,
 } from "@flowkit/core";
@@ -33,7 +34,7 @@ import { buildScope, childSteps, entryAt, type NextAction, nextAction } from "./
 import { redactBySchema } from "./redact";
 import type { Lease, NewRunEvent, Run, RunPatch } from "./storage";
 import { startSubflow, subflowOutputProblem } from "./subflow";
-import { DEFAULT_BASE_PATH, errorMessage } from "./util";
+import { DEFAULT_BASE_PATH, errorMessage, secretRefMessage } from "./util";
 
 const DEFAULT_LEASE_MS = 30_000;
 const DEFAULT_STEPS_PER_CLAIM = 100;
@@ -718,6 +719,9 @@ export function createExecutor(opts: EngineOptions): Executor {
         attempt++;
       }
 
+      // Defence in depth behind the validator: run data must never choose a secret's name.
+      const secretRef = secretExprPath(step.config, manifest.input);
+      if (secretRef !== undefined) return fatal(secretRefMessage(label, secretRef));
       const scope = buildScope(doc, journal, path, run.trigger, run.id);
       let resolved: Record<string, unknown>;
       try {
