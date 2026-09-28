@@ -1,4 +1,4 @@
-import { branchesFor, type NodeManifest, type Step } from "@flowline/core";
+import { branchesFor, type NodeManifest, type Step } from "@flowlinejs/core";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {

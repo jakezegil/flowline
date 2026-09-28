@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import type { Manifest, WorkflowDoc } from "@flowline/core";
-import { createClient } from "@flowline/core/client";
-import { FlowlineProvider } from "@flowline/react";
+import type { Manifest, WorkflowDoc } from "@flowlinejs/core";
+import { createClient } from "@flowlinejs/core/client";
+import { FlowlineProvider } from "@flowlinejs/react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";

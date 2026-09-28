@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { type JSONSchema, UI_META_KEY } from "@flowline/core";
+import { type JSONSchema, UI_META_KEY } from "@flowlinejs/core";
 
 /** The value that replaces masked fields. */
 export const REDACTED = "[redacted]";

@@ -1,4 +1,4 @@
-import type { FlowlineClient } from "@flowline/core/client";
+import type { FlowlineClient } from "@flowlinejs/core/client";
 import { vi } from "vitest";
 
 /** jsdom has no layout: gives xyflow a sized container and the APIs Radix/cmdk expect. */

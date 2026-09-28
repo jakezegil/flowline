@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { FieldType, ValueExpr } from "@flowline/core";
+import type { FieldType, ValueExpr } from "@flowlinejs/core";
 import { type JSX, useRef } from "react";
 import { useFlowlineAppearance } from "../../provider";
 import { AddButton, focusLastItem, ItemActions, useItemKeys } from "../fields/collections";

@@ -1,4 +1,4 @@
-import { type Issue, type WorkflowDoc, walkSteps } from "@flowline/core";
+import { type Issue, type WorkflowDoc, walkSteps } from "@flowlinejs/core";
 import { Plus, TriangleAlert } from "lucide-react";
 import { type JSX, useMemo, useState } from "react";
 import { useEditorStore, useIssues } from "../hooks";

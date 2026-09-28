@@ -1,4 +1,4 @@
-import { findStep } from "@flowline/core";
+import { findStep } from "@flowlinejs/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";

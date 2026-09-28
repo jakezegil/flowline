@@ -1,4 +1,4 @@
-import { runStorageConformance } from "@flowline/engine/conformance";
+import { runStorageConformance } from "@flowlinejs/engine/conformance";
 import { describe, expect, it } from "vitest";
 import { createMemoryStorage } from "./index";
 

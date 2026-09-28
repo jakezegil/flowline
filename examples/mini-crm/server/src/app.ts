@@ -4,14 +4,14 @@
  *
  * @module
  */
-import { createRegistry, type Logger } from "@flowline/core";
+import { createRegistry, type Logger } from "@flowlinejs/core";
 import {
   createEngine,
   type Engine,
   FlowlineValidationError,
   type StorageAdapter,
-} from "@flowline/engine";
-import { createMemoryStorage } from "@flowline/storage-memory";
+} from "@flowlinejs/engine";
+import { createMemoryStorage } from "@flowlinejs/storage-memory";
 import { Hono } from "hono";
 import { z } from "zod";
 import { CrmError, type CrmStore, createCrmStore, DEAL_STAGES } from "./crm-store";

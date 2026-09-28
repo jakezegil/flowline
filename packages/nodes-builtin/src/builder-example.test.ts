@@ -1,9 +1,9 @@
 /**
- * The `workflow()` TSDoc example in `@flowline/core`'s builder.ts, compiled and validated against
+ * The `workflow()` TSDoc example in `@flowlinejs/core`'s builder.ts, compiled and validated against
  * the real built-in nodes (core can't import them), plus compile-time checks of the condition
  * node's `rules` config type.
  */
-import { createRegistry, ref, validateWorkflow, workflow } from "@flowline/core";
+import { createRegistry, ref, validateWorkflow, workflow } from "@flowlinejs/core";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {

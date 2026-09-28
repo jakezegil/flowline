@@ -1,11 +1,11 @@
 /**
- * Dev playground: `pnpm --filter @flowline/react playground`. URL params pick the state, so the
+ * Dev playground: `pnpm --filter @flowlinejs/react playground`. URL params pick the state, so the
  * screenshot script can drive it: `?theme=light|dark|system&doc=nested|empty&mode=edit|readonly|run`
  * for the bare canvas, `?page=editor&wf=deal-won|onboarding|inbound-lead` for the editor, and
  * `?page=run&run=running|waiting|failed|loop` for the run viewer beside the run list, and
  * `?page=picker` (or `/picker`) for the reference input, data picker and code editor.
  */
-import type { FlowlineClient } from "@flowline/core/client";
+import type { FlowlineClient } from "@flowlinejs/core/client";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {

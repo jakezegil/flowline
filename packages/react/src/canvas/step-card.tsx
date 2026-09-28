@@ -1,4 +1,4 @@
-import type { Issue, NodeManifest, Step } from "@flowline/core";
+import type { Issue, NodeManifest, Step } from "@flowlinejs/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import type { Node, NodeProps } from "@xyflow/react";
 import {

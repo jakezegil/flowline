@@ -1,4 +1,4 @@
-import type { JournalEntry, RunDetail, RunEvent, Step } from "@flowline/core";
+import type { JournalEntry, RunDetail, RunEvent, Step } from "@flowlinejs/core";
 import { Hourglass, Play, X, Zap } from "lucide-react";
 import { type JSX, type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
 import type { RunOverlay } from "../canvas/canvas-context";

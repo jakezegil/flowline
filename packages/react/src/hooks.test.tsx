@@ -1,5 +1,5 @@
-import type { RunDetail, RunEvent } from "@flowline/core";
-import type { FlowlineClient } from "@flowline/core/client";
+import type { RunDetail, RunEvent } from "@flowlinejs/core";
+import type { FlowlineClient } from "@flowlinejs/core/client";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";

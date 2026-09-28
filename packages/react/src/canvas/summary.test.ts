@@ -1,4 +1,4 @@
-import type { JSONSchema, Step } from "@flowline/core";
+import type { JSONSchema, Step } from "@flowlinejs/core";
 import { describe, expect, test } from "vitest";
 import { renderSummary, summaryStepRefs } from "./summary";
 

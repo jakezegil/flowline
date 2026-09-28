@@ -9,13 +9,13 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import type { Engine } from "@flowline/engine";
+import type { Engine } from "@flowlinejs/engine";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { extractBlocks } from "./extract";
 
 vi.mock("pg", () => ({ default: { Pool: class {} } }));
-vi.mock("@flowline/storage-postgres", async () => {
-  const { createMemoryStorage } = await import("@flowline/storage-memory");
+vi.mock("@flowlinejs/storage-postgres", async () => {
+  const { createMemoryStorage } = await import("@flowlinejs/storage-memory");
   return { migrate: async () => {}, createPostgresStorage: () => createMemoryStorage() };
 });
 vi.mock("@hono/node-server", () => ({ serve: vi.fn() }));

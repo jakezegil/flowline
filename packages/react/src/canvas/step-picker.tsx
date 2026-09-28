@@ -1,4 +1,4 @@
-import { findStep, type Manifest, type NodeManifest } from "@flowline/core";
+import { findStep, type Manifest, type NodeManifest } from "@flowlinejs/core";
 import * as Popover from "@radix-ui/react-popover";
 import { Command } from "cmdk";
 import { Search } from "lucide-react";

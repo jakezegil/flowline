@@ -1,5 +1,5 @@
 {
-  "name": "@flowline/storage-postgres",
+  "name": "@flowlinejs/storage-postgres",
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
@@ -55,8 +55,8 @@
     "build": "tsup"
   },
   "dependencies": {
-    "@flowline/core": "workspace:^",
-    "@flowline/engine": "workspace:^"
+    "@flowlinejs/core": "workspace:^",
+    "@flowlinejs/engine": "workspace:^"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",

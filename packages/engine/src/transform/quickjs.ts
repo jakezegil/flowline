@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { TransformRuntime } from "@flowline/core";
+import type { TransformRuntime } from "@flowlinejs/core";
 import {
   newQuickJSWASMModule,
   type QuickJSContext,

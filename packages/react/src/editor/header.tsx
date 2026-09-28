@@ -1,4 +1,4 @@
-import type { Issue } from "@flowline/core";
+import type { Issue } from "@flowlinejs/core";
 import { LoaderCircle, Play, Redo2, Undo2 } from "lucide-react";
 import { type JSX, type ReactNode, useEffect, useRef, useState } from "react";
 import { isMac } from "../canvas/keyboard";

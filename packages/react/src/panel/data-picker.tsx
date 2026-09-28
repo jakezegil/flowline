@@ -5,7 +5,7 @@
  * @module
  */
 
-import type { JSONSchema, ScopeEntry } from "@flowline/core";
+import type { JSONSchema, ScopeEntry } from "@flowlinejs/core";
 import { ChevronRight, CornerDownLeft, Plus, Search } from "lucide-react";
 import {
   type CSSProperties,

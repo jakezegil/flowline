@@ -1,4 +1,4 @@
-import type { Manifest, NodeManifest, Step, WorkflowDoc } from "@flowline/core";
+import type { Manifest, NodeManifest, Step, WorkflowDoc } from "@flowlinejs/core";
 
 /**
  * Shared test fixtures: a hand-written JSON manifest (the editor only ever sees JSON) covering

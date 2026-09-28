@@ -15,7 +15,7 @@ import {
   type ScopeEntry,
   schemaAtPath,
   type ValueExpr,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import { refLabel } from "../../canvas/summary";
 import type { FlowlineLabels } from "../../labels";
 import { shortType } from "./schema-tree";

@@ -1,5 +1,5 @@
 {
-  "name": "@flowline/nodes-builtin",
+  "name": "@flowlinejs/nodes-builtin",
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
@@ -55,7 +55,7 @@
     "manifest:playground": "UPDATE_PLAYGROUND_MANIFEST=1 vitest run src/playground-manifest.test.ts && biome format --write ../react/playground/builtin-manifest.json"
   },
   "dependencies": {
-    "@flowline/core": "workspace:^"
+    "@flowlinejs/core": "workspace:^"
   },
   "peerDependencies": {
     "zod": "^4"

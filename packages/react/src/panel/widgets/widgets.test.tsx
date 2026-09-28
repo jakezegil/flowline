@@ -5,7 +5,7 @@ import {
   type ValueExpr,
   validateWorkflow,
   type WorkflowDoc,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { type JSX, useState } from "react";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";

@@ -1,4 +1,4 @@
-import type { WorkflowDetail, WorkflowDoc } from "@flowline/core";
+import type { WorkflowDetail, WorkflowDoc } from "@flowlinejs/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { httpError, mockClient, setupDom } from "../../test/dom";

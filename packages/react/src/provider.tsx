@@ -1,5 +1,5 @@
-import type { JSONSchema, UiMeta, ValueExpr } from "@flowline/core";
-import type { FlowlineClient } from "@flowline/core/client";
+import type { JSONSchema, UiMeta, ValueExpr } from "@flowlinejs/core";
+import type { FlowlineClient } from "@flowlinejs/core/client";
 import {
   type ComponentType,
   createContext,

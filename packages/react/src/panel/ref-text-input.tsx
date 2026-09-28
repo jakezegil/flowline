@@ -25,7 +25,7 @@ import {
   placeholder as placeholderExt,
   tooltips,
 } from "@codemirror/view";
-import { type JSONSchema, parseRefPath, type ScopeEntry, type ValueExpr } from "@flowline/core";
+import { type JSONSchema, parseRefPath, type ScopeEntry, type ValueExpr } from "@flowlinejs/core";
 import * as Popover from "@radix-ui/react-popover";
 import { Variable } from "lucide-react";
 import {

@@ -1,4 +1,4 @@
-import type { StepLocation } from "@flowline/core";
+import type { StepLocation } from "@flowlinejs/core";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Plus } from "lucide-react";
 import { memo } from "react";

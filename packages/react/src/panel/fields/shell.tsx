@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { Issue } from "@flowline/core";
+import type { Issue } from "@flowlinejs/core";
 import { CircleAlert, TriangleAlert } from "lucide-react";
 import type { JSX, ReactNode } from "react";
 import { useFlowlineAppearance } from "../../provider";

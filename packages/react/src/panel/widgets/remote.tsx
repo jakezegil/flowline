@@ -5,8 +5,8 @@
  *
  * @module
  */
-import type { SubflowInfo } from "@flowline/core";
-import type { FlowlineClient } from "@flowline/core/client";
+import type { SubflowInfo } from "@flowlinejs/core";
+import type { FlowlineClient } from "@flowlinejs/core/client";
 import { KeyRound, RotateCw } from "lucide-react";
 import { type JSX, useContext, useEffect, useId, useState, useSyncExternalStore } from "react";
 import { EditorContext } from "../../hooks";

@@ -6,9 +6,9 @@
  *
  * @module
  */
-import type { Issue } from "@flowline/core";
+import type { Issue } from "@flowlinejs/core";
 
-export { FatalError, type FatalErrorOptions, RetryableError } from "@flowline/core";
+export { FatalError, type FatalErrorOptions, RetryableError } from "@flowlinejs/core";
 
 /**
  * A storage operation violated a storage invariant, e.g. creating a run whose ID already belongs

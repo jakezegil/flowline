@@ -231,8 +231,8 @@ class WorkflowBuilderImpl extends StepsBuilderImpl implements WorkflowBuilder {
  *
  * @example
  * ```ts
- * import { ref, workflow } from "@flowline/core";
- * import { and, conditionNode, delayNode, eq, eventTrigger, stopNode } from "@flowline/nodes-builtin";
+ * import { ref, workflow } from "@flowlinejs/core";
+ * import { and, conditionNode, delayNode, eq, eventTrigger, stopNode } from "@flowlinejs/nodes-builtin";
  *
  * const dealWon = workflow("deal-won", { name: "Deal won follow-up" })
  *   .trigger(eventTrigger, { event: "deal.updated" })
@@ -242,7 +242,7 @@ class WorkflowBuilderImpl extends StepsBuilderImpl implements WorkflowBuilder {
  *   })
  *   .build();
  * ```
- * (This example is compiled by `@flowline/nodes-builtin`'s `builder-example.test.ts`.)
+ * (This example is compiled by `@flowlinejs/nodes-builtin`'s `builder-example.test.ts`.)
  */
 export function workflow(
   id: string,

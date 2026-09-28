@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { WorkflowSummary } from "@flowline/core/client";
+import type { WorkflowSummary } from "@flowlinejs/core/client";
 import { ArrowUpRight, LoaderCircle, RefreshCw, Send, Webhook } from "lucide-react";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";

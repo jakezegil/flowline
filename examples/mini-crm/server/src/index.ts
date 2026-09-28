@@ -4,9 +4,9 @@
  *
  * @module
  */
-import type { StorageAdapter } from "@flowline/engine";
-import { createMemoryStorage } from "@flowline/storage-memory";
-import { createPostgresStorage, migrate } from "@flowline/storage-postgres";
+import type { StorageAdapter } from "@flowlinejs/engine";
+import { createMemoryStorage } from "@flowlinejs/storage-memory";
+import { createPostgresStorage, migrate } from "@flowlinejs/storage-postgres";
 import { serve } from "@hono/node-server";
 import pg from "pg";
 import { createMiniCrm, TENANT_ID } from "./app";

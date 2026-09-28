@@ -35,14 +35,14 @@ At the end, one app event produces a completed run. `examples/docs-check` runs e
 snippets on every `pnpm test`.
 
 ```sh
-pnpm add @flowline/core @flowline/nodes-builtin @flowline/engine @flowline/storage-postgres zod@^4 pg
+pnpm add @flowlinejs/core @flowlinejs/nodes-builtin @flowlinejs/engine @flowlinejs/storage-postgres zod@^4 pg
 pnpm add hono @hono/node-server # or any other fetch-style server
-pnpm add @flowline/react react react-dom # the editor (step 7), in your React app
+pnpm add @flowlinejs/react react react-dom # the editor (step 7), in your React app
 pnpm add -D @types/react @types/react-dom vite @vitejs/plugin-react # or your own bundler
-pnpm add -D @flowline/storage-memory # for tests and prototypes
+pnpm add -D @flowlinejs/storage-memory # for tests and prototypes
 ```
 
-`zod` 4 is a peer dependency of `@flowline/core`, `@flowline/nodes-builtin` and `@flowline/engine`:
+`zod` 4 is a peer dependency of `@flowlinejs/core`, `@flowlinejs/nodes-builtin` and `@flowlinejs/engine`:
 install it once, so your schemas and flowline's share one copy. Zod 3 is not supported. If a
 second copy slips in (typically a `link:`/`file:` dependency on a flowline checkout, which resolves
 its own zod), `createRegistry` throws a `FlowlineDefinitionError` naming the field whose
@@ -53,12 +53,12 @@ Dedupe zod (`pnpm dedupe`, or an `overrides` entry), or install a packed tarball
 
 ```ts file=flowline/nodes.ts
 // flowline/nodes.ts
-import { defineNode, ui } from "@flowline/core";
+import { defineNode, ui } from "@flowlinejs/core";
 import { z } from "zod";
 import type { Db } from "../db";
 
 // Type ctx.services once, for every handler.
-declare module "@flowline/core" {
+declare module "@flowlinejs/core" {
   interface FlowlineServices {
     db: Db;
   }
@@ -79,7 +79,7 @@ export const loadContact = defineNode({
 
 ```ts file=flowline/plugin.ts
 // flowline/plugin.ts
-import { createRegistry, definePlugin, defineTrigger } from "@flowline/core";
+import { createRegistry, definePlugin, defineTrigger } from "@flowlinejs/core";
 import { z } from "zod";
 import { loadContact } from "./nodes";
 
@@ -105,8 +105,8 @@ export const registry = createRegistry([crm]);
 
 ```ts file=flowline/engine.ts
 // flowline/engine.ts
-import { createEngine } from "@flowline/engine";
-import { createPostgresStorage, migrate } from "@flowline/storage-postgres";
+import { createEngine } from "@flowlinejs/engine";
+import { createPostgresStorage, migrate } from "@flowlinejs/storage-postgres";
 import pg from "pg";
 import { getSession } from "../auth";
 import { db } from "../db";
@@ -129,7 +129,7 @@ export const engine = createEngine({
 });
 ```
 
-For tests and prototypes, use `createMemoryStorage()` from `@flowline/storage-memory` instead.
+For tests and prototypes, use `createMemoryStorage()` from `@flowlinejs/storage-memory` instead.
 
 ### 4. Mount the HTTP handler
 
@@ -169,7 +169,7 @@ Triggers only start *published* workflows. You can build and publish a workflow 
 
 ```ts file=flowline/workflows.ts
 // flowline/workflows.ts
-import { ref, workflow } from "@flowline/core";
+import { ref, workflow } from "@flowlinejs/core";
 import { engine } from "./engine";
 import { loadContact } from "./nodes";
 import { contactCreated } from "./plugin";
@@ -190,9 +190,9 @@ export async function publishWorkflows(tenantId: string) {
 
 ```tsx file=WorkflowPage.tsx
 // WorkflowPage.tsx
-import { createClient } from "@flowline/core/client";
-import { FlowlineProvider, WorkflowEditor } from "@flowline/react";
-import "@flowline/react/styles.css";
+import { createClient } from "@flowlinejs/core/client";
+import { FlowlineProvider, WorkflowEditor } from "@flowlinejs/react";
+import "@flowlinejs/react/styles.css";
 
 const client = createClient({ baseUrl: "/flowline" });
 
@@ -244,7 +244,7 @@ The editor and viewer add a few hundred KB of JavaScript (CodeMirror and React F
 editor route lazily, with `React.lazy(() => import("./WorkflowPage"))`, so the rest of your app
 doesn't wait for it.
 
-The browser receives only the JSON manifest. `@flowline/core` and `@flowline/react` never import
+The browser receives only the JSON manifest. `@flowlinejs/core` and `@flowlinejs/react` never import
 the engine or any server-only code.
 
 ### 8. Start runs from your app
@@ -279,7 +279,7 @@ in code:
 
 ```ts file=flowline/welcome-vip.ts
 // flowline/welcome-vip.ts
-import { ref, workflow } from "@flowline/core";
+import { ref, workflow } from "@flowlinejs/core";
 import {
   and,
   conditionNode,
@@ -287,7 +287,7 @@ import {
   isTrue,
   manualTrigger,
   stopNode,
-} from "@flowline/nodes-builtin";
+} from "@flowlinejs/nodes-builtin";
 import { engine } from "./engine";
 import { loadContact } from "./nodes";
 
@@ -350,7 +350,7 @@ produces a string.
   or the run is cancelled. Pass it to `fetch`.
 - Retries follow the node's `retry` policy (by default 3 attempts, with exponential backoff
   starting at 1 s). Throw `FatalError` to fail at once. Throw `RetryableError`, or any other error,
-  to retry. Both classes are exported from `@flowline/core` and from `@flowline/engine`. If the input
+  to retry. Both classes are exported from `@flowlinejs/core` and from `@flowlinejs/engine`. If the input
   or output fails schema validation, the step fails at once.
 - `engine.retryRun` continues a failed run from its failed step. `engine.cancelRun` cancels a run
   that is queued or waiting at once. If a worker is running the run, it cancels at the next
@@ -363,7 +363,7 @@ for an HTTP call. When the run resumes, the engine calls the same handler again,
 `ctx.resume` set to one of `timer`, `callback`, `timeout`, `subflow` or `subflowFailed`.
 
 ```ts file=flowline/approval.ts
-import { defineNode, suspend } from "@flowline/core";
+import { defineNode, suspend } from "@flowlinejs/core";
 import { z } from "zod";
 
 export const requestApproval = defineNode({
@@ -445,8 +445,8 @@ deduplication header:
 ```ts file=flowline/webhook.ts
 // flowline/webhook.ts
 import { createHmac } from "node:crypto";
-import { ref, workflow } from "@flowline/core";
-import { webhookTrigger } from "@flowline/nodes-builtin";
+import { ref, workflow } from "@flowlinejs/core";
+import { webhookTrigger } from "@flowlinejs/nodes-builtin";
 import { engine } from "./engine";
 import { loadContact } from "./nodes";
 
@@ -521,14 +521,14 @@ may hold PII. Each place that stores or shows values masks them differently:
 
 | Package | Use |
 |---|---|
-| `@flowline/storage-memory` | Tests, examples and single-process development. Data is lost when the process exits. |
-| `@flowline/storage-postgres` | Production. Run `migrate(pool, schema?)` first. Leasing uses `FOR UPDATE SKIP LOCKED`, so any number of workers can share one database. Postgres cannot store NUL bytes (`\u0000`) in strings, so they raise `FlowlineStorageError`. |
+| `@flowlinejs/storage-memory` | Tests, examples and single-process development. Data is lost when the process exits. |
+| `@flowlinejs/storage-postgres` | Production. Run `migrate(pool, schema?)` first. Leasing uses `FOR UPDATE SKIP LOCKED`, so any number of workers can share one database. Postgres cannot store NUL bytes (`\u0000`) in strings, so they raise `FlowlineStorageError`. |
 
-To write your own adapter, implement `StorageAdapter` from `@flowline/engine`, then check it against
+To write your own adapter, implement `StorageAdapter` from `@flowlinejs/engine`, then check it against
 the conformance suite (it requires Vitest):
 
 ```ts file=my-storage.conformance.ts
-import { runStorageConformance } from "@flowline/engine/conformance";
+import { runStorageConformance } from "@flowlinejs/engine/conformance";
 import { createMyStorage } from "./my-storage";
 
 runStorageConformance("my-storage", async () => {
@@ -542,7 +542,7 @@ runStorageConformance("my-storage", async () => {
 - **Authorization.** Every editor route goes through `authorize(req)`, which returns
   `{ tenantId, userId }` or `null` (a 401). Every editor request other than `GET` must send
   `Content-Type: application/json`, even when it has no body. Otherwise the engine returns 415.
-  This check keeps cookie-authorized mutations safe from CSRF. `@flowline/core/client` sets the
+  This check keeps cookie-authorized mutations safe from CSRF. `@flowlinejs/core/client` sets the
   header for you. Without `authorize`, every request acts as tenant
   `"default"` and the engine logs a warning. Always set it in production. Each tenant can see only
   its own data.
@@ -568,7 +568,7 @@ runStorageConformance("my-storage", async () => {
 
 ## Editor
 
-`@flowline/react` gives you these components:
+`@flowlinejs/react` gives you these components:
 
 - `<WorkflowEditor workflowId>`, which has a `renderPanel` slot for the side panel of the selected
   step.
@@ -578,7 +578,7 @@ runStorageConformance("my-storage", async () => {
 
 The provider accepts `client`, `theme`, `labels`, `icons` and `widgets`.
 
-- **Styles.** Import `@flowline/react/styles.css`. All the rules sit in `@layer flowline`, so your own
+- **Styles.** Import `@flowlinejs/react/styles.css`. All the rules sit in `@layer flowline`, so your own
   unlayered CSS wins without any specificity fights. That includes global resets like
   `button { color: inherit }`, so put those in a layer ordered before `flowline`
   (`@layer reset, flowline;`). See [Styles and cascade layers](packages/react/README.md#styles-and-cascade-layers).
@@ -593,15 +593,15 @@ The provider accepts `client`, `theme`, `labels`, `icons` and `widgets`.
 
 ## Testing
 
-`@flowline/engine/testing` exports `testNode`, which runs one handler, and `runWorkflowInMemory`,
+`@flowlinejs/engine/testing` exports `testNode`, which runs one handler, and `runWorkflowInMemory`,
 which saves, publishes, starts and drains a doc, skipping through timers. `runWorkflowInMemory`
-needs `@flowline/storage-memory`, which is an optional peer dependency of the engine, so install it
+needs `@flowlinejs/storage-memory`, which is an optional peer dependency of the engine, so install it
 as a dev dependency. Besides `plugins`, `services`, `trigger` and `clock`, it takes `secrets`
 (values by name, for `ctx.secrets`), `http` (the network policy; `{ allowPrivateNetworks: true }`
 reaches a local mock server) and `subflows` (docs published before the workflow that calls them).
-See [Testing your plugin](docs/guides/writing-a-plugin.md#testing). `@flowline/engine/testing`
+See [Testing your plugin](docs/guides/writing-a-plugin.md#testing). `@flowlinejs/engine/testing`
 never imports `vitest`; the storage conformance suite (`runStorageConformance`, see above) is its
-own entry point, `@flowline/engine/conformance`, because it does.
+own entry point, `@flowlinejs/engine/conformance`, because it does.
 
 ## Examples
 
@@ -609,19 +609,19 @@ own entry point, `@flowline/engine/conformance`, because it does.
   engine. It prints the run's audit log. Run it with `pnpm --filter headless start`.
 - [`examples/mini-crm`](examples/mini-crm): a Vite and React app with a Hono server. It includes a
   CRM plugin, sub-flows, webhook lead routing, a manager approval step, the embedded editor and
-  the run viewer. Run it with `pnpm --filter @flowline/example-mini-crm dev` and open
+  the run viewer. Run it with `pnpm --filter @flowlinejs/example-mini-crm dev` and open
   `http://localhost:5173`.
 
 ## Packages
 
 | Package | What it contains |
 |---|---|
-| `@flowline/core` | `defineNode`, `defineTrigger`, `definePlugin`, `createRegistry`, the doc types, references, the validator, the `workflow()` builder, and `@flowline/core/client`. Isomorphic, with no I/O. |
-| `@flowline/nodes-builtin` | The `core.*` nodes and triggers, and the rule helpers (`and`, `eq`, `isTrue`, ...). |
-| `@flowline/engine` | `createEngine`: the interpreter, workers, HTTP handler, triggers, SSE and the QuickJS runtime. `@flowline/engine/testing` holds the test helpers; `@flowline/engine/conformance` holds the storage conformance suite. |
-| `@flowline/storage-memory` | The in-memory `StorageAdapter`. |
-| `@flowline/storage-postgres` | The Postgres `StorageAdapter` and `migrate`. |
-| `@flowline/react` | The editor, run viewer, run list, hooks and theme. |
+| `@flowlinejs/core` | `defineNode`, `defineTrigger`, `definePlugin`, `createRegistry`, the doc types, references, the validator, the `workflow()` builder, and `@flowlinejs/core/client`. Isomorphic, with no I/O. |
+| `@flowlinejs/nodes-builtin` | The `core.*` nodes and triggers, and the rule helpers (`and`, `eq`, `isTrue`, ...). |
+| `@flowlinejs/engine` | `createEngine`: the interpreter, workers, HTTP handler, triggers, SSE and the QuickJS runtime. `@flowlinejs/engine/testing` holds the test helpers; `@flowlinejs/engine/conformance` holds the storage conformance suite. |
+| `@flowlinejs/storage-memory` | The in-memory `StorageAdapter`. |
+| `@flowlinejs/storage-postgres` | The Postgres `StorageAdapter` and `migrate`. |
+| `@flowlinejs/react` | The editor, run viewer, run list, hooks and theme. |
 
 ## Roadmap
 

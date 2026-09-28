@@ -6,7 +6,7 @@
  *
  * @module
  */
-import { WorkflowEditor } from "@flowline/react";
+import { WorkflowEditor } from "@flowlinejs/react";
 import { type JSX, useState } from "react";
 import { Link, useBlocker, useNavigate, useParams } from "react-router";
 import { invalidate } from "../api";

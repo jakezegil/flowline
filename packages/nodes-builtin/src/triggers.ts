@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { defineTrigger, fields, secret, ui } from "@flowline/core";
+import { defineTrigger, fields, secret, ui } from "@flowlinejs/core";
 import { z } from "zod";
 
 /** Five (or six, with seconds) space-separated cron fields. Full parsing happens when scheduling. */

@@ -1,4 +1,4 @@
-# @flowline/react
+# @flowlinejs/react
 
 The Flowline workflow editor, run viewer and run list for React. See the
 [main README](../../README.md#editor) for the components and the provider's options.
@@ -8,7 +8,7 @@ The Flowline workflow editor, run viewer and run list for React. See the
 Import the stylesheet once, next to your app's own CSS:
 
 ```ts
-import "@flowline/react/styles.css";
+import "@flowlinejs/react/styles.css";
 ```
 
 Every Flowline rule sits in the `flowline` [cascade layer](https://developer.mozilla.org/docs/Web/CSS/@layer).
@@ -31,7 +31,7 @@ Put resets in a layer and declare the layer order before Flowline's stylesheet l
 place a layer is named fixes its order, so do this in a file imported first:
 
 ```css
-/* layers.css — import this before @flowline/react/styles.css */
+/* layers.css — import this before @flowlinejs/react/styles.css */
 @layer reset, flowline;
 ```
 
@@ -48,7 +48,7 @@ place a layer is named fixes its order, so do this in a file imported first:
 
 ```ts
 import "./layers.css";
-import "@flowline/react/styles.css";
+import "@flowlinejs/react/styles.css";
 import "./app.css";
 ```
 

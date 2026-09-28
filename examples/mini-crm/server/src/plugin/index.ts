@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { definePlugin, type PluginDefinition } from "@flowline/core";
+import { definePlugin, type PluginDefinition } from "@flowlinejs/core";
 import type { CrmStore } from "../crm-store";
 import { requestApproval } from "./approval";
 import {
@@ -18,7 +18,7 @@ import { updateDeal } from "./deals";
 import { sendEmail } from "./email";
 import { contactCreated, dealUpdated } from "./triggers";
 
-declare module "@flowline/core" {
+declare module "@flowlinejs/core" {
   interface FlowlineServices {
     /** The mini CRM's store, available to handlers as `ctx.services.crm`. */
     crm: CrmStore;

@@ -1,6 +1,6 @@
 import { acceptCompletion, currentCompletions } from "@codemirror/autocomplete";
 import { deleteCharBackward, redo, undo } from "@codemirror/commands";
-import type { ScopeEntry, ValueExpr } from "@flowline/core";
+import type { ScopeEntry, ValueExpr } from "@flowlinejs/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";

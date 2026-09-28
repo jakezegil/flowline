@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { Step, WorkflowDoc } from "@flowline/core";
+import type { Step, WorkflowDoc } from "@flowlinejs/core";
 
 /**
  * A copy of `doc` with `names[stepId]` set as each step's `name`, at any depth.

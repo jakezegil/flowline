@@ -5,7 +5,7 @@ import {
   type Step,
   type StepLocation,
   type WorkflowDoc,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import {
   BRANCH_GAP,
   CARD_H,

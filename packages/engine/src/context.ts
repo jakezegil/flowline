@@ -11,7 +11,7 @@ import type {
   ResolveScope,
   ResumeInfo,
   TransformRuntime,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import { FatalError } from "./errors";
 import { createGuardedFetch, type GuardedFetch } from "./http";
 import { quickjsRuntime } from "./transform/quickjs";

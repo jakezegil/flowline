@@ -4,8 +4,8 @@
  *
  * @module
  */
-import type { ValueExpr } from "@flowline/core";
-import { type FieldWidgetProps, useFlowline } from "@flowline/react";
+import type { ValueExpr } from "@flowlinejs/core";
+import { type FieldWidgetProps, useFlowline } from "@flowlinejs/react";
 import { type JSX, useState } from "react";
 import { PageHeader } from "../ui";
 import { UserSelect } from "../widgets/user-select";

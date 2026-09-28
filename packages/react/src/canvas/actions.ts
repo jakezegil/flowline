@@ -13,7 +13,7 @@ import {
   type Step,
   type StepLocation,
   type WorkflowDoc,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import type { FlowlineLabels } from "../labels";
 import { type EditorStore, TRIGGER_KEY } from "../store/editor-store";
 import type { CanvasUiStore } from "./canvas-context";

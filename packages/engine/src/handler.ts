@@ -1,7 +1,7 @@
 /**
  * The engine's HTTP handler, `(Request) => Promise<Response>`, mounted under a base path (default
- * `/flowline`). Route shapes are documented in `@flowline/core`'s `api-types` and consumed by
- * `@flowline/core/client`.
+ * `/flowline`). Route shapes are documented in `@flowlinejs/core`'s `api-types` and consumed by
+ * `@flowlinejs/core/client`.
  *
  * Editor routes are authenticated with `EngineOptions.authorize`; `POST /hooks/...` is
  * authenticated by the workflow's webhook slug (and optional HMAC signature), `POST /resume/:token`
@@ -9,7 +9,7 @@
  *
  * @module
  */
-import type { ApiErrorBody, RunStatus, TestStepRequest, WorkflowDoc } from "@flowline/core";
+import type { ApiErrorBody, RunStatus, TestStepRequest, WorkflowDoc } from "@flowlinejs/core";
 import type { Engine, EngineCore } from "./engine";
 import {
   EngineConflictError,

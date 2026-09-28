@@ -1,6 +1,6 @@
-import type { Logger, RunDetail, RunSummary, Step, WorkflowDoc } from "@flowline/core";
-import type { StorageAdapter } from "@flowline/engine";
-import { createMemoryStorage } from "@flowline/storage-memory";
+import type { Logger, RunDetail, RunSummary, Step, WorkflowDoc } from "@flowlinejs/core";
+import type { StorageAdapter } from "@flowlinejs/engine";
+import { createMemoryStorage } from "@flowlinejs/storage-memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMiniCrm, type MiniCrm, type MiniCrmOptions, TENANT_ID } from "./app";
 import type { Approval, Contact, OutboxMessage } from "./crm-store";

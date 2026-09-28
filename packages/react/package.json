@@ -1,5 +1,5 @@
 {
-  "name": "@flowline/react",
+  "name": "@flowlinejs/react",
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
@@ -57,7 +57,7 @@
     "screenshots": "node playground/screenshot.mjs"
   },
   "devDependencies": {
-    "@flowline/nodes-builtin": "workspace:*",
+    "@flowlinejs/nodes-builtin": "workspace:*",
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.6",
     "@types/react": "19.3.0",
@@ -77,7 +77,7 @@
     "@codemirror/language": "6.12.4",
     "@codemirror/state": "6.7.4",
     "@codemirror/view": "6.43.11",
-    "@flowline/core": "workspace:^",
+    "@flowlinejs/core": "workspace:^",
     "@lezer/highlight": "1.2.5",
     "@radix-ui/react-context-menu": "2.3.7",
     "@radix-ui/react-dialog": "1.1.23",

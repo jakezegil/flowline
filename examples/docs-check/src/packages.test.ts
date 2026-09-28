@@ -97,7 +97,7 @@ async function nodeResolve(specifier: string, flags: string[] = []): Promise<str
 }
 
 describe("package exports", () => {
-  it.each(PACKAGES)("@flowline/%s: the source condition comes first, then dist", (name) => {
+  it.each(PACKAGES)("@flowlinejs/%s: the source condition comes first, then dist", (name) => {
     const { exports, publishConfig } = pkg(name);
     for (const [key, entry] of Object.entries(exports)) {
       expect(typeof entry, `${name} ${key}`).toBe("object");
@@ -119,7 +119,7 @@ describe("package exports", () => {
     const expected: Record<string, { dist: string; src: string }> = {};
     for (const name of PACKAGES) {
       const p = pkg(name);
-      const dir = join(root, "node_modules", "@flowline", name);
+      const dir = join(root, "node_modules", "@flowlinejs", name);
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "package.json"), JSON.stringify(p));
       for (const [key, entry] of Object.entries(p.exports)) {
@@ -127,7 +127,7 @@ describe("package exports", () => {
           mkdirSync(dirname(join(dir, target)), { recursive: true });
           writeFileSync(join(dir, target), "");
         }
-        const specifier = `@flowline/${name}${key === "." ? "" : key.slice(1)}`;
+        const specifier = `@flowlinejs/${name}${key === "." ? "" : key.slice(1)}`;
         expected[specifier] = {
           dist: pathToFileURL(join(dir, entry.default as string)).href,
           src: pathToFileURL(join(dir, entry["flowline-source"] as string)).href,
@@ -149,7 +149,7 @@ describe("package exports", () => {
       resolveAll([]),
       resolveAll(["--conditions=flowline-source"]),
     ]);
-    expect(Object.keys(expected)).toContain("@flowline/engine/testing");
+    expect(Object.keys(expected)).toContain("@flowlinejs/engine/testing");
     for (const [specifier, { dist, src }] of Object.entries(expected)) {
       expect(plain[specifier], specifier).toBe(dist);
       expect(source[specifier], specifier).toBe(src);
@@ -157,9 +157,9 @@ describe("package exports", () => {
   });
 
   it.runIf(existsSync(join(REPO, "packages/core/dist/index.js")))(
-    "after a build, the workspace's own @flowline/core resolves to dist for plain Node",
+    "after a build, the workspace's own @flowlinejs/core resolves to dist for plain Node",
     async () => {
-      expect(await nodeResolve("@flowline/core")).toMatch(/\/packages\/core\/dist\/index\.js$/);
+      expect(await nodeResolve("@flowlinejs/core")).toMatch(/\/packages\/core\/dist\/index\.js$/);
     },
   );
 });
@@ -296,19 +296,19 @@ describe("dev entry points run workspace sources", () => {
 });
 
 describe("dependencies", () => {
-  it.each(PACKAGES)("@flowline/%s takes zod 4 as a peer", (name) => {
+  it.each(PACKAGES)("@flowlinejs/%s takes zod 4 as a peer", (name) => {
     const p = pkg(name);
     expect(p.peerDependencies?.zod).toBe("^4");
     expect(p.dependencies?.zod).toBeUndefined();
     expect(p.devDependencies?.zod).toBeDefined();
   });
 
-  it("@flowline/react declares react and react-dom as peers", () => {
+  it("@flowlinejs/react declares react and react-dom as peers", () => {
     const p = pkg("react");
     expect(p.peerDependencies).toMatchObject({ react: ">=19", "react-dom": "^19" });
   });
 
-  it("@flowline/engine builds its declarations with stripInternal", () => {
+  it("@flowlinejs/engine builds its declarations with stripInternal", () => {
     expect(readFileSync(join(REPO, "packages/engine/tsup.config.ts"), "utf8")).toMatch(
       /stripInternal:\s*true/,
     );
@@ -319,7 +319,7 @@ describe("dependencies", () => {
   // Locally a stale or missing build skips this (run `pnpm build` first); CI always runs it, so
   // a pipeline that tests before building fails here instead of passing silently.
   it.skipIf(!process.env.CI && !engineDistIsFresh())(
-    "@flowline/engine strips @internal members from its built declarations",
+    "@flowlinejs/engine strips @internal members from its built declarations",
     () => {
       expect(engineDistIsFresh(), "packages/engine/dist is missing or stale: run pnpm build").toBe(
         true,
@@ -334,12 +334,12 @@ describe("dependencies", () => {
     },
   );
 
-  // `vitest` is an optional peer of @flowline/engine; @flowline/engine/testing must stay importable
+  // `vitest` is an optional peer of @flowlinejs/engine; @flowlinejs/engine/testing must stay importable
   // without it. The storage conformance suite (which needs vitest) is its own entry point,
-  // @flowline/engine/conformance, so it can't leak a static "vitest" import into testing/index.js
+  // @flowlinejs/engine/conformance, so it can't leak a static "vitest" import into testing/index.js
   // (directly, or via a shared chunk it imports).
   it.skipIf(!process.env.CI && !engineDistIsFresh())(
-    "@flowline/engine/testing's built output never imports vitest",
+    "@flowlinejs/engine/testing's built output never imports vitest",
     () => {
       expect(engineDistIsFresh(), "packages/engine/dist is missing or stale: run pnpm build").toBe(
         true,
@@ -354,12 +354,12 @@ describe("dependencies", () => {
     },
   );
 
-  // `@flowline/storage-memory` is an optional peer of @flowline/engine; @flowline/engine/testing
+  // `@flowlinejs/storage-memory` is an optional peer of @flowlinejs/engine; @flowlinejs/engine/testing
   // must stay importable without it. `runWorkflowInMemory` loads it lazily (`await import(...)`),
-  // so it can't leak a static "@flowline/storage-memory" import into testing/index.js either
+  // so it can't leak a static "@flowlinejs/storage-memory" import into testing/index.js either
   // (directly, or via a shared chunk it imports).
   it.skipIf(!process.env.CI && !engineDistIsFresh())(
-    "@flowline/engine/testing's built output never statically imports @flowline/storage-memory",
+    "@flowlinejs/engine/testing's built output never statically imports @flowlinejs/storage-memory",
     () => {
       expect(engineDistIsFresh(), "packages/engine/dist is missing or stale: run pnpm build").toBe(
         true,
@@ -368,8 +368,8 @@ describe("dependencies", () => {
       const text = readFileSync(join(dir, "testing/index.js"), "utf8");
       const chunks = jsChunksOf(dir, "testing/index.js", text);
       for (const source of [text, ...chunks]) {
-        expect(source).not.toMatch(/from\s+["']@flowline\/storage-memory["']/);
-        expect(source).not.toMatch(/require\(\s*["']@flowline\/storage-memory["']\s*\)/);
+        expect(source).not.toMatch(/from\s+["']@flowlinejs\/storage-memory["']/);
+        expect(source).not.toMatch(/require\(\s*["']@flowlinejs\/storage-memory["']\s*\)/);
       }
     },
   );

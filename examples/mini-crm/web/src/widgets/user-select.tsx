@@ -9,8 +9,8 @@
  *
  * @module
  */
-import type { ValueExpr } from "@flowline/core";
-import type { FieldWidgetProps } from "@flowline/react";
+import type { ValueExpr } from "@flowlinejs/core";
+import type { FieldWidgetProps } from "@flowlinejs/react";
 import { Braces, ChevronsUpDown, TriangleAlert } from "lucide-react";
 import { type JSX, useId } from "react";
 import { type User, useUsers } from "../api";

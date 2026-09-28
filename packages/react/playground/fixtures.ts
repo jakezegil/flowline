@@ -1,9 +1,9 @@
 /**
  * Playground fixtures: the real built-in manifest (plugin "core", dumped from
- * `@flowline/nodes-builtin` into builtin-manifest.json) plus a fake CRM plugin, and sample
+ * `@flowlinejs/nodes-builtin` into builtin-manifest.json) plus a fake CRM plugin, and sample
  * workflows. The editor only ever sees JSON, so no server code is needed.
  */
-import type { Manifest, NodeManifest, Step, TriggerManifest, WorkflowDoc } from "@flowline/core";
+import type { Manifest, NodeManifest, Step, TriggerManifest, WorkflowDoc } from "@flowlinejs/core";
 import builtin from "./builtin-manifest.json";
 
 const S = "https://json-schema.org/draft/2020-12/schema";

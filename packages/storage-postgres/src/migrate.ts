@@ -40,7 +40,7 @@ export async function withTransaction<T>(
 ): Promise<T> {
   if (!pool.connect) {
     throw new Error(
-      "@flowline/storage-postgres: this operation needs a transaction, so the pool must provide connect()",
+      "@flowlinejs/storage-postgres: this operation needs a transaction, so the pool must provide connect()",
     );
   }
   const client = await pool.connect();

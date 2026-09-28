@@ -1,12 +1,12 @@
 /**
- * The `StorageAdapter` conformance suite, exposed as `@flowline/engine/conformance`. This is its
- * own entry point (separate from `@flowline/engine/testing`) because it requires `vitest`
- * (an optional peer dependency) at import time; `@flowline/engine/testing` must stay importable
+ * The `StorageAdapter` conformance suite, exposed as `@flowlinejs/engine/conformance`. This is its
+ * own entry point (separate from `@flowlinejs/engine/testing`) because it requires `vitest`
+ * (an optional peer dependency) at import time; `@flowlinejs/engine/testing` must stay importable
  * without vitest installed.
  *
  * @module
  */
-import type { JournalEntry, RunEventType, WorkflowDoc } from "@flowline/core";
+import type { JournalEntry, RunEventType, WorkflowDoc } from "@flowlinejs/core";
 import { describe, expect, it } from "vitest";
 import { FlowlineStorageError } from "./errors";
 import type { Lease, NewRun, NewRunEvent, StorageAdapter } from "./storage";
@@ -75,7 +75,7 @@ async function claimOrFail(storage: StorageAdapter, now: number, workerId = "w1"
  *
  * @example
  * ```ts
- * import { runStorageConformance } from "@flowline/engine/testing";
+ * import { runStorageConformance } from "@flowlinejs/engine/testing";
  * runStorageConformance("memory", async () => ({ storage: createMemoryStorage() }));
  * ```
  *

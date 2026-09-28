@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { defineTrigger, ui } from "@flowline/core";
+import { defineTrigger, ui } from "@flowlinejs/core";
 import { z } from "zod";
 import { ContactSchema, DEAL_STAGES, DealSchema } from "../crm-store";
 

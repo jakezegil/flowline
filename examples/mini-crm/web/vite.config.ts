@@ -5,7 +5,7 @@ import { defaultClientConditions, defineConfig } from "vite";
 /** Where the CRM server listens; `/api` and `/flowline` are proxied to it. */
 const target = process.env.MINI_CRM_API ?? "http://localhost:8787";
 
-/** The mini CRM web app: `pnpm --filter @flowline/example-mini-crm dev`. */
+/** The mini CRM web app: `pnpm --filter @flowlinejs/example-mini-crm dev`. */
 export default defineConfig({
   // Run workspace packages from `src` (see /source-conditions.ts).
   resolve: { conditions: ["flowline-source", ...defaultClientConditions] },

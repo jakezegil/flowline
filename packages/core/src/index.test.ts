@@ -15,8 +15,8 @@ describe("package entry points", () => {
     expect(typeof core.tpl).toBe("function");
   });
 
-  it("exposes the client at @flowline/core/client", async () => {
-    const client = await import("@flowline/core/client");
+  it("exposes the client at @flowlinejs/core/client", async () => {
+    const client = await import("@flowlinejs/core/client");
     expect(typeof client.createClient).toBe("function");
     expect(typeof client.FlowlineHttpError).toBe("function");
   });

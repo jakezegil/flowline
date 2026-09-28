@@ -1,4 +1,4 @@
-import type { Manifest, NodeManifest, RunDetail } from "@flowline/core";
+import type { Manifest, NodeManifest, RunDetail } from "@flowlinejs/core";
 import * as Popover from "@radix-ui/react-popover";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { Ban, CircleAlert, CircleStop, Hourglass, LoaderCircle, RotateCcw } from "lucide-react";

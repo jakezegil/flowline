@@ -8,12 +8,12 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@flowline/core": "workspace:*",
-    "@flowline/engine": "workspace:*",
-    "@flowline/nodes-builtin": "workspace:*",
-    "@flowline/react": "workspace:*",
-    "@flowline/storage-memory": "workspace:*",
-    "@flowline/storage-postgres": "workspace:*",
+    "@flowlinejs/core": "workspace:*",
+    "@flowlinejs/engine": "workspace:*",
+    "@flowlinejs/nodes-builtin": "workspace:*",
+    "@flowlinejs/react": "workspace:*",
+    "@flowlinejs/storage-memory": "workspace:*",
+    "@flowlinejs/storage-postgres": "workspace:*",
     "@hono/node-server": "2.1.1",
     "@types/node": "22.20.2",
     "@types/pg": "8.23.1",

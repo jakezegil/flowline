@@ -1,4 +1,4 @@
-import { allStepIds, findStep, type Issue, type Step, type WorkflowDoc } from "@flowline/core";
+import { allStepIds, findStep, type Issue, type Step, type WorkflowDoc } from "@flowlinejs/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { branchyDoc, docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
 import { createEditorStore, type EditorStore } from "./editor-store";

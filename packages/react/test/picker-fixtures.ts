@@ -1,4 +1,4 @@
-import type { ScopeEntry } from "@flowline/core";
+import type { ScopeEntry } from "@flowlinejs/core";
 
 /** A scope in document order: the trigger, two steps (one without a schema), a loop. */
 export const scope: ScopeEntry[] = [

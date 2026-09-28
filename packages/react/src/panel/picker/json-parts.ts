@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { isRef, isTpl, parseTemplate, type ValueExpr } from "@flowline/core";
+import { isRef, isTpl, parseTemplate, type ValueExpr } from "@flowlinejs/core";
 import { partsToValue, type RefPart } from "./ref-model";
 
 /** Text of a JSON string's content (no quotes). */

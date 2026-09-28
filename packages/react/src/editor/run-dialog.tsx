@@ -1,4 +1,4 @@
-import type { FieldDecl } from "@flowline/core";
+import type { FieldDecl } from "@flowlinejs/core";
 import { type JSX, useId, useState } from "react";
 import { useFlowlineAppearance } from "../provider";
 import { SmallDialog } from "../ui/primitives";

@@ -85,7 +85,7 @@ describe("schemas from a different zod copy", () => {
     ]) {
       expect(call).toThrow(FlowlineDefinitionError);
       expect(call).toThrow(
-        /ui\(\) \(or secret\(\)\/sensitive\(\)\) got a zod 3 schema, but flowline requires zod ≥4 \(@flowline\/core uses zod 4\.\d+\.\d+\)/,
+        /ui\(\) \(or secret\(\)\/sensitive\(\)\) got a zod 3 schema, but flowline requires zod ≥4 \(@flowlinejs\/core uses zod 4\.\d+\.\d+\)/,
       );
       expect(call).toThrow(/upgrade to zod 4/);
       expect(call).toThrow(/pnpm dedupe/);

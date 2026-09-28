@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { createClient, type RunSummary } from "@flowline/core/client";
+import { createClient, type RunSummary } from "@flowlinejs/core/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   Approval,

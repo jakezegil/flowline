@@ -6,7 +6,7 @@
  * @module
  */
 
-import type { StepLocation } from "@flowline/core";
+import type { StepLocation } from "@flowlinejs/core";
 import { createContext, useContext } from "react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";

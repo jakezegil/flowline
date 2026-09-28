@@ -11,7 +11,7 @@ import type {
   WorkflowDoc,
   WorkflowSummary,
   WorkflowVersion,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import {
   FlowlineStorageError,
   type Lease,
@@ -23,7 +23,7 @@ import {
   type StorageAdapter,
   stoppedAtOf,
   type WorkflowAuditEntry,
-} from "@flowline/engine";
+} from "@flowlinejs/engine";
 
 /** Package version. */
 export const VERSION = "0.1.0";

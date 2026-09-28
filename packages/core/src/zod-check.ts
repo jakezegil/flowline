@@ -8,7 +8,7 @@
 import { z } from "zod";
 import { FlowlineDefinitionError } from "./define";
 
-/** The zod version `@flowline/core` runs with, as `major.minor.patch`. */
+/** The zod version `@flowlinejs/core` runs with, as `major.minor.patch`. */
 export const CORE_ZOD_VERSION = `${z.core.version.major}.${z.core.version.minor}.${z.core.version.patch}`;
 
 /** How to get to a single zod ≥4 copy. */
@@ -41,6 +41,6 @@ export function assertZod4(schema: unknown, subject: string, needsMeta = false):
       ? "a schema that isn't a zod ≥4 schema"
       : `${s === null ? "null" : typeof s} instead of a zod schema`;
   throw new FlowlineDefinitionError(
-    `${subject} got ${found}, but flowline requires zod ≥4 (@flowline/core uses zod ${CORE_ZOD_VERSION}). ${ZOD_ADVICE}`,
+    `${subject} got ${found}, but flowline requires zod ≥4 (@flowlinejs/core uses zod ${CORE_ZOD_VERSION}). ${ZOD_ADVICE}`,
   );
 }

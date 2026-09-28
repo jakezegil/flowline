@@ -1,5 +1,5 @@
 {
-  "name": "@flowline/example-mini-crm",
+  "name": "@flowlinejs/example-mini-crm",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,12 +16,12 @@
     "e2e": "playwright test --config e2e/playwright.config.ts"
   },
   "dependencies": {
-    "@flowline/core": "workspace:*",
-    "@flowline/engine": "workspace:*",
-    "@flowline/nodes-builtin": "workspace:*",
-    "@flowline/react": "workspace:*",
-    "@flowline/storage-memory": "workspace:*",
-    "@flowline/storage-postgres": "workspace:*",
+    "@flowlinejs/core": "workspace:*",
+    "@flowlinejs/engine": "workspace:*",
+    "@flowlinejs/nodes-builtin": "workspace:*",
+    "@flowlinejs/react": "workspace:*",
+    "@flowlinejs/storage-memory": "workspace:*",
+    "@flowlinejs/storage-postgres": "workspace:*",
     "@hono/node-server": "2.1.1",
     "hono": "4.13.7",
     "lucide-react": "1.45.0",

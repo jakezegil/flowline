@@ -1,4 +1,4 @@
-import { testNode } from "@flowline/engine/testing";
+import { testNode } from "@flowlinejs/engine/testing";
 import { describe, expect, it } from "vitest";
 import { type Message, main, notify } from "./main";
 

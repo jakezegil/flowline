@@ -15,8 +15,8 @@ import type {
   TestStepResponse,
   WorkflowDoc,
   WorkflowVersion,
-} from "@flowline/core";
-import type { FlowlineClient } from "@flowline/core/client";
+} from "@flowlinejs/core";
+import type { FlowlineClient } from "@flowlinejs/core/client";
 import { manifest, nestedDoc, webhookDoc } from "./fixtures";
 
 const T0 = Date.now();

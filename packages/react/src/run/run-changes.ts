@@ -5,8 +5,8 @@
  *
  * @module
  */
-import type { RunSummary } from "@flowline/core";
-import type { FlowlineClient } from "@flowline/core/client";
+import type { RunSummary } from "@flowlinejs/core";
+import type { FlowlineClient } from "@flowlinejs/core/client";
 
 /** The fields of a run a status change carries. */
 export type RunChange = Pick<

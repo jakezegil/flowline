@@ -2,8 +2,8 @@
  * `?page=picker` (or `/picker`): the reference input, data picker and code editor in isolation,
  * against a hand-made scope with samples. `&theme=light|dark`.
  */
-import type { ScopeEntry, ValueExpr } from "@flowline/core";
-import type { FlowlineClient } from "@flowline/core/client";
+import type { ScopeEntry, ValueExpr } from "@flowlinejs/core";
+import type { FlowlineClient } from "@flowlinejs/core/client";
 import { type JSX, type ReactNode, useMemo, useState } from "react";
 import { PortalContainerContext } from "../src/canvas/canvas-context";
 import { FlowlineProvider } from "../src/index";

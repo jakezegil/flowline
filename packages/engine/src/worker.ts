@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { Logger } from "@flowline/core";
+import type { Logger } from "@flowlinejs/core";
 
 /** Options of `Engine.startWorker`. */
 export interface WorkerOptions {

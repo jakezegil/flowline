@@ -11,10 +11,10 @@ import {
   ref,
   tpl,
   workflow,
-} from "@flowline/core";
-import { createEngine } from "@flowline/engine";
-import { and, conditionNode, isTrue, manualTrigger, stopNode } from "@flowline/nodes-builtin";
-import { createMemoryStorage } from "@flowline/storage-memory";
+} from "@flowlinejs/core";
+import { createEngine } from "@flowlinejs/engine";
+import { and, conditionNode, isTrue, manualTrigger, stopNode } from "@flowlinejs/nodes-builtin";
+import { createMemoryStorage } from "@flowlinejs/storage-memory";
 import { z } from "zod";
 
 /** A sent notification. */
@@ -25,7 +25,7 @@ export interface Message {
 }
 
 // Type `ctx.services` for every handler.
-declare module "@flowline/core" {
+declare module "@flowlinejs/core" {
   interface FlowlineServices {
     users: Map<string, { name: string; email: string; vip: boolean }>;
     outbox: Message[];

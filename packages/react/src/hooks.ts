@@ -9,8 +9,8 @@ import {
   unreachableSteps,
   type WorkflowDoc,
   walkSteps,
-} from "@flowline/core";
-import type { FlowlineClient } from "@flowline/core/client";
+} from "@flowlinejs/core";
+import type { FlowlineClient } from "@flowlinejs/core/client";
 import {
   createContext,
   useCallback,

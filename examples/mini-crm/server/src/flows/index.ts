@@ -3,8 +3,8 @@
  *
  * @module
  */
-import type { WorkflowDoc } from "@flowline/core";
-import type { Engine } from "@flowline/engine";
+import type { WorkflowDoc } from "@flowlinejs/core";
+import type { Engine } from "@flowlinejs/engine";
 import { dealWonFollowUpFlow } from "./deal-won";
 import { inboundLeadRoutingFlow } from "./lead-routing";
 import { createContactFlow, getContactFlow, getOrCreateContactFlow } from "./subflows";

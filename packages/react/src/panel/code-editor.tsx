@@ -24,7 +24,7 @@ import {
   lineNumbers,
   tooltips,
 } from "@codemirror/view";
-import { type JSONSchema, type ScopeEntry, schemaAtPath } from "@flowline/core";
+import { type JSONSchema, type ScopeEntry, schemaAtPath } from "@flowlinejs/core";
 import { type JSX, useContext, useEffect, useId, useRef } from "react";
 import { PortalContainerContext } from "../canvas/canvas-context";
 import { useFlowlineAppearance } from "../provider";

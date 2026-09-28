@@ -11,7 +11,7 @@ import {
   tpl,
   type WorkflowDoc,
   workflow,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import {
   and,
   builtinPlugin,
@@ -27,8 +27,8 @@ import {
   switchNode,
   transformNode,
   waitForCallbackNode,
-} from "@flowline/nodes-builtin";
-import { createMemoryStorage } from "@flowline/storage-memory";
+} from "@flowlinejs/nodes-builtin";
+import { createMemoryStorage } from "@flowlinejs/storage-memory";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createEngine, type Engine } from "./engine";

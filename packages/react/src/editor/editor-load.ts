@@ -6,7 +6,7 @@
  * @module
  */
 
-import type { Manifest, ValidationContext, WorkflowDetail, WorkflowDoc } from "@flowline/core";
+import type { Manifest, ValidationContext, WorkflowDetail, WorkflowDoc } from "@flowlinejs/core";
 import { useEffect, useState } from "react";
 import type { FlowlineLabels } from "../labels";
 import { useFlowline, useFlowlineAppearance } from "../provider";

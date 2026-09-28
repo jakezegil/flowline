@@ -1,5 +1,5 @@
 {
-  "name": "@flowline/engine",
+  "name": "@flowlinejs/engine",
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
@@ -64,19 +64,19 @@
     "build": "tsup"
   },
   "dependencies": {
-    "@flowline/core": "workspace:^",
-    "@flowline/nodes-builtin": "workspace:^",
+    "@flowlinejs/core": "workspace:^",
+    "@flowlinejs/nodes-builtin": "workspace:^",
     "cron-parser": "5.10.1",
     "quickjs-emscripten": "0.32.0",
     "undici": "7.29.1"
   },
   "peerDependencies": {
-    "@flowline/storage-memory": "workspace:^",
+    "@flowlinejs/storage-memory": "workspace:^",
     "vitest": ">=3",
     "zod": "^4"
   },
   "peerDependenciesMeta": {
-    "@flowline/storage-memory": {
+    "@flowlinejs/storage-memory": {
       "optional": true
     },
     "vitest": {
@@ -84,7 +84,7 @@
     }
   },
   "devDependencies": {
-    "@flowline/storage-memory": "workspace:*",
+    "@flowlinejs/storage-memory": "workspace:*",
     "vitest": "5.0.0",
     "zod": "4.6.5"
   }

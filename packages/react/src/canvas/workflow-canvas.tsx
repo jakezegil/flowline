@@ -1,4 +1,4 @@
-import { branchesFor, type Manifest, type WorkflowDoc } from "@flowline/core";
+import { branchesFor, type Manifest, type WorkflowDoc } from "@flowlinejs/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import {
   type AriaLabelConfig,

@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { JSONSchema, ValueExpr } from "@flowline/core";
+import type { JSONSchema, ValueExpr } from "@flowlinejs/core";
 import { type JSX, useRef } from "react";
 import { useFlowlineAppearance } from "../../provider";
 import { AddButton, focusLastItem, ItemActions, useItemKeys } from "../fields/collections";

@@ -5,8 +5,8 @@
  *
  * @module
  */
-import type { WorkflowSummary } from "@flowline/core/client";
-import { RunList } from "@flowline/react";
+import type { WorkflowSummary } from "@flowlinejs/core/client";
+import { RunList } from "@flowlinejs/react";
 import type { JSX } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { flowline, useQuery } from "../api";

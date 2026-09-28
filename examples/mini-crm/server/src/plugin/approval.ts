@@ -4,9 +4,17 @@
  * @module
  */
 import { createHash } from "node:crypto";
-import { branch, defineNode, FatalError, type Step, suspend, ui, walkSteps } from "@flowline/core";
-import type { Engine } from "@flowline/engine";
-import { parseDuration } from "@flowline/nodes-builtin";
+import {
+  branch,
+  defineNode,
+  FatalError,
+  type Step,
+  suspend,
+  ui,
+  walkSteps,
+} from "@flowlinejs/core";
+import type { Engine } from "@flowlinejs/engine";
+import { parseDuration } from "@flowlinejs/nodes-builtin";
 import { z } from "zod";
 import type { CrmStore } from "../crm-store";
 import { userId } from "./contacts";

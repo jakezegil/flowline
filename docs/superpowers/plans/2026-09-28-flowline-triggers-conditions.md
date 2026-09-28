@@ -4,7 +4,7 @@
 
 **Goal:** Close the five gaps a migrating CRM customer reported: per-match emit failure isolation, time-windowed dedupe with random run IDs, multi-event triggers, strict/loose condition semantics with typed literals and host operators, and a poll trigger kind — with a worked "Deal stuck in stage" example and e2e coverage in mini-crm.
 
-**Architecture:** pnpm monorepo `@flowline/*`: `core` (pure, isomorphic: definitions, doc model, manifest, validator) → `nodes-builtin` → `engine` (durable interpreter over a `StorageAdapter`, workers, HTTP handler, trigger dispatch) → `storage-memory` / `storage-postgres`. `react` consumes only `core` + the JSON manifest. `examples/mini-crm` wires everything together and hosts the Playwright e2e suite.
+**Architecture:** pnpm monorepo `@flowlinejs/*`: `core` (pure, isomorphic: definitions, doc model, manifest, validator) → `nodes-builtin` → `engine` (durable interpreter over a `StorageAdapter`, workers, HTTP handler, trigger dispatch) → `storage-memory` / `storage-postgres`. `react` consumes only `core` + the JSON manifest. `examples/mini-crm` wires everything together and hosts the Playwright e2e suite.
 
 **Tech Stack:** Node 22, pnpm 10, TypeScript 5.x strict, Zod 4, Vitest 3, tsup, Biome, React 19, @xyflow/react 12, Zustand 5, cron-parser, pg + @electric-sql/pglite (tests), Hono, Vite 6, Playwright.
 
@@ -12,9 +12,9 @@
 
 ## Global Constraints
 
-- This plan is executed **after** the flowkit → flowline rename has landed. Every identifier is the post-rename one: package scope `@flowline/*`, `FlowlineValidationError`, `FlowlineDefinitionError`, `FlowlineStorageError`, `FlowlineServices`, `<FlowlineProvider>`, source condition `flowline-source`, signature header `X-Flowline-Signature`, env `FLOWLINE_PG_URL`. Never introduce a `flowkit` identifier.
+- This plan is executed **after** the flowkit → flowline rename has landed. Every identifier is the post-rename one: package scope `@flowlinejs/*`, `FlowlineValidationError`, `FlowlineDefinitionError`, `FlowlineStorageError`, `FlowlineServices`, `<FlowlineProvider>`, source condition `flowline-source`, signature header `X-Flowline-Signature`, env `FLOWLINE_PG_URL`. Never introduce a `flowkit` identifier.
 - All packages ESM-only, `"type": "module"`, TS `strict: true`, `noUncheckedIndexedAccess: true`. Workspace dev resolution: package `exports` resolve to `./src` only under the `flowline-source` condition; every new dev entry point (vitest/vite config, `tsx --conditions=flowline-source`, Playwright webServer) sets it.
-- `@flowline/core` and `@flowline/react` must never import from `@flowline/engine`, `nodes-builtin`, Node built-ins, or anything server-only. The browser only ever sees the **manifest** (JSON).
+- `@flowlinejs/core` and `@flowlinejs/react` must never import from `@flowlinejs/engine`, `nodes-builtin`, Node built-ins, or anything server-only. The browser only ever sees the **manifest** (JSON).
 - Timestamps inside engine/storage are epoch milliseconds (`number`). Storage never reads a clock; the engine gets time only from its injectable `clock`.
 - Storage adapters: every method is one atomic operation; guarded writes check and write in the same transaction; a write that returns `false`/`null` changes nothing; tenancy on every tenant-scoped method. New methods must be covered by `runStorageConformance` and pass on memory and PGlite.
 - Secrets and undredacted payloads never appear in workflow docs, journals, run events or `TriggerEvent`s.
@@ -96,9 +96,9 @@ README.md, docs/guides/writing-a-plugin.md, examples/mini-crm/README.md
 
 **Interfaces**
 
-Consumes: `checkTriggerPayload`, `visibleTriggerConfig` (subflow.ts), `EngineCore.logger`, `Issue` from `@flowline/core`.
+Consumes: `checkTriggerPayload`, `visibleTriggerConfig` (subflow.ts), `EngineCore.logger`, `Issue` from `@flowlinejs/core`.
 
-Produces (exported from `@flowline/engine`):
+Produces (exported from `@flowlinejs/engine`):
 ```ts
 export interface EmitRejection { workflowId: string; version: number; message: string; issues: Issue[] }
 export interface EmitResult { started: string[]; rejected: EmitRejection[] }
@@ -165,15 +165,15 @@ Note: v4 is authored once. Task 2 creates `v4()` with the dedupe statements; Tas
 
 **Interfaces**
 
-Consumes: `claimDedupeKey` (Task 2), `parseDuration`, `MAX_DURATION_MS` from `@flowline/nodes-builtin`.
+Consumes: `claimDedupeKey` (Task 2), `parseDuration`, `MAX_DURATION_MS` from `@flowlinejs/nodes-builtin`.
 
 Produces:
 ```ts
-// @flowline/core
+// @flowlinejs/core
 export type DurationInput = number | string;
 export interface TriggerDedupe<C extends z.ZodObject, P> { key(args: { config: z.infer<C>; payload: P; event?: string }): string | undefined; window?: DurationInput }
 interface TriggerDefinition<C, P> { dedupe?: TriggerDedupe<C, P> }   // dedupeKey removed; defineTrigger validates window >= 1 ms
-// @flowline/engine
+// @flowlinejs/engine
 export interface DedupeOptions { key?: string; window?: DurationInput }
 interface EngineOptions { dedupe?: { defaultWindow?: DurationInput } }   // default "7d"
 interface Engine {
@@ -213,7 +213,7 @@ Consumes: Task 1 isolation loop, Task 3 dedupe namespace `event:<wf>:<key>`.
 
 Produces:
 ```ts
-// @flowline/core
+// @flowlinejs/core
 interface TriggerDefinition<C, P> {
   events?: readonly string[];
   normalize?(event: string, payload: unknown): P | undefined;
@@ -270,11 +270,11 @@ Consumes: `ui()` metadata, `defineNode`, `definePlugin`.
 
 Produces:
 ```ts
-// @flowline/core
+// @flowlinejs/core
 export type RuleValueType = "string" | "date" | "number" | "boolean" | "array" | "object" | "any";
 export interface RuleOperatorMeta { id: string; label: string; arity: "unary" | "binary"; types?: RuleValueType[] }
 interface UiMeta { operators?: RuleOperatorMeta[] }
-// @flowline/nodes-builtin
+// @flowlinejs/nodes-builtin
 export type CompareMode = "strict" | "loose";
 export interface ConditionRules extends RuleGroup { compare?: CompareMode }
 export interface CustomOperator { id: string; label: string; arity: "unary" | "binary"; types?: RuleValueType[]; evaluate(left: unknown, right: unknown, ctx: { compare: CompareMode }): boolean }
@@ -377,7 +377,7 @@ Consumes: Task 8 storage methods; Task 3 `launch` with `{ key: "poll:<wf>:<itemK
 
 Produces:
 ```ts
-// @flowline/core
+// @flowlinejs/core
 export type TriggerKind = "event" | "webhook" | "manual" | "schedule" | "subflow" | "poll";
 export interface PollItem<P> { key: string; payload: P }
 export interface PollResult<P> { items: PollItem<P>[]; cursor?: unknown }
@@ -386,7 +386,7 @@ export interface PollArgs<C> { config: C; since: number; until: number; cursor: 
 interface TriggerDefinition<C, P> { poll?(args: PollArgs<z.infer<C>>): Promise<PollResult<P>> | PollResult<P>; interval?: DurationInput; maxInterval?: DurationInput }
 interface TriggerManifest { interval?: number; maxInterval?: number }
 export type RunOrigin = /* existing variants */ | { kind: "poll"; since: number; until: number; itemKey: string };
-// @flowline/engine
+// @flowlinejs/engine
 interface EngineOptions { poll?: { defaultInterval?: DurationInput /* "1m" */; defaultMaxInterval?: DurationInput /* "24h" */; maxCallsPerTick?: number /* 10 */; leaseMs?: number /* 60_000 */ } }
 interface Engine { tickPolls(): Promise<number> }
 interface WorkerOptions { pollEveryMs?: number /* 15_000 */ }

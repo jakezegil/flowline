@@ -13,7 +13,7 @@ import {
   resolveValue,
   type TestStepResponse,
   type ValueExpr,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import {
   CircleAlert,
   CircleCheck,

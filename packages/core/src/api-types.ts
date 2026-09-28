@@ -1,6 +1,6 @@
 /**
  * HTTP request/response DTOs shared by the engine's HTTP handler and the client
- * (`@flowline/core/client`). All timestamps are epoch milliseconds.
+ * (`@flowlinejs/core/client`). All timestamps are epoch milliseconds.
  *
  * Routes (relative to the handler's base path):
  * - `GET  /manifest` → `Manifest`

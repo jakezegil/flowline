@@ -32,22 +32,22 @@ importers:
 
   examples/docs-check:
     devDependencies:
-      '@flowline/core':
+      '@flowlinejs/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@flowline/engine':
+      '@flowlinejs/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@flowline/nodes-builtin':
+      '@flowlinejs/nodes-builtin':
         specifier: workspace:*
         version: link:../../packages/nodes-builtin
-      '@flowline/react':
+      '@flowlinejs/react':
         specifier: workspace:*
         version: link:../../packages/react
-      '@flowline/storage-memory':
+      '@flowlinejs/storage-memory':
         specifier: workspace:*
         version: link:../../packages/storage-memory
-      '@flowline/storage-postgres':
+      '@flowlinejs/storage-postgres':
         specifier: workspace:*
         version: link:../../packages/storage-postgres
       '@hono/node-server':
@@ -83,16 +83,16 @@ importers:
 
   examples/headless:
     dependencies:
-      '@flowline/core':
+      '@flowlinejs/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@flowline/engine':
+      '@flowlinejs/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@flowline/nodes-builtin':
+      '@flowlinejs/nodes-builtin':
         specifier: workspace:*
         version: link:../../packages/nodes-builtin
-      '@flowline/storage-memory':
+      '@flowlinejs/storage-memory':
         specifier: workspace:*
         version: link:../../packages/storage-memory
       zod:
@@ -108,22 +108,22 @@ importers:
 
   examples/mini-crm:
     dependencies:
-      '@flowline/core':
+      '@flowlinejs/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@flowline/engine':
+      '@flowlinejs/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@flowline/nodes-builtin':
+      '@flowlinejs/nodes-builtin':
         specifier: workspace:*
         version: link:../../packages/nodes-builtin
-      '@flowline/react':
+      '@flowlinejs/react':
         specifier: workspace:*
         version: link:../../packages/react
-      '@flowline/storage-memory':
+      '@flowlinejs/storage-memory':
         specifier: workspace:*
         version: link:../../packages/storage-memory
-      '@flowline/storage-postgres':
+      '@flowlinejs/storage-postgres':
         specifier: workspace:*
         version: link:../../packages/storage-postgres
       '@hono/node-server':
@@ -196,10 +196,10 @@ importers:
 
   packages/engine:
     dependencies:
-      '@flowline/core':
+      '@flowlinejs/core':
         specifier: workspace:^
         version: link:../core
-      '@flowline/nodes-builtin':
+      '@flowlinejs/nodes-builtin':
         specifier: workspace:^
         version: link:../nodes-builtin
       cron-parser:
@@ -212,7 +212,7 @@ importers:
         specifier: 7.29.1
         version: 7.29.1
     devDependencies:
-      '@flowline/storage-memory':
+      '@flowlinejs/storage-memory':
         specifier: workspace:*
         version: link:../storage-memory
       vitest:
@@ -224,7 +224,7 @@ importers:
 
   packages/nodes-builtin:
     dependencies:
-      '@flowline/core':
+      '@flowlinejs/core':
         specifier: workspace:^
         version: link:../core
     devDependencies:
@@ -255,7 +255,7 @@ importers:
       '@codemirror/view':
         specifier: 6.43.11
         version: 6.43.11
-      '@flowline/core':
+      '@flowlinejs/core':
         specifier: workspace:^
         version: link:../core
       '@lezer/highlight':
@@ -289,7 +289,7 @@ importers:
         specifier: 5.0.15
         version: 5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.7.0(react@19.3.0))
     devDependencies:
-      '@flowline/nodes-builtin':
+      '@flowlinejs/nodes-builtin':
         specifier: workspace:*
         version: link:../nodes-builtin
       '@testing-library/react':
@@ -328,10 +328,10 @@ importers:
 
   packages/storage-memory:
     dependencies:
-      '@flowline/core':
+      '@flowlinejs/core':
         specifier: workspace:^
         version: link:../core
-      '@flowline/engine':
+      '@flowlinejs/engine':
         specifier: workspace:^
         version: link:../engine
     devDependencies:
@@ -344,10 +344,10 @@ importers:
 
   packages/storage-postgres:
     dependencies:
-      '@flowline/core':
+      '@flowlinejs/core':
         specifier: workspace:^
         version: link:../core
-      '@flowline/engine':
+      '@flowlinejs/engine':
         specifier: workspace:^
         version: link:../engine
     devDependencies:

@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { defineNode, FatalError, ui } from "@flowline/core";
+import { defineNode, FatalError, ui } from "@flowlinejs/core";
 import { z } from "zod";
 import { ContactSchema, CrmError, TEAMS, UserSchema } from "../crm-store";
 

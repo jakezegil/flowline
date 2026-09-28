@@ -5,7 +5,7 @@
  * @module
  */
 
-import type { RunEventType, RunOrigin } from "@flowline/core";
+import type { RunEventType, RunOrigin } from "@flowlinejs/core";
 import type { RunStepStatus } from "./canvas/canvas-context";
 
 /** The canvas's visible and accessible text. Functions build text that includes values. */

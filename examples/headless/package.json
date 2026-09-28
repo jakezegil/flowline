@@ -9,10 +9,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@flowline/core": "workspace:*",
-    "@flowline/engine": "workspace:*",
-    "@flowline/nodes-builtin": "workspace:*",
-    "@flowline/storage-memory": "workspace:*",
+    "@flowlinejs/core": "workspace:*",
+    "@flowlinejs/engine": "workspace:*",
+    "@flowlinejs/nodes-builtin": "workspace:*",
+    "@flowlinejs/storage-memory": "workspace:*",
     "zod": "^4"
   },
   "devDependencies": {

@@ -5,7 +5,7 @@ import {
   type NodeContext,
   type TransformRuntime,
   UI_META_KEY,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import { describe, expect, it } from "vitest";
 import { transform } from "./transform";
 

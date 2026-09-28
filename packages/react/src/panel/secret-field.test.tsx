@@ -2,7 +2,7 @@
  * `secret()` fields are literal-only (ruling 68): the manifest carries `literalOnly`, the form
  * offers no reference toggle, and a stored reference shows the validator's issue.
  */
-import type { Issue, JSONSchema, Manifest, ValueExpr } from "@flowline/core";
+import type { Issue, JSONSchema, Manifest, ValueExpr } from "@flowlinejs/core";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 import builtin from "../../playground/builtin-manifest.json";

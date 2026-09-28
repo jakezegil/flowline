@@ -11,7 +11,7 @@ import {
   secret,
   sensitive,
   ui,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import { z } from "zod";
 
 const stringRecord = () => z.record(z.string(), z.string());

@@ -19,7 +19,7 @@ import {
   type RefPath,
   type Step,
   type ValueExpr,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import { defaultLabels, type FlowlineLabels } from "../labels";
 import { metaOf, optionLabel } from "../panel/schema";
 

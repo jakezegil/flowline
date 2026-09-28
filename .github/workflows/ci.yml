@@ -39,4 +39,4 @@ jobs:
 
       # e2e (Playwright, examples/mini-crm) is intentionally not run in CI yet: it needs browser
       # binaries installed and a dedicated job. Run it locally with
-      # `pnpm --filter @flowline/example-mini-crm e2e`.
+      # `pnpm --filter @flowlinejs/example-mini-crm e2e`.

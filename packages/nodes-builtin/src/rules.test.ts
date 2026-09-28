@@ -1,4 +1,4 @@
-import { ref } from "@flowline/core";
+import { ref } from "@flowlinejs/core";
 import { describe, expect, it } from "vitest";
 import {
   and,

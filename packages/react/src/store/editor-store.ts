@@ -19,7 +19,7 @@ import {
   validateWorkflow,
   type WorkflowDoc,
   walkSteps,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import {
   cloneWithFreshIds,

@@ -10,8 +10,8 @@ import {
   stop,
   suspend,
   type WorkflowDoc,
-} from "@flowline/core";
-import { createMemoryStorage } from "@flowline/storage-memory";
+} from "@flowlinejs/core";
+import { createMemoryStorage } from "@flowlinejs/storage-memory";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { sha256Hex } from "./context";

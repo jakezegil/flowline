@@ -1,4 +1,4 @@
-import type { NodeContext } from "@flowline/core";
+import type { NodeContext } from "@flowlinejs/core";
 
 /** Fixed "now" of {@link fakeContext}: 2026-01-01T00:00:00Z. */
 export const NOW = Date.UTC(2026, 0, 1);

@@ -6,7 +6,7 @@ for example, owns `crm.loadContact`, `crm.sendEmail` and `crm.contactCreated`. Y
 picker, config forms and data picker from that manifest.
 
 ```ts file=plugin.ts
-import { createRegistry, definePlugin } from "@flowline/core";
+import { createRegistry, definePlugin } from "@flowlinejs/core";
 import { loadContact } from "./load-contact";
 import { sendEmail } from "./send-email";
 import { contactCreated } from "./triggers";
@@ -26,7 +26,7 @@ registry.manifest(); // what the browser gets
 ## Nodes
 
 ```ts file=load-contact.ts
-import { defineNode, ui } from "@flowline/core";
+import { defineNode, ui } from "@flowlinejs/core";
 import { z } from "zod";
 
 export const loadContact = defineNode({
@@ -72,7 +72,7 @@ has already succeeded. The step then runs again, and in some cases the first att
 running. So key every side effect on `ctx.idempotencyKey`:
 
 ```ts file=send-email.ts
-import { defineNode, sensitive, ui } from "@flowline/core";
+import { defineNode, sensitive, ui } from "@flowlinejs/core";
 import { z } from "zod";
 
 export const sendEmail = defineNode({
@@ -97,12 +97,12 @@ export const sendEmail = defineNode({
 - `throw new FatalError(message)` fails the step at once, with no retries. Use it for bad input,
   missing records and 4xx responses.
 - `throw new RetryableError(message)`, or any other error, is retried according to `retry`.
-- Both classes come from `@flowline/core`, and `@flowline/engine` re-exports them.
+- Both classes come from `@flowlinejs/core`, and `@flowlinejs/engine` re-exports them.
 
 To call an HTTP API with a credential, use a `secret()` field together with `ctx.http`:
 
 ```ts file=enrich.ts
-import { defineNode, FatalError, RetryableError, secret } from "@flowline/core";
+import { defineNode, FatalError, RetryableError, secret } from "@flowlinejs/core";
 import { z } from "zod";
 
 export const enrichCompany = defineNode({
@@ -130,7 +130,7 @@ The workflow doc stores only the secret's name (for example `"ENRICH_KEY"`). The
 Declare the branches, then return `branch(id, output)`:
 
 ```ts file=deal-size.ts
-import { branch, defineNode } from "@flowline/core";
+import { branch, defineNode } from "@flowlinejs/core";
 import { z } from "zod";
 
 export const dealSize = defineNode({
@@ -163,7 +163,7 @@ URL from `afterCommit`. It runs only after the suspension is committed, so the U
 when it is sent.
 
 ```ts file=approval.ts
-import { defineNode, suspend } from "@flowline/core";
+import { defineNode, suspend } from "@flowlinejs/core";
 import { z } from "zod";
 
 export const requestApproval = defineNode({
@@ -203,7 +203,7 @@ a step, never hand out `cb.token` or `cb.resumeUrl`; resume it by run ID instead
 ## Triggers
 
 ```ts file=triggers.ts
-import { defineTrigger, ui } from "@flowline/core";
+import { defineTrigger, ui } from "@flowlinejs/core";
 import { z } from "zod";
 
 export const contactCreated = defineTrigger({
@@ -277,7 +277,7 @@ schema, then register it on the provider:
 
 ```ts file=assign-owner.ts
 // assign-owner.ts: the node names the widget (server and shared code)
-import { defineNode, ui } from "@flowline/core";
+import { defineNode, ui } from "@flowlinejs/core";
 import { z } from "zod";
 
 export const assignOwner = defineNode({
@@ -291,8 +291,8 @@ export const assignOwner = defineNode({
 
 ```tsx file=user-select.tsx
 // user-select.tsx: in the browser
-import { createClient } from "@flowline/core/client";
-import { type FieldWidgetProps, FlowlineProvider, WorkflowEditor } from "@flowline/react";
+import { createClient } from "@flowlinejs/core/client";
+import { type FieldWidgetProps, FlowlineProvider, WorkflowEditor } from "@flowlinejs/react";
 import { useUsers } from "./api";
 
 export function UserSelect({ value, onChange, meta, readOnly }: FieldWidgetProps) {
@@ -342,7 +342,7 @@ Tell TypeScript what `ctx.services` holds, once, anywhere in your server code:
 ```ts file=services-types.ts
 import type { Db, Mailer } from "./services";
 
-declare module "@flowline/core" {
+declare module "@flowlinejs/core" {
   interface FlowlineServices {
     db: Db;
     mailer: Mailer;
@@ -356,14 +356,14 @@ optional, though, so TypeScript does not catch a call that leaves it out entirel
 
 ## Testing
 
-`@flowline/engine/testing` has two helpers:
+`@flowlinejs/engine/testing` has two helpers:
 
 - `testNode(node, input, ctx?)` parses `input`, runs the handler with a default context (which your
   `ctx` overrides), and parses the output. It returns signals such as `branch()` or `suspend()` as
   they are. The result is typed as the node's output (or a signal), so no casts are needed.
 - `runWorkflowInMemory(doc, { plugins, services, trigger })` runs a whole workflow on a fresh
   in-memory engine. It moves the clock forward through delays and retries, so a `2d` delay finishes
-  at once. It needs `@flowline/storage-memory` as a dev dependency. It also takes:
+  at once. It needs `@flowlinejs/storage-memory` as a dev dependency. It also takes:
   - `secrets: { name: "value" }`, the values `ctx.secrets.get(name)` returns. A name that isn't
     listed is "not configured", as in production.
   - `http`, the network policy of `ctx.http.fetch`. The default blocks private addresses, so set
@@ -372,9 +372,9 @@ optional, though, so TypeScript does not catch a call that leaves it out entirel
     with it.
 
 ```ts file=plugin.test.ts
-import { ref, workflow } from "@flowline/core";
-import { runWorkflowInMemory, testNode } from "@flowline/engine/testing";
-import { manualTrigger } from "@flowline/nodes-builtin";
+import { ref, workflow } from "@flowlinejs/core";
+import { runWorkflowInMemory, testNode } from "@flowlinejs/engine/testing";
+import { manualTrigger } from "@flowlinejs/nodes-builtin";
 import { describe, expect, it } from "vitest";
 import { dealSize } from "./deal-size";
 import { loadContact } from "./load-contact";

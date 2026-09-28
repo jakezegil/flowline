@@ -1,6 +1,6 @@
 /**
  * Isomorphic HTTP client for the Flowline engine's HTTP handler, exported as
- * `@flowline/core/client`. Uses the platform `fetch`; works in browsers, Node 22+, and edge runtimes.
+ * `@flowlinejs/core/client`. Uses the platform `fetch`; works in browsers, Node 22+, and edge runtimes.
  *
  * @module
  */
@@ -225,7 +225,7 @@ class SseParser {
  *
  * @example
  * ```ts
- * import { createClient } from "@flowline/core/client";
+ * import { createClient } from "@flowlinejs/core/client";
  * const client = createClient({
  *   baseUrl: "/flowline",
  *   headers: async () => ({ authorization: `Bearer ${await getToken()}` }),

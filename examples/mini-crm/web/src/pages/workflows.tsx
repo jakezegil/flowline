@@ -5,9 +5,9 @@
  *
  * @module
  */
-import type { Manifest, WorkflowDoc } from "@flowline/core";
-import type { WorkflowSummary } from "@flowline/core/client";
-import { useFlowline } from "@flowline/react";
+import type { Manifest, WorkflowDoc } from "@flowlinejs/core";
+import type { WorkflowSummary } from "@flowlinejs/core/client";
+import { useFlowline } from "@flowlinejs/react";
 import { ChevronRight, Plus, Workflow } from "lucide-react";
 import { type FormEvent, type JSX, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";

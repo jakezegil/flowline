@@ -6,7 +6,7 @@
  *
  * @module
  */
-import { isRef, isTpl, type JSONSchema, type ScopeEntry, type ValueExpr } from "@flowline/core";
+import { isRef, isTpl, type JSONSchema, type ScopeEntry, type ValueExpr } from "@flowlinejs/core";
 import { CaseSensitive, ListPlus, Plus } from "lucide-react";
 import type { JSX } from "react";
 import { useFlowlineAppearance } from "../../provider";

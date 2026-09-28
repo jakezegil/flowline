@@ -5,7 +5,7 @@
  * @module
  */
 
-import { checkJson, describeType, isAnySchema, type JSONSchema } from "@flowline/core";
+import { checkJson, describeType, isAnySchema, type JSONSchema } from "@flowlinejs/core";
 import { LoaderCircle } from "lucide-react";
 import { type JSX, useEffect, useId, useState } from "react";
 import { useFlowlineAppearance } from "../provider";

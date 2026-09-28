@@ -1,7 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
-import type { WorkflowDoc } from "@flowline/core";
-import { FlowlineStorageError } from "@flowline/engine";
-import { runStorageConformance } from "@flowline/engine/conformance";
+import type { WorkflowDoc } from "@flowlinejs/core";
+import { FlowlineStorageError } from "@flowlinejs/engine";
+import { runStorageConformance } from "@flowlinejs/engine/conformance";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { createPostgresStorage, migrate, type PgStorageOptions } from "./index";

@@ -13,8 +13,8 @@ import {
   sensitive,
   suspend,
   type WorkflowDoc,
-} from "@flowline/core";
-import { createMemoryStorage } from "@flowline/storage-memory";
+} from "@flowlinejs/core";
+import { createMemoryStorage } from "@flowlinejs/storage-memory";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createEngine, type Engine, type EngineOptions } from "./engine";

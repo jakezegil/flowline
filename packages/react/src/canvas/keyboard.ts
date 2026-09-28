@@ -7,7 +7,7 @@
  * @module
  */
 
-import { findStep } from "@flowline/core";
+import { findStep } from "@flowlinejs/core";
 import type { KeyboardEvent } from "react";
 import type { LayoutEdge, LayoutNode } from "../layout/layout-tree";
 import { type EditorStore, TRIGGER_KEY } from "../store/editor-store";

@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-28
 **Status:** Design directions approved; this written spec is pending review
-**Extends:** `docs/superpowers/specs/2026-09-27-flowkit-design.md` (the v1 spec; package scope is now `@flowline/*`)
-**Applies after:** the flowkit → flowline rename. All names below are post-rename (`FlowlineValidationError`, `@flowline/engine`, …).
+**Extends:** `docs/superpowers/specs/2026-09-27-flowkit-design.md` (the v1 spec; package scope is now `@flowlinejs/*`)
+**Applies after:** the flowkit → flowline rename. All names below are post-rename (`FlowlineValidationError`, `@flowlinejs/engine`, …).
 
 ## 1. Purpose
 
@@ -46,7 +46,7 @@ Breaking changes are acceptable before 1.0 and are listed in §11.
 ### 3.1 API
 
 ```ts
-// @flowline/engine
+// @flowlinejs/engine
 export interface EmitRejection {
   /** The workflow whose trigger rejected the delivery. */
   workflowId: string;
@@ -77,7 +77,7 @@ interface Engine {
 }
 ```
 
-`DurationInput = number | string` lives in `@flowline/core` (`types.ts`); the engine parses strings with `parseDuration` from `@flowline/nodes-builtin` (max `MAX_DURATION_MS`).
+`DurationInput = number | string` lives in `@flowlinejs/core` (`types.ts`); the engine parses strings with `parseDuration` from `@flowlinejs/nodes-builtin` (max `MAX_DURATION_MS`).
 
 ### 3.2 Semantics
 
@@ -102,7 +102,7 @@ Matches are processed in workflow ID order; `started` and `rejected` keep that o
 ### 3.3 Trigger events
 
 ```ts
-// @flowline/engine
+// @flowlinejs/engine
 export type TriggerEvent =
   | {
       type: "trigger.rejected";
@@ -141,7 +141,7 @@ interface EngineOptions {
 ### 4.1 Storage
 
 ```ts
-// @flowline/engine storage.ts
+// @flowlinejs/engine storage.ts
 export interface DedupeClaim {
   /** The run the key belongs to: `runId` as given when `claimed`, else the earlier claimant's. */
   runId: string;
@@ -213,7 +213,7 @@ Guarantees kept from v1:
 ### 4.3 Configuring windows
 
 ```ts
-// @flowline/core define.ts
+// @flowlinejs/core define.ts
 export interface TriggerDedupe<C extends z.ZodObject, P> {
   /** A key identifying duplicate deliveries; `undefined` → no dedupe for this delivery. */
   key(args: { config: z.infer<C>; payload: P; event?: string }): string | undefined;
@@ -225,7 +225,7 @@ interface TriggerDefinition<C, P> {
   dedupe?: TriggerDedupe<C, P>;   // replaces `dedupeKey`
 }
 
-// @flowline/engine
+// @flowlinejs/engine
 interface EngineOptions {
   dedupe?: {
     /** Window used when neither the call nor the trigger sets one. Default `"7d"`. */
@@ -281,7 +281,7 @@ The Postgres test also covers migration v4: a v3-shaped row (`run_id` null) inse
 ### 5.1 API
 
 ```ts
-// @flowline/core define.ts
+// @flowlinejs/core define.ts
 export interface TriggerDefinition<C extends z.ZodObject = z.ZodObject, P = unknown> {
   kind: TriggerKind;                       // "event" | "webhook" | "manual" | "schedule" | "subflow" | "poll"
   /** For `event` triggers listening to one event. Mutually exclusive with `events`. */
@@ -352,7 +352,7 @@ export const callEnded = defineTrigger({
 ### 6.1 Compare modes
 
 ```ts
-// @flowline/nodes-builtin rules.ts
+// @flowlinejs/nodes-builtin rules.ts
 export type CompareMode = "strict" | "loose";
 
 /** The top-level group of a condition: a rule group plus the compare mode. */
@@ -447,7 +447,7 @@ A literal typed differently from the left operand under `compare: "strict"` (e.g
 ### 6.6 Host-registered operators
 
 ```ts
-// @flowline/nodes-builtin
+// @flowlinejs/nodes-builtin
 export type RuleValueType = "string" | "date" | "number" | "boolean" | "array" | "object" | "any";
 
 export interface CustomOperator {
@@ -480,7 +480,7 @@ export const builtinPlugin: PluginDefinition;
 Manifest transport: the `op` field of `RuleSchema` becomes `z.enum([...RULE_OPS, ...customIds])` with `ui(..., { enumLabels: { isUnassigned: "is unassigned", … }, operators: [{ id, label, arity, types }] })`. `UiMeta` in core gains:
 
 ```ts
-// @flowline/core types.ts
+// @flowlinejs/core types.ts
 export interface RuleOperatorMeta { id: string; label: string; arity: "unary" | "binary"; types?: RuleValueType[] }
 interface UiMeta { operators?: RuleOperatorMeta[] }
 ```
@@ -524,7 +524,7 @@ Switch cases widget: a **Compare** select next to Match case; case `value` liter
 ### 7.1 Definition API
 
 ```ts
-// @flowline/core define.ts
+// @flowlinejs/core define.ts
 export interface PollItem<P> { /** Identifies the item within the workflow; dedupe key `poll:<wf>:<key>`. */ key: string; payload: P }
 export interface PollResult<P> { items: PollItem<P>[]; /** Stored and handed back on the next poll. Must be JSON. */ cursor?: unknown }
 export interface PollContext {
@@ -601,7 +601,7 @@ Republishing a workflow keeps its poll state; changing the trigger to another ki
 ### 7.3 Storage
 
 ```ts
-// @flowline/engine storage.ts
+// @flowlinejs/engine storage.ts
 export interface PollState {
   tenantId: string;
   workflowId: string;

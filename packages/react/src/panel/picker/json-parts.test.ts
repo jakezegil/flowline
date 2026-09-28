@@ -1,4 +1,4 @@
-import type { ValueExpr } from "@flowline/core";
+import type { ValueExpr } from "@flowlinejs/core";
 import { describe, expect, test } from "vitest";
 import { jsonToParts, partsToJson } from "./json-parts";
 

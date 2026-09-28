@@ -1,5 +1,5 @@
 {
-  "name": "@flowline/storage-memory",
+  "name": "@flowlinejs/storage-memory",
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
@@ -46,8 +46,8 @@
     "build": "tsup"
   },
   "dependencies": {
-    "@flowline/engine": "workspace:^",
-    "@flowline/core": "workspace:^"
+    "@flowlinejs/engine": "workspace:^",
+    "@flowlinejs/core": "workspace:^"
   },
   "devDependencies": {
     "vitest": "5.0.0",

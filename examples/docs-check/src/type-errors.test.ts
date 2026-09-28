@@ -16,8 +16,8 @@ const REPO = join(PKG, "../..");
 const DIR = join(PKG, ".generated", "type-errors");
 const tscBin = createRequire(import.meta.url).resolve("typescript/bin/tsc");
 
-const PROBE = `import { defineNode, workflow } from "@flowline/core";
-import { eventTrigger } from "@flowline/nodes-builtin";
+const PROBE = `import { defineNode, workflow } from "@flowlinejs/core";
+import { eventTrigger } from "@flowlinejs/nodes-builtin";
 import { z } from "zod";
 
 const send = defineNode({

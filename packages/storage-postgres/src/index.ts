@@ -11,7 +11,7 @@ import type {
   RunSummary,
   WorkflowSummary,
   WorkflowVersion,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import {
   FlowlineStorageError,
   type NewRun,
@@ -21,7 +21,7 @@ import {
   type RunPatch,
   type StorageAdapter,
   type WorkflowAuditEntry,
-} from "@flowline/engine";
+} from "@flowlinejs/engine";
 import { type PoolLike, type Queryable, withTransaction } from "./migrate";
 import { quoteSchema } from "./schema";
 

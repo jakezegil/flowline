@@ -10,7 +10,7 @@
  *
  * @module
  */
-import type { RunSummary } from "@flowline/core/client";
+import type { RunSummary } from "@flowlinejs/core/client";
 import { useCallback, useEffect, useState } from "react";
 import { flowline } from "./api";
 

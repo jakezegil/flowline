@@ -1,5 +1,5 @@
 /**
- * Pure document commands used by the editor store, built on `@flowline/core`'s immutable tree
+ * Pure document commands used by the editor store, built on `@flowlinejs/core`'s immutable tree
  * operations. Nothing here mutates its inputs.
  *
  * @module
@@ -16,7 +16,7 @@ import {
   updateStep,
   type ValueExpr,
   type WorkflowDoc,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 
 /**
  * Initial config for a new step or trigger: the `default` of each top-level property of the

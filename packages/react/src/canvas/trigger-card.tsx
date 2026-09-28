@@ -4,7 +4,7 @@ import {
   type JSONSchema,
   type TriggerManifest,
   type WorkflowDoc,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Zap } from "lucide-react";
 import { memo, useRef } from "react";

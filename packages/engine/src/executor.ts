@@ -25,7 +25,7 @@ import {
   secretExprPath,
   type ValueExpr,
   type WorkflowVersion,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import type { z } from "zod";
 import { createNodeContext, newCallbackToken, sha256Hex } from "./context";
 import type { EngineOptions } from "./engine";

@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { JSONSchema, ValueExpr } from "@flowline/core";
+import type { JSONSchema, ValueExpr } from "@flowlinejs/core";
 import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 import { type JSX, useEffect, useId, useRef, useState } from "react";
 import { useFlowlineAppearance } from "../../provider";

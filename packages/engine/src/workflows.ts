@@ -27,7 +27,7 @@ import {
   type WorkflowDoc,
   type WorkflowVersion,
   walkSteps,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import type { z } from "zod";
 import { createNodeContext } from "./context";
 import type { EngineCore } from "./engine";

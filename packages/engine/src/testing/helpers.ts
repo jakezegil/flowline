@@ -14,7 +14,7 @@ import {
   type RunDetail,
   type RunEvent,
   type WorkflowDoc,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import type { z } from "zod";
 import { createNodeContext } from "../context";
 import { createEngine, type EngineOptions } from "../engine";
@@ -115,7 +115,7 @@ export interface RunWorkflowInMemoryOptions {
  * outside call can resume (a callback without timeout). Resolves the run as `getRunDetail` shows it
  * (sensitive values masked) and its events.
  *
- * Requires `@flowline/storage-memory`, loaded lazily on first call so importing `testNode` alone
+ * Requires `@flowlinejs/storage-memory`, loaded lazily on first call so importing `testNode` alone
  * never requires it.
  *
  * @example
@@ -137,7 +137,7 @@ export async function runWorkflowInMemory(
   const base = opts.clock ?? Date.now;
   let skipped = 0;
   const clock = () => base() + skipped;
-  const { createMemoryStorage } = await import("@flowline/storage-memory");
+  const { createMemoryStorage } = await import("@flowlinejs/storage-memory");
   const storage = createMemoryStorage();
   const secrets = opts.secrets;
   const engine = createEngine({

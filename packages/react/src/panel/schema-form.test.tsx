@@ -5,7 +5,7 @@ import {
   type Manifest,
   type ScopeEntry,
   type ValueExpr,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type JSX, useState } from "react";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";

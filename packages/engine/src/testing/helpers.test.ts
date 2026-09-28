@@ -9,7 +9,7 @@ import {
   secret,
   sensitive,
   type WorkflowDoc,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import { runWorkflowInMemory, testNode } from "./index";

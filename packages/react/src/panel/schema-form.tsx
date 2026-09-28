@@ -11,7 +11,7 @@ import {
   type JSONSchema,
   type ScopeEntry,
   type ValueExpr,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { ChevronRight } from "lucide-react";
 import {

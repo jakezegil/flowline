@@ -15,7 +15,7 @@ import {
   UI_META_KEY,
   type ValueExpr,
   type WorkflowDoc,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import { X } from "lucide-react";
 import { type JSX, useMemo } from "react";
 import { useEditorStore } from "../hooks";

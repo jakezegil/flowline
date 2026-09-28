@@ -1,10 +1,10 @@
-# @flowline/storage-postgres
+# @flowlinejs/storage-postgres
 
 Postgres `StorageAdapter` for the Flowline engine.
 
 ```ts
 import pg from "pg";
-import { createPostgresStorage, migrate } from "@flowline/storage-postgres";
+import { createPostgresStorage, migrate } from "@flowlinejs/storage-postgres";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 await migrate(pool); // idempotent; creates schema "flowline"
@@ -40,7 +40,7 @@ const storage = createPostgresStorage({ pool });
 
 ## Testing
 
-`@flowline/storage-postgres/testing` exports `pgliteQueryable(db)`, which wraps an
+`@flowlinejs/storage-postgres/testing` exports `pgliteQueryable(db)`, which wraps an
 [`@electric-sql/pglite`](https://pglite.dev) instance as a pool. The package's tests run the
 engine's storage conformance suite against PGlite, and additionally against a real server when
 `FLOWLINE_PG_URL` is set:

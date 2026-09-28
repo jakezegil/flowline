@@ -11,7 +11,7 @@ import {
   type JSONSchema,
   payloadSchemaFor,
   type TriggerManifest,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import { Check, Copy, Info, Link2, Zap } from "lucide-react";
 import { type JSX, useEffect, useId, useMemo, useState } from "react";
 import { useEditorStore } from "../hooks";

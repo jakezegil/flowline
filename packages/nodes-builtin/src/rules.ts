@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { ui } from "@flowline/core";
+import { ui } from "@flowlinejs/core";
 import { z } from "zod";
 
 /** Comparison operators a {@link Rule} can use. */

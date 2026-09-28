@@ -16,7 +16,7 @@ export class FlowlineDefinitionError extends Error {
  *
  * @example
  * ```ts
- * declare module "@flowline/core" {
+ * declare module "@flowlinejs/core" {
  *   interface FlowlineServices { db: Db }
  * }
  * ```
@@ -141,7 +141,7 @@ export interface NodeContext {
 
 /**
  * Tag key present on every signal object. Created with `Symbol.for` so signals from a duplicated
- * copy of `@flowline/core` are still recognised.
+ * copy of `@flowlinejs/core` are still recognised.
  */
 export const FLOWLINE_SIGNAL: unique symbol = Symbol.for("flowline.signal") as never;
 

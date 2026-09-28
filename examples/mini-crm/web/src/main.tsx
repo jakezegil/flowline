@@ -1,6 +1,6 @@
 // Declares the cascade-layer order first, so the app's resets sit below Flowline's styles.
 import "./layers.css";
-import "@flowline/react/styles.css";
+import "@flowlinejs/react/styles.css";
 import "./styles.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

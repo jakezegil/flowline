@@ -9,7 +9,7 @@
  * @module
  */
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import type { Issue, RunOrigin, WorkflowVersion } from "@flowline/core";
+import type { Issue, RunOrigin, WorkflowVersion } from "@flowlinejs/core";
 import { CronExpressionParser } from "cron-parser";
 import { sha256Hex } from "./context";
 import type { EngineCore } from "./engine";

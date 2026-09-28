@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { FatalError, type NodeContext, RetryableError, type SuspendSignal } from "@flowline/core";
+import { FatalError, type NodeContext, RetryableError, type SuspendSignal } from "@flowlinejs/core";
 import { describe, expect, it } from "vitest";
 import { fakeContext, NOW } from "../test/fake-context";
 import { delayNode, MAX_DURATION_MS, parseDuration, waitForCallbackNode } from "./time";

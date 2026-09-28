@@ -1,4 +1,4 @@
-import type { Manifest, RunDetail, RunEvent } from "@flowline/core";
+import type { Manifest, RunDetail, RunEvent } from "@flowlinejs/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";

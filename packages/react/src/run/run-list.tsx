@@ -1,4 +1,4 @@
-import type { RunStatus, RunSummary } from "@flowline/core";
+import type { RunStatus, RunSummary } from "@flowlinejs/core";
 import { type JSX, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFlowline, useFlowlineAppearance } from "../provider";
 import { themeStyle } from "../theme";

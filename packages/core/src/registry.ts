@@ -329,7 +329,7 @@ function assertReadableMeta(
     if (blank.has(s) || (own?.[UI_META_KEY] !== undefined && (!readable || !emitted))) {
       const field = path ? `field "${path}" of the ` : "";
       throw new FlowlineDefinitionError(
-        `The ${field}${what} schema of "${type}" was built with a different copy of zod (${version}) than the one @flowline/core uses (${CORE_ZOD_VERSION}), so flowline can't read it or its metadata (ui(), secret(), sensitive()), and its secret/sensitive guarantees would be lost. ${ZOD_ADVICE}`,
+        `The ${field}${what} schema of "${type}" was built with a different copy of zod (${version}) than the one @flowlinejs/core uses (${CORE_ZOD_VERSION}), so flowline can't read it or its metadata (ui(), secret(), sensitive()), and its secret/sensitive guarantees would be lost. ${ZOD_ADVICE}`,
       );
     }
     queue.push(...nestedSchemas(s, path));

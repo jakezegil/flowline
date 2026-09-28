@@ -6,9 +6,9 @@ import {
   definePlugin,
   defineTrigger,
   type WorkflowDoc,
-} from "@flowline/core";
-import { isPrivateAddress } from "@flowline/nodes-builtin/ssrf";
-import { createMemoryStorage } from "@flowline/storage-memory";
+} from "@flowlinejs/core";
+import { isPrivateAddress } from "@flowlinejs/nodes-builtin/ssrf";
+import { createMemoryStorage } from "@flowlinejs/storage-memory";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createNodeContext } from "./context";

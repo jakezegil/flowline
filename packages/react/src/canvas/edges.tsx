@@ -1,4 +1,4 @@
-import type { StepLocation } from "@flowline/core";
+import type { StepLocation } from "@flowlinejs/core";
 import { type Edge, EdgeLabelRenderer, type EdgeProps } from "@xyflow/react";
 import { Plus, TriangleAlert } from "lucide-react";
 import { type CSSProperties, memo } from "react";

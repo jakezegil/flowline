@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { RunSummary } from "@flowline/core/client";
+import type { RunSummary } from "@flowlinejs/core/client";
 import { Handshake } from "lucide-react";
 import { type JSX, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";

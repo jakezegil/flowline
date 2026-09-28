@@ -2,7 +2,7 @@
  * Error classes node handlers throw to control retry behaviour: {@link RetryableError} retries the
  * step according to its retry policy, {@link FatalError} fails it at once. Any other error is
  * treated as retryable. They live in core so plugins can throw them without depending on the
- * engine; `@flowline/engine` re-exports them.
+ * engine; `@flowlinejs/engine` re-exports them.
  *
  * @module
  */

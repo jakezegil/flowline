@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { Issue } from "@flowline/core";
+import type { Issue } from "@flowlinejs/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { CircleOff, Copy, X } from "lucide-react";
 import { type JSX, type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";

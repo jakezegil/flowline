@@ -15,7 +15,7 @@ import {
   UI_META_KEY,
   type UiMeta,
   type ValueExpr,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 
 const MAX_DEPTH = 32;
 

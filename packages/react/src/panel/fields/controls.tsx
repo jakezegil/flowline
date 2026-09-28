@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { isRef, isTpl, type JSONSchema, type ValueExpr } from "@flowline/core";
+import { isRef, isTpl, type JSONSchema, type ValueExpr } from "@flowlinejs/core";
 import { Braces } from "lucide-react";
 import { type JSX, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useFlowlineAppearance } from "../../provider";

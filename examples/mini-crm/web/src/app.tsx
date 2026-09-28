@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { FlowlineProvider, type FlowlineTheme, useRunChanges } from "@flowline/react";
+import { FlowlineProvider, type FlowlineTheme, useRunChanges } from "@flowlinejs/react";
 import {
   Activity,
   BadgeCheck,

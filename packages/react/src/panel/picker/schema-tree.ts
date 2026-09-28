@@ -15,7 +15,7 @@ import {
   type RefPath,
   type ScopeEntry,
   schemaAtPath,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 
 /** Sample key standing for the trigger (the editor store's `TRIGGER_KEY`). */
 const TRIGGER_SAMPLE_KEY = "__trigger";

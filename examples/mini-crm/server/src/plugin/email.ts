@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { defineNode, ui } from "@flowline/core";
+import { defineNode, ui } from "@flowlinejs/core";
 import { z } from "zod";
 
 /**

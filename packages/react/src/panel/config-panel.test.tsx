@@ -1,4 +1,4 @@
-import type { Manifest, WorkflowDoc } from "@flowline/core";
+import type { Manifest, WorkflowDoc } from "@flowlinejs/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import builtin from "../../playground/builtin-manifest.json";

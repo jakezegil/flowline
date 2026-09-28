@@ -20,8 +20,8 @@ import {
   type TransformRuntime,
   type WorkflowDoc,
   type WorkflowVersion,
-} from "@flowline/core";
-import { builtinPlugin } from "@flowline/nodes-builtin";
+} from "@flowlinejs/core";
+import { builtinPlugin } from "@flowlinejs/nodes-builtin";
 import {
   EngineConflictError,
   EngineNotFoundError,
@@ -84,7 +84,7 @@ export interface EngineOptions {
   /** Engine and handler logger. */
   logger?: Logger;
   /**
-   * Register the built-in `core.*` nodes and triggers (`@flowline/nodes-builtin`) ahead of the
+   * Register the built-in `core.*` nodes and triggers (`@flowlinejs/nodes-builtin`) ahead of the
    * registry's own plugins. Default `true`.
    */
   builtins?: boolean;
@@ -231,8 +231,8 @@ export interface Engine {
   /**
    * The HTTP API under `basePath`. Mount it on any `fetch`-style server, e.g.
    * `app.all("/flowline/*", (c) => engine.handler(c.req.raw))`. Every route has a method on
-   * `createClient()` from `@flowline/core/client` (see `FlowlineClient`), and the request and
-   * response bodies are types exported from `@flowline/core` (`WorkflowDetail`, `RunDetail`,
+   * `createClient()` from `@flowlinejs/core/client` (see `FlowlineClient`), and the request and
+   * response bodies are types exported from `@flowlinejs/core` (`WorkflowDetail`, `RunDetail`,
    * `TestStepRequest`, `ApiErrorBody`, …).
    * Editor routes require `authorize` (without it every request acts as tenant `"default"`, with a
    * logged warning); webhooks and callback resumes are authenticated by slug/signature and token.

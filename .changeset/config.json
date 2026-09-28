@@ -4,17 +4,17 @@
   "commit": false,
   "fixed": [
     [
-      "@flowline/core",
-      "@flowline/engine",
-      "@flowline/nodes-builtin",
-      "@flowline/react",
-      "@flowline/storage-memory",
-      "@flowline/storage-postgres"
+      "@flowlinejs/core",
+      "@flowlinejs/engine",
+      "@flowlinejs/nodes-builtin",
+      "@flowlinejs/react",
+      "@flowlinejs/storage-memory",
+      "@flowlinejs/storage-postgres"
     ]
   ],
   "linked": [],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@flowline/example-mini-crm", "headless", "docs-check"]
+  "ignore": ["@flowlinejs/example-mini-crm", "headless", "docs-check"]
 }

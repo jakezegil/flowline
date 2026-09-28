@@ -12,7 +12,7 @@ import {
   validateWorkflow,
   type WorkflowDoc,
   workflow,
-} from "@flowline/core";
+} from "@flowlinejs/core";
 import { describe, expect, it } from "vitest";
 import {
   and,

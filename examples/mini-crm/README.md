@@ -8,7 +8,7 @@ from one Hono app.
 
 ```sh
 pnpm install
-pnpm --filter @flowline/example-mini-crm dev   # or: pnpm --filter ./examples/mini-crm dev
+pnpm --filter @flowlinejs/example-mini-crm dev   # or: pnpm --filter ./examples/mini-crm dev
 ```
 
 `dev` runs the server on `http://localhost:8787` (reloading on change) and the web app on
@@ -29,7 +29,7 @@ data.
 
 ## Web app
 
-`web/` is a React app (Vite, React Router 7) that embeds `@flowline/react` in CRM pages:
+`web/` is a React app (Vite, React Router 7) that embeds `@flowlinejs/react` in CRM pages:
 
 | Page | What it shows |
 | --- | --- |
@@ -54,13 +54,13 @@ How it wires Flowline (`web/src/app.tsx`):
   are needed.
 
 `MINI_CRM_API` points the proxy at another server (default `http://localhost:8787`), and
-`WEB_PORT` changes the web port. `pnpm --filter @flowline/example-mini-crm build` builds the app
+`WEB_PORT` changes the web port. `pnpm --filter @flowlinejs/example-mini-crm build` builds the app
 into `web/dist`.
 
 ## Server
 
 ```sh
-pnpm --filter @flowline/example-mini-crm start   # server only; `dev:server` reloads on change
+pnpm --filter @flowlinejs/example-mini-crm start   # server only; `dev:server` reloads on change
 ```
 
 The server listens on `http://localhost:8787` and runs a background worker (`concurrency: 2`,

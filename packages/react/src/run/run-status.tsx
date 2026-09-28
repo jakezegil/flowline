@@ -1,4 +1,4 @@
-import type { RunStatus, RunSummary } from "@flowline/core";
+import type { RunStatus, RunSummary } from "@flowlinejs/core";
 import { Ban, Check, CircleStop, Clock, LoaderCircle, X } from "lucide-react";
 import type { JSX } from "react";
 import { useFlowlineAppearance } from "../provider";
