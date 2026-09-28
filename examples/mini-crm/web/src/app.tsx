@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { FlowkitProvider, type FlowkitTheme } from "@flowkit/react";
+import { FlowkitProvider, type FlowkitTheme, useRunChanges } from "@flowkit/react";
 import {
   Activity,
   BadgeCheck,
@@ -195,6 +195,13 @@ function Sidebar(props: {
   onToggle(): void;
 }): JSX.Element {
   const approvals = useQuery("approvals", api.listApprovals, 5000);
+  // A run that starts or stops waiting (resumes, is cancelled or ends) changes the count: recount
+  // at once. A first sighting (opening a run) is not a change.
+  useRunChanges((run, previous) => {
+    if (previous !== undefined && (previous === "waiting") !== (run.status === "waiting")) {
+      invalidate("approvals");
+    }
+  });
   const pending = approvals.data?.filter((a) => a.status === "pending").length;
   return (
     <nav className="sidebar" aria-label="Main">

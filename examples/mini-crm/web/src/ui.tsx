@@ -214,6 +214,7 @@ const RUN_TONES: Record<string, Tone> = {
   running: "info",
   waiting: "warning",
   completed: "success",
+  stopped: "neutral",
   failed: "danger",
   cancelled: "neutral",
 };
@@ -223,17 +224,32 @@ const RUN_LABELS: Record<string, string> = {
   running: "Running",
   waiting: "Waiting",
   completed: "Completed",
+  stopped: "Stopped",
   failed: "Failed",
   cancelled: "Cancelled",
 };
 
-/** A run status as a badge, linking to the run. */
-export function RunBadge(props: { runId: string; status: string; label?: string }): JSX.Element {
-  const live = props.status === "running" || props.status === "queued";
+/**
+ * What a run badge shows for a run: its status, except that a completed run a Stop step ended
+ * reads `"stopped"` (as in the run viewer).
+ */
+export function runBadgeState(run: { status: string; stoppedAt?: string | undefined }): string {
+  return run.status === "completed" && run.stoppedAt !== undefined ? "stopped" : run.status;
+}
+
+/** A run status as a badge, linking to the run. Pass `stoppedAt` so a stopped run reads Stopped. */
+export function RunBadge(props: {
+  runId: string;
+  status: string;
+  stoppedAt?: string | undefined;
+  label?: string;
+}): JSX.Element {
+  const state = runBadgeState(props);
+  const live = state === "running" || state === "queued";
   return (
     <Link to={`/runs/${props.runId}`} className="badge-link" title="Open run">
-      <Badge tone={RUN_TONES[props.status] ?? "neutral"} dot live={live}>
-        {props.label ?? RUN_LABELS[props.status] ?? props.status}
+      <Badge tone={RUN_TONES[state] ?? "neutral"} dot live={live}>
+        {props.label ?? RUN_LABELS[state] ?? state}
       </Badge>
     </Link>
   );

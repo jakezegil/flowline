@@ -71,6 +71,11 @@ export interface Run {
    * executing the run; that worker cancels the run under its lease.
    */
   cancelRequestedAt?: number;
+  /**
+   * Who asked for that cancellation, and why (from the first request); the worker records them
+   * on the `run.cancelled` event. Cleared together with `cancelRequestedAt`.
+   */
+  cancelRequest?: CancelRequest;
   /** What started the run. */
   startedBy: RunOrigin;
   /** Worker currently holding the lease, if any. */
@@ -85,6 +90,14 @@ export interface Run {
 
 /** The input of {@link StorageAdapter.createRun} and {@link RunPatch.createChild}. */
 export type NewRun = Omit<Run, "createdAt" | "updatedAt">;
+
+/** Who requested a run's cancellation and why ({@link StorageAdapter.requestCancel}). */
+export interface CancelRequest {
+  /** Who, e.g. a user ID. */
+  by?: string;
+  /** Why, e.g. `"Demo data reset"`. */
+  reason?: string;
+}
 
 /**
  * Exclusive permission to advance a run, returned by {@link StorageAdapter.claimRun}.
@@ -131,7 +144,7 @@ export interface RunPatch {
   output?: unknown;
   /** New error; `null` clears. */
   error?: RunError | null;
-  /** New cancel-request time; `null` clears. */
+  /** New cancel-request time; `null` clears it and `cancelRequest`. */
   cancelRequestedAt?: number | null;
   /**
    * Clear the lease (`leaseOwner`, `leaseUntil` and the lease token) in the same write. Implied
@@ -411,8 +424,16 @@ export interface StorageAdapter {
    * `cancelled`, whether or not it is leased. The lease is left untouched; the executor notices
    * the flag and cancels the run under its lease. Returns `false` (no write) when the run does not
    * exist in the tenant or is already finished.
+   *
+   * `request` (who and why) is stored as `cancelRequest` with the first request only, like its
+   * time; a later request keeps both.
    */
-  requestCancel(tenantId: string, runId: string, now: number): Promise<boolean>;
+  requestCancel(
+    tenantId: string,
+    runId: string,
+    now: number,
+    request?: CancelRequest,
+  ): Promise<boolean>;
 
   /**
    * Compare-and-set update for a run no worker is executing (cancel, retry). Applies `patch`

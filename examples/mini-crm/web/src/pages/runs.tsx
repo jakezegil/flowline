@@ -10,7 +10,19 @@ import { RunList } from "@flowkit/react";
 import type { JSX } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { flowkit, useQuery } from "../api";
+import { useRunSubjects } from "../run-subject";
 import { RunDetail } from "./run-detail";
+
+/** Longest workflow name shown in the filter before it is cut with an ellipsis. */
+const MAX_OPTION = 40;
+
+/** `name`, cut at a word boundary to at most {@link MAX_OPTION} characters. */
+export function shortName(name: string, max = MAX_OPTION): string {
+  if (name.length <= max) return name;
+  const cut = name.slice(0, max - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
 
 /** The runs page. */
 export function RunsPage(): JSX.Element {
@@ -20,6 +32,8 @@ export function RunsPage(): JSX.Element {
   const workflowId = params.get("workflow") ?? undefined;
   const workflows = useQuery<WorkflowSummary[]>("workflows", () => flowkit.listWorkflows());
   const query = workflowId ? `?workflow=${encodeURIComponent(workflowId)}` : "";
+  const describeRun = useRunSubjects();
+  const selected = workflows.data?.find((w) => w.id === workflowId);
 
   return (
     <div className="runs-page">
@@ -29,6 +43,7 @@ export function RunsPage(): JSX.Element {
           <select
             className="input input--sm"
             aria-label="Filter by workflow"
+            title={selected?.name}
             value={workflowId ?? ""}
             onChange={(e) => {
               const next = new URLSearchParams(params);
@@ -39,8 +54,8 @@ export function RunsPage(): JSX.Element {
           >
             <option value="">All workflows</option>
             {workflows.data?.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
+              <option key={w.id} value={w.id} title={w.name}>
+                {shortName(w.name)}
               </option>
             ))}
           </select>
@@ -50,6 +65,7 @@ export function RunsPage(): JSX.Element {
           {...(workflowId ? { workflowId } : {})}
           {...(runId ? { selectedRunId: runId } : {})}
           pollMs={3000}
+          describeRun={describeRun}
           onSelect={(id) => navigate(`/runs/${id}${query}`)}
         />
       </aside>

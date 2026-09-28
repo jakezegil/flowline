@@ -29,6 +29,8 @@ test("builds a workflow from scratch, maps a field through the data picker, save
 
   const dialog = page.getByRole("dialog", { name: "New workflow" });
   await dialog.getByRole("textbox", { name: "Name" }).fill(name);
+  await expect(dialog.getByRole("radio", { name: /^Workflow/ })).toBeChecked();
+  await dialog.locator("label", { hasText: "Deal updated" }).click();
   await expect(dialog.getByRole("radio", { name: /^Deal updated/ })).toBeChecked();
   await dialog.getByRole("button", { name: "Create and open editor" }).click();
 

@@ -8,11 +8,13 @@ import {
   approvalManifest,
   approvalStoppedRun,
   approvalWaitingRun,
+  ev,
   failedLoopRun,
   runDetail,
   waitingRun,
 } from "../../test/run-fixtures";
 import { FlowkitProvider } from "../provider";
+import { RunList } from "./run-list";
 import { RunViewer } from "./run-viewer";
 
 beforeAll(setupDom);
@@ -262,7 +264,7 @@ describe("RunViewer: stopping inside branches", () => {
     expect(card("size")?.dataset.run).toBe("done");
     expect(card("approval")?.dataset.run).toBe("done");
     expect(card("load")?.dataset.run).toBe("done");
-    expect(card("after_halt")?.dataset.run).toBe("pending");
+    expect(card("after_halt")?.dataset.run).toBe("skipped");
     expect(screen.getByText("Stopped")).toBeTruthy();
   });
 
@@ -270,7 +272,9 @@ describe("RunViewer: stopping inside branches", () => {
     setup(approvalStoppedRun(), { manifest: approvalManifest() });
     const banner = (await screen.findByText(/^Stopped at /)).closest(".fk-banner") as HTMLElement;
     expect(banner.dataset.tone).toBe("neutral");
-    expect(within(banner).getByText("No")).toBeTruthy();
+    // The reason, then when it stopped (like the cancelled banner), with the date on hover.
+    const detail = within(banner).getByText(/^No · (.+ ago|just now)$/);
+    expect(detail.getAttribute("title")).toBeTruthy();
     // The Stop step is opened, like a failed or waiting step.
     const inspector = await screen.findByRole("complementary", { name: "Step details" });
     await waitFor(() =>
@@ -284,14 +288,14 @@ describe("RunViewer: stopping inside branches", () => {
     detail.run = { ...detail.run, status: "cancelled" };
     setup(detail, { manifest: approvalManifest() });
     await waitFor(() => expect(card("approval")?.dataset.run).toBe("cancelled"));
-    expect(card("size")?.dataset.run).toBe("cancelled");
+    expect(card("size")?.dataset.run).toBe("done");
     expect(screen.queryByRole("button", { name: "Resume…" })).toBeNull();
   });
 
-  test("a block with a waiting child reads as waiting", async () => {
+  test("a block with a waiting child reads as done; the child waits", async () => {
     setup(approvalWaitingRun(), { manifest: approvalManifest() });
     await waitFor(() => expect(card("approval")?.dataset.run).toBe("waiting"));
-    expect(card("size")?.dataset.run).toBe("waiting");
+    expect(card("size")?.dataset.run).toBe("done");
   });
 });
 
@@ -340,9 +344,56 @@ describe("RunViewer: resuming", () => {
       expect(within(inspector).getByText("Decide it in Approvals.")).toBeTruthy(),
     );
     expect(
-      screen.getByText(/Waiting for callback · expires .*\. Decide it in Approvals\./),
+      screen.getByText(/Waiting for a decision · expires .*\. Decide it in Approvals\./),
     ).toBeTruthy();
     expect(resumeButtons()).toHaveLength(0);
+    // The timeline says the same, not "callback".
+    fireEvent.click(within(inspector).getByRole("tab", { name: /^Timeline/ }));
+    const timeline = within(inspector).getByRole("tabpanel", { name: /^Timeline/ });
+    expect(timeline.textContent).toMatch(/Waiting for a decision/);
+    expect(timeline.textContent).not.toMatch(/Waiting for callback/);
+  });
+
+  test("a host-handled wait still reads as a decision in the timeline once the run is cancelled", async () => {
+    const detail = approvalWaitingRun();
+    detail.run = { ...detail.run, status: "cancelled" };
+    detail.events = [...detail.events, ev("run.cancelled", "size/if/approval")];
+    setup(detail, { manifest: approvalManifest({ hostHandled: true, hint: "Decide it." }) });
+    fireEvent.click(await screen.findByRole("button", { name: "Show step" }));
+    const inspector = await screen.findByRole("complementary", { name: "Step details" });
+    fireEvent.click(within(inspector).getByRole("tab", { name: /^Timeline/ }));
+    const timeline = within(inspector).getByRole("tabpanel", { name: /^Timeline/ });
+    expect(timeline.textContent).toMatch(/Waiting for a decision/);
+    expect(timeline.textContent).not.toMatch(/Waiting for callback/);
+  });
+
+  test("a wait's timeline shows its expiry only while it is still open", async () => {
+    const withExpiry = (d: RunDetail): RunDetail => ({
+      ...d,
+      events: d.events.map((e) =>
+        e.type === "run.suspended"
+          ? { ...e, data: { callback: true, expiresAt: Date.now() + 3 * 86_400_000 } }
+          : e,
+      ),
+    });
+    const timelineText = async () => {
+      const inspector = await screen.findByRole("complementary", { name: "Step details" });
+      fireEvent.click(within(inspector).getByRole("tab", { name: /^Timeline/ }));
+      return within(inspector).getByRole("tabpanel", { name: /^Timeline/ }).textContent;
+    };
+    const manifest = approvalManifest({ hostHandled: true, hint: "Decide it." });
+    setup(withExpiry(approvalWaitingRun()), { manifest });
+    expect(await timelineText()).toMatch(/Waiting for a decision · expires/);
+    cleanup();
+
+    const cancelled = withExpiry(approvalWaitingRun());
+    cancelled.run = { ...cancelled.run, status: "cancelled" };
+    cancelled.events = [...cancelled.events, ev("run.cancelled", "size/if/approval")];
+    setup(cancelled, { manifest });
+    fireEvent.click(await screen.findByRole("button", { name: "Show step" }));
+    const text = await timelineText();
+    expect(text).toMatch(/Waiting for a decision/);
+    expect(text).not.toMatch(/· expires/);
   });
 
   test("a declared body schema: the form starts empty, and a body must match it", async () => {
@@ -386,6 +437,138 @@ describe("RunViewer: resuming", () => {
       "r1",
       { decision: "approved" },
       { expectStep: "size/if/approval" },
+    );
+  });
+});
+
+describe("RunViewer: cancelled runs", () => {
+  function cancelledWhileWaiting(data?: unknown): RunDetail {
+    const detail = approvalWaitingRun();
+    const at = Date.now() - 3 * 60_000;
+    return {
+      ...detail,
+      run: { ...detail.run, status: "cancelled", updatedAt: at },
+      events: [...detail.events, ev("run.cancelled", "size/if/approval", data, at)],
+    };
+  }
+
+  test("has a banner saying where it was waiting, who cancelled it and when", async () => {
+    setup(cancelledWhileWaiting({ by: "u_ava" }), {
+      manifest: approvalManifest(),
+      props: { userName: (id) => (id === "u_ava" ? "Ava Chen" : undefined) },
+    });
+    const title = await screen.findByText("Cancelled while waiting at Request approval");
+    const banner = title.closest(".fk-banner") as HTMLElement;
+    expect(banner.dataset.tone).toBe("neutral");
+    expect(within(banner).getByText(/^By Ava Chen · 3 min(\.|utes)? ago$/)).toBeTruthy();
+    fireEvent.click(within(banner).getByRole("button", { name: "Show step" }));
+    const inspector = await screen.findByRole("complementary", { name: "Step details" });
+    expect(within(inspector).getByRole("heading", { name: "Request approval" })).toBeTruthy();
+    // The inspector does not say who cancelled: narrow screens keep the banner for it.
+    expect(banner.hasAttribute("data-redundant")).toBe(false);
+    // Nothing after the cancelled wait will run: those steps read Skipped, not "Not run yet".
+    expect(card("last")?.dataset.run).toBe("skipped");
+  });
+
+  test("shows the reason, and the user ID when there is no name for it", async () => {
+    setup(cancelledWhileWaiting({ by: "demo-user", reason: "Demo data reset" }), {
+      manifest: approvalManifest(),
+    });
+    expect(await screen.findByText(/^By demo-user · Demo data reset · /)).toBeTruthy();
+  });
+
+  test("without a step or actor it still says the run was cancelled, and when", async () => {
+    const detail = runDetail("cancelled", {}, [ev("run.started"), ev("run.cancelled")]);
+    setup(detail);
+    const banner = (await screen.findByText(/^Cancelled$/, { selector: ".fk-banner__title" }))
+      .parentElement as HTMLElement;
+    expect(within(banner).getByText(/ago|just now/)).toBeTruthy();
+  });
+
+  test("cancelling updates a RunList of the same provider without waiting for its poll", async () => {
+    let current = waitingRun();
+    const summary = () => {
+      const { trigger: _t, journal: _j, output: _o, wakeAt: _w, parent: _p, ...s } = current.run;
+      return s;
+    };
+    const client = mockClient({
+      getManifest: async () => manifest,
+      getRun: async () => current,
+      listRuns: vi.fn(async () => [summary()]),
+      cancelRun: vi.fn(async () => {
+        current = runDetail("cancelled", waitingRun().run.journal, [
+          ...waitingRun().events,
+          ev("run.cancelled", "cond/if/email", { by: "u1" }),
+        ]);
+      }),
+    });
+    render(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} pollMs={0} />
+        <div style={{ height: 800 }}>
+          <RunViewer runId="r1" />
+        </div>
+      </FlowkitProvider>,
+    );
+    const list = await screen.findByRole("list", { name: "Runs" });
+    expect(within(list).getByRole("button", { name: /Waiting/ })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
+    const confirm = await screen.findByRole("dialog", { name: "Cancel this run?" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel run" }));
+    await waitFor(() =>
+      expect(within(list).getByRole("button", { name: /Cancelled/ })).toBeTruthy(),
+    );
+    expect(await screen.findByText(/^Cancelled while waiting at /)).toBeTruthy();
+  });
+});
+
+describe("RunViewer: timed waits", () => {
+  test("a wait ending in a few seconds says when, not 'just now'", async () => {
+    const until = Date.now() + 30_000;
+    const detail = runDetail(
+      "waiting",
+      {
+        load: { status: "done", output: {}, startedAt: 0, at: 5, attempts: 1 },
+        cond: {
+          status: "branched",
+          branch: "if",
+          output: {},
+          startedAt: 6,
+          at: 7,
+          attempts: 1,
+        },
+        "cond/if/email": {
+          status: "suspended",
+          pending: { until },
+          startedAt: 8,
+          at: 9,
+          attempts: 1,
+        },
+      },
+      [ev("run.started"), ev("run.suspended", "cond/if/email", { until })],
+    );
+    setup(detail);
+    const inspector = await screen.findByRole("complementary", { name: "Step details" });
+    const callout = await within(inspector).findByText(/^Waiting until /, {
+      selector: ".fk-callout__text",
+    });
+    expect(callout.textContent).toMatch(/ · in a few seconds$/);
+    expect(callout.textContent).not.toMatch(/just now/);
+  });
+});
+
+describe("RunViewer: tablet widths", () => {
+  test("keeps the inspector beside the canvas from 561px to 720px and the zoom controls clear of the sheet", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const css = readFileSync(resolve(__dirname, "../styles.css"), "utf8");
+    const i = css.indexOf("@container fk-app (min-width: 561px) and (max-width: 720px)");
+    expect(i).toBeGreaterThan(-1);
+    const block = css.slice(i, css.indexOf("@container", i + 10));
+    expect(block).toMatch(/\.fk-run \.fk-editor__body \{\s*flex-direction: row;/);
+    expect(block).toMatch(/\.fk-run \.fk-panel \{[^}]*width: 300px;[^}]*height: auto;/);
+    expect(css).toMatch(
+      /\.fk-editor__body:has\(> \.fk-panel\) \.fk-controls\.react-flow__panel \{\s*margin-bottom: 30px;/,
     );
   });
 });

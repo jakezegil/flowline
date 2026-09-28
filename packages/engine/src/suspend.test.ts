@@ -618,6 +618,19 @@ describe("cancelRun", () => {
     expect((await eventsOf(id)).filter((e) => e.type === "run.cancelled")).toHaveLength(1);
   });
 
+  it("records who cancelled and why on the run.cancelled event", async () => {
+    behaviours.a = waitForCallback([]);
+    const id = await startRun(wf([step("a")]));
+    const engine = makeEngine();
+    await engine.drain();
+    expect(await engine.cancelRun(TENANT, id, { by: "u1", reason: "Demo data reset" })).toBe(
+      "cancelled",
+    );
+    const cancelled = (await eventsOf(id)).find((e) => e.type === "run.cancelled");
+    expect(cancelled?.data).toEqual({ by: "u1", reason: "Demo data reset" });
+    expect(cancelled?.stepPath).toBe("a");
+  });
+
   it("rejects unknown runs", async () => {
     await expect(makeEngine().cancelRun(TENANT, "missing")).rejects.toThrow(/not found/);
     const id = await startRun(wf([step("a")]));
@@ -686,6 +699,73 @@ describe("cancelRun", () => {
       "step.completed",
       "run.cancelled",
     ]);
+  });
+
+  it.each([
+    ["between steps", "result"],
+    ["instead of suspending", "start"],
+  ] as const)("records who asked and why on a requested cancel (%s)", async (_label, hookPhase) => {
+    if (hookPhase === "start") behaviours.a = (ctx) => suspend({ until: ctx.now() + 60_000 });
+    let result: string | undefined;
+    const engine: ReturnType<typeof makeEngine> = makeEngine({
+      __testHooks: {
+        async beforeCommit(_runId, stepPath, phase) {
+          if (stepPath === "a" && phase === hookPhase && result === undefined) {
+            result = await engine.cancelRun(TENANT, id, { by: "u1", reason: "Wrong contact" });
+            // A second request does not overwrite the first one's details.
+            await engine.cancelRun(TENANT, id, { by: "u2", reason: "late" });
+          }
+        },
+      },
+    });
+    const id = await startRun(wf([step("a"), step("b")]));
+    await engine.drain();
+    expect(result).toBe("requested");
+    const run = await getRun(id);
+    expect(run.status).toBe("cancelled");
+    const cancelled = (await eventsOf(id)).filter((e) => e.type === "run.cancelled");
+    expect(cancelled).toHaveLength(1);
+    expect(cancelled[0]).toMatchObject({
+      data: { by: "u1", reason: "Wrong contact" },
+    });
+  });
+
+  it("records who asked on a cancel that aborts a running handler", async () => {
+    let started!: () => void;
+    const running = new Promise<void>((r) => {
+      started = r;
+    });
+    behaviours.a = (ctx) =>
+      new Promise((_, reject) => {
+        started();
+        ctx.signal.addEventListener("abort", () => reject(new Error("aborted by signal")));
+      });
+    const id = await startRun(wf([step("a")]));
+    const engine = makeEngine({ leaseMs: 40 });
+    const claim = engine.runOnce();
+    await running;
+    expect(await engine.cancelRun(TENANT, id, { by: "u1" })).toBe("requested");
+    await claim;
+    const cancelled = (await eventsOf(id)).find((e) => e.type === "run.cancelled");
+    expect(cancelled?.data).toEqual({ by: "u1" });
+  });
+
+  it("a requested cancel with no details records no data", async () => {
+    let result: string | undefined;
+    const engine: ReturnType<typeof makeEngine> = makeEngine({
+      __testHooks: {
+        async beforeCommit(_runId, stepPath, phase) {
+          if (stepPath === "a" && phase === "result" && result === undefined) {
+            result = await engine.cancelRun(TENANT, id);
+          }
+        },
+      },
+    });
+    const id = await startRun(wf([step("a"), step("b")]));
+    await engine.drain();
+    expect(result).toBe("requested");
+    const cancelled = (await eventsOf(id)).find((e) => e.type === "run.cancelled");
+    expect(cancelled?.data).toBeUndefined();
   });
 
   it("cancels instead of suspending when the request arrives while the step runs", async () => {

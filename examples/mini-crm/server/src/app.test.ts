@@ -510,7 +510,13 @@ describe("CRM API", () => {
     const [dealRun] = await runsOf("deal-won-follow-up");
 
     expect((await call("POST", "/api/demo/reset")).status).toBe(204);
-    expect((await runDetail(leadRun)).run.status).toBe("cancelled");
+    const lead = await runDetail(leadRun);
+    expect(lead.run.status).toBe("cancelled");
+    // The run viewer's cancelled banner says who cancelled it and why.
+    expect(lead.events.find((e) => e.type === "run.cancelled")?.data).toEqual({
+      by: "demo-user",
+      reason: "Demo data reset",
+    });
     expect((await runDetail(dealRun?.id as string)).run.status).toBe("cancelled");
     expect(await get<Approval[]>("/api/approvals")).toEqual([]);
 

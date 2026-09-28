@@ -247,7 +247,7 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
     // Cancel unfinished runs first: they reference contacts and approvals that are about to go.
     for (const status of ACTIVE_STATUSES) {
       for (const run of await engine.storage.listRuns(TENANT_ID, { status, limit: 1000 })) {
-        await engine.cancelRun(TENANT_ID, run.id);
+        await engine.cancelRun(TENANT_ID, run.id, { by: DEMO_USER_ID, reason: "Demo data reset" });
       }
     }
     crm.reset();

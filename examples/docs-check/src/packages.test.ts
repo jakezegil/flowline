@@ -4,7 +4,15 @@
  * picks the TypeScript sources; zod is a peer; React's DOM renderer is a declared peer.
  */
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -31,6 +39,34 @@ interface PackageJson {
   dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+}
+
+/** Newest modification time (ms) of the files under `dir`, recursively. */
+function newestMtime(dir: string): number {
+  let newest = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    // Tests are not built, so editing one does not make the build stale.
+    if (!entry.isDirectory() && /\.test\.tsx?$/.test(entry.name)) continue;
+    const t = entry.isDirectory() ? newestMtime(path) : statSync(path).mtimeMs;
+    if (t > newest) newest = t;
+  }
+  return newest;
+}
+
+/**
+ * Whether `packages/engine/dist` was built from the current sources: its `index.d.ts` exists and
+ * is no older than the newest file under `src` or the tsup config.
+ */
+function engineDistIsFresh(): boolean {
+  const engine = join(REPO, "packages/engine");
+  const dts = join(engine, "dist/index.d.ts");
+  if (!existsSync(dts)) return false;
+  const sources = Math.max(
+    newestMtime(join(engine, "src")),
+    statSync(join(engine, "tsup.config.ts")).mtimeMs,
+  );
+  return statSync(dts).mtimeMs >= sources;
 }
 
 function pkg(name: string): PackageJson {
@@ -260,19 +296,29 @@ describe("dependencies", () => {
     expect(p.peerDependencies).toMatchObject({ react: ">=19", "react-dom": "^19" });
   });
 
-  it("@flowkit/engine strips @internal members from its declarations", () => {
+  it("@flowkit/engine builds its declarations with stripInternal", () => {
     expect(readFileSync(join(REPO, "packages/engine/tsup.config.ts"), "utf8")).toMatch(
       /stripInternal:\s*true/,
     );
-    const dts = join(REPO, "packages/engine/dist/index.d.ts");
-    if (existsSync(dts)) {
+  });
+
+  // Reads the built declarations, so it runs only against a dist at least as new as the sources:
+  // `pnpm test` before `pnpm build` (no dist, or a stale one) skips it instead of failing.
+  // Locally a stale or missing build skips this (run `pnpm build` first); CI always runs it, so
+  // a pipeline that tests before building fails here instead of passing silently.
+  it.skipIf(!process.env.CI && !engineDistIsFresh())(
+    "@flowkit/engine strips @internal members from its built declarations",
+    () => {
+      expect(engineDistIsFresh(), "packages/engine/dist is missing or stale: run pnpm build").toBe(
+        true,
+      );
       const dir = join(REPO, "packages/engine/dist");
-      const text = readFileSync(dts, "utf8");
+      const text = readFileSync(join(dir, "index.d.ts"), "utf8");
       // Declarations are split into chunks; follow the index's relative imports one level.
       const chunks = [...text.matchAll(/from ['"]\.\/([^'"]+)['"]/g)].map((m) =>
         readFileSync(join(dir, m[1]!.replace(/\.js$/, ".d.ts")), "utf8"),
       );
       for (const source of [text, ...chunks]) expect(source).not.toContain("__testHooks");
-    }
-  });
+    },
+  );
 });
