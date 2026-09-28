@@ -345,6 +345,11 @@ describe("RunViewer: resuming", () => {
       screen.getByText(/Waiting for a decision · expires .*\. Decide it in Approvals\./),
     ).toBeTruthy();
     expect(resumeButtons()).toHaveLength(0);
+    // The timeline says the same, not "callback".
+    fireEvent.click(within(inspector).getByRole("tab", { name: /^Timeline/ }));
+    const timeline = within(inspector).getByRole("tabpanel", { name: /^Timeline/ });
+    expect(timeline.textContent).toMatch(/Waiting for a decision/);
+    expect(timeline.textContent).not.toMatch(/Waiting for callback/);
   });
 
   test("a declared body schema: the form starts empty, and a body must match it", async () => {

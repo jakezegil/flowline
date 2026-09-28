@@ -93,7 +93,12 @@ function inspect(
 }
 
 /** One-line description of an audit event. */
-function eventDetail(e: RunEvent, labels: FlowkitLabels, now: number): string | undefined {
+function eventDetail(
+  e: RunEvent,
+  labels: FlowkitLabels,
+  now: number,
+  decision: boolean,
+): string | undefined {
   const d = (e.data ?? {}) as Record<string, unknown>;
   const err = d.error as { message?: string } | string | undefined;
   const message = typeof err === "string" ? err : err?.message;
@@ -115,7 +120,9 @@ function eventDetail(e: RunEvent, labels: FlowkitLabels, now: number): string | 
     case "run.suspended":
       if (d.callback === true) {
         const exp = typeof d.expiresAt === "number" ? d.expiresAt : undefined;
-        return labels.waitingForCallback(exp ? labels.relativeTime(exp - now) : undefined);
+        return (decision ? labels.waitingForDecision : labels.waitingForCallback)(
+          exp ? labels.relativeTime(exp - now) : undefined,
+        );
       }
       if (typeof d.until === "number") return labels.waitingUntil(labels.dateTime(d.until));
       if (typeof d.childRunId === "string") return labels.waitingForSubflow;
@@ -143,11 +150,14 @@ function Timeline({
   runStart,
   showSteps,
   stepName,
+  decision = false,
 }: {
   events: RunEvent[];
   runStart: number;
   showSteps: boolean;
   stepName(path: string): string;
+  /** The step waits on a person's decision (it has a resume hint): say so, not "callback". */
+  decision?: boolean;
 }) {
   const { labels } = useFlowkitAppearance();
   const now = useNow(30_000);
@@ -155,7 +165,7 @@ function Timeline({
   return (
     <ol className="fk-timeline">
       {events.map((e) => {
-        const detail = eventDetail(e, labels, now);
+        const detail = eventDetail(e, labels, now, decision);
         const hasData = e.data !== undefined && e.data !== null;
         const head = (
           <>
@@ -351,6 +361,7 @@ export function StepInspector({
         runStart={detail.run.createdAt}
         showSteps={info.isTrigger}
         stepName={stepName}
+        decision={!info.isTrigger && resumeHint !== undefined}
       />
     );
   }
