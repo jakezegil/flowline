@@ -258,9 +258,11 @@ await publishWorkflows("acme"); // once, at deploy or startup. Each call saves a
 await engine.emit("contact.created", { contactId: "c_42" }, { tenantId: "acme" });
 ```
 
-`emit` starts every published workflow whose trigger listens for the event. It validates the
-payload and returns the new run IDs. The worker then runs the steps. To see the completed run, use
-`GET /flowline/runs` or `<RunList>` and `<RunViewer>`. For a workflow with a manual trigger, call
+`emit` starts every published workflow whose trigger listens for the event and resolves
+`{ started, rejected }`: `started` is the new run IDs, and `rejected` reports any match whose
+trigger rejected the payload (or whose `filter`/`dedupeKey` threw) without blocking the others from
+starting. The worker then runs the steps. To see the completed run, use `GET /flowline/runs` or
+`<RunList>` and `<RunViewer>`. For a workflow with a manual trigger, call
 `engine.start({ tenantId, workflowId, input })`. It validates `input` against the trigger's
 declared fields.
 
@@ -416,8 +418,10 @@ export const requestApproval = defineNode({
 ### Triggers
 
 - **Events.** `engine.emit(event, payload, { tenantId, dedupeKey? })` starts a run for each
-  matching trigger. It validates the payload first. A trigger can also define `filter` and
-  `dedupeKey`.
+  matching trigger and resolves `{ started, rejected }`. Each match is validated independently: an
+  invalid payload, or a `filter`/`dedupeKey` that throws, adds an entry to `rejected` (also logged
+  at `warn`, and reported through `onTriggerEvent` as `trigger.rejected`) without blocking the
+  other matches from starting. A trigger can also define `filter` and `dedupeKey`.
 - **Webhooks.** `POST <basePath>/hooks/:tenantId/:workflowId/:slug` starts a run. The engine
   generates the slug on the first save. You can add an HMAC check with
   `X-Flowline-Signature: sha256=<hex>`. The engine never stores the `authorization`, `cookie`,

@@ -138,13 +138,26 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
     authorize: demoAuthorize,
   });
 
-  // CRM changes start workflows, with the event's ID as the dedupe key. Here a failed emit is only
-  // logged and the event is lost (a workflow problem must not fail the CRM change). A production
-  // host would write each event to a transactional outbox with the change and redeliver it with
-  // the same stored ID until the emit succeeds; the dedupe key makes redelivery start one run.
+  // CRM changes start workflows, with the event's ID as the dedupe key. `emit` isolates each
+  // matching workflow's trigger: one with an incompatible payload schema is reported in
+  // `rejected` (and logged here) without blocking the others from starting. A production host
+  // would write each event to a transactional outbox with the change and redeliver it with the
+  // same stored ID until every match starts or is deliberately rejected; the dedupe key makes
+  // redelivery start one run per workflow.
   crm.onEvent(async (event) => {
     try {
-      await engine.emit(event.type, event.payload, { tenantId: TENANT_ID, dedupeKey: event.id });
+      const result = await engine.emit(event.type, event.payload, {
+        tenantId: TENANT_ID,
+        dedupeKey: event.id,
+      });
+      for (const rejection of result.rejected) {
+        logger.warn("workflow rejected CRM event", {
+          event: event.type,
+          workflowId: rejection.workflowId,
+          version: rejection.version,
+          message: rejection.message,
+        });
+      }
     } catch (err) {
       logger.error("could not start workflows for CRM event", {
         event: event.type,

@@ -34,4 +34,6 @@ export {
   type WorkflowAuditEntry,
 } from "./storage";
 export { type QuickjsRuntimeOptions, quickjsRuntime } from "./transform/quickjs";
+export type { TriggerEvent } from "./trigger-events";
+export type { EmitRejection, EmitResult } from "./triggers";
 export type { Worker, WorkerOptions } from "./worker";

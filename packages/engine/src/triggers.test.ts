@@ -3,13 +3,15 @@ import {
   defineNode,
   definePlugin,
   defineTrigger,
+  type Logger,
   type WorkflowDoc,
 } from "@flowlinejs/core";
 import { createMemoryStorage } from "@flowlinejs/storage-memory";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createEngine, type Engine } from "./engine";
 import type { StorageAdapter } from "./storage";
+import type { TriggerEvent } from "./trigger-events";
 
 const DealUpdated = z.object({ dealId: z.string(), changes: z.array(z.string()) });
 
@@ -25,6 +27,34 @@ const dealUpdated = defineTrigger({
   dedupeKey: ({ payload }) => (payload.dealId === "d-dedupe" ? "fixed" : undefined),
 });
 
+/** Requires `amount`, unlike {@link dealUpdated}: used to make exactly one of several matches reject. */
+const dealAmountChanged = defineTrigger({
+  type: "crm.dealAmountChanged",
+  name: "Deal amount changed",
+  kind: "event",
+  event: "deal.updated",
+  config: z.object({}),
+  payload: DealUpdated.extend({ amount: z.number() }),
+});
+
+/** A trigger whose `filter`/`dedupeKey` throw depending on `config.throwIn`, for isolation tests. */
+const throwy = defineTrigger({
+  type: "crm.throwy",
+  name: "Throwy",
+  kind: "event",
+  event: "deal.updated",
+  config: z.object({ throwIn: z.enum(["filter", "dedupeKey"]) }),
+  payload: DealUpdated,
+  filter: ({ config }) => {
+    if (config.throwIn === "filter") throw new Error("boom");
+    return true;
+  },
+  dedupeKey: ({ config }) => {
+    if (config.throwIn === "dedupeKey") throw new Error("boom");
+    return undefined;
+  },
+});
+
 const echo = defineNode({
   type: "crm.echo",
   name: "Echo",
@@ -33,7 +63,12 @@ const echo = defineNode({
 });
 
 const registry = createRegistry([
-  definePlugin({ id: "crm", name: "CRM", nodes: [echo], triggers: [dealUpdated] }),
+  definePlugin({
+    id: "crm",
+    name: "CRM",
+    nodes: [echo],
+    triggers: [dealUpdated, dealAmountChanged, throwy],
+  }),
 ]);
 
 const steps: WorkflowDoc["steps"] = [
@@ -44,6 +79,20 @@ const dealDoc = (id: string, onlyWhenStageChanges = false): WorkflowDoc => ({
   id,
   name: id,
   trigger: { type: "crm.dealUpdated", config: { onlyWhenStageChanges } },
+  steps,
+});
+
+const dealAmountDoc = (id: string): WorkflowDoc => ({
+  id,
+  name: id,
+  trigger: { type: "crm.dealAmountChanged", config: {} },
+  steps,
+});
+
+const throwyDoc = (id: string, throwIn: "filter" | "dedupeKey"): WorkflowDoc => ({
+  id,
+  name: id,
+  trigger: { type: "crm.throwy", config: { throwIn } },
   steps,
 });
 
@@ -85,13 +134,14 @@ describe("emit", () => {
     await deploy(eventDoc("other-event", "deal.deleted"));
     await deploy(dealDoc("elsewhere"), "t2");
 
-    const ids = await engine.emit(
+    const result = await engine.emit(
       "deal.updated",
       { dealId: "d1", changes: ["amount"] },
       { tenantId: "t1" },
     );
-    expect(ids).toHaveLength(1);
-    const run = await storage.getRun("t1", ids[0] as string);
+    expect(result.rejected).toEqual([]);
+    expect(result.started).toHaveLength(1);
+    const run = await storage.getRun("t1", result.started[0] as string);
     expect(run).toMatchObject({
       workflowId: "any",
       status: "queued",
@@ -104,19 +154,22 @@ describe("emit", () => {
       { dealId: "d2", changes: ["stage"] },
       { tenantId: "t1" },
     );
-    expect(both).toHaveLength(2);
+    expect(both.started).toHaveLength(2);
     expect(await storage.listRuns("t2", {})).toEqual([]);
-    const events = await storage.listEvents("t1", ids[0] as string);
+    const events = await storage.listEvents("t1", result.started[0] as string);
     expect(events.map((e) => e.type)).toEqual(["run.started"]);
   });
 
   it("matches core.event triggers by their configured event name", async () => {
     await deploy(eventDoc("on-signup", "user.signedUp"));
-    const ids = await engine.emit("user.signedUp", { id: 7 }, { tenantId: "t1" });
-    expect(ids).toHaveLength(1);
+    const result = await engine.emit("user.signedUp", { id: 7 }, { tenantId: "t1" });
+    expect(result.started).toHaveLength(1);
     await engine.drain();
-    expect((await storage.getRun("t1", ids[0] as string))?.status).toBe("completed");
-    expect(await engine.emit("user.deleted", {}, { tenantId: "t1" })).toEqual([]);
+    expect((await storage.getRun("t1", result.started[0] as string))?.status).toBe("completed");
+    expect(await engine.emit("user.deleted", {}, { tenantId: "t1" })).toEqual({
+      started: [],
+      rejected: [],
+    });
   });
 
   it("starts at most one run per dedupe key", async () => {
@@ -125,23 +178,134 @@ describe("emit", () => {
     const payload = { dealId: "d1", changes: [] };
     const first = await engine.emit("deal.updated", payload, { tenantId: "t1", dedupeKey: "k1" });
     const second = await engine.emit("deal.updated", payload, { tenantId: "t1", dedupeKey: "k1" });
-    expect(first).toHaveLength(2);
-    expect(second).toEqual([]);
+    expect(first.started).toHaveLength(2);
+    expect(second.started).toEqual([]);
     expect(await storage.listRuns("t1", {})).toHaveLength(2);
     // The trigger's own dedupeKey() applies when no key is passed.
     const viaTrigger = { dealId: "d-dedupe", changes: [] };
-    expect(await engine.emit("deal.updated", viaTrigger, { tenantId: "t1" })).toHaveLength(2);
-    expect(await engine.emit("deal.updated", viaTrigger, { tenantId: "t1" })).toEqual([]);
+    expect(
+      (await engine.emit("deal.updated", viaTrigger, { tenantId: "t1" })).started,
+    ).toHaveLength(2);
+    expect((await engine.emit("deal.updated", viaTrigger, { tenantId: "t1" })).started).toEqual([]);
     expect(await storage.listRuns("t1", {})).toHaveLength(4);
   });
 
-  it("rejects an invalid payload before creating any run", async () => {
-    await deploy(eventDoc("generic", "deal.updated"));
-    await deploy(dealDoc("typed"));
-    await expect(
-      engine.emit("deal.updated", { dealId: 5 }, { tenantId: "t1" }),
-    ).rejects.toMatchObject({ name: "FlowlineValidationError", issues: [expect.any(Object)] });
-    expect(await storage.listRuns("t1", {})).toEqual([]);
+  it("returns { started: [], rejected: [] } when nothing matches the event", async () => {
+    await deploy(dealDoc("any"));
+    expect(await engine.emit("nothing.listens", {}, { tenantId: "t1" })).toEqual({
+      started: [],
+      rejected: [],
+    });
+  });
+
+  it("isolates one match's invalid payload: the rest start, one rejection is reported", async () => {
+    const events: TriggerEvent[] = [];
+    const warn = vi.fn();
+    const logger: Logger = { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() };
+    engine = createEngine({
+      registry,
+      storage,
+      clock: () => now,
+      logger,
+      onTriggerEvent: (e) => events.push(e),
+    });
+    await deploy(dealDoc("a")); // crm.dealUpdated: accepts { dealId, changes }
+    await deploy(eventDoc("b", "deal.updated")); // core.event: payload z.unknown()
+    await deploy(dealAmountDoc("c")); // crm.dealAmountChanged: also requires `amount`
+
+    const result = await engine.emit(
+      "deal.updated",
+      { dealId: "d1", changes: ["amount"] },
+      { tenantId: "t1" },
+    );
+
+    expect(result.started).toHaveLength(2);
+    const startedWorkflows = await Promise.all(
+      result.started.map(async (id) => (await storage.getRun("t1", id))?.workflowId),
+    );
+    expect(new Set(startedWorkflows)).toEqual(new Set(["a", "b"]));
+
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]).toMatchObject({
+      workflowId: "c",
+      version: 1,
+      message: expect.stringContaining("amount"),
+    });
+    expect(result.rejected[0]?.issues[0]).toMatchObject({ code: "config.invalid" });
+
+    const rejections = events.filter((e) => e.type === "trigger.rejected");
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0]).toMatchObject({
+      type: "trigger.rejected",
+      tenantId: "t1",
+      workflowId: "c",
+      version: 1,
+      source: { kind: "event", event: "deal.updated" },
+    });
+    expect(rejections[0]).not.toHaveProperty("payload");
+
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a match whose filter throws, `message` starting `filter threw:`; others unaffected", async () => {
+    await deploy(dealDoc("any"));
+    await deploy(throwyDoc("bad", "filter"));
+    const result = await engine.emit(
+      "deal.updated",
+      { dealId: "d1", changes: [] },
+      { tenantId: "t1" },
+    );
+    expect(result.started).toHaveLength(1);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]?.workflowId).toBe("bad");
+    expect(result.rejected[0]?.message).toMatch(/^filter threw:/);
+  });
+
+  it("rejects a match whose dedupeKey throws; other matches unaffected", async () => {
+    await deploy(dealDoc("any"));
+    await deploy(throwyDoc("bad", "dedupeKey"));
+    const result = await engine.emit(
+      "deal.updated",
+      { dealId: "d1", changes: [] },
+      { tenantId: "t1" },
+    );
+    expect(result.started).toHaveLength(1);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]?.workflowId).toBe("bad");
+    expect(result.rejected[0]?.message).toMatch(/^dedupeKey threw:/);
+  });
+
+  it("a filter returning false is skipped: neither started nor rejected", async () => {
+    await deploy(dealDoc("stage-only", true));
+    const result = await engine.emit(
+      "deal.updated",
+      { dealId: "d1", changes: ["amount"] },
+      { tenantId: "t1" },
+    );
+    expect(result).toEqual({ started: [], rejected: [] });
+  });
+
+  it("a throwing onTriggerEvent is logged and does not fail emit", async () => {
+    const warn = vi.fn();
+    const logger: Logger = { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() };
+    engine = createEngine({
+      registry,
+      storage,
+      clock: () => now,
+      logger,
+      onTriggerEvent: () => {
+        throw new Error("listener boom");
+      },
+    });
+    await deploy(dealAmountDoc("c")); // missing `amount` in the payload below: rejects
+    const result = await engine.emit(
+      "deal.updated",
+      { dealId: "d1", changes: [] },
+      { tenantId: "t1" },
+    );
+    expect(result.rejected).toHaveLength(1);
+    // One warn for the rejection itself, one for the listener throwing.
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 });
 
