@@ -243,6 +243,7 @@ export function StepInspector({
   onClose,
   resumeSlot,
   resumeHint,
+  decisionWait = false,
 }: {
   detail: RunDetail;
   selection: string;
@@ -255,6 +256,8 @@ export function StepInspector({
   resumeSlot?: ReactNode;
   /** How to resume this step when the host app does it (the node's `resume.hint`). */
   resumeHint?: string;
+  /** The step's waits are decided in the host app: its timeline says "a decision", not "callback". */
+  decisionWait?: boolean;
 }): JSX.Element {
   const { labels } = useFlowkitAppearance();
   const step = stepIndex(detail.doc).get(selection);
@@ -361,7 +364,7 @@ export function StepInspector({
         runStart={detail.run.createdAt}
         showSteps={info.isTrigger}
         stepName={stepName}
-        decision={!info.isTrigger && resumeHint !== undefined}
+        decision={!info.isTrigger && (decisionWait || resumeHint !== undefined)}
       />
     );
   }

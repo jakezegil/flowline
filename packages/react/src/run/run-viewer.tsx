@@ -568,6 +568,8 @@ function RunCanvasAndInspector({
   const selection = useEditorStore((s) => s.selection);
   let name = "";
   let Icon: React.ComponentType<{ size?: number }> | undefined;
+  /** The selected step's waits are decided in the host app (e.g. an approval). */
+  let decisionWait = false;
   if (selection === TRIGGER_KEY) {
     const t = manifest.triggers.find((x) => x.type === detail.doc.trigger.type);
     name = t?.name ?? labels.triggerTag;
@@ -575,7 +577,9 @@ function RunCanvasAndInspector({
   } else if (selection !== null) {
     name = nameOf(selection);
     const step = stepIndex(detail.doc).get(selection);
-    Icon = resolveIcon(manifest.nodes.find((n) => n.type === step?.type)?.icon);
+    const node = manifest.nodes.find((n) => n.type === step?.type);
+    Icon = resolveIcon(node?.icon);
+    decisionWait = node?.resume?.hostHandled === true;
   }
   return (
     <div className="fk-editor__body">
@@ -594,6 +598,7 @@ function RunCanvasAndInspector({
             name={name}
             {...(Icon ? { icon: <Icon size={16} /> } : {})}
             onClose={() => store.getState().select(null)}
+            decisionWait={decisionWait}
             {...(waitingStep === selection
               ? { resumeSlot, ...(resumeHint ? { resumeHint } : {}) }
               : {})}

@@ -352,6 +352,19 @@ describe("RunViewer: resuming", () => {
     expect(timeline.textContent).not.toMatch(/Waiting for callback/);
   });
 
+  test("a host-handled wait still reads as a decision in the timeline once the run is cancelled", async () => {
+    const detail = approvalWaitingRun();
+    detail.run = { ...detail.run, status: "cancelled" };
+    detail.events = [...detail.events, ev("run.cancelled", "size/if/approval")];
+    setup(detail, { manifest: approvalManifest({ hostHandled: true, hint: "Decide it." }) });
+    fireEvent.click(await screen.findByRole("button", { name: "Show step" }));
+    const inspector = await screen.findByRole("complementary", { name: "Step details" });
+    fireEvent.click(within(inspector).getByRole("tab", { name: /^Timeline/ }));
+    const timeline = within(inspector).getByRole("tabpanel", { name: /^Timeline/ });
+    expect(timeline.textContent).toMatch(/Waiting for a decision/);
+    expect(timeline.textContent).not.toMatch(/Waiting for callback/);
+  });
+
   test("a declared body schema: the form starts empty, and a body must match it", async () => {
     const t = setup(approvalWaitingRun(), {
       manifest: approvalManifest({
