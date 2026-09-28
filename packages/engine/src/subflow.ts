@@ -50,12 +50,13 @@ async function nestingDepth(storage: StorageAdapter, run: Run): Promise<number> 
 }
 
 /**
- * The trigger payload for a run of `child`: `input`, checked against the child trigger's payload
- * schema or declared fields.
+ * @internal The trigger payload for a run of `doc`: `input`, checked against the trigger's payload
+ * schema (and parsed by it) or its declared fields (for `webhook` payloads: the declared body
+ * fields against `input.body`).
  */
-async function subflowPayload(
+export async function checkTriggerPayload(
   registry: Registry,
-  child: WorkflowDoc,
+  doc: WorkflowDoc,
   input: unknown,
 ): Promise<{ ok: true; value: unknown } | { ok: false; message: string }> {
   let value: unknown;
@@ -64,7 +65,7 @@ async function subflowPayload(
   } catch {
     return { ok: false, message: "must be JSON-serializable" };
   }
-  const trigger = registry.getTrigger(child.trigger.type);
+  const trigger = registry.getTrigger(doc.trigger.type);
   if (trigger?.payload) {
     const res = await (trigger.payload as z.ZodType).safeParseAsync(value);
     if (res.success) return { ok: true, value: res.data };
@@ -72,9 +73,12 @@ async function subflowPayload(
     const field = issue && issue.path.length > 0 ? `field "${issue.path.join(".")}" ` : "";
     return { ok: false, message: `${field}${issue?.message ?? "is invalid"}` };
   }
-  if (trigger?.dynamicPayload?.kind === "fields") {
-    const decls = configValueAt(child.trigger.config, trigger.dynamicPayload.configPath);
-    const problem = checkFields(Array.isArray(decls) ? (decls as FieldDecl[]) : [], value);
+  const dynamic = trigger?.dynamicPayload;
+  if (dynamic) {
+    const decls = configValueAt(doc.trigger.config, dynamic.configPath);
+    const fields = Array.isArray(decls) ? (decls as FieldDecl[]) : [];
+    const checked = dynamic.kind === "webhook" ? (value as { body?: unknown } | null)?.body : value;
+    const problem = checkFields(fields, checked);
     if (problem !== undefined) return { ok: false, message: problem };
   }
   return { ok: true, value };
@@ -136,7 +140,7 @@ export async function startSubflow<T>(sig: SubflowSignal, env: SubflowEnv<T>): P
   if ((await nestingDepth(storage, run)) >= MAX_SUBFLOW_DEPTH) {
     return env.fail("Sub-flow nesting too deep", "subflow.depth");
   }
-  const payload = await subflowPayload(env.registry, child.doc, sig.input);
+  const payload = await checkTriggerPayload(env.registry, child.doc, sig.input);
   if (!payload.ok) {
     return env.fail(`Sub-flow "${sig.workflowId}" input: ${payload.message}`, "subflow.input");
   }

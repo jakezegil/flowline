@@ -297,6 +297,20 @@ describe("subscribeRun", () => {
     expect(calls[0]!.headers.accept).toBe("text/event-stream");
   });
 
+  test("treats run.stopped as terminal and does not reconnect", async () => {
+    const e1 = event(1, "run.started");
+    const e2 = event(2, "run.stopped");
+    // The server closes the stream after the terminal event.
+    const { fetch, calls } = stubFetch(() => sseResponse([frame(e1), frame(e2)]));
+    const client = createClient({ baseUrl: "https://api.test", fetch });
+    const received: RunEvent[] = [];
+    client.subscribeRun("r1", (e) => received.push(e));
+    await vi.waitFor(() => expect(received).toEqual([e1, e2]));
+    // Past the first reconnect backoff (500 ms).
+    await new Promise((r) => setTimeout(r, 700));
+    expect(calls).toHaveLength(1);
+  });
+
   test("handles CRLF split exactly between CR and LF, and ignores non-run events", async () => {
     const e1 = event(1, "run.started");
     const e2 = event(2, "run.completed");

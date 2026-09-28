@@ -35,13 +35,18 @@
   "dependencies": {
     "@flowkit/core": "workspace:*",
     "@flowkit/nodes-builtin": "workspace:*",
+    "cron-parser": "5.10.1",
     "quickjs-emscripten": "0.32.0",
     "undici": "7.29.1"
   },
   "peerDependencies": {
+    "@flowkit/storage-memory": "workspace:*",
     "vitest": ">=3"
   },
   "peerDependenciesMeta": {
+    "@flowkit/storage-memory": {
+      "optional": true
+    },
     "vitest": {
       "optional": true
     }

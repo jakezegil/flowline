@@ -61,8 +61,8 @@ export interface FlowkitClient {
   /**
    * Stream a run's events from `GET /runs/:id/stream`. Uses `fetch` (so `headers()` auth works),
    * reconnects with `?after=<lastSeq>` and exponential backoff (500ms doubling to 10s), delivers
-   * each `seq` at most once and in order, and stops after `run.completed`, `run.failed` or
-   * `run.cancelled`, or on a non-retryable 4xx response. Falls back to polling `getRun` every 2s
+   * each `seq` at most once and in order, and stops after `run.completed`, `run.failed`,
+   * `run.cancelled` or `run.stopped`, or on a non-retryable 4xx response. Falls back to polling `getRun` every 2s
    * when the runtime cannot stream response bodies.
    *
    * @returns A function that unsubscribes and closes the stream.
@@ -107,6 +107,7 @@ const TERMINAL_EVENTS: ReadonlySet<string> = new Set([
   "run.completed",
   "run.failed",
   "run.cancelled",
+  "run.stopped",
 ]);
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
 const BACKOFF_INITIAL_MS = 500;

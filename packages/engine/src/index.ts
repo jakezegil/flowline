@@ -6,6 +6,7 @@ export {
   FatalError,
   type FatalErrorOptions,
   FlowkitStorageError,
+  FlowkitValidationError,
   RetryableError,
 } from "./errors";
 export { buildScope, type Frame, type NextAction, nextAction } from "./interpreter";
@@ -21,3 +22,4 @@ export type {
   WorkflowAuditEntry,
 } from "./storage";
 export { type QuickjsRuntimeOptions, quickjsRuntime } from "./transform/quickjs";
+export type { Worker, WorkerOptions } from "./worker";
