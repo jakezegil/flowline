@@ -696,6 +696,30 @@ describe("resume", () => {
     expect(ok.status).toBe(202);
   });
 
+  it("answers 409 resume_unverifiable on both routes when the wait can't be checked", async () => {
+    const { runId, token } = await decisionRun("t.decide");
+    const real = storage.getWorkflowVersion.bind(storage);
+    storage.getWorkflowVersion = async () => null;
+    try {
+      const body = { decision: "approved" };
+      for (const res of [
+        await call("POST", `/resume/${token}`, { tenant: null, body }),
+        await call("POST", `/runs/${runId}/resume`, { body }),
+      ]) {
+        expect(res.status).toBe(409);
+        expect(await res.json()).toMatchObject({ code: "resume_unverifiable" });
+      }
+    } finally {
+      storage.getWorkflowVersion = real;
+    }
+    expect((await storage.getRun("a", runId))?.status).toBe("waiting");
+    const ok = await call("POST", `/resume/${token}`, {
+      tenant: null,
+      body: { decision: "approved" },
+    });
+    expect(ok.status).toBe(202);
+  });
+
   it("resumes only at the step named by ?step", async () => {
     const { runId } = await waitingRun();
     const wrong = await call("POST", `/runs/${runId}/resume?step=elsewhere`, { body: {} });

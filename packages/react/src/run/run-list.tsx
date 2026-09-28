@@ -26,6 +26,35 @@ function filterOf(tab: RunFilter | undefined): { status?: RunStatus; stopped?: b
   return tab ? { status: tab } : {};
 }
 
+/**
+ * Which ends of a sideways-scrolling row have more content past them: `"start"`, `"end"`,
+ * `"both"`, or `undefined` when everything fits. Drives the edge fade on the filter chips.
+ */
+function useScrollOverflow(ref: {
+  current: HTMLElement | null;
+}): "start" | "end" | "both" | undefined {
+  const [overflow, setOverflow] = useState<"start" | "end" | "both" | undefined>();
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      // 1px slack: fractional widths leave a sub-pixel remainder at the end.
+      const start = el.scrollLeft > 1;
+      const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+      setOverflow(start && end ? "both" : start ? "start" : end ? "end" : undefined);
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(update);
+    observer?.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  }, [ref]);
+  return overflow;
+}
+
 /** Loads `listRuns` for a filter and reloads it every `pollMs` while mounted. */
 function useRunList(
   workflowId: string | undefined,
@@ -109,6 +138,8 @@ export function RunList(props: {
   const { theme, labels } = useFlowkitAppearance();
   const stateName = useRunStateName();
   const [status, setStatus] = useState<RunFilter | undefined>(undefined);
+  const filtersRef = useRef<HTMLFieldSetElement>(null);
+  const filtersOverflow = useScrollOverflow(filtersRef);
   const { runs, error, retry } = useRunList(workflowId, status, !includeSubflowRuns, pollMs);
   const names = useWorkflowNames(
     useMemo(() => runs?.map((r) => r.workflowId) ?? [], [runs]),
@@ -193,7 +224,12 @@ export function RunList(props: {
       data-fk-theme={theme.colorMode ?? "system"}
       style={style}
     >
-      <fieldset className="fk-runs__filters" aria-label={labels.filterRuns}>
+      <fieldset
+        ref={filtersRef}
+        className="fk-runs__filters"
+        aria-label={labels.filterRuns}
+        {...(filtersOverflow ? { "data-overflow": filtersOverflow } : {})}
+      >
         {FILTERS.map((f) => (
           <button
             key={f ?? "all"}

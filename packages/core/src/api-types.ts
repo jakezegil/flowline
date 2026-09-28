@@ -34,7 +34,9 @@
  *   for a bad `X-Flowkit-Signature`, 400 `{ issues }` for a body not matching the declared
  *   fields). The signature has no timestamp, so a captured delivery can be replayed: set a
  *   dedupe header (e.g. the sender's delivery id) alongside a signing secret.
- * - `POST /resume/:token` body = callback body → 202 (410 `{ error: "gone" }`)
+ * - `POST /resume/:token` body = callback body → 202 (410 `{ error: "gone" }`; 409
+ *   `{ code: "resume_unverifiable" }` when the waiting step can't be checked; 400 when the body
+ *   doesn't match the node's `resume.body`)
  *
  * Editor requests other than `GET` must send `Content-Type: application/json`, bodyless ones
  * (cancel, retry) too; anything else, including no `Content-Type`, is refused with 415 (so a

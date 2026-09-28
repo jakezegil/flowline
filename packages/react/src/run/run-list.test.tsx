@@ -249,5 +249,40 @@ describe("RunList: stopped runs and narrow widths", () => {
     const rule = /\.fk-runs__filters \{([^}]*)\}/.exec(css)?.[1] ?? "";
     expect(rule).toMatch(/flex-wrap: nowrap/);
     expect(rule).toMatch(/overflow-x: auto/);
+    expect(css).toMatch(
+      /\.fk-runs__filters\[data-overflow\] \{[^}]*mask-image: var\(--fk-runs-fade\)/,
+    );
+    for (const edge of ["start", "end", "both"]) {
+      expect(css).toContain(`.fk-runs__filters[data-overflow="${edge}"] {\n    --fk-runs-fade:`);
+    }
+  });
+
+  it("marks which ends of the chip row have more chips past them", async () => {
+    render(
+      <FlowkitProvider client={mockClient({ listRuns: async () => [] })}>
+        <RunList onSelect={() => {}} />
+      </FlowkitProvider>,
+    );
+    const row = screen.getByRole("group", { name: "Filter runs by status" });
+    await screen.findByText(/No runs yet/);
+    // Everything fits (jsdom's default: no layout).
+    expect(row.hasAttribute("data-overflow")).toBe(false);
+    const size = { scrollLeft: 0, clientWidth: 320, scrollWidth: 520 };
+    for (const key of Object.keys(size) as (keyof typeof size)[]) {
+      Object.defineProperty(row, key, { configurable: true, get: () => size[key] });
+    }
+    const scrollTo = (left: number) => {
+      size.scrollLeft = left;
+      fireEvent.scroll(row);
+    };
+    scrollTo(0);
+    expect(row.getAttribute("data-overflow")).toBe("end");
+    scrollTo(100);
+    expect(row.getAttribute("data-overflow")).toBe("both");
+    scrollTo(200);
+    expect(row.getAttribute("data-overflow")).toBe("start");
+    size.scrollWidth = 320;
+    scrollTo(0);
+    expect(row.hasAttribute("data-overflow")).toBe(false);
   });
 });

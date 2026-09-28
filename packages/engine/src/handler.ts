@@ -163,8 +163,15 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
       }
     }
     if (seg.length === 2 && seg[0] === "resume") {
-      const outcome = await engine.resume(seg[1] as string, await readJson(req));
-      return outcome === "resumed" ? json(202, {}) : json(410, { error: "gone" });
+      try {
+        const outcome = await engine.resume(seg[1] as string, await readJson(req));
+        return outcome === "resumed" ? json(202, {}) : json(410, { error: "gone" });
+      } catch (err) {
+        if (err instanceof ResumeUnverifiableError) {
+          throw new HttpError(409, err.message, { code: err.code });
+        }
+        throw err;
+      }
     }
     return undefined;
   };
