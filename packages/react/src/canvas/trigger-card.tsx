@@ -1,11 +1,12 @@
 import type { Issue, TriggerManifest, WorkflowDoc } from "@flowkit/core";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Zap } from "lucide-react";
-import { memo, useMemo } from "react";
-import { useEditorStore, useShallow } from "../hooks";
+import { memo, useRef } from "react";
+import { sameIssues, useEditorStore, useShallow } from "../hooks";
+import type { FlowkitLabels } from "../labels";
 import { useFlowkitAppearance } from "../provider";
 import { TRIGGER_KEY } from "../store/editor-store";
-import { useCanvasUi } from "./canvas-context";
+import { useCanvasUi, useLabels } from "./canvas-context";
 import { NodeHandles } from "./handles";
 import { DraftBadge } from "./step-card";
 
@@ -13,21 +14,25 @@ import { DraftBadge } from "./step-card";
 export type TriggerNode = Node<Record<string, never>, "trigger">;
 
 /** One line describing when a trigger fires. */
-function triggerCaption(t: TriggerManifest | undefined, doc: WorkflowDoc): string {
-  if (!t) return `Unknown trigger type ${doc.trigger.type}`;
+function triggerCaption(
+  t: TriggerManifest | undefined,
+  trigger: WorkflowDoc["trigger"],
+  labels: FlowkitLabels,
+): string {
+  if (!t) return labels.triggerUnknown(trigger.type);
   switch (t.kind) {
     case "event":
-      return t.event ? `When ${t.event} happens` : "When an event happens";
+      return labels.triggerEvent(t.event || undefined);
     case "webhook":
-      return "When a webhook is called";
+      return labels.triggerWebhook;
     case "manual":
-      return "When run manually";
+      return labels.triggerManual;
     case "schedule": {
-      const cron = doc.trigger.config.cron;
-      return typeof cron === "string" && cron ? `On schedule ${cron}` : "On a schedule";
+      const cron = trigger.config.cron;
+      return labels.triggerSchedule(typeof cron === "string" && cron ? cron : undefined);
     }
     case "subflow":
-      return "When called by another workflow";
+      return labels.triggerSubflow;
     default:
       return t.description ?? "";
   }
@@ -40,18 +45,25 @@ const isTriggerIssue = (i: Issue) =>
 /** The workflow's trigger card, at the top of the canvas. */
 export const TriggerCard = memo(function TriggerCard({ selected }: NodeProps<TriggerNode>) {
   const { resolveIcon } = useFlowkitAppearance();
-  const { trigger, doc, allIssues } = useEditorStore(
+  const labels = useLabels();
+  // Only the trigger's slice of the store, so edits to steps don't re-render this card.
+  const { trigger, docTrigger } = useEditorStore(
     useShallow((s) => ({
-      doc: s.doc,
+      docTrigger: s.doc.trigger,
       trigger: s.manifest.triggers.find((t) => t.type === s.doc.trigger.type),
-      allIssues: s.issues,
     })),
   );
+  const lastIssues = useRef<Issue[]>([]);
+  const issues = useEditorStore((s) => {
+    const next = s.issues.filter(isTriggerIssue);
+    if (sameIssues(lastIssues.current, next)) return lastIssues.current;
+    lastIssues.current = next;
+    return next;
+  });
   const testState = useEditorStore((s) => s.testState[TRIGGER_KEY]);
   const inRunMode = useCanvasUi((s) => s.overlay !== undefined);
-  const issues = useMemo(() => allIssues.filter(isTriggerIssue), [allIssues]);
   const Icon = trigger?.icon ? resolveIcon(trigger.icon) : Zap;
-  const name = trigger?.name ?? "Trigger";
+  const name = trigger?.name ?? labels.triggerTag;
   return (
     <>
       <NodeHandles />
@@ -69,9 +81,9 @@ export const TriggerCard = memo(function TriggerCard({ selected }: NodeProps<Tri
               {name}
             </span>
           </div>
-          <div className="fk-card__summary">{triggerCaption(trigger, doc)}</div>
+          <div className="fk-card__summary">{triggerCaption(trigger, docTrigger, labels)}</div>
         </div>
-        <span className="fk-card__tag">Trigger</span>
+        <span className="fk-card__tag">{labels.triggerTag}</span>
         {!inRunMode && (
           <div className="fk-card__status">
             <DraftBadge issues={issues} testState={testState} />

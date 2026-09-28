@@ -17,7 +17,7 @@ import {
 import { type ComponentType, type ReactNode, useContext } from "react";
 import { useEditorStore } from "../hooks";
 import type { StepActions } from "./actions";
-import { PortalContainerContext } from "./canvas-context";
+import { PortalContainerContext, useLabels } from "./canvas-context";
 import { isMac } from "./keyboard";
 
 const mod = () => (isMac() ? "⌘" : "Ctrl+");
@@ -88,34 +88,39 @@ function StepMenuItems({
   const loopBody = spec?.kind === "loop" ? spec.branch : undefined;
   const branches = manifest && loopBody === undefined ? branchesFor(manifest, step) : [];
   const m = mod();
+  const l = useLabels();
   return (
     <>
       <M.Item className="fk-menu__item" onSelect={actions.rename}>
-        <Row icon={Pencil} label="Rename" kbd="F2" />
+        <Row icon={Pencil} label={l.rename} kbd="F2" />
       </M.Item>
       <M.Item className="fk-menu__item" onSelect={actions.duplicate}>
-        <Row icon={CopyPlus} label="Duplicate" kbd={`${m}D`} />
+        <Row icon={CopyPlus} label={l.duplicate} kbd={`${m}D`} />
       </M.Item>
       <M.Item className="fk-menu__item" onSelect={actions.copyReference}>
-        <Row icon={Link2} label="Copy reference" />
+        <Row icon={Link2} label={l.copyReference} />
       </M.Item>
       <M.Item className="fk-menu__item" onSelect={actions.replace}>
-        <Row icon={Replace} label="Replace…" />
+        <Row icon={Replace} label={l.replace} />
       </M.Item>
       <M.Item className="fk-menu__item" onSelect={actions.toggleDisabled}>
-        {step.disabled ? <Row icon={Eye} label="Enable" /> : <Row icon={EyeOff} label="Disable" />}
+        {step.disabled ? (
+          <Row icon={Eye} label={l.enable} />
+        ) : (
+          <Row icon={EyeOff} label={l.disable} />
+        )}
       </M.Item>
       <M.Separator className="fk-menu__sep" />
       <M.Item className="fk-menu__item" onSelect={actions.copy}>
-        <Row icon={Copy} label="Copy" kbd={`${m}C`} />
+        <Row icon={Copy} label={l.copy} kbd={`${m}C`} />
       </M.Item>
       <M.Item className="fk-menu__item" disabled={!canPaste} onSelect={actions.pasteAfter}>
-        <Row icon={ClipboardPaste} label="Paste after" kbd={`${m}V`} />
+        <Row icon={ClipboardPaste} label={l.pasteAfter} kbd={`${m}V`} />
       </M.Item>
       {branches.length > 0 && (
         <M.Sub>
           <M.SubTrigger className="fk-menu__item" disabled={!canPaste}>
-            <Row icon={ClipboardPaste} label="Paste inside branch" />
+            <Row icon={ClipboardPaste} label={l.pasteInsideBranch} />
             <ChevronRight size={14} className="fk-menu__chevron" aria-hidden />
           </M.SubTrigger>
           <M.Portal container={container}>
@@ -139,12 +144,12 @@ function StepMenuItems({
           disabled={!canPaste}
           onSelect={() => actions.pasteInside(loopBody)}
         >
-          <Row icon={ClipboardPaste} label="Paste inside loop" />
+          <Row icon={ClipboardPaste} label={l.pasteInsideLoop} />
         </M.Item>
       )}
       <M.Separator className="fk-menu__sep" />
       <M.Item className="fk-menu__item" data-danger onSelect={actions.remove}>
-        <Row icon={Trash2} label="Delete" kbd="⌫" />
+        <Row icon={Trash2} label={l.delete} kbd="⌫" />
       </M.Item>
     </>
   );
@@ -174,6 +179,7 @@ export function StepContextMenu({ children, ...props }: StepMenuProps & { childr
 /** The "…" button of a card, opening the same menu as right-click. */
 export function StepKebabMenu(props: StepMenuProps & { name: string }) {
   const container = useContext(PortalContainerContext);
+  const labels = useLabels();
   const { name, ...rest } = props;
   return (
     <DropdownMenu.Root modal={false}>
@@ -181,7 +187,7 @@ export function StepKebabMenu(props: StepMenuProps & { name: string }) {
         <button
           type="button"
           className="fk-card__kebab nodrag nopan"
-          aria-label={`Actions for ${name}`}
+          aria-label={labels.actionsFor(name)}
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
         >

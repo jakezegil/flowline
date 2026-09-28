@@ -26,9 +26,19 @@
       "Helvetica Neue", Arial, sans-serif;
     --fk-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
+    /* Glyphs on the solid status colors (badge check, ×, !). Not a theme token; override in CSS. */
+    --fk-on-status: #ffffff;
+
     --fk-shadow-rgb: 17 17 26;
     --fk-shadow-strength: 1;
   }
+
+  /*
+   * The dark set appears twice on purpose: once for an explicit dark theme and once for
+   * `system` under a dark `prefers-color-scheme`. CSS can't put a media condition in a selector
+   * list, so the two can't share one rule, and `light-dark()` would only cover the colors (not
+   * the shadow numbers) and needs 2024+ browsers. Keep the two blocks identical.
+   */
 
   .fk-root[data-fk-theme="dark"] {
     --fk-accent: #8587f5;
@@ -395,10 +405,12 @@
   .fk-pill:first-child {
     margin-left: 0;
   }
-  .fk-pill[data-empty] {
-    color: var(--fk-text-muted);
-    background: transparent;
-    box-shadow: inset 0 0 0 1px var(--fk-border-strong);
+  /* Unset values: a schema default, muted; or "No subject", muted italic. */
+  .fk-summary__unset {
+    color: color-mix(in srgb, var(--fk-text-muted) 80%, transparent);
+  }
+  .fk-summary__unset[data-kind="empty"] {
+    font-style: italic;
   }
   .fk-summary .fk-pill {
     flex: 0 1 auto;
@@ -417,7 +429,7 @@
     place-items: center;
     width: 18px;
     height: 18px;
-    color: #fff;
+    color: var(--fk-on-status);
     background: var(--fk-text-muted);
     border: 2px solid var(--fk-canvas-bg);
     border-radius: 50%;
@@ -829,11 +841,14 @@
     font-weight: 540;
   }
   .fk-picker__desc {
+    display: -webkit-box;
     overflow: hidden;
     font-size: 12px;
+    line-height: 16px;
     color: var(--fk-text-muted);
-    white-space: nowrap;
-    text-overflow: ellipsis;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
   }
   .fk-picker__empty {
     padding: 28px 16px;

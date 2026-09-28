@@ -14,15 +14,17 @@ import {
 } from "lucide-react";
 import { memo, type ReactNode, useContext, useEffect, useMemo, useRef } from "react";
 import { stepIndex, useEditorStore, useEditorStoreApi, useShallow, useStep } from "../hooks";
+import type { FlowkitLabels } from "../labels";
 import { useFlowkitAppearance } from "../provider";
 import type { TestState } from "../store/editor-store";
-import { stepActions } from "./actions";
+import { focusNode, stepActions } from "./actions";
 import {
   PortalContainerContext,
   RootElementContext,
   type RunStepStatus,
   useCanvasUi,
   useCanvasUiApi,
+  useLabels,
 } from "./canvas-context";
 import { StepContextMenu, StepKebabMenu } from "./context-menu";
 import { NodeHandles } from "./handles";
@@ -37,19 +39,7 @@ export interface StepNodeData extends Record<string, unknown> {
 /** A step node. */
 export type StepNode = Node<StepNodeData, "step">;
 
-/** Formats a run duration: `850ms`, `1.2s`, `2m 5s`. */
-export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.round((ms % 60_000) / 1000);
-  return s ? `${m}m ${s}s` : `${m}m`;
-}
-
-function issueSummary(issues: Issue[]): string {
-  const n = issues.length;
-  return `${n} ${n === 1 ? "issue" : "issues"}: ${issues.map((i) => i.message).join("; ")}`;
-}
+export { formatDuration } from "../labels";
 
 /** A badge with a tooltip. The badge carries the full text as its accessible name. */
 function Badge({
@@ -96,12 +86,13 @@ function IssueList({ issues }: { issues: Issue[] }) {
 
 /** Draft status badge: invalid, needs re-test or tested. */
 export function DraftBadge({ issues, testState }: { issues: Issue[]; testState?: TestState }) {
+  const labels = useLabels();
   if (issues.length > 0) {
     const error = issues.some((i) => i.severity === "error");
     return (
       <Badge
         tone={error ? "danger" : "warning"}
-        label={issueSummary(issues)}
+        label={labels.issues(issues.map((i) => i.message))}
         tooltip={<IssueList issues={issues} />}
       >
         <TriangleAlert size={11} strokeWidth={2.5} aria-hidden />
@@ -110,29 +101,20 @@ export function DraftBadge({ issues, testState }: { issues: Issue[]; testState?:
   }
   if (testState === "needs-test") {
     return (
-      <Badge tone="warning" label="Edited since last test" tooltip="Edited since last test">
+      <Badge tone="warning" label={labels.needsTest} tooltip={labels.needsTest}>
         <span className="fk-badge__dot" aria-hidden />
       </Badge>
     );
   }
   if (testState === "tested") {
     return (
-      <Badge tone="success" label="Tested" tooltip="Tested">
+      <Badge tone="success" label={labels.tested} tooltip={labels.tested}>
         <Check size={11} strokeWidth={3} aria-hidden />
       </Badge>
     );
   }
   return null;
 }
-
-const RUN_LABEL: Record<RunStepStatus["status"], string> = {
-  done: "Succeeded",
-  failed: "Failed",
-  running: "Running",
-  waiting: "Waiting",
-  skipped: "Skipped",
-  pending: "Not run yet",
-};
 
 const RUN_TONE = {
   done: "success",
@@ -145,7 +127,7 @@ const RUN_TONE = {
 
 /** Run status badge. */
 function RunBadge({ run }: { run: RunStepStatus }) {
-  const label = RUN_LABEL[run.status];
+  const label = useLabels().runStatus[run.status];
   const icon = {
     done: <Check size={11} strokeWidth={3} aria-hidden />,
     failed: <X size={11} strokeWidth={3} aria-hidden />,
@@ -162,10 +144,10 @@ function RunBadge({ run }: { run: RunStepStatus }) {
 }
 
 /** Subtitle of a card in run mode: duration and retry count. */
-function runSubtitle(run: RunStepStatus): string {
-  const parts: string[] = [RUN_LABEL[run.status]];
-  if (run.durationMs !== undefined) parts.push(formatDuration(run.durationMs));
-  if (run.attempts !== undefined && run.attempts > 1) parts.push(`${run.attempts} attempts`);
+function runSubtitle(run: RunStepStatus, labels: FlowkitLabels): string {
+  const parts: string[] = [labels.runStatus[run.status]];
+  if (run.durationMs !== undefined) parts.push(labels.duration(run.durationMs));
+  if (run.attempts !== undefined && run.attempts > 1) parts.push(labels.attempts(run.attempts));
   return parts.join(" · ");
 }
 
@@ -190,8 +172,12 @@ export function SummaryLine({ parts }: { parts: SummaryPart[] }) {
           );
         }
         return (
-          <span key={key} className="fk-pill" data-empty>
-            {p.label}
+          <span
+            key={key}
+            className="fk-summary__text fk-summary__unset"
+            data-kind={p.kind === "default" ? "default" : "empty"}
+          >
+            {p.kind === "default" ? p.text : p.label}
           </span>
         );
       })}
@@ -199,55 +185,70 @@ export function SummaryLine({ parts }: { parts: SummaryPart[] }) {
   );
 }
 
-/** Inline name editor. Enter or blur saves, Escape cancels. */
-function RenameInput({ initial, onDone }: { initial: string; onDone(name: string | null): void }) {
+/**
+ * Inline name editor. Enter or blur saves, Escape cancels. `keyboard` is true when it ended
+ * with Enter or Escape (focus should go back to the card) rather than by blurring.
+ */
+function RenameInput({
+  initial,
+  onDone,
+}: {
+  initial: string;
+  onDone(name: string | null, keyboard: boolean): void;
+}) {
+  const labels = useLabels();
   const ref = useRef<HTMLInputElement>(null);
   const done = useRef(false);
   useEffect(() => {
     ref.current?.focus();
     ref.current?.select();
   }, []);
-  const finish = (name: string | null) => {
+  const finish = (name: string | null, keyboard = false) => {
     if (done.current) return;
     done.current = true;
-    onDone(name);
+    onDone(name, keyboard);
   };
   return (
     <input
       ref={ref}
       className="fk-card__rename nodrag nopan"
       defaultValue={initial}
-      aria-label="Step name"
+      aria-label={labels.stepName}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         e.stopPropagation();
-        if (e.key === "Enter") finish(e.currentTarget.value);
-        if (e.key === "Escape") finish(null);
+        if (e.key === "Enter") finish(e.currentTarget.value, true);
+        if (e.key === "Escape") finish(null, true);
       }}
       onBlur={(e) => finish(e.currentTarget.value)}
     />
   );
 }
 
-/** Loop iteration stepper `‹ 3 / 12 ›` for run mode. */
-function IterationStepper({ stepId }: { stepId: string }) {
+/**
+ * Loop iteration stepper `‹ 3 / 12 ›` for run mode. Red when the loop failed and the shown
+ * iteration is the failed one.
+ */
+function IterationStepper({ stepId, run }: { stepId: string; run: RunStepStatus }) {
   const iter = useCanvasUi((s) => s.overlay?.loopIteration[stepId]);
   const onChange = useCanvasUi((s) => s.overlay?.onIterationChange);
+  const labels = useLabels();
   if (!iter || iter.count === 0) return null;
   const go = (index: number) => onChange?.(stepId, Math.max(0, Math.min(iter.count - 1, index)));
-  const failed = iter.failedIndex === iter.index;
+  const failed =
+    run.status === "failed" && (iter.failedIndex === undefined || iter.failedIndex === iter.index);
   return (
     <div
       className="fk-iter nodrag nopan"
       role="toolbar"
-      aria-label="Loop iteration"
+      aria-label={labels.loopIteration}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >
       <button
         type="button"
-        aria-label="Previous iteration"
+        aria-label={labels.previousIteration}
         disabled={iter.index <= 0}
         onClick={() => go(iter.index - 1)}
       >
@@ -258,7 +259,7 @@ function IterationStepper({ stepId }: { stepId: string }) {
       </span>
       <button
         type="button"
-        aria-label="Next iteration"
+        aria-label={labels.nextIteration}
         disabled={iter.index >= iter.count - 1}
         onClick={() => go(iter.index + 1)}
       >
@@ -287,6 +288,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
   const readOnly = useCanvasUi((s) => s.readOnly);
   const renaming = useCanvasUi((s) => s.renaming === stepId);
   const run = useCanvasUi((s) => s.overlay?.stepStatus[stepId]);
+  const labels = useLabels();
   const inRunMode = useCanvasUi((s) => s.overlay !== undefined);
   const actions = useMemo(() => stepActions(store, ui, root, stepId), [store, ui, root, stepId]);
 
@@ -311,8 +313,8 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
   const parts = useMemo(() => {
     if (!step || !manifest?.summary) return undefined;
     const names = new Map(refIds.map((id, i) => [id, refNames[i]]));
-    return renderSummary(manifest.summary, step, (id) => names.get(id));
-  }, [step, manifest, refIds, refNames]);
+    return renderSummary(manifest.summary, step, (id) => names.get(id), manifest.input, labels);
+  }, [step, manifest, refIds, refNames, labels]);
 
   if (!step) return null;
   const name = stepDisplayName(step, manifest);
@@ -320,9 +322,10 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
   const control = manifest !== undefined && manifest.branches.kind !== "none";
 
   let subtitle: ReactNode;
-  if (run) subtitle = runSubtitle(run);
-  else if (!manifest) subtitle = `Unknown step type ${step.type}`;
-  else if (parts && parts.length > 0) subtitle = <SummaryLine parts={parts} />;
+  if (run) subtitle = runSubtitle(run, labels);
+  else if (!manifest) subtitle = labels.unknownStep(step.type);
+  else if (parts?.blank && manifest.description) subtitle = manifest.description;
+  else if (parts && parts.parts.length > 0) subtitle = <SummaryLine parts={parts.parts} />;
   else if (step.name) subtitle = manifest.name;
   else if (manifest.description) subtitle = manifest.description;
 
@@ -342,9 +345,10 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
           {renaming && !readOnly ? (
             <RenameInput
               initial={step.name ?? name}
-              onDone={(value) => {
+              onDone={(value, keyboard) => {
                 ui.getState().stopRename();
                 if (value !== null) store.getState().renameStep(stepId, value);
+                if (keyboard) focusNode(root(), stepId);
               }}
             />
           ) : (
@@ -364,12 +368,14 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
               {name}
             </span>
           )}
-          {step.disabled && <span className="fk-chip">Disabled</span>}
+          {step.disabled && <span className="fk-chip">{labels.disabled}</span>}
         </div>
         {subtitle !== undefined && <div className="fk-card__summary">{subtitle}</div>}
       </div>
       <div className="fk-card__aside" data-overlay={(!inRunMode && !readOnly) || undefined}>
-        {inRunMode ? <IterationStepper stepId={stepId} /> : null}
+        {run && run.status !== "pending" && run.status !== "skipped" ? (
+          <IterationStepper stepId={stepId} run={run} />
+        ) : null}
         {!readOnly && (
           <StepKebabMenu step={step} manifest={manifest} actions={actions} name={name} />
         )}

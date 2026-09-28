@@ -2,7 +2,7 @@ import type { StepLocation } from "@flowkit/core";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Plus } from "lucide-react";
 import { memo } from "react";
-import { useCanvasUi } from "./canvas-context";
+import { useCanvasUi, useLabels } from "./canvas-context";
 import { NodeHandles } from "./handles";
 
 /** Data of an empty-branch placeholder node. */
@@ -20,6 +20,7 @@ export type PlaceholderNode = Node<PlaceholderNodeData, "placeholder">;
 export const AddPlaceholder = memo(function AddPlaceholder({ data }: NodeProps<PlaceholderNode>) {
   const readOnly = useCanvasUi((s) => s.readOnly);
   const openPicker = useCanvasUi((s) => s.openPicker);
+  const labels = useLabels();
   const active = useCanvasUi(
     (s) =>
       s.picker?.request.mode === "insert" &&
@@ -31,7 +32,7 @@ export const AddPlaceholder = memo(function AddPlaceholder({ data }: NodeProps<P
       <>
         <NodeHandles />
         <div className="fk-placeholder" data-readonly>
-          No steps
+          {labels.noSteps}
         </div>
       </>
     );
@@ -49,7 +50,7 @@ export const AddPlaceholder = memo(function AddPlaceholder({ data }: NodeProps<P
         }}
       >
         <Plus size={14} strokeWidth={2.5} aria-hidden />
-        <span>Add step</span>
+        <span>{labels.addStep}</span>
       </button>
     </>
   );

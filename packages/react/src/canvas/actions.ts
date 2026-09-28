@@ -85,8 +85,8 @@ export function stepActions(
     duplicate: () => after(s().duplicateStep(stepId)),
     copyReference() {
       const text = `{{steps.${stepId}}}`;
-      const done = () => ui.getState().toast("Reference copied");
-      const failed = () => ui.getState().toast(`Couldn't copy. The reference is ${text}`);
+      const done = () => ui.getState().toast(ui.getState().labels.referenceCopied);
+      const failed = () => ui.getState().toast(ui.getState().labels.copyFailed(text));
       try {
         const write = globalThis.navigator?.clipboard?.writeText(text);
         if (write) write.then(done, failed);
@@ -100,7 +100,7 @@ export function stepActions(
     toggleDisabled: () => s().toggleDisabled(stepId),
     copy() {
       s().copy(stepId);
-      ui.getState().toast("Step copied");
+      ui.getState().toast(ui.getState().labels.stepCopied);
     },
     pasteAfter: () => after(s().paste(locationAfter(store, stepId))),
     pasteInside: (branch) => after(s().paste({ parentId: stepId, branch, index: 0 })),
@@ -109,7 +109,8 @@ export function stepActions(
       s().removeStep(stepId);
       s().select(next);
       focusNode(root(), next);
-      ui.getState().toast("Step deleted", { label: "Undo", run: () => s().undo() });
+      const { labels } = ui.getState();
+      ui.getState().toast(labels.stepDeleted, { label: labels.undo, run: () => s().undo() });
     },
   };
 }

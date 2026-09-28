@@ -10,6 +10,7 @@ import type { StepLocation } from "@flowkit/core";
 import { createContext, useContext } from "react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
+import type { FlowkitLabels } from "../labels";
 
 /** Per-step run state shown on the canvas in run mode. */
 export interface RunStepStatus {
@@ -51,6 +52,8 @@ export interface Toast {
 /** The canvas' UI state. */
 export interface CanvasUiState {
   readOnly: boolean;
+  /** The UI text (from `<FlowkitProvider labels>`, else English). */
+  labels: FlowkitLabels;
   overlay: RunOverlay | undefined;
   /** The open picker and the element it is anchored to. */
   picker: { request: PickerRequest; anchor: HTMLElement | null } | null;
@@ -80,6 +83,7 @@ export const TOAST_MS = 5000;
 export function createCanvasUiStore(init: {
   readOnly: boolean;
   overlay: RunOverlay | undefined;
+  labels: FlowkitLabels;
 }): CanvasUiStore {
   let nextToast = 1;
   return createStore<CanvasUiState & CanvasUiActions>()((set, get) => ({
@@ -127,4 +131,9 @@ export function useCanvasUiApi(): CanvasUiStore {
 /** Subscribes to a slice of the canvas UI state. */
 export function useCanvasUi<T>(selector: (s: CanvasUiState & CanvasUiActions) => T): T {
   return useStore(useCanvasUiApi(), selector);
+}
+
+/** The UI text of the enclosing canvas. */
+export function useLabels(): FlowkitLabels {
+  return useCanvasUi((s) => s.labels);
 }

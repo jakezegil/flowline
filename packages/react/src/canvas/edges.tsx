@@ -3,7 +3,7 @@ import { type Edge, EdgeLabelRenderer, type EdgeProps } from "@xyflow/react";
 import { Plus, TriangleAlert } from "lucide-react";
 import { type CSSProperties, memo } from "react";
 import type { LayoutEdge } from "../layout/layout-tree";
-import { useCanvasUi } from "./canvas-context";
+import { useCanvasUi, useLabels } from "./canvas-context";
 import type { EdgeGeometry, Point } from "./geometry";
 
 /** Data of every canvas edge. */
@@ -34,6 +34,7 @@ function at(p: Point): CSSProperties {
 function AddButton({ p, loc }: { p: Point; loc: StepLocation }) {
   const readOnly = useCanvasUi((s) => s.readOnly);
   const openPicker = useCanvasUi((s) => s.openPicker);
+  const labels = useLabels();
   const active = useCanvasUi(
     (s) => s.picker?.request.mode === "insert" && sameLoc(s.picker.request.loc, loc),
   );
@@ -43,7 +44,7 @@ function AddButton({ p, loc }: { p: Point; loc: StepLocation }) {
       <button
         type="button"
         className="fk-add"
-        aria-label="Add step here"
+        aria-label={labels.addStepHere}
         data-active={active || undefined}
         onClick={(e) => {
           e.stopPropagation();
@@ -96,6 +97,7 @@ export const AddEdge = memo(function AddEdge({ data }: EdgeProps<FlowEdge>) {
 /** An edge from a block into one of its branch columns, with the branch's label pill and "+". */
 export const BranchEdge = memo(function BranchEdge({ id, data }: EdgeProps<FlowEdge>) {
   const dimmed = useDimmed(id, data?.blockId);
+  const labels = useLabels();
   if (data?.edge.kind !== "branch") return null;
   const { geometry, edge, leftover, label } = data;
   return (
@@ -108,14 +110,10 @@ export const BranchEdge = memo(function BranchEdge({ id, data }: EdgeProps<FlowE
             data-leftover={leftover || undefined}
             data-dimmed={dimmed || undefined}
             style={at(geometry.label)}
-            title={
-              leftover
-                ? `The "${edge.branchId}" branch isn't part of this step's type anymore. Move or delete its steps.`
-                : undefined
-            }
+            title={leftover ? labels.leftoverBranchHint(edge.branchId) : undefined}
           >
             {leftover && <TriangleAlert size={11} aria-hidden />}
-            <span>{leftover ? `Leftover: ${label}` : label}</span>
+            <span>{leftover ? labels.leftoverBranch(label ?? edge.branchId) : label}</span>
           </div>
         )}
         {geometry.plus && <AddButton p={geometry.plus} loc={edge.loc} />}

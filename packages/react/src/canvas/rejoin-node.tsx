@@ -1,5 +1,6 @@
 import type { Node, NodeProps } from "@xyflow/react";
 import { memo } from "react";
+import { useLabels } from "./canvas-context";
 import { NodeHandles } from "./handles";
 
 /** A join node, where a block's branches (or a loop's body) rejoin. */
@@ -20,10 +21,11 @@ export const RejoinNode = memo(function RejoinNode(_: NodeProps<JoinNode>) {
 
 /** The end of the workflow: a dot with an "End" caption. */
 export const EndNode = memo(function EndNode(_: NodeProps<EndNode>) {
+  const labels = useLabels();
   return (
     <div className="fk-end">
       <NodeHandles />
-      <span className="fk-end__label">End</span>
+      <span className="fk-end__label">{labels.end}</span>
     </div>
   );
 });

@@ -1,10 +1,11 @@
 import { X } from "lucide-react";
-import { useCanvasUi } from "./canvas-context";
+import { useCanvasUi, useLabels } from "./canvas-context";
 
 /** The canvas' toast region (bottom center), announced politely to screen readers. */
 export function Toasts() {
   const toasts = useCanvasUi((s) => s.toasts);
   const dismiss = useCanvasUi((s) => s.dismissToast);
+  const labels = useLabels();
   return (
     <div className="fk-toasts" role="status" aria-live="polite">
       {toasts.map((t) => (
@@ -25,7 +26,7 @@ export function Toasts() {
           <button
             type="button"
             className="fk-toast__close"
-            aria-label="Dismiss"
+            aria-label={labels.dismiss}
             onClick={() => dismiss(t.id)}
           >
             <X size={14} aria-hidden />

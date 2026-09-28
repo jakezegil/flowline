@@ -17,6 +17,7 @@ import {
 import { Maximize, Minus, Plus } from "lucide-react";
 import { type JSX, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EditorContext, stepIndex, useEditorStore } from "../hooks";
+import type { FlowkitLabels } from "../labels";
 import { LOOP_GUTTER } from "../layout/constants";
 import { type LayoutEdge, type LayoutNode, layoutTree } from "../layout/layout-tree";
 import { useFlowkitAppearance } from "../provider";
@@ -30,6 +31,7 @@ import {
   RootElementContext,
   type RunOverlay,
   useCanvasUiApi,
+  useLabels,
 } from "./canvas-context";
 import { edgeTypes, type FlowEdgeData } from "./edges";
 import { edgeGeometries } from "./geometry";
@@ -48,13 +50,18 @@ const nodeTypes = {
   end: EndNode,
 };
 
+const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+
 /** Top padding (and side padding, space permitting) of the initial fit. */
 const FIT_PADDING = 100;
-/** Fitting a tall workflow's height never zooms out further than this (it scrolls instead). */
-const FIT_MIN_ZOOM_FOR_HEIGHT = 0.75;
 /**
- * The initial fit never zooms out further than this to fit the width: on a narrow screen a
- * readable trigger, centered, beats a whole workflow too small to read (the rest is a pan away).
+ * The initial fit never zooms out further than this: a big workflow opens readable at the top
+ * (the rest is a pan away) rather than shrunk to fit.
+ */
+const FIT_MIN_ZOOM = 0.6;
+/**
+ * Width alone never asks for less than this, so on a narrow pane the fit is driven by height
+ * (or the floor above), keeping the trigger readable and centered.
  */
 const FIT_MIN_ZOOM_FOR_WIDTH = 0.7;
 const MIN_ZOOM = 0.25;
@@ -62,17 +69,16 @@ const MAX_ZOOM = 1.5;
 
 const EMPTY_DATA = {};
 
-function ariaLabels(readOnly: boolean): Partial<AriaLabelConfig> {
-  const nav = "Use the arrow keys to move between steps and Enter to open one.";
-  const edit = `${nav} Press Delete to remove the selected step, and Escape to clear the selection.`;
+function ariaLabels(labels: FlowkitLabels, readOnly: boolean): Partial<AriaLabelConfig> {
+  const help = readOnly ? labels.canvasHelpReadOnly : labels.canvasHelp;
   return {
-    "node.a11yDescription.default": readOnly ? nav : edit,
-    "node.a11yDescription.keyboardDisabled": readOnly ? nav : edit,
-    "edge.a11yDescription.default": "Connection between steps.",
-    "controls.ariaLabel": "Canvas controls",
-    "controls.zoomIn.ariaLabel": "Zoom in",
-    "controls.zoomOut.ariaLabel": "Zoom out",
-    "controls.fitView.ariaLabel": "Fit workflow to view",
+    "node.a11yDescription.default": help,
+    "node.a11yDescription.keyboardDisabled": help,
+    "edge.a11yDescription.default": labels.edgeDescription,
+    "controls.ariaLabel": labels.controls,
+    "controls.zoomIn.ariaLabel": labels.zoomIn,
+    "controls.zoomOut.ariaLabel": labels.zoomOut,
+    "controls.fitView.ariaLabel": labels.fitView,
   };
 }
 
@@ -179,6 +185,7 @@ function toFlowEdges(
   manifest: Manifest,
   nodes: LayoutNode[],
   edges: LayoutEdge[],
+  eachItem: string,
 ): Edge<FlowEdgeData>[] {
   const geometry = edgeGeometries(nodes, edges, LOOP_GUTTER);
   const steps = stepIndex(doc);
@@ -190,7 +197,7 @@ function toFlowEdges(
       const m = step ? manifest.nodes.find((n) => n.type === step.type) : undefined;
       data.blockId = blockId;
       data.leftover = !!(m && step && !branchesFor(m, step).some((b) => b.id === le.branchId));
-      data.label = m?.branches.kind === "loop" && !data.leftover ? "Each item" : le.label;
+      data.label = m?.branches.kind === "loop" && !data.leftover ? eachItem : le.label;
     }
     const edge: Edge<FlowEdgeData> = {
       id: le.id,
@@ -211,30 +218,26 @@ function toFlowEdges(
 /** Zoom and fit buttons. */
 function Controls({ onFit }: { onFit(): void }) {
   const rf = useReactFlow();
+  const labels = useLabels();
   return (
-    <Panel position="bottom-left" className="fk-controls" aria-label="Canvas controls">
+    <Panel position="bottom-left" className="fk-controls" aria-label={labels.controls}>
       <button
         type="button"
-        aria-label="Zoom out"
-        title="Zoom out"
+        aria-label={labels.zoomOut}
+        title={labels.zoomOut}
         onClick={() => rf.zoomOut({ duration: 150 })}
       >
         <Minus size={14} aria-hidden />
       </button>
       <button
         type="button"
-        aria-label="Zoom in"
-        title="Zoom in"
+        aria-label={labels.zoomIn}
+        title={labels.zoomIn}
         onClick={() => rf.zoomIn({ duration: 150 })}
       >
         <Plus size={14} aria-hidden />
       </button>
-      <button
-        type="button"
-        aria-label="Fit workflow to view"
-        title="Fit workflow to view"
-        onClick={onFit}
-      >
+      <button type="button" aria-label={labels.fitView} title={labels.fitView} onClick={onFit}>
         <Maximize size={14} aria-hidden />
       </button>
     </Panel>
@@ -255,8 +258,10 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
   const selection = useEditorStore((s) => s.selection);
   const select = useEditorStore((s) => s.select);
   const ui = useCanvasUiApi();
+  const labels = useLabels();
   const rf = useReactFlow();
   const flowStore = useStoreApi();
+  const ariaLabelConfig = useMemo(() => ariaLabels(labels, readOnly), [labels, readOnly]);
 
   const layout = useMemo(() => layoutTree(doc, manifest), [doc, manifest]);
   layoutRef.current = layout;
@@ -265,7 +270,7 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
     (ln: LayoutNode): string | undefined => {
       if (ln.kind === "trigger") {
         const t = manifest.triggers.find((x) => x.type === doc.trigger.type);
-        return `Trigger: ${t?.name ?? doc.trigger.type}`;
+        return labels.triggerNode(t?.name ?? doc.trigger.type);
       }
       if (ln.kind !== "step") return undefined;
       const step = stepIndex(doc).get(ln.stepId);
@@ -274,9 +279,9 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
         step,
         manifest.nodes.find((n) => n.type === step.type),
       );
-      return step.disabled ? `${name} (disabled)` : name;
+      return step.disabled ? labels.disabledNode(name) : name;
     },
-    [doc, manifest],
+    [doc, manifest, labels],
   );
   const rawNodes = useMemo(
     () => layout.nodes.map((ln) => toFlowNode(ln, selection, label)),
@@ -284,8 +289,8 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
   );
   const nodes = useStable(rawNodes, sameNode);
   const rawEdges = useMemo(
-    () => toFlowEdges(doc, manifest, layout.nodes, layout.edges),
-    [doc, manifest, layout],
+    () => toFlowEdges(doc, manifest, layout.nodes, layout.edges, labels.eachItem),
+    [doc, manifest, layout, labels.eachItem],
   );
   const edges = useStable(rawEdges, sameEdge);
 
@@ -304,11 +309,7 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
       const byHeight = (H - padTop - padX) / l.height;
       const zoom = whole
         ? Math.max(MIN_ZOOM, Math.min(1, byWidth, byHeight))
-        : Math.min(
-            1,
-            Math.max(byWidth, FIT_MIN_ZOOM_FOR_WIDTH),
-            Math.max(byHeight, FIT_MIN_ZOOM_FOR_HEIGHT),
-          );
+        : clamp(Math.min(Math.max(byWidth, FIT_MIN_ZOOM_FOR_WIDTH), byHeight), FIT_MIN_ZOOM, 1);
       rf.setViewport({ x: W / 2, y: padTop, zoom }, { duration });
     },
     [rf, flowStore, layoutRef],
@@ -328,9 +329,9 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
       edges={edges}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
-      aria-label="Workflow canvas"
+      aria-label={labels.canvas}
       colorMode={colorMode}
-      ariaLabelConfig={ariaLabels(readOnly)}
+      ariaLabelConfig={ariaLabelConfig}
       nodesDraggable={false}
       nodesConnectable={false}
       elementsSelectable
@@ -392,8 +393,8 @@ export function WorkflowCanvas(props: {
   onStepClick?(id: string): void;
 }): JSX.Element {
   const { store, readOnly = false, overlay, onStepClick } = props;
-  const { theme } = useFlowkitAppearance();
-  const [ui] = useState(() => createCanvasUiStore({ readOnly, overlay }));
+  const { theme, labels } = useFlowkitAppearance();
+  const [ui] = useState(() => createCanvasUiStore({ readOnly, overlay, labels }));
   const rootRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<ReturnType<typeof layoutTree> | null>(null);
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
@@ -405,6 +406,9 @@ export function WorkflowCanvas(props: {
       readOnly ? { readOnly, overlay, picker: null, renaming: null } : { readOnly, overlay },
     );
   }, [ui, readOnly, overlay]);
+  useEffect(() => {
+    if (ui.getState().labels !== labels) ui.setState({ labels });
+  }, [ui, labels]);
 
   useEffect(() => {
     store.getState().hydrateLocal();

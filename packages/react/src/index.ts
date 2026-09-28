@@ -17,6 +17,8 @@ export {
   useStep,
   useWorkflow,
 } from "./hooks";
+export { bundledIconNames, type IconComponent } from "./icons";
+export { defaultLabels, type FlowkitLabels } from "./labels";
 export {
   BRANCH_GAP,
   CARD_H,

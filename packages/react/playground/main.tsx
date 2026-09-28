@@ -27,15 +27,17 @@ const runOverlay: RunOverlay = {
     loadContact: { status: "done", durationMs: 182 },
     isWon: { status: "done", durationMs: 4 },
     region: { status: "done", durationMs: 2 },
-    welcomeEmea: { status: "failed", durationMs: 1320, attempts: 3 },
-    markCustomer: { status: "pending" },
-    eachTag: { status: "pending" },
-    addTag: { status: "pending" },
+    welcomeEmea: { status: "done", durationMs: 1320, attempts: 3 },
+    markCustomer: { status: "done", durationMs: 95 },
+    eachTag: { status: "failed", durationMs: 640 },
+    addTag: { status: "failed", durationMs: 210, attempts: 2 },
+    notify: { status: "pending" },
     wait: { status: "skipped" },
     nudge: { status: "skipped" },
   },
   takenEdges: new Set(["step:isWon->step:region", "step:region->step:welcomeEmea"]),
-  loopIteration: { eachTag: { index: 1, count: 4, failedIndex: 1 } },
+  // The loop failed on its third tag; that iteration is shown.
+  loopIteration: { eachTag: { index: 2, count: 4, failedIndex: 2 } },
 };
 
 function setParam(key: string, value: string) {

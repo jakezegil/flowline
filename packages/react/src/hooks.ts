@@ -94,7 +94,11 @@ const NO_ISSUES: Issue[] = [];
 const issueIndexes = new WeakMap<Issue[], Map<string, Issue[]>>();
 const lastIssueIndexes = new WeakMap<EditorStore, Map<string, Issue[]>>();
 
-function sameIssues(a: Issue[], b: Issue[]): boolean {
+/**
+ * Whether two issue lists have the same issues in the same order.
+ * @internal
+ */
+export function sameIssues(a: Issue[], b: Issue[]): boolean {
   return (
     a.length === b.length &&
     a.every((x, i) => {

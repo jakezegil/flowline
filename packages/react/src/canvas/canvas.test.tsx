@@ -1,10 +1,11 @@
 import { findStep } from "@flowkit/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { branchyDoc, docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
 import * as hooks from "../hooks";
 import { createEditorStore, type EditorStore, TRIGGER_KEY } from "../store/editor-store";
-import type { RunOverlay } from "./canvas-context";
+import type { RunOverlay, RunStepStatus } from "./canvas-context";
 import { WorkflowCanvas } from "./workflow-canvas";
 
 vi.mock("../hooks", async (importOriginal) => {
@@ -81,6 +82,27 @@ describe("WorkflowCanvas", () => {
     render(<WorkflowCanvas store={store} />);
     expect(within(card("load")).getByText("Load c_42")).toBeTruthy();
     expect(within(card("again")).getByText("Load contact › id")).toBeTruthy();
+  });
+
+  test('an unset value reads "No <label>" without a pill; an all-unset summary shows the description', () => {
+    const doc = docWith([step("load", "crm.loadContact", {})]);
+    store = createEditorStore({ doc, manifest });
+    const { unmount } = render(<WorkflowCanvas store={store} />);
+    const unset = within(card("load")).getByText("No contact");
+    expect(unset.classList.contains("fk-pill")).toBe(false);
+    expect(unset.dataset.kind).toBe("empty");
+    unmount();
+
+    const described = {
+      ...manifest,
+      nodes: manifest.nodes.map((n) =>
+        n.type === "crm.loadContact" ? { ...n, description: "Fetch a contact by ID" } : n,
+      ),
+    };
+    store = createEditorStore({ doc, manifest: described });
+    render(<WorkflowCanvas store={store} />);
+    expect(within(card("load")).getByText("Fetch a contact by ID")).toBeTruthy();
+    expect(within(card("load")).queryByText("No contact")).toBeNull();
   });
 
   test('clicking "+" opens the step picker and picking inserts the step there', async () => {
@@ -276,6 +298,65 @@ describe("WorkflowCanvas", () => {
     expect(store.getState().selection).toBe("load");
   });
 
+  test('Enter on a focused "+" opens the picker instead of opening the selection', async () => {
+    const user = userEvent.setup();
+    const onStepClick = vi.fn();
+    render(<WorkflowCanvas store={store} onStepClick={onStepClick} />);
+    act(() => store.getState().select("load"));
+    (screen.getAllByRole("button", { name: "Add step here" })[1] as HTMLElement).focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "Add step" })).toBeTruthy();
+    expect(onStepClick).not.toHaveBeenCalled();
+  });
+
+  test("Backspace on the toast's Undo button doesn't delete the selected step", async () => {
+    const user = userEvent.setup();
+    render(<WorkflowCanvas store={store} />);
+    act(() => store.getState().select("email"));
+    fireEvent.keyDown(root(), { key: "Delete" });
+    expect(store.getState().selection).toBe("load");
+    const toast = await screen.findByText("Step deleted");
+    // Focus moves to the neighbour on the next frame; wait so it doesn't steal focus back.
+    await waitFor(() => expect(document.activeElement).toBe(card("load")));
+    within(toast.parentElement as HTMLElement)
+      .getByRole("button", { name: "Undo" })
+      .focus();
+    await user.keyboard("{Backspace}");
+    expect(findStep(store.getState().doc, "load")).toBeDefined();
+    await user.keyboard("{Enter}");
+    expect(findStep(store.getState().doc, "email")).toBeDefined();
+  });
+
+  test.each([
+    ["Enter", "{Enter}"],
+    ["Escape", "{Escape}"],
+  ])("arrow keys work after ending a rename with %s", async (_, finish) => {
+    const user = userEvent.setup();
+    render(<WorkflowCanvas store={store} />);
+    act(() => store.getState().select("load"));
+    fireEvent.keyDown(root(), { key: "F2" });
+    const input = await screen.findByRole("textbox", { name: "Step name" });
+    await user.type(input, "x");
+    await user.keyboard(finish);
+    await waitFor(() => expect(document.activeElement).toBe(card("load")));
+    await user.keyboard("{ArrowDown}");
+    expect(store.getState().selection).toBe("email");
+  });
+
+  test('Esc in the picker returns focus to its "+", and arrow keys still work', async () => {
+    const user = userEvent.setup();
+    render(<WorkflowCanvas store={store} />);
+    act(() => store.getState().select("load"));
+    const plus = screen.getAllByRole("button", { name: "Add step here" })[1] as HTMLElement;
+    await user.click(plus);
+    await screen.findByRole("dialog", { name: "Add step" });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(plus));
+    await user.keyboard("{ArrowDown}");
+    expect(store.getState().selection).toBe("email");
+  });
+
   test("⌘K opens the picker to insert after the selected step", async () => {
     render(<WorkflowCanvas store={store} />);
     act(() => store.getState().select("load"));
@@ -367,6 +448,26 @@ describe("WorkflowCanvas", () => {
     expect(screen.getByText("If").parentElement?.dataset.dimmed).toBeUndefined();
   });
 
+  test("the loop iteration stepper shows only for loops that ran, red only when failed", () => {
+    store = createEditorStore({ doc: branchyDoc(), manifest });
+    const overlay = (status: RunStepStatus["status"]): RunOverlay => ({
+      stepStatus: { each: { status } },
+      takenEdges: new Set(),
+      loopIteration: { each: { index: 1, count: 3, failedIndex: 1 } },
+    });
+    const counter = () => within(card("each")).queryByText("2 / 3");
+    const { rerender } = render(
+      <WorkflowCanvas store={store} readOnly overlay={overlay("pending")} />,
+    );
+    expect(counter()).toBeNull();
+    rerender(<WorkflowCanvas store={store} readOnly overlay={overlay("skipped")} />);
+    expect(counter()).toBeNull();
+    rerender(<WorkflowCanvas store={store} readOnly overlay={overlay("done")} />);
+    expect(counter()?.dataset.failed).toBeUndefined();
+    rerender(<WorkflowCanvas store={store} readOnly overlay={overlay("failed")} />);
+    expect(counter()?.dataset.failed).toBeDefined();
+  });
+
   test("applies the color mode and token overrides to the root", async () => {
     const { FlowkitProvider } = await import("../provider");
     render(
@@ -380,5 +481,63 @@ describe("WorkflowCanvas", () => {
     expect(root().dataset.fkTheme).toBe("dark");
     expect(root().style.getPropertyValue("--fk-accent")).toBe("#0f766e");
     expect(root().style.getPropertyValue("--fk-radius")).toBe("4px");
+  });
+
+  test("labels on the provider replace the UI text; unset labels stay English", async () => {
+    const { FlowkitProvider } = await import("../provider");
+    render(
+      <FlowkitProvider
+        client={{} as never}
+        labels={{
+          addStepHere: "Schritt hier einfügen",
+          addStep: "Schritt hinzufügen",
+          tabAll: "Alle",
+          triggerTag: "Auslöser",
+        }}
+      >
+        <WorkflowCanvas store={store} />
+      </FlowkitProvider>,
+    );
+    expect(screen.getByText("Auslöser")).toBeTruthy();
+    const plus = screen.getAllByRole("button", { name: "Schritt hier einfügen" });
+    expect(plus).toHaveLength(3);
+    fireEvent.click(plus[0] as HTMLElement);
+    const picker = await screen.findByRole("dialog", { name: "Schritt hinzufügen" });
+    expect(within(picker).getByRole("tab", { name: "Alle" })).toBeTruthy();
+    expect(within(picker).getByRole("tab", { name: "Logic" })).toBeTruthy();
+  });
+
+  test("picker tabs use a roving tabindex and control the list's tabpanel", async () => {
+    render(<WorkflowCanvas store={store} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Add step here" })[0] as HTMLElement);
+    const picker = await screen.findByRole("dialog", { name: "Add step" });
+    const [all, second] = within(picker).getAllByRole("tab") as [HTMLElement, HTMLElement];
+    expect(all.textContent).toBe("All");
+    const panel = within(picker).getByRole("tabpanel");
+    expect(all.getAttribute("aria-controls")).toBe(panel.id);
+    expect(panel.getAttribute("aria-labelledby")).toBe(all.id);
+    expect([all.tabIndex, second.tabIndex]).toEqual([0, -1]);
+    all.focus();
+    fireEvent.keyDown(all, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(second);
+    expect(second.getAttribute("aria-selected")).toBe("true");
+    expect([all.tabIndex, second.tabIndex]).toEqual([-1, 0]);
+    expect(panel.getAttribute("aria-labelledby")).toBe(second.id);
+    fireEvent.keyDown(second, { key: "Home" });
+    expect(document.activeElement).toBe(all);
+  });
+
+  test("host icons override bundled ones by name; unknown names fall back", async () => {
+    const { FlowkitProvider } = await import("../provider");
+    const { resolveIconIn } = await import("../icons");
+    const Custom = () => <svg data-testid="custom-user" />;
+    render(
+      <FlowkitProvider client={{} as never} icons={{ user: Custom }}>
+        <WorkflowCanvas store={store} />
+      </FlowkitProvider>,
+    );
+    expect(within(card("load")).getByTestId("custom-user")).toBeTruthy();
+    expect(resolveIconIn(undefined, "no-such-icon")).toBe(resolveIconIn(undefined, undefined));
+    expect(resolveIconIn(undefined, "GitFork")).toBe(resolveIconIn(undefined, "git-fork"));
   });
 });

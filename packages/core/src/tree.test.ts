@@ -329,4 +329,35 @@ describe("structural sharing", () => {
     expect(findStep(removed, "left")?.step).toBe(findStep(doc, "left")?.step);
     expect(findStep(removed, "right")?.step).toEqual(findStep(doc, "right")?.step);
   });
+
+  test("move shares every step off the source and target paths, and the moved step itself", () => {
+    const doc = twoBlocksDoc();
+    const before = (id: string) => findStep(doc, id)?.step;
+    // a: outer › if › left › if  →  sibling › if (index 0)
+    const next = moveStep(doc, "a", { parentId: "sibling", branch: "if", index: 0 });
+    const after = (id: string) => findStep(next, id)?.step;
+    expect(after("sibling")?.branches?.if?.map((s) => s.id)).toEqual(["a", "d"]);
+    expect(after("a")).toBe(before("a"));
+    expect(after("d")).toBe(before("d"));
+    expect(after("right")).toBe(before("right"));
+    expect(after("c")).toBe(before("c"));
+    expect(after("outer")?.branches?.else).toBe(before("outer")?.branches?.else);
+    // Only the source and target paths are copied.
+    expect(after("left")).not.toBe(before("left"));
+    expect(after("sibling")).not.toBe(before("sibling"));
+  });
+
+  test("duplicate shares every step except the copy's parent path", () => {
+    const doc = twoBlocksDoc();
+    const before = (id: string) => findStep(doc, id)?.step;
+    const { doc: next, newId } = duplicateStep(doc, "b");
+    const after = (id: string) => findStep(next, id)?.step;
+    expect(after("right")?.branches?.if?.map((s) => s.id)).toEqual(["b", newId]);
+    expect(after("b")).toBe(before("b"));
+    expect(after("left")).toBe(before("left"));
+    expect(after("sibling")).toBe(before("sibling"));
+    expect(after("c")).toBe(before("c"));
+    expect(after("right")).not.toBe(before("right"));
+    expect(after("outer")).not.toBe(before("outer"));
+  });
 });

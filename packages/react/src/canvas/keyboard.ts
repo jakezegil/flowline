@@ -35,6 +35,22 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
+const ARROWS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
+
+/**
+ * Whether a plain key belongs to the focused control (a button, link, tab or menu item other
+ * than a canvas node) rather than to the canvas: Enter, Space, Backspace etc. activate or edit
+ * it. Arrow keys still move the selection from a plain button such as "+", but not from menu
+ * triggers, tabs or menu items, which use them themselves.
+ */
+function ownsKey(target: EventTarget | null, key: string): boolean {
+  if (!(target instanceof Element)) return false;
+  const control = target.closest('button, a[href], [role="tab"], [role="menuitem"]');
+  if (control === null || control.classList.contains("react-flow__node")) return false;
+  if (!ARROWS.has(key)) return true;
+  return control.hasAttribute("aria-haspopup") || control.getAttribute("role") !== null;
+}
+
 /** Selection keys (step IDs and {@link TRIGGER_KEY}) in pre-order, from the layout's node order. */
 export function treeOrder(nodes: LayoutNode[]): string[] {
   const out: string[] = [];
@@ -103,11 +119,13 @@ export interface KeyboardDeps {
  */
 export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   if (e.defaultPrevented || isEditableTarget(e.target)) return false;
+  const mod = isMac() ? e.metaKey : e.ctrlKey;
+  // Plain keys on a focused control ("+", "…", Undo, tabs) belong to that control.
+  if (!mod && ownsKey(e.target, e.key)) return false;
   const { store, ui } = deps;
   const state = store.getState();
   const { readOnly } = ui.getState();
   const selection = state.selection;
-  const mod = isMac() ? e.metaKey : e.ctrlKey;
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   const stepSelected = selection !== null && selection !== TRIGGER_KEY;
   const select = (id: string | undefined) => {
