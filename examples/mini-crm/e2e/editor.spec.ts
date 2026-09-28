@@ -135,7 +135,7 @@ test("deleting a referenced step flags the stale reference and blocks Publish", 
   // The issues pill counts the dangling reference, and the card carries a badge.
   await expect(main.getByRole("button", { name: "1 issue" })).toBeVisible();
   await expect(
-    email.getByRole("img", { name: /references step "load" which no longer exists/ }),
+    email.getByRole("img", { name: /references step "load", which isn.t in this workflow/ }),
   ).toBeVisible();
   await expect(publish).toBeDisabled();
 
@@ -147,7 +147,7 @@ test("deleting a referenced step flags the stale reference and blocks Publish", 
     to.getByRole("img", { name: /load › contact\.email: not available here/ }),
   ).toBeVisible();
   await expect(panel.getByRole("listitem")).toContainText([
-    `"To" references step "load" which no longer exists`,
+    `"To" references step "load", which isn't in this workflow`,
   ]);
 
   // Saving the broken draft is allowed, but the server refuses to publish it.

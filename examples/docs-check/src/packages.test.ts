@@ -4,9 +4,10 @@
  * picks the TypeScript sources; zod is a peer; React's DOM renderer is a declared peer.
  */
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
@@ -61,19 +62,125 @@ describe("package exports", () => {
     }
   });
 
+  // Runs without a build: each real package.json is installed into a scratch node_modules with
+  // empty files at its targets, and plain Node resolves every entry point there.
+  it("plain Node resolves every entry point to dist; the source condition opts into src", async () => {
+    const root = join(PKG, ".generated", "resolve");
+    rmSync(root, { recursive: true, force: true });
+    const expected: Record<string, { dist: string; src: string }> = {};
+    for (const name of PACKAGES) {
+      const p = pkg(name);
+      const dir = join(root, "node_modules", "@flowkit", name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "package.json"), JSON.stringify(p));
+      for (const [key, entry] of Object.entries(p.exports)) {
+        for (const target of [entry["flowkit-source"], entry.default] as string[]) {
+          mkdirSync(dirname(join(dir, target)), { recursive: true });
+          writeFileSync(join(dir, target), "");
+        }
+        const specifier = `@flowkit/${name}${key === "." ? "" : key.slice(1)}`;
+        expected[specifier] = {
+          dist: pathToFileURL(join(dir, entry.default as string)).href,
+          src: pathToFileURL(join(dir, entry["flowkit-source"] as string)).href,
+        };
+      }
+    }
+    const resolveAll = async (flags: string[]) => {
+      const script = `console.log(JSON.stringify(Object.fromEntries(${JSON.stringify(
+        Object.keys(expected),
+      )}.map((s) => [s, import.meta.resolve(s)]))))`;
+      const { stdout } = await promisify(execFile)(
+        process.execPath,
+        [...flags, "--input-type=module", "-e", script],
+        { cwd: root },
+      );
+      return JSON.parse(stdout) as Record<string, string>;
+    };
+    const [plain, source] = await Promise.all([
+      resolveAll([]),
+      resolveAll(["--conditions=flowkit-source"]),
+    ]);
+    expect(Object.keys(expected)).toContain("@flowkit/engine/testing");
+    for (const [specifier, { dist, src }] of Object.entries(expected)) {
+      expect(plain[specifier], specifier).toBe(dist);
+      expect(source[specifier], specifier).toBe(src);
+    }
+  });
+
   it.runIf(existsSync(join(REPO, "packages/core/dist/index.js")))(
-    "plain Node resolves a built package to dist; the source condition opts into src",
+    "after a build, the workspace's own @flowkit/core resolves to dist for plain Node",
     async () => {
       expect(await nodeResolve("@flowkit/core")).toMatch(/\/packages\/core\/dist\/index\.js$/);
-      expect(await nodeResolve("@flowkit/core", ["--conditions=flowkit-source"])).toMatch(
-        /\/packages\/core\/src\/index\.ts$/,
-      );
     },
   );
 });
 
+/** Every file under `dir` (skipping node_modules and build output) whose name matches `re`. */
+function findFiles(dir: string, re: RegExp): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (["node_modules", "dist", ".generated"].includes(entry.name)) continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...findFiles(full, re));
+    else if (re.test(entry.name)) out.push(full);
+  }
+  return out;
+}
+
+describe("dev entry points run workspace sources", () => {
+  const roots = [join(REPO, "packages"), join(REPO, "examples")];
+
+  it("every tsx command (scripts, Playwright webServers) passes the source condition", () => {
+    const commands: { where: string; command: string }[] = [];
+    for (const file of roots.flatMap((r) => findFiles(r, /^package\.json$/))) {
+      const scripts = (JSON.parse(readFileSync(file, "utf8")) as { scripts?: object }).scripts;
+      for (const [name, command] of Object.entries(scripts ?? {})) {
+        commands.push({ where: `${file} scripts.${name}`, command: String(command) });
+      }
+    }
+    for (const file of roots.flatMap((r) => findFiles(r, /^playwright\.config\.ts$/))) {
+      for (const m of readFileSync(file, "utf8").matchAll(/command:\s*"([^"]*)"/g)) {
+        commands.push({ where: file, command: m[1] as string });
+      }
+    }
+    const tsx = commands.filter((c) => /\btsx\s/.test(c.command));
+    expect(tsx.length).toBeGreaterThan(0);
+    for (const { where, command } of tsx) {
+      // Each tsx invocation in the command (e.g. both halves of a `concurrently`).
+      for (const m of command.matchAll(/\btsx\s+(?:watch\s+)?(\S+)/g)) {
+        expect(m[1], `${where}: ${command}`).toBe("--conditions=flowkit-source");
+      }
+    }
+  });
+
+  it("every Vite and Vitest config sets the source condition", () => {
+    const configs = roots.flatMap((r) => findFiles(r, /^vite(st)?\.config\.ts$/));
+    expect(configs.length).toBeGreaterThanOrEqual(11);
+    for (const file of configs) {
+      expect(readFileSync(file, "utf8"), file).toMatch(/sourceConditions|"flowkit-source"/);
+    }
+  });
+
+  it("source-conditions.ts keeps Vite's own default conditions", async () => {
+    const vitePath = createRequire(join(REPO, "examples/mini-crm/package.json")).resolve("vite");
+    const vite = (await import(pathToFileURL(vitePath).href)) as {
+      defaultClientConditions: string[];
+      defaultServerConditions: string[];
+    };
+    const { sourceConditions, SOURCE_CONDITION } = await import("../../../source-conditions.ts");
+    expect(sourceConditions.resolve.conditions).toEqual([
+      SOURCE_CONDITION,
+      ...vite.defaultClientConditions,
+    ]);
+    expect(sourceConditions.ssr.resolve.conditions).toEqual([
+      SOURCE_CONDITION,
+      ...vite.defaultServerConditions,
+    ]);
+  });
+});
+
 describe("dependencies", () => {
-  it.each(["core", "nodes-builtin", "engine"])("@flowkit/%s takes zod 4 as a peer", (name) => {
+  it.each(PACKAGES)("@flowkit/%s takes zod 4 as a peer", (name) => {
     const p = pkg(name);
     expect(p.peerDependencies?.zod).toBe("^4");
     expect(p.dependencies?.zod).toBeUndefined();
@@ -82,7 +189,7 @@ describe("dependencies", () => {
 
   it("@flowkit/react declares react and react-dom as peers", () => {
     const p = pkg("react");
-    expect(p.peerDependencies).toMatchObject({ react: ">=19", "react-dom": ">=19" });
+    expect(p.peerDependencies).toMatchObject({ react: ">=19", "react-dom": "^19" });
   });
 
   it("@flowkit/engine strips @internal members from its declarations", () => {

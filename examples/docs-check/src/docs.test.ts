@@ -65,14 +65,18 @@ async function typecheck(project: Project): Promise<string> {
 
 const load = (file: string) => import(pathToFileURL(join(OUT, "readme", file)).href);
 
-beforeAll(() => {
-  generate("readme");
-  generate("guide");
-});
-
-/** The Hono app server.ts passes to (mocked) `serve`, captured by the quick-start test. */
+/** The Hono app server.ts passes to (mocked) `serve`. */
 type HonoApp = { fetch(req: Request): Promise<Response> };
 let app: HonoApp;
+
+beforeAll(async () => {
+  generate("readme");
+  generate("guide");
+  // Mount the README's server once, so every test can call the handler on its own.
+  await load("server.ts");
+  const { serve } = await import("@hono/node-server");
+  app = vi.mocked(serve).mock.calls[0]?.[0] as HonoApp;
+}, 30_000);
 
 describe("docs", () => {
   it("annotates every TypeScript block with file= (or nocheck)", () => {
@@ -87,10 +91,6 @@ describe("docs", () => {
 
   it("runs the README quick start to a completed run", async () => {
     const { engine } = (await load("flowkit/engine.ts")) as { engine: Engine };
-    await load("server.ts");
-    const { serve } = await import("@hono/node-server");
-    app = vi.mocked(serve).mock.calls[0]?.[0] as HonoApp;
-
     await load("app.ts"); // publishes welcome-contact and emits contact.created
     const { worker } = (await load("worker.ts")) as { worker: { stop(): Promise<void> } };
     try {

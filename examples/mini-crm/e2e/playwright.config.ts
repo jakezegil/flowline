@@ -35,7 +35,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "pnpm exec tsx server/src/index.ts",
+      command: "pnpm exec tsx --conditions=flowkit-source server/src/index.ts",
       cwd: "..",
       url: `http://localhost:${SERVER_PORT}/api/demo`,
       reuseExistingServer: false,
