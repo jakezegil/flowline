@@ -135,6 +135,16 @@ describe("renderSummary", () => {
       }),
     ).toBe("If Load contact › vip is true or 2 more");
     expect(text({ combinator: "and", rules: [] })).toBe("If No conditions");
+    // Minor 6: an empty rule reads as not set, never "If  equals".
+    expect(text({ combinator: "and", rules: [{ left: "", op: "eq", right: "" }] })).toBe(
+      "If Condition not set",
+    );
+    expect(
+      text({
+        combinator: "and",
+        rules: [{ left: { $ref: "trigger.stage" }, op: "eq", right: "" }],
+      }),
+    ).toBe("If Trigger › stage equals (not set)");
     expect(
       summaryStepRefs(
         "If {{rules}}",

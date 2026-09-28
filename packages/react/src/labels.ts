@@ -42,6 +42,10 @@ export interface FlowkitLabels {
   unknownStep(type: string): string;
   /** Card summary of a condition without rules. */
   noConditions: string;
+  /** Card summary of a condition whose first rule has no value to test yet. */
+  conditionNotSet: string;
+  /** Stands for the missing right-hand side of a rule in a card summary. */
+  ruleValueNotSet: string;
   /** After a condition summary's first rule: the other rules, `or` when any may match. */
   moreRules(n: number, or: boolean): string;
   /** A trigger card's filters, after its caption: "Stage: Won". */
@@ -544,6 +548,8 @@ export const defaultLabels: FlowkitLabels = {
 
   unknownStep: (type) => `Unknown step type ${type}`,
   noConditions: "No conditions",
+  conditionNotSet: "Condition not set",
+  ruleValueNotSet: "(not set)",
   moreRules: (n, or) => `${or ? "or" : "and"} ${n} more`,
   triggerFilter: (label, value) => `${label}: ${value}`,
   neverRuns: "Never runs: an earlier step ends the run",

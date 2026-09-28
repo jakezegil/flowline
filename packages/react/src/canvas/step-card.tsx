@@ -37,7 +37,7 @@ import {
 } from "./canvas-context";
 import { StepContextMenu, StepKebabMenu } from "./context-menu";
 import { NodeHandles } from "./handles";
-import { renderSummary, type SummaryPart, summaryStepRefs } from "./summary";
+import { renderSummary, type SummaryPart, summaryStepRefs, summaryText } from "./summary";
 
 /** Data of a step node. */
 export interface StepNodeData extends Record<string, unknown> {
@@ -166,8 +166,9 @@ function runSubtitle(run: RunStepStatus, labels: FlowkitLabels): string {
 
 /** Renders summary parts: text, ref pills and unset fields. */
 export function SummaryLine({ parts }: { parts: SummaryPart[] }) {
+  // The whole summary as a tooltip, for when the card cuts it short.
   return (
-    <span className="fk-summary">
+    <span className="fk-summary" title={summaryText(parts)}>
       {parts.map((p, i) => {
         const key = `${i}:${p.kind}`;
         if (p.kind === "text") {

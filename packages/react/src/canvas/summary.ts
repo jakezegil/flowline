@@ -171,6 +171,13 @@ function flatRules(group: RuleLike): RuleLike[] {
   );
 }
 
+const isUnset = (v: unknown) => v === undefined || v === null || v === "";
+
+/** The plain text of summary parts, e.g. for a tooltip showing a summary cut short. */
+export function summaryText(parts: readonly SummaryPart[]): string {
+  return parts.map((p) => (p.kind === "text" || p.kind === "default" ? p.text : p.label)).join("");
+}
+
 /**
  * The first comparison of a `"rules"` widget value, in words ("Trigger › stage equals won"),
  * then "and 2 more" (or "or 2 more"); "no conditions" when there are none.
@@ -188,11 +195,20 @@ function ruleParts(
       ? valueParts(v as ValueExpr, "", undefined, stepName, labels)
       : [{ kind: "text", text: literalText(v, labels) }];
   const op = typeof first.op === "string" ? first.op : "eq";
+  // Nothing to test yet: say so rather than "If  equals".
+  if (isUnset(first.left)) return [{ kind: "empty", label: labels.conditionNotSet }];
   const parts: SummaryPart[] = [
     ...side(first.left),
     { kind: "text", text: ` ${labels.ruleOps[op] ?? op}` },
   ];
-  if (!UNARY_OPS.has(op)) parts.push({ kind: "text", text: " " }, ...side(first.right));
+  if (!UNARY_OPS.has(op)) {
+    parts.push(
+      { kind: "text", text: " " },
+      ...(isUnset(first.right)
+        ? [{ kind: "empty", label: labels.ruleValueNotSet } as const]
+        : side(first.right)),
+    );
+  }
   if (rules.length > 1) {
     parts.push({
       kind: "text",
@@ -210,8 +226,6 @@ function literalText(value: unknown, labels: FlowkitLabels, field?: JSONSchema):
     return truncate(optionLabel(value, metaOf(field)));
   return truncate(String(value));
 }
-
-const isUnset = (v: unknown) => v === undefined || v === null || v === "";
 
 function unsetParts(
   path: string,

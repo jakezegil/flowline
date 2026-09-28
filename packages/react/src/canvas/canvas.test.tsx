@@ -85,6 +85,9 @@ describe("WorkflowCanvas", () => {
     render(<WorkflowCanvas store={store} />);
     expect(within(card("load")).getByText("Load c_42")).toBeTruthy();
     expect(within(card("again")).getByText("Load contact › id")).toBeTruthy();
+    // The whole summary is the tooltip, for when the card cuts it short (Minor 6).
+    const summary = card("again").querySelector(".fk-summary");
+    expect(summary?.getAttribute("title")).toBe(summary?.textContent);
   });
 
   test('an unset value reads "No <label>" without a pill; an all-unset summary shows the description', () => {
