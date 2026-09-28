@@ -15,6 +15,7 @@ import { sha256Hex } from "./context";
 import type { EngineCore } from "./engine";
 import { FlowkitValidationError } from "./errors";
 import { checkTriggerPayload } from "./subflow";
+import { errorMessage } from "./util";
 
 /** How long dedupe keys are recorded. Run ids derived from a key keep deduplicating after it. */
 const DEDUPE_TTL_MS = 7 * 24 * 3_600_000;
@@ -25,14 +26,17 @@ const DROPPED_HEADERS: ReadonlySet<string> = new Set([
   "cookie",
   "x-flowkit-signature",
 ]);
+/** Header names that likely carry credentials (`x-api-key`, `stripe-signature`, `x-auth-token`…). */
+const CREDENTIAL_HEADER = /signature|api-?key|token|secret|password|auth/;
+
+/** Whether a (lowercased) request header is kept in a webhook run's `trigger.headers`. */
+function keptHeader(name: string): boolean {
+  return !DROPPED_HEADERS.has(name) && !name.startsWith("proxy-") && !CREDENTIAL_HEADER.test(name);
+}
 
 /** A validation issue about a trigger payload or run input. */
 function payloadIssue(message: string): Issue {
   return { code: "config.invalid", severity: "error", message };
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 /** A literal string in trigger config, or `undefined`. */
@@ -53,6 +57,8 @@ export type WebhookResult =
   | { status: "notFound" }
   | { status: "unauthorized" }
   | { status: "invalid"; message: string; issues: Issue[] }
+  /** The trigger's `filter` returned `false`; no run was started. */
+  | { status: "skipped" }
   | { status: "started"; runId: string; deduped: boolean };
 
 /** @internal What an inbound webhook request carries. */
@@ -105,9 +111,10 @@ export function createTriggers(core: EngineCore): Triggers {
       fresh = await storage.recordDedupeKey(v.tenantId, dedupeKey, now, DEDUPE_TTL_MS);
       runId = `run_${(await sha256Hex(`${v.tenantId}\u0000${dedupeKey}`)).slice(0, 32)}`;
     }
+    // A seen key whose run exists is a duplicate. One whose run is missing lost it to a crash right
+    // after the key was recorded: create it now (`createRun` is idempotent on the id).
+    if (!fresh && (await storage.getRun(v.tenantId, runId))) return { runId, created: false };
     const events = [core.event({ id: runId, tenantId: v.tenantId }, "run.started", undefined)];
-    // Also for a seen key: `createRun` is idempotent on the id, and this re-creates a run lost to a
-    // crash right after its key was recorded.
     const run = await storage.createRun(
       {
         id: runId,
@@ -123,6 +130,10 @@ export function createTriggers(core: EngineCore): Triggers {
       events,
       now,
     );
+    // Only the delivery that recorded the key counts as creating the run: a concurrent duplicate
+    // can reach this point before that delivery's insert, and must not report or publish it too.
+    // So a run recovered after a crash is created without its `run.started` reaching `onEvent`,
+    // and its delivery is answered as a duplicate; the run itself executes normally.
     const created = fresh && run.createdAt === now && run.workflowId === v.workflowId;
     if (created) core.publish(events);
     return { runId, created };
@@ -280,7 +291,7 @@ export function createTriggers(core: EngineCore): Triggers {
       const headers: Record<string, string> = {};
       d.headers.forEach((value, name) => {
         const lower = name.toLowerCase();
-        if (!DROPPED_HEADERS.has(lower) && !lower.startsWith("proxy-")) headers[lower] = value;
+        if (keptHeader(lower)) headers[lower] = value;
       });
       let payload: unknown;
       try {
@@ -291,8 +302,15 @@ export function createTriggers(core: EngineCore): Triggers {
         }
         throw err;
       }
+      const t = triggerOf(v);
+      if (!t) return { status: "notFound" };
+      // A throwing filter or dedupeKey propagates (500), so the sender retries the delivery.
+      if (t.def.filter && !t.def.filter({ config: t.config, payload }))
+        return { status: "skipped" };
       const dedupeHeader = configString(v, "dedupeHeader");
-      const dedupeValue = dedupeHeader === undefined ? null : d.headers.get(dedupeHeader);
+      const dedupeValue =
+        (dedupeHeader === undefined ? null : d.headers.get(dedupeHeader)) ||
+        t.def.dedupeKey?.({ config: t.config, payload });
       const key = dedupeValue ? `webhook:${v.workflowId}:${dedupeValue}` : undefined;
       const r = await launch(v, payload, { kind: "webhook" }, key);
       return { status: "started", runId: r.runId, deduped: !r.created };

@@ -1,12 +1,15 @@
 import { createHmac } from "node:crypto";
 import {
+  branch,
   createRegistry,
   defineNode,
   definePlugin,
+  defineTrigger,
   type Issue,
   type Logger,
   type RunDetail,
   type RunEvent,
+  secret,
   sensitive,
   suspend,
   type WorkflowDoc,
@@ -178,6 +181,53 @@ describe("routing and authorization", () => {
     expect(logger.warn).toHaveBeenCalledTimes(1);
   });
 
+  it("refuses editor mutations with a non-JSON content type (CSRF)", async () => {
+    await deploy(manualDoc("wf"));
+    const form = await call("POST", "/workflows/wf/run", {
+      body: JSON.stringify({ input: { name: "x" } }),
+      headers: { "content-type": "text/plain" },
+    });
+    expect(form.status).toBe(415);
+    expect(await storage.listRuns("a", {})).toEqual([]);
+    const bare = await engine.handler(
+      new Request("http://localhost/flowkit/workflows/wf/run", {
+        method: "POST",
+        headers: { "x-tenant": "a", "content-type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ input: { name: "x" } }),
+      }),
+    );
+    expect(bare.status).toBe(202);
+  });
+
+  it("answers 404 for a malformed percent-encoding", async () => {
+    const res = await call("GET", "/runs/%E0%A4%A");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: expect.any(String) });
+  });
+
+  it("answers 413 for a body over 1 MiB, declared or streamed", async () => {
+    const big = JSON.stringify({ pad: "x".repeat(1_100_000) });
+    const declared = await call("POST", "/workflows/validate", { body: big });
+    expect(declared.status).toBe(413);
+    const chunk = new TextEncoder().encode("x".repeat(64 * 1024));
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent++ < 20) controller.enqueue(chunk);
+        else controller.close();
+      },
+    });
+    const streamed = await engine.handler(
+      new Request("http://localhost/flowkit/workflows/validate", {
+        method: "POST",
+        headers: { "x-tenant": "a", "content-type": "application/json" },
+        body: stream,
+        duplex: "half",
+      } as RequestInit),
+    );
+    expect(streamed.status).toBe(413);
+  });
+
   it("honours a custom basePath", async () => {
     const mounted = makeEngine({ basePath: "/api/flows/" });
     const res = await mounted.handler(
@@ -243,6 +293,14 @@ describe("workflow management", () => {
     // Non-webhook workflows get none.
     const manual = await engine.saveWorkflow("a", manualDoc("m"), "u");
     expect(manual.doc.trigger.config).not.toHaveProperty("slug");
+  });
+
+  it("replaces a supplied slug shorter than 22 characters", async () => {
+    const weak = await engine.saveWorkflow("a", webhookDoc("w", { slug: "a".repeat(21) }), "u");
+    expect((weak.doc.trigger.config as { slug: string }).slug).toMatch(/^[A-Za-z0-9_-]{24}$/);
+    const strong = "b".repeat(22);
+    const kept = await engine.saveWorkflow("a", webhookDoc("s", { slug: strong }), "u");
+    expect((kept.doc.trigger.config as { slug: string }).slug).toBe(strong);
   });
 
   it("publishing an invalid doc answers 422 with issues", async () => {
@@ -427,6 +485,27 @@ describe("runs", () => {
     expect((await call("POST", "/runs/nope/retry", {}, e)).status).toBe(404);
   });
 
+  it("answers 500 when retrying fails for another reason than the run's state", async () => {
+    await deploy(manualDoc("wf"));
+    const runId = await engine.start({ tenantId: "a", workflowId: "wf", input: { name: "x" } });
+    await storage.updateRunUnleased(
+      "a",
+      runId,
+      { status: ["queued"] },
+      { status: "failed" },
+      [],
+      now,
+    );
+    const broken: StorageAdapter = {
+      ...storage,
+      updateRunUnleased: () => Promise.reject(new Error("db down")),
+    };
+    const e = makeEngine({}, broken);
+    const res = await call("POST", `/runs/${runId}/retry`, {}, e);
+    expect(res.status).toBe(500);
+    expect(logger.error).toHaveBeenCalledWith("flowkit handler error", { error: "db down" });
+  });
+
   it("maps cancel outcomes to 200, 202 and 409", async () => {
     await deploy(manualDoc("wf"));
     const queued = await engine.start({ tenantId: "a", workflowId: "wf", input: { name: "x" } });
@@ -566,12 +645,63 @@ describe("webhooks", () => {
     expect(await storage.listRuns("a", {})).toHaveLength(2);
   });
 
+  it("applies a plugin webhook trigger's filter and dedupeKey", async () => {
+    const invoiceHook = defineTrigger({
+      type: "p.invoice",
+      name: "Invoice",
+      kind: "webhook",
+      config: z.object({}),
+      payload: z.object({ body: z.object({ type: z.string(), id: z.string() }) }),
+      filter: ({ payload }) => payload.body.type === "invoice.paid",
+      dedupeKey: ({ payload }) => payload.body.id,
+    });
+    const e = makeEngine({
+      registry: createRegistry([
+        definePlugin({ id: "t", name: "Test", nodes: [echo] }),
+        definePlugin({ id: "p", name: "P", triggers: [invoiceHook] }),
+      ]),
+    });
+    const doc: WorkflowDoc = {
+      id: "inv",
+      name: "Invoices",
+      trigger: { type: "p.invoice", config: {} },
+      steps: [{ id: "show", type: "t.echo", config: { value: { $ref: "trigger.body.id" } } }],
+    };
+    const v = await e.saveWorkflow("a", doc, "u");
+    await e.publish("a", "inv", v.version, "u");
+    const slug = (v.doc.trigger.config as { slug: string }).slug;
+    const send = (body: unknown) =>
+      e.handler(
+        new Request(`http://localhost/flowkit/hooks/a/inv/${slug}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    const skipped = await send({ type: "invoice.created", id: "in_1" });
+    expect(skipped.status).toBe(200);
+    expect(await skipped.json()).toEqual({ skipped: true });
+    expect(await storage.listRuns("a", {})).toEqual([]);
+
+    const first = await send({ type: "invoice.paid", id: "in_1" });
+    expect(first.status).toBe(202);
+    const { runId } = await json<{ runId: string }>(first);
+    const again = await send({ type: "invoice.paid", id: "in_1" });
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ runId, deduped: true });
+    expect(await storage.listRuns("a", {})).toHaveLength(1);
+  });
+
   it("stores lowercased headers without credentials", async () => {
     const slug = await hook();
     const res = await post(`/hooks/a/hook/${slug}`, JSON.stringify({ email: "a@b.c" }), {
       Authorization: "Bearer secret",
       Cookie: "session=1",
       "Proxy-Authorization": "Basic x",
+      "X-Api-Key": "k",
+      "Stripe-Signature": "t=1,v1=abc",
+      "X-Auth-Token": "tok",
       "X-Custom": "Kept",
     });
     const { runId } = await json<{ runId: string }>(res);
@@ -582,6 +712,9 @@ describe("webhooks", () => {
     expect(Object.keys(headers)).not.toContain("authorization");
     expect(Object.keys(headers)).not.toContain("cookie");
     expect(Object.keys(headers)).not.toContain("proxy-authorization");
+    expect(Object.keys(headers)).not.toContain("x-api-key");
+    expect(Object.keys(headers)).not.toContain("stripe-signature");
+    expect(Object.keys(headers)).not.toContain("x-auth-token");
     expect(Object.keys(headers).some((k) => k !== k.toLowerCase())).toBe(false);
   });
 });
@@ -652,12 +785,74 @@ describe("SSE stream", () => {
     expect(await readFrames(await call("GET", `/runs/${runId}/stream?after=4`), 3_000)).toEqual([]);
   });
 
+  it("stops polling and heartbeats when the client goes away", async () => {
+    await deploy(manualDoc("wf"));
+    const runId = await engine.start({ tenantId: "a", workflowId: "wf", input: { name: "x" } });
+    const clear = vi.spyOn(globalThis, "clearInterval");
+    try {
+      const aborter = new AbortController();
+      const res = await engine.handler(
+        new Request(`http://localhost/flowkit/runs/${runId}/stream`, {
+          headers: { "x-tenant": "a" },
+          signal: aborter.signal,
+        }),
+      );
+      const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+      await reader.read();
+      aborter.abort();
+      await expect.poll(() => clear.mock.calls.length).toBeGreaterThanOrEqual(2);
+      const other = await call("GET", `/runs/${runId}/stream`);
+      await (other.body as ReadableStream<Uint8Array>).cancel();
+      await expect.poll(() => clear.mock.calls.length).toBeGreaterThanOrEqual(4);
+    } finally {
+      clear.mockRestore();
+    }
+  });
+
   it("closes after run.stopped", async () => {
     await deploy(manualDoc("wf", [{ id: "halt", type: "core.stop", config: {} }]));
     const runId = await engine.start({ tenantId: "a", workflowId: "wf", input: { name: "x" } });
     await engine.drain();
     const frames = await readFrames(await call("GET", `/runs/${runId}/stream`));
     expect(frames.at(-1)?.data.type).toBe("run.stopped");
+  });
+
+  it("does not end on a failure the run was retried past", async () => {
+    let fail = true;
+    const flaky = defineNode({
+      type: "u.flaky",
+      name: "Flaky",
+      input: z.object({}),
+      retry: { max: 1 },
+      run: () => {
+        if (fail) throw new Error("boom");
+        return { ok: true };
+      },
+    });
+    const e = makeEngine({
+      registry: createRegistry([definePlugin({ id: "u", name: "U", nodes: [flaky] })]),
+    });
+    const v = await e.saveWorkflow(
+      "a",
+      manualDoc("f", [{ id: "f", type: "u.flaky", config: {} }]),
+      "u",
+    );
+    await e.publish("a", "f", v.version, "u");
+    const runId = await e.start({ tenantId: "a", workflowId: "f", input: { name: "x" } });
+    await e.drain();
+    fail = false;
+    await e.retryRun("a", runId);
+    // Opened after the retry, before it ran: history holds the old run.failed.
+    const reading = readFrames(await call("GET", `/runs/${runId}/stream`, {}, e));
+    await new Promise((r) => setTimeout(r, 50));
+    await e.drain();
+    const types = (await reading).map((f) => f.data.type);
+    expect(types).toContain("run.failed");
+    expect(types.at(-1)).toBe("run.completed");
+
+    // Replaying the finished history in full still closes after its last event.
+    const replay = await readFrames(await call("GET", `/runs/${runId}/stream`, {}, e), 3_000);
+    expect(replay.map((f) => f.data.type)).toEqual(types);
   });
 
   it("receives events committed by another engine through storage polling", async () => {
@@ -710,6 +905,47 @@ describe("test-step", () => {
       input: { value: "Hi Ada" },
     });
     expect(body.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("masks secret output fields and keeps sensitive ones visible", async () => {
+    const issue = defineNode({
+      type: "u.issue",
+      name: "Issue key",
+      input: z.object({}),
+      output: z.object({ id: z.string(), key: secret(z.string()), card: sensitive(z.string()) }),
+      run: () => ({ id: "k1", key: "sk_live_123", card: "4111" }),
+    });
+    const pick = defineNode({
+      type: "u.pick",
+      name: "Pick",
+      input: z.object({}),
+      output: z.object({ key: secret(z.string()) }),
+      branches: {
+        kind: "static",
+        branches: [
+          { id: "a", label: "A" },
+          { id: "b", label: "B" },
+        ],
+      },
+      run: () => branch("a", { key: "sk_live_456" }),
+    });
+    const e = makeEngine({
+      registry: createRegistry([definePlugin({ id: "u", name: "U", nodes: [issue, pick] })]),
+    });
+    const plain = await e.testStep("a", {
+      step: { id: "i", type: "u.issue", config: {} },
+      doc: manualDoc("wf", [{ id: "i", type: "u.issue", config: {} }]),
+      samples: {},
+    });
+    expect(plain).toMatchObject({ ok: true, output: { id: "k1", card: "4111" } });
+    expect(JSON.stringify(plain)).not.toContain("sk_live_123");
+    const branched = await e.testStep("a", {
+      step: { id: "p", type: "u.pick", config: {}, branches: { a: [], b: [] } },
+      doc: manualDoc("wf", [{ id: "p", type: "u.pick", config: {}, branches: { a: [], b: [] } }]),
+      samples: {},
+    });
+    expect(branched).toMatchObject({ ok: true, branch: "a" });
+    expect(JSON.stringify(branched)).not.toContain("sk_live_456");
   });
 
   it("uses step samples and reports suspension without executing it", async () => {

@@ -120,8 +120,9 @@ export interface RunEventStreamArgs {
  * @internal The `text/event-stream` response of `GET /runs/:id/stream`: one `event: run` frame
  * (`id: <seq>`, `data: <RunEvent JSON>`) per event with `seq > after`, in order and at most once.
  * Events come from the in-process bus (fast path) and from polling storage, so a worker in another
- * process is seen too. The stream ends after a terminal event (`run.completed`, `run.failed`,
- * `run.cancelled`, `run.stopped`), including when that event was sent before `after`.
+ * process is seen too. The stream ends once the run's latest event is terminal (`run.completed`,
+ * `run.failed`, `run.cancelled`, `run.stopped`), including when that event was sent before
+ * `after`. An earlier terminal event that a retry moved past does not end it.
  */
 export function runEventStream(a: RunEventStreamArgs): Response {
   const encoder = new TextEncoder();
@@ -154,17 +155,28 @@ export function runEventStream(a: RunEventStreamArgs): Response {
           stop();
         }
       };
-      const send = (events: RunEvent[]) => {
+      /** Sends the events not sent yet; `true` when one of them is terminal. */
+      const send = (events: RunEvent[]): boolean => {
+        let terminal = false;
         for (const e of events) {
-          if (closed) return;
+          if (closed) return false;
           if (e.seq <= lastSent || e.runId !== a.runId || e.tenantId !== a.tenantId) continue;
           write(`event: run\nid: ${e.seq}\ndata: ${JSON.stringify(e)}\n\n`);
           lastSent = e.seq;
-          if (TERMINAL_EVENTS.has(e.type)) close();
+          if (TERMINAL_EVENTS.has(e.type)) terminal = true;
         }
+        return terminal;
       };
-      const poll = async () => {
-        if (polling || closed) return;
+      // A terminal event ends the stream only while it is the run's latest event: a retried run
+      // continues after its old `run.failed`. Only a full read of the log can tell, so the stream
+      // closes from `poll`, and a terminal event from the bus triggers an immediate poll.
+      let repoll = false;
+      const poll = async (): Promise<void> => {
+        if (closed) return;
+        if (polling) {
+          repoll = true;
+          return;
+        }
         polling = true;
         try {
           const events = await a.storage.listEvents(a.tenantId, a.runId);
@@ -179,9 +191,17 @@ export function runEventStream(a: RunEventStreamArgs): Response {
         } finally {
           polling = false;
         }
+        if (repoll) {
+          repoll = false;
+          await poll();
+        }
       };
 
-      cleanups.push(a.subscribe(a.runId, (e) => send([e])));
+      cleanups.push(
+        a.subscribe(a.runId, (e) => {
+          if (send([e])) void poll();
+        }),
+      );
       const pollTimer = setInterval(poll, a.pollMs ?? DEFAULT_POLL_MS);
       const heartbeat = setInterval(
         () => write(": ping\n\n"),

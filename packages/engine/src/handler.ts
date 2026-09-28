@@ -11,12 +11,12 @@
  */
 import type { ApiErrorBody, RunStatus, TestStepRequest, WorkflowDoc } from "@flowkit/core";
 import type { Engine, EngineCore } from "./engine";
-import { FlowkitValidationError } from "./errors";
+import { EngineConflictError, EngineNotFoundError, FlowkitValidationError } from "./errors";
 import { runEventStream } from "./sse";
 import type { Triggers } from "./triggers";
+import { DEFAULT_BASE_PATH, isPlainObject } from "./util";
 import { docShapeProblem } from "./workflows";
 
-const DEFAULT_BASE_PATH = "/flowkit";
 /** Largest request body accepted, in bytes. */
 const MAX_BODY_BYTES = 1_048_576;
 const MAX_LIST_LIMIT = 1_000;
@@ -96,10 +96,6 @@ async function readJson(req: Request): Promise<unknown> {
   }
 }
 
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
 /** @internal Create the HTTP handler of an engine. */
 export function createHandler({ core, engine, triggers }: HandlerDeps) {
   const { storage, registry } = core;
@@ -150,6 +146,8 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
           return json(401, { error: "Invalid signature" });
         case "invalid":
           return json(400, { error: result.message, issues: result.issues });
+        case "skipped":
+          return json(200, { skipped: true });
         case "started":
           return result.deduped
             ? json(200, { runId: result.runId, deduped: true })
@@ -174,6 +172,12 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
     const { tenantId, userId } = user;
     const [first, id, action] = seg;
     const n = seg.length;
+    // Cross-site forms can only send form or text content types without a CORS preflight; refusing
+    // them keeps cookie-authorized editor mutations out of reach of CSRF.
+    const type = req.headers.get("content-type");
+    if (method !== "GET" && type !== null && !/^application\/json\s*(;|$)/i.test(type)) {
+      throw new HttpError(415, "Content-Type must be application/json");
+    }
 
     if (method === "GET" && n === 1 && first === "manifest") {
       return json(200, registry.manifest());
@@ -223,6 +227,8 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
           if (err instanceof FlowkitValidationError) {
             throw new HttpError(422, err.message, { issues: err.issues });
           }
+          // The version vanished between the check above and the publish.
+          if (err instanceof EngineNotFoundError) throw notFound("Workflow version not found");
           throw err;
         }
         return json(200, { version });
@@ -312,7 +318,9 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
         try {
           return json(200, { runId: await engine.retryRun(tenantId, id) });
         } catch (err) {
-          throw new HttpError(409, err instanceof Error ? err.message : String(err));
+          if (err instanceof EngineConflictError) throw new HttpError(409, err.message);
+          if (err instanceof EngineNotFoundError) throw notFound();
+          throw err;
         }
       }
       if (method === "POST" && n === 3 && action === "cancel") {
@@ -355,7 +363,7 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
       if (err instanceof FlowkitValidationError) {
         return json(400, { error: err.message, issues: err.issues });
       }
-      core.logger?.error("flowkit handler error", {
+      (core.logger ?? console).error("flowkit handler error", {
         error: err instanceof Error ? err.message : String(err),
       });
       return json(500, { error: "Internal error" });

@@ -297,6 +297,34 @@ describe("subscribeRun", () => {
     expect(calls[0]!.headers.accept).toBe("text/event-stream");
   });
 
+  test("keeps reading past a terminal event the run was retried past", async () => {
+    const events = [
+      event(1, "run.started"),
+      event(2, "run.failed"),
+      event(3, "run.resumed"),
+      event(4, "run.completed"),
+    ];
+    const { fetch, calls } = stubFetch(() => sseResponse(events.map(frame)));
+    const client = createClient({ baseUrl: "https://api.test", fetch });
+    const received: RunEvent[] = [];
+    client.subscribeRun("r1", (e) => received.push(e));
+    await vi.waitFor(() => expect(received).toEqual(events));
+    await new Promise((r) => setTimeout(r, 700));
+    expect(calls).toHaveLength(1);
+  });
+
+  test("reconnects when the stream ends right after a non-terminal event", async () => {
+    const e1 = event(1, "run.started");
+    const e2 = event(2, "run.completed");
+    let n = 0;
+    const { fetch, calls } = stubFetch(() => sseResponse(n++ === 0 ? [frame(e1)] : [frame(e2)]));
+    const client = createClient({ baseUrl: "https://api.test", fetch });
+    const received: RunEvent[] = [];
+    client.subscribeRun("r1", (e) => received.push(e));
+    await vi.waitFor(() => expect(received).toEqual([e1, e2]), { timeout: 3_000 });
+    expect(calls[1]?.url).toBe("https://api.test/runs/r1/stream?after=1");
+  });
+
   test("treats run.stopped as terminal and does not reconnect", async () => {
     const e1 = event(1, "run.started");
     const e2 = event(2, "run.stopped");

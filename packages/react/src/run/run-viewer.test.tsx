@@ -91,6 +91,25 @@ describe("RunViewer", () => {
     expect(client.retryRun).toHaveBeenCalledWith("r1");
   });
 
+  test("after retrying in place it listens to the run again", async () => {
+    const t = setup(failedLoopRun());
+    await waitFor(() => expect(card("tag")?.dataset.run).toBe("failed"));
+    // A finished run is not listened to.
+    await waitFor(() => expect(t.subscribed()).toBe(false));
+    // The engine retries under the same run id.
+    t.client.retryRun.mockImplementation(async () => {
+      t.setRun({ ...failedLoopRun(), run: { ...failedLoopRun().run, status: "queued" } });
+      return { runId: "r1" };
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Retry from failed step" }));
+    await waitFor(() => expect(t.onRetried).toHaveBeenCalledWith("r1"));
+    await waitFor(() => expect(t.subscribed()).toBe(true));
+    // Live events refetch the run again.
+    t.setRun(runDetail("completed", failedLoopRun().run.journal));
+    act(() => t.emit({ ...failedLoopRun().events[0], seq: 99, type: "run.completed" } as RunEvent));
+    await waitFor(() => expect(screen.getAllByText("Completed").length).toBeGreaterThan(0));
+  });
+
   test("a run waiting on a callback can be resumed with a JSON body", async () => {
     const { client } = setup(waitingRun());
     const inspector = await screen.findByRole("complementary", { name: "Step details" });

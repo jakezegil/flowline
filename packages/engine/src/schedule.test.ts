@@ -1,4 +1,4 @@
-import { createRegistry, defineNode, definePlugin, type WorkflowDoc } from "@flowkit/core";
+import { createRegistry, defineNode, definePlugin, suspend, type WorkflowDoc } from "@flowkit/core";
 import { createMemoryStorage } from "@flowkit/storage-memory";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -159,5 +159,49 @@ describe("startWorker", () => {
     await expect.poll(async () => (await storage.listRuns("t1", {}))[0]?.status).toBe("running");
     await worker.stop();
     expect(finished).toBe(true);
+  });
+
+  it("stop() aborts an in-flight afterCommit hook", async () => {
+    let hookStarted = false;
+    const notify = defineNode({
+      type: "s.notify",
+      name: "Notify",
+      input: z.object({}),
+      run: ({ ctx }) =>
+        ctx.resume
+          ? {}
+          : suspend({
+              until: ctx.now() + 60_000,
+              afterCommit: ({ signal }) =>
+                new Promise<void>((_, reject) => {
+                  hookStarted = true;
+                  signal.addEventListener("abort", () => reject(new Error("aborted")));
+                }),
+            }),
+    });
+    const e = createEngine({
+      registry: createRegistry([definePlugin({ id: "s", name: "S", nodes: [notify] })]),
+      storage,
+      clock: () => now,
+    });
+    const v = await e.saveWorkflow(
+      "t1",
+      {
+        id: "n",
+        name: "n",
+        trigger: { type: "core.manual", config: {} },
+        steps: [{ id: "x", type: "s.notify", config: {} }],
+      },
+      "u",
+    );
+    await e.publish("t1", "n", v.version, "u");
+    const runId = await e.start({ tenantId: "t1", workflowId: "n" });
+    const worker = e.startWorker({ pollMs: 5 });
+    await expect.poll(() => hookStarted).toBe(true);
+    const began = performance.now();
+    await worker.stop();
+    expect(performance.now() - began).toBeLessThan(1_000);
+    const events = await storage.listEvents("t1", runId);
+    expect(events.some((ev) => ev.type === "step.afterCommitFailed")).toBe(true);
   });
 });

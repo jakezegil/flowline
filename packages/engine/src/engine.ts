@@ -21,6 +21,7 @@ import {
   type WorkflowVersion,
 } from "@flowkit/core";
 import { builtinPlugin } from "@flowkit/nodes-builtin";
+import { EngineConflictError, EngineNotFoundError } from "./errors";
 import { cancelPatch, createExecutor, TERMINAL } from "./executor";
 import { createHandler } from "./handler";
 import { entryAt } from "./interpreter";
@@ -244,6 +245,9 @@ export interface Engine {
    * Run one step against sample data, without creating a run or journaling anything: config is
    * resolved against `samples` (by step ID) and `triggerSample`, and control-flow signals
    * (suspend, including callbacks, stop, sub-flow) are reported instead of executed.
+   *
+   * `secret` input and output fields are masked, as in the journal. `sensitive` fields are shown:
+   * the response goes only to an editor of the tenant and is not stored.
    */
   testStep(tenantId: string, req: TestStepRequest): Promise<TestStepResponse>;
   /**
@@ -305,16 +309,18 @@ export function createEngine(options: EngineOptions): Engine {
   const executor = createExecutor(opts);
   const defaultWorkerId = `worker-${globalThis.crypto.randomUUID().slice(0, 8)}`;
 
-  const runOnce = async (workerId: string = defaultWorkerId): Promise<boolean> => {
+  /** Claim and advance one run; `stop` (a stopping worker) aborts its in-flight `afterCommit`. */
+  const claimOnce = async (workerId: string, stop?: AbortSignal): Promise<boolean> => {
     const lease = await opts.storage.claimRun({
       workerId,
       leaseMs: executor.leaseMs,
       now: executor.clock(),
     });
     if (!lease) return false;
-    await executor.executeClaim(lease, workerId);
+    await executor.executeClaim(lease, workerId, stop);
     return true;
   };
+  const runOnce = (workerId: string = defaultWorkerId) => claimOnce(workerId);
 
   const storage = opts.storage;
   const clock = executor.clock;
@@ -424,7 +430,7 @@ export function createEngine(options: EngineOptions): Engine {
 
     async retryRun(tenantId, runId) {
       const run = await storage.getRun(tenantId, runId);
-      if (!run) throw new Error(`Run "${runId}" not found`);
+      if (!run) throw new EngineNotFoundError(`Run "${runId}" not found`);
       const failedPath = run.error?.stepPath;
       const patch: RunPatch = {
         status: "queued",
@@ -437,7 +443,7 @@ export function createEngine(options: EngineOptions): Engine {
         cancelRequestedAt: null,
       };
       if (run.status === "failed" && run.parent && !(await parentWaitsOn(run))) {
-        throw new Error(
+        throw new EngineConflictError(
           `Run "${runId}" is a sub-flow whose parent run "${run.parent.runId}" no longer waits on it; retry the parent instead`,
         );
       }
@@ -455,7 +461,7 @@ export function createEngine(options: EngineOptions): Engine {
           events,
           clock(),
         ));
-      if (!ok) throw new Error(`Run "${runId}" is not failed`);
+      if (!ok) throw new EngineConflictError(`Run "${runId}" is not failed`);
       executor.publish(events);
       return runId;
     },
@@ -463,7 +469,7 @@ export function createEngine(options: EngineOptions): Engine {
     startWorker: (workerOpts) =>
       startWorker(
         {
-          runOnce,
+          runOnce: claimOnce,
           tickSchedules: () => triggers.tickSchedules(),
           defaultWorkerId,
           ...(opts.logger ? { logger: opts.logger } : {}),
