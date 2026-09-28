@@ -182,7 +182,11 @@ export function runEventStream(a: RunEventStreamArgs): Response {
           const events = await a.storage.listEvents(a.tenantId, a.runId);
           send(events);
           const last = events[events.length - 1];
-          if (last && lastSent >= last.seq && TERMINAL_EVENTS.has(last.type)) close();
+          // Nothing newer than the snapshot may have been sent: the bus can be ahead of a slow read,
+          // and then the snapshot's terminal event is no longer the run's latest.
+          if (last && TERMINAL_EVENTS.has(last.type) && lastSent === Math.max(last.seq, a.after)) {
+            close();
+          }
         } catch (err) {
           a.logger?.warn("run stream poll failed", {
             runId: a.runId,

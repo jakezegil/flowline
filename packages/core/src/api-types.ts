@@ -31,8 +31,9 @@
  *   dedupe header (e.g. the sender's delivery id) alongside a signing secret.
  * - `POST /resume/:token` body = callback body → 202 (410 `{ error: "gone" }`)
  *
- * Editor requests other than `GET` whose `Content-Type` is set to anything but
- * `application/json` are refused with 415 (so a cross-site form cannot reach them).
+ * Editor requests other than `GET` must send `Content-Type: application/json`, bodyless ones
+ * (cancel, retry) too; anything else, including no `Content-Type`, is refused with 415 (so a
+ * cross-site form or no-cors fetch cannot reach them).
  * Validation failures of run input are 400 `{ error, issues }`. Error responses are JSON
  * {@link ApiErrorBody}.
  *

@@ -172,10 +172,11 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
     const { tenantId, userId } = user;
     const [first, id, action] = seg;
     const n = seg.length;
-    // Cross-site forms can only send form or text content types without a CORS preflight; refusing
-    // them keeps cookie-authorized editor mutations out of reach of CSRF.
-    const type = req.headers.get("content-type");
-    if (method !== "GET" && type !== null && !/^application\/json\s*(;|$)/i.test(type)) {
+    // Without a CORS preflight a cross-site request can only send a form or text content type, or
+    // none (a no-cors fetch of a Blob). Requiring JSON on every mutation, bodyless ones too, keeps
+    // cookie-authorized editor mutations out of reach of CSRF.
+    const type = req.headers.get("content-type") ?? "";
+    if (method !== "GET" && method !== "HEAD" && !/^application\/json\s*(;|$)/i.test(type)) {
       throw new HttpError(415, "Content-Type must be application/json");
     }
 

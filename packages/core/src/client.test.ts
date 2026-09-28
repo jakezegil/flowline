@@ -180,7 +180,8 @@ describe("createClient requests", () => {
       expect(calls[0]!.method).toBe(tc.method);
       expect(calls[0]!.url).toBe(`https://api.test/flowkit${tc.path}`);
       expect(calls[0]!.body).toEqual(tc.body);
-      if (tc.body !== undefined) expect(calls[0]!.headers["content-type"]).toBe("application/json");
+      // Every non-GET request declares JSON, bodyless ones too: the server refuses others (CSRF).
+      if (tc.method !== "GET") expect(calls[0]!.headers["content-type"]).toBe("application/json");
       if ("expected" in tc) expect(result).toEqual(tc.expected);
     });
   }

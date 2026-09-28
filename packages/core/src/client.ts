@@ -232,10 +232,9 @@ export function createClient(opts: ClientOptions): FlowkitClient {
       ...(await extraHeaders()),
     };
     const init: RequestInit = { method, headers };
-    if (body !== undefined && body.value !== undefined) {
-      headers["content-type"] = "application/json";
-      init.body = JSON.stringify(body.value);
-    }
+    // Declared on every mutation, bodyless ones too: the handler refuses anything else (CSRF).
+    if (method !== "GET") headers["content-type"] = "application/json";
+    if (body !== undefined && body.value !== undefined) init.body = JSON.stringify(body.value);
     if (signal) init.signal = signal;
     const res = await doFetch(base + path, init);
     const parsed = await readBody(res);

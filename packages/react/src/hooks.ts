@@ -210,6 +210,13 @@ export function useIssues(): {
 const RUN_REFETCH_DEBOUNCE_MS = 150;
 
 const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
+/** Events after which the client's run stream may end by itself. */
+const TERMINAL_RUN_EVENTS: ReadonlySet<string> = new Set([
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "run.stopped",
+]);
 
 /**
  * Loads a run with `client.getRun` and keeps it fresh: refetches (debounced 150ms) whenever
@@ -237,8 +244,13 @@ export function useRun(runId: string): {
     let latest = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let unsubscribe: (() => void) | undefined;
+    /** The stream's last event was terminal, so the client may have ended it by itself. */
+    let mayHaveEnded = false;
     const listen = () => {
-      unsubscribe ??= client.subscribeRun(runId, () => {
+      // A quick retry can show the run running again before any fetch showed it finished.
+      if (mayHaveEnded) stopListening();
+      unsubscribe ??= client.subscribeRun(runId, (e) => {
+        mayHaveEnded = TERMINAL_RUN_EVENTS.has(e.type);
         clearTimeout(timer);
         timer = setTimeout(load, RUN_REFETCH_DEBOUNCE_MS);
       });
@@ -246,6 +258,7 @@ export function useRun(runId: string): {
     const stopListening = () => {
       unsubscribe?.();
       unsubscribe = undefined;
+      mayHaveEnded = false;
     };
     const load = () => {
       const request = ++latest;

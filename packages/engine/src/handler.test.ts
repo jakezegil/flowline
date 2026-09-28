@@ -129,8 +129,9 @@ function call(method: string, path: string, opts: CallOpts = {}, e: Engine = eng
   const tenant = opts.tenant === undefined ? "a" : opts.tenant;
   if (tenant !== null) headers["x-tenant"] = tenant;
   const init: RequestInit = { method, headers };
+  // Like the client: every mutation declares JSON.
+  if (method !== "GET") headers["content-type"] ??= "application/json";
   if (opts.body !== undefined) {
-    headers["content-type"] ??= "application/json";
     init.body = typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
   }
   return e.handler(new Request(`http://localhost/flowkit${path}`, init));
@@ -197,6 +198,26 @@ describe("routing and authorization", () => {
       }),
     );
     expect(bare.status).toBe(202);
+    // A no-cors fetch with an untyped Blob body sends no Content-Type at all.
+    const untyped = await engine.handler(
+      new Request("http://localhost/flowkit/workflows/wf/run", {
+        method: "POST",
+        headers: { "x-tenant": "a" },
+        body: new Blob([JSON.stringify({ input: { name: "y" } })]),
+      }),
+    );
+    expect(untyped.status).toBe(415);
+    const bodyless = await engine.handler(
+      new Request(
+        `http://localhost/flowkit/runs/${(await storage.listRuns("a", {}))[0]?.id}/cancel`,
+        {
+          method: "POST",
+          headers: { "x-tenant": "a" },
+        },
+      ),
+    );
+    expect(bodyless.status).toBe(415);
+    expect(await storage.listRuns("a", {})).toHaveLength(1);
   });
 
   it("answers 404 for a malformed percent-encoding", async () => {
