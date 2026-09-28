@@ -16,11 +16,13 @@ const contactId = () =>
 
 /**
  * Run a store call, turning a {@link CrmError} into a {@link FatalError}: an unknown ID or an
- * invalid value will not fix itself on retry.
+ * invalid value will not fix itself on retry. Any other error is rethrown unchanged, so the
+ * engine retries the step with its retry policy. A store talking to a real database or API would
+ * throw `RetryableError` for transient failures (timeouts, 429, 503) to make that explicit.
  */
-export function crmCall<T>(fn: () => T): T {
+export async function crmCall<T>(fn: () => T | Promise<T>): Promise<T> {
   try {
-    return fn();
+    return await fn();
   } catch (err) {
     if (err instanceof CrmError) throw new FatalError(err.message);
     throw err;
@@ -81,7 +83,11 @@ const contactFields = {
   source: ui(z.string(), { label: "Source", placeholder: "web" }).optional(),
 };
 
-/** Creates a contact. Re-running the step (at-least-once execution) creates it only once. */
+/**
+ * Creates a contact. Re-running the step (at-least-once execution) creates it only once. When a
+ * contact with the email exists already (e.g. two runs for the same lead raced past their
+ * lookups), that contact is returned instead of failing the step.
+ */
 export const createContact = defineNode({
   type: "crm.createContact",
   name: "Create contact",
@@ -92,12 +98,13 @@ export const createContact = defineNode({
   input: z.object({ ...contactFields, ownerId: userId("Owner").optional() }),
   output: z.object({ contact: ContactSchema }),
   run: async ({ input, ctx }) => {
+    const { crm } = ctx.services;
     try {
-      const contact = await ctx.services.crm.createContact(input, {
-        idempotencyKey: ctx.idempotencyKey,
-      });
-      return { contact };
+      return { contact: await crm.createContact(input, { idempotencyKey: ctx.idempotencyKey }) };
     } catch (err) {
+      const existing = err instanceof CrmError && err.status === 409;
+      const contact = existing ? crm.findContactByEmail(input.email) : undefined;
+      if (contact) return { contact };
       if (err instanceof CrmError) throw new FatalError(err.message);
       throw err;
     }
@@ -122,9 +129,9 @@ export const updateContact = defineNode({
     ownerId: userId("Owner").optional(),
   }),
   output: z.object({ contact: ContactSchema }),
-  run: ({ input, ctx }) => {
+  run: async ({ input, ctx }) => {
     const { contactId: id, ...changes } = input;
-    return { contact: crmCall(() => ctx.services.crm.updateContact(id, changes)) };
+    return { contact: await crmCall(() => ctx.services.crm.updateContact(id, changes)) };
   },
 });
 

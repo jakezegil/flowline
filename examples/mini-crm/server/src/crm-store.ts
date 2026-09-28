@@ -68,18 +68,24 @@ export const OutboxMessageSchema = z.object({
 /** An email the CRM "sent" (recorded, never delivered). */
 export type OutboxMessage = z.infer<typeof OutboxMessageSchema>;
 
-/** State of an approval request. `expired` means it timed out undecided. */
+/**
+ * State of an approval request. `expired` means its run stopped waiting undecided (it timed out
+ * or was cancelled).
+ */
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
 
 /**
- * An approval request as the API shows it. The callback token that resumes the waiting run stays
- * inside the store and is never part of this record.
+ * An approval request. It points at the waiting workflow step (`runId`, `stepPath`); deciding it
+ * resumes that step through the engine's authorized `resumeRun`, so no callback token or resume
+ * URL is ever stored here.
  */
 export interface Approval {
-  /** Approval ID, stable for the workflow step that requested it. */
+  /** Approval ID, derived from `runId` and `stepPath`. */
   id: string;
   /** The run waiting for the decision. */
   runId: string;
+  /** The waiting step's path in that run. */
+  stepPath: string;
   /** What needs approving. */
   title: string;
   /** The user asked to decide. */
@@ -134,17 +140,12 @@ export class CrmError extends Error {
   }
 }
 
-interface StoredApproval extends Approval {
-  /** Resumes the waiting run through `engine.resume`. Never leaves the store. */
-  token: string;
-}
-
 interface State {
   contacts: Map<string, Contact>;
   deals: Map<string, Deal>;
   users: Map<string, User>;
   outbox: OutboxMessage[];
-  approvals: Map<string, StoredApproval>;
+  approvals: Map<string, Approval>;
   /** Idempotency key → contact ID, so a re-run `crm.createContact` step creates one contact. */
   createdByKey: Map<string, string>;
   /** Idempotency key → user ID, so a re-run `crm.assignOwner` step picks the same owner. */
@@ -272,7 +273,11 @@ export interface CrmStore {
    * @throws {@link CrmError} 409 when another contact already has the email.
    */
   createContact(fields: NewContact, opts?: { idempotencyKey?: string }): Promise<Contact>;
-  /** Change a contact. @throws {@link CrmError} 404 for an unknown contact or owner. */
+  /**
+   * Change a contact.
+   * @throws {@link CrmError} 404 for an unknown contact, 400 for an unknown owner, 409 when the
+   * new email belongs to another contact.
+   */
   updateContact(id: string, changes: ContactChanges): Contact;
   /**
    * Pick an owner for a contact and assign it. `roundRobin` cycles through every rep, `team`
@@ -309,31 +314,32 @@ export interface CrmStore {
     deduped: boolean;
   };
 
-  /** Approval requests, newest first (without their tokens). */
+  /** Approval requests, newest first. */
   listApprovals(): Approval[];
-  /** The approval with this ID (without its token), if any. */
+  /** The approval with this ID, if any. */
   getApproval(id: string): Approval | undefined;
   /**
-   * Record a pending approval, or refresh a pending one's token (a re-run step issues a new
-   * callback). A decided approval is left as is.
+   * Record a pending approval. Recording one that exists already (a re-run step, or rebuilding
+   * approvals after a restart) keeps the existing record.
    */
   upsertApproval(a: {
     id: string;
     runId: string;
+    stepPath: string;
     title: string;
     approverId: string;
-    token: string;
+    /** Request time (ISO 8601). Default: now. */
+    createdAt?: string;
   }): Approval;
-  /** The token that resumes a pending approval's run; `undefined` once decided. */
-  approvalToken(id: string): string | undefined;
-  /** Mark an approval decided (or expired). Already decided approvals keep their first outcome. */
+  /**
+   * Move a pending approval to `status`. Returns the updated approval, or `undefined` when it is
+   * unknown or no longer pending (the first outcome wins).
+   */
   settleApproval(id: string, status: Exclude<ApprovalStatus, "pending">): Approval | undefined;
+  /** Make an approval pending again, e.g. when resuming its run failed after it was claimed. */
+  reopenApproval(id: string): Approval | undefined;
   /** Mark an approval expired, whatever its state: its run no longer waits for a decision. */
   expireApproval(id: string): Approval | undefined;
-}
-
-function publicApproval({ token: _token, ...approval }: StoredApproval): Approval {
-  return { ...approval };
 }
 
 /**
@@ -378,6 +384,18 @@ export function createCrmStore(opts: { clock?: () => number } = {}): CrmStore {
     if (!u) throw new CrmError(`User "${id}" not found`, 404);
     return u;
   };
+  /** A user referenced by a create or update: unknown is invalid input (400), not a 404. */
+  const requireOwner = (id: string): void => {
+    if (!state.users.has(id)) throw new CrmError(`Unknown owner "${id}"`, 400);
+  };
+  /** Throws a 409 when another contact than `exceptId` has `email`. */
+  const requireFreeEmail = (email: string, exceptId?: string): void => {
+    const wanted = email.trim().toLowerCase();
+    const taken = [...state.contacts.values()].some(
+      (c) => c.id !== exceptId && c.email.toLowerCase() === wanted,
+    );
+    if (taken) throw new CrmError(`A contact with email "${email.trim()}" already exists`, 409);
+  };
   const newestFirst = <T>(items: Iterable<T>): T[] => [...items].reverse();
 
   const store: CrmStore = {
@@ -403,10 +421,8 @@ export function createCrmStore(opts: { clock?: () => number } = {}): CrmStore {
       if (previous) return { ...requireContact(previous) };
       const email = fields.email.trim();
       if (email === "") throw new CrmError("A contact needs an email", 400);
-      if (store.findContactByEmail(email)) {
-        throw new CrmError(`A contact with email "${email}" already exists`, 409);
-      }
-      if (fields.ownerId) requireUser(fields.ownerId);
+      requireFreeEmail(email);
+      if (fields.ownerId) requireOwner(fields.ownerId);
       const contact: Contact = {
         id: `c_${state.nextContact++}`,
         firstName: fields.firstName,
@@ -424,8 +440,19 @@ export function createCrmStore(opts: { clock?: () => number } = {}): CrmStore {
     },
     updateContact(id, changes) {
       const contact = requireContact(id);
-      if (changes.ownerId) requireUser(changes.ownerId);
-      const updated = { ...contact, ...changes, id, createdAt: contact.createdAt };
+      if (changes.ownerId) requireOwner(changes.ownerId);
+      const email = changes.email?.trim();
+      if (email !== undefined) {
+        if (email === "") throw new CrmError("A contact needs an email", 400);
+        requireFreeEmail(email, id);
+      }
+      const updated = {
+        ...contact,
+        ...changes,
+        ...(email !== undefined ? { email } : {}),
+        id,
+        createdAt: contact.createdAt,
+      };
       state.contacts.set(id, updated);
       return { ...updated };
     },
@@ -470,7 +497,7 @@ export function createCrmStore(opts: { clock?: () => number } = {}): CrmStore {
       ) {
         throw new CrmError("amount must be a non-negative number", 400);
       }
-      if (changes.ownerId !== undefined) requireUser(changes.ownerId);
+      if (changes.ownerId !== undefined) requireOwner(changes.ownerId);
       const changed = (Object.keys(changes) as (keyof DealChanges)[]).filter(
         (k) => changes[k] !== undefined && changes[k] !== deal[k],
       );
@@ -505,50 +532,50 @@ export function createCrmStore(opts: { clock?: () => number } = {}): CrmStore {
       return { message: { ...message }, deduped: false };
     },
 
-    listApprovals: () => newestFirst(state.approvals.values()).map(publicApproval),
+    listApprovals: () =>
+      [...state.approvals.values()]
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+        .map((a) => ({ ...a })),
     getApproval: (id) => {
       const a = state.approvals.get(id);
-      return a && publicApproval(a);
+      return a && { ...a };
     },
-    upsertApproval({ id, runId, title, approverId, token }) {
+    upsertApproval({ id, runId, stepPath, title, approverId, createdAt }) {
       const existing = state.approvals.get(id);
-      if (existing && existing.status !== "pending") return publicApproval(existing);
-      const approval: StoredApproval = existing
-        ? { ...existing, token }
-        : {
-            id,
-            runId,
-            title,
-            approverId,
-            token,
-            status: "pending",
-            createdAt: iso(),
-            decidedAt: null,
-          };
-      // Re-insert so a refreshed approval sorts as the newest.
-      state.approvals.delete(id);
+      if (existing) return { ...existing };
+      const approval: Approval = {
+        id,
+        runId,
+        stepPath,
+        title,
+        approverId,
+        status: "pending",
+        createdAt: createdAt ?? iso(),
+        decidedAt: null,
+      };
       state.approvals.set(id, approval);
-      return publicApproval(approval);
-    },
-    approvalToken(id) {
-      const a = state.approvals.get(id);
-      return a?.status === "pending" ? a.token : undefined;
+      return { ...approval };
     },
     settleApproval(id, status) {
       const a = state.approvals.get(id);
+      if (a?.status !== "pending") return undefined;
+      a.status = status;
+      a.decidedAt = iso();
+      return { ...a };
+    },
+    reopenApproval(id) {
+      const a = state.approvals.get(id);
       if (!a) return undefined;
-      if (a.status === "pending") {
-        a.status = status;
-        a.decidedAt = iso();
-      }
-      return publicApproval(a);
+      a.status = "pending";
+      a.decidedAt = null;
+      return { ...a };
     },
     expireApproval(id) {
       const a = state.approvals.get(id);
       if (!a) return undefined;
       a.status = "expired";
       a.decidedAt = iso();
-      return publicApproval(a);
+      return { ...a };
     },
   };
   return store;

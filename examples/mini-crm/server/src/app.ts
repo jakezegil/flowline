@@ -16,11 +16,13 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { CrmError, type CrmStore, createCrmStore, DEAL_STAGES } from "./crm-store";
 import { seedFlows } from "./flows";
-import { crmPlugin } from "./plugin";
+import { crmPlugin, restoreApprovals } from "./plugin";
 
 /** The demo's only tenant. */
 export const TENANT_ID = "acme";
-/** The user every request acts as (the demo has no login). */
+/**
+ * The user every request acts as. The demo has NO authentication: see {@link demoAuthorize}.
+ */
 export const DEMO_USER_ID = "demo-user";
 
 /** Options of {@link createMiniCrm}. */
@@ -66,6 +68,32 @@ const DealPatchBody = z
 
 const DecisionBody = z.object({ decision: z.enum(["approved", "rejected"]) });
 
+/**
+ * Who is calling. The demo has no login, so every request, to `/api` and to `/flowkit` alike, is
+ * user `demo-user` of tenant `acme`.
+ *
+ * A production host must instead authenticate the request with its own session (cookie, bearer
+ * token, ...) and derive both IDs from it, returning `null` when there is no valid session so the
+ * engine answers 401:
+ *
+ * ```ts
+ * async function authorize(req: Request) {
+ *   const session = await sessions.fromRequest(req); // your auth
+ *   if (!session) return null;
+ *   return { tenantId: session.accountId, userId: session.userId };
+ * }
+ * ```
+ *
+ * Run the same check as middleware in front of `/api/*`, scope every CRM query to the session's
+ * tenant, and check permissions per route (e.g. only `approval.approverId` may decide it).
+ */
+async function demoAuthorize(_req: Request): Promise<{ tenantId: string; userId: string } | null> {
+  return { tenantId: TENANT_ID, userId: DEMO_USER_ID };
+}
+
+/** Statuses of runs that have not finished. */
+const ACTIVE_STATUSES = ["queued", "running", "waiting"] as const;
+
 const consoleLogger: Logger = {
   debug: () => {},
   info: (m, d) => console.info(m, d ?? ""),
@@ -106,12 +134,13 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
     clock,
     logger,
     ...(opts.publicUrl ? { publicUrl: opts.publicUrl } : {}),
-    // The demo has no login: everyone is the same user of tenant "acme".
-    authorize: async () => ({ tenantId: TENANT_ID, userId: DEMO_USER_ID }),
+    authorize: demoAuthorize,
   });
 
-  // CRM changes start workflows. The event ID is the dedupe key, so re-delivering an event never
-  // starts a second run. A workflow problem must not fail the CRM change itself: log it.
+  // CRM changes start workflows, with the event's ID as the dedupe key. Here a failed emit is only
+  // logged and the event is lost (a workflow problem must not fail the CRM change). A production
+  // host would write each event to a transactional outbox with the change and redeliver it with
+  // the same stored ID until the emit succeeds; the dedupe key makes redelivery start one run.
   crm.onEvent(async (event) => {
     try {
       await engine.emit(event.type, event.payload, { tenantId: TENANT_ID, dedupeKey: event.id });
@@ -124,6 +153,8 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
   });
 
   await seedFlows(engine, TENANT_ID);
+  // The CRM is in memory but the engine may persist: re-create approvals of runs still waiting.
+  await restoreApprovals(engine, crm, TENANT_ID);
 
   const app = new Hono();
 
@@ -155,19 +186,33 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
   app.post("/api/approvals/:id/decision", async (c) => {
     const id = c.req.param("id");
     const { decision } = await readBody(c.req.raw, DecisionBody);
-    const approval = crm.getApproval(id);
-    if (!approval) throw new CrmError(`Approval "${id}" not found`, 404);
-    const token = crm.approvalToken(id);
-    if (!token) return c.json({ error: `Approval is already ${approval.status}` }, 409);
-    // Record the decision before resuming, so a concurrent second decision gets a 409.
+    const current = crm.getApproval(id);
+    if (!current) throw new CrmError(`Approval "${id}" not found`, 404);
+    // Claim it synchronously before the first await, so a concurrent second decision gets a 409.
     const decided = crm.settleApproval(id, decision);
-    // Resume server-side with the stored token: it never leaves the server.
-    const outcome = await engine.resume(token, { decision, by: DEMO_USER_ID });
-    if (outcome === "gone") {
-      // The run stopped waiting (timed out or was cancelled) before this decision.
-      return c.json({ error: "gone", approval: crm.expireApproval(id) }, 410);
+    if (!decided) {
+      return c.json({ error: `Approval is already ${current.status}`, approval: current }, 409);
     }
-    return c.json({ approval: decided }, 202);
+    try {
+      // Resume only the step this approval belongs to. `resumeRun` resumes whatever callback the
+      // run waits on and re-checks that it is still waiting, atomically.
+      const detail = await engine.getRunDetail(TENANT_ID, decided.runId);
+      const waiting =
+        detail?.run.status === "waiting" &&
+        detail.run.journal[decided.stepPath]?.status === "suspended";
+      const outcome = waiting
+        ? await engine.resumeRun(TENANT_ID, decided.runId, { decision }, DEMO_USER_ID)
+        : "gone";
+      if (outcome === "gone") {
+        // The run stopped waiting (timed out or was cancelled) before this decision.
+        return c.json({ error: "gone", approval: crm.expireApproval(id) }, 410);
+      }
+      return c.json({ approval: decided }, 202);
+    } catch (err) {
+      // The run was not resumed: undo the claim so the decision can be retried.
+      crm.reopenApproval(id);
+      throw err;
+    }
   });
 
   app.get("/api/demo", async (c) => {
@@ -180,7 +225,13 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
     }
     return c.json({ tenantId: TENANT_ID, userId: DEMO_USER_ID, webhooks });
   });
-  app.post("/api/demo/reset", (c) => {
+  app.post("/api/demo/reset", async (c) => {
+    // Cancel unfinished runs first: they reference contacts and approvals that are about to go.
+    for (const status of ACTIVE_STATUSES) {
+      for (const run of await engine.storage.listRuns(TENANT_ID, { status, limit: 1000 })) {
+        await engine.cancelRun(TENANT_ID, run.id);
+      }
+    }
     crm.reset();
     return c.body(null, 204);
   });

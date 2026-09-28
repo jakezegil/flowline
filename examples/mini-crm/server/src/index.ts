@@ -14,29 +14,51 @@ import { createMiniCrm, TENANT_ID } from "./app";
 const port = Number(process.env.PORT ?? 8787);
 const publicUrl = process.env.PUBLIC_URL ?? `http://localhost:${port}`;
 
-async function createStorage(): Promise<{ storage: StorageAdapter; label: string }> {
+interface Storage {
+  storage: StorageAdapter;
+  label: string;
+  close(): Promise<void>;
+}
+
+async function createStorage(): Promise<Storage> {
   const url = process.env.DATABASE_URL;
-  if (!url) return { storage: createMemoryStorage(), label: "memory" };
+  if (!url) return { storage: createMemoryStorage(), label: "memory", close: async () => {} };
   const pool = new pg.Pool({ connectionString: url });
-  await migrate(pool);
-  return { storage: createPostgresStorage({ pool }), label: "postgres" };
+  try {
+    await migrate(pool);
+  } catch (err) {
+    await pool.end();
+    throw err;
+  }
+  return { storage: createPostgresStorage({ pool }), label: "postgres", close: () => pool.end() };
 }
 
-const { storage, label } = await createStorage();
-const { app, engine } = await createMiniCrm({ storage, publicUrl });
-const worker = engine.startWorker({ concurrency: 2, pollMs: 250 });
+async function main(): Promise<void> {
+  const { storage, label, close } = await createStorage();
+  const { app, engine } = await createMiniCrm({ storage, publicUrl });
+  const worker = engine.startWorker({ concurrency: 2, pollMs: 250 });
 
-const server = serve({ fetch: app.fetch, port }, () => {
-  console.info(`mini-crm server on ${publicUrl} (storage: ${label}, tenant: ${TENANT_ID})`);
-  console.info(`  CRM API:     ${publicUrl}/api/contacts`);
-  console.info(`  Flowkit API: ${publicUrl}/flowkit/manifest`);
-  console.info(`  Webhooks:    ${publicUrl}/api/demo`);
+  const server = serve({ fetch: app.fetch, port }, () => {
+    console.info(`mini-crm server on ${publicUrl} (storage: ${label}, tenant: ${TENANT_ID})`);
+    console.info(`  CRM API:     ${publicUrl}/api/contacts`);
+    console.info(`  Flowkit API: ${publicUrl}/flowkit/manifest`);
+    console.info(`  Webhooks:    ${publicUrl}/api/demo`);
+  });
+
+  const shutdown = async (): Promise<void> => {
+    server.close();
+    await worker.stop();
+    await close();
+    process.exit(0);
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+}
+
+main().catch((err: unknown) => {
+  // A refused connection is an AggregateError with an empty message but a code.
+  const code = (err as { code?: unknown } | null)?.code;
+  const reason = err instanceof Error && err.message ? err.message : String(code ?? err);
+  console.error(`mini-crm failed to start: ${reason}`);
+  process.exit(1);
 });
-
-async function shutdown(): Promise<void> {
-  await worker.stop();
-  server.close();
-  process.exit(0);
-}
-process.once("SIGINT", shutdown);
-process.once("SIGTERM", shutdown);

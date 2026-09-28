@@ -25,7 +25,7 @@ declare module "@flowkit/core" {
   }
 }
 
-export { requestApproval } from "./approval";
+export { approvalIdFor, REQUEST_APPROVAL, requestApproval, restoreApprovals } from "./approval";
 export {
   assignOwner,
   createContact,

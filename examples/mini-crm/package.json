@@ -6,6 +6,8 @@
   "license": "MIT",
   "description": "Example CRM embedding Flowkit: a crm plugin, demo workflows and a Hono server.",
   "scripts": {
+    "dev": "tsx watch server/src/index.ts",
+    "start": "tsx server/src/index.ts",
     "dev:server": "tsx watch server/src/index.ts",
     "start:server": "tsx server/src/index.ts",
     "typecheck": "tsc --noEmit"

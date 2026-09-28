@@ -3,10 +3,10 @@
  *
  * @module
  */
-import { defineNode, FatalError, ui } from "@flowkit/core";
+import { defineNode, ui } from "@flowkit/core";
 import { z } from "zod";
-import { CrmError, DEAL_STAGES, DealSchema } from "../crm-store";
-import { userId } from "./contacts";
+import { DEAL_STAGES, DealSchema } from "../crm-store";
+import { crmCall, userId } from "./contacts";
 
 /**
  * Changes a deal's stage, amount or owner. Like any change to a deal, this reports
@@ -31,11 +31,6 @@ export const updateDeal = defineNode({
   }),
   run: async ({ input, ctx }) => {
     const { dealId, ...changes } = input;
-    try {
-      return await ctx.services.crm.updateDeal(dealId, changes);
-    } catch (err) {
-      if (err instanceof CrmError) throw new FatalError(err.message);
-      throw err;
-    }
+    return crmCall(() => ctx.services.crm.updateDeal(dealId, changes));
   },
 });
