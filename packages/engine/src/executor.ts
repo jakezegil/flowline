@@ -30,7 +30,7 @@ import { FatalError, RetryableError } from "./errors";
 import { buildScope, childSteps, entryAt, type NextAction, nextAction } from "./interpreter";
 import { redactBySchema } from "./redact";
 import type { Lease, NewRunEvent, Run, RunPatch } from "./storage";
-import { startSubflow } from "./subflow";
+import { startSubflow, subflowOutputProblem } from "./subflow";
 
 const DEFAULT_LEASE_MS = 30_000;
 const DEFAULT_STEPS_PER_CLAIM = 100;
@@ -545,6 +545,10 @@ export function createExecutor(opts: EngineOptions): Executor {
       }
     };
 
+    /** For a sub-flow run: why its mapped output breaks the declared output fields, if it does. */
+    const childOutputProblem = (output: unknown): string | undefined =>
+      run.parent ? subflowOutputProblem(registry, doc, output) : undefined;
+
     const execStep = async (action: Extract<NextAction, { type: "exec" }>): Promise<Flow> => {
       const { step, path } = action;
       const label = step.name ?? step.id;
@@ -694,10 +698,12 @@ export function createExecutor(opts: EngineOptions): Executor {
             runOutput.reason = result.reason;
           }
           const entry: JournalEntry = { status: "done", output, attempts: attempt, ...base };
-          // A stopped sub-flow hands the parent its mapped output when every value it maps exists;
-          // otherwise the parent step sees a failed sub-flow.
+          // A stopped sub-flow hands the parent its mapped output when every value it maps exists
+          // and matches the declared output fields; otherwise the parent step sees a failed
+          // sub-flow (the stopped run itself still completes).
           const mapped = mapOutput({ ...journal, [path]: entry }, { strict: true });
           const reason = result.reason === undefined ? "" : `: ${result.reason}`;
+          const problem = mapped.ok ? childOutputProblem(mapped.output) : undefined;
           await commitEntry(
             path,
             entry,
@@ -706,9 +712,11 @@ export function createExecutor(opts: EngineOptions): Executor {
               status: "completed",
               output: runOutput,
               ...wakeParent(
-                mapped.ok
-                  ? { kind: "subflow", output: mapped.output }
-                  : { kind: "subflowFailed", error: { message: `Sub-flow stopped${reason}` } },
+                !mapped.ok
+                  ? { kind: "subflowFailed", error: { message: `Sub-flow stopped${reason}` } }
+                  : problem !== undefined
+                    ? { kind: "subflowFailed", error: { message: problem } }
+                    : { kind: "subflow", output: mapped.output },
               ),
             },
             [
@@ -943,6 +951,11 @@ export function createExecutor(opts: EngineOptions): Executor {
         return;
       }
       const { output } = mapped;
+      const problem = childOutputProblem(output);
+      if (problem !== undefined) {
+        await failRun({ message: problem, fatal: true, code: "subflow.output" });
+        return;
+      }
       const patch: RunPatch = {
         status: "completed",
         currentStep: null,

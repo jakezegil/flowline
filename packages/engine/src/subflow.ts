@@ -81,6 +81,24 @@ async function subflowPayload(
 }
 
 /**
+ * @internal Why `output` (a finished sub-flow run's mapped output) does not match the output
+ * fields its workflow declares, prefixed `Sub-flow output: `; `undefined` when it matches or
+ * nothing is declared. Declared output lives in `config.output` of a trigger of kind `subflow`
+ * (`core.subflow`); a missing output mapping counts as `{}`.
+ */
+export function subflowOutputProblem(
+  registry: Registry,
+  doc: WorkflowDoc,
+  output: unknown,
+): string | undefined {
+  if (registry.getTrigger(doc.trigger.type)?.kind !== "subflow") return undefined;
+  const decls = configValueAt(doc.trigger.config, "output");
+  if (!Array.isArray(decls)) return undefined;
+  const problem = checkFields(decls as FieldDecl[], output ?? {});
+  return problem === undefined ? undefined : `Sub-flow output: ${problem}`;
+}
+
+/**
  * The child run id for the step at `path`: `sub_` + the first 24 hex digits of
  * sha256(`runId:path:attempt`), so re-executing the same call names the same child. If that id
  * already belongs to a finished run (the step was retried with `retryRun`, or the handler starts
