@@ -664,9 +664,8 @@ to add one, and `.github/workflows/release.yml` opens or updates a "Version Pack
 push to `main` with pending changesets, then publishes once that PR is merged (via
 `changesets/action`, gated on the repo's own `install`/`build`/`test`/`typecheck`/`lint` run).
 
-**Do not add the `NPM_TOKEN` secret to this repo until the `@flowline` rename (ruling 79) has
-merged and a publish has been explicitly approved.** Adding it earlier would let the release job
-publish the six packages under the pre-rename `@flowkit` scope as soon as a "Version Packages" PR
-lands on `main` — see the comment at the top of `.github/workflows/release.yml`.
+**Do not add the `NPM_TOKEN` secret until a first publish is explicitly approved.** With no
+pending changesets, the first push to `main` after the secret exists publishes the current
+versions immediately — see the comment at the top of `.github/workflows/release.yml`.
 
 MIT licensed.
