@@ -35,7 +35,7 @@ import {
   useLabels,
 } from "./canvas-context";
 import { edgeTypes, type FlowEdgeData } from "./edges";
-import { fitViewport } from "./fit";
+import { fitViewport, revealViewport } from "./fit";
 import { edgeGeometries } from "./geometry";
 import { handleCanvasKey } from "./keyboard";
 import { EndNode, RejoinNode } from "./rejoin-node";
@@ -309,8 +309,10 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   /**
-   * Pans the selected card on screen if it isn't. `focus` (a selection made before the first
-   * fit, e.g. a run opening on its failed step) centers it at a readable zoom of at least 1.
+   * Pans the selected card on screen with the smallest move, bringing a block's branch heads
+   * along when they fit (so a side panel opening doesn't hide the card or its paths). `focus` (a
+   * selection made before the first fit, e.g. a run opening on its failed step) instead centers
+   * it at a readable zoom of at least 1.
    */
   const revealSelection = useCallback(
     (duration: number, focus = false) => {
@@ -321,14 +323,20 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
       const id = sel === TRIGGER_KEY ? "trigger" : `step:${sel}`;
       const node = l.nodes.find((n) => n.id === id);
       if (!node) return;
-      const [tx, ty, current] = transform;
-      const zoom = focus ? Math.max(current, 1) : current;
-      const x = node.x * zoom + tx;
-      const y = node.y * zoom + ty;
-      const m = PAN_MARGIN;
-      const inView = x >= m && y >= m && x + node.w * zoom <= W - m && y + node.h * zoom <= H - m;
-      if (zoom === current && inView) return;
-      rf.setCenter(node.x + node.w / 2, node.y + node.h / 2, { zoom, duration });
+      const heads = l.edges
+        .filter((e) => e.kind === "branch" && e.source === id)
+        .flatMap((e) => l.nodes.find((n) => n.id === e.target) ?? []);
+      const pane = { width: W, height: H };
+      const current = transform[2];
+      if (focus) {
+        if (current < 1 || revealViewport(pane, transform, node, [], PAN_MARGIN)) {
+          const zoom = Math.max(current, 1);
+          rf.setCenter(node.x + node.w / 2, node.y + node.h / 2, { zoom, duration });
+        }
+        return;
+      }
+      const next = revealViewport(pane, transform, node, heads, PAN_MARGIN);
+      if (next) rf.setViewport(next, { duration });
     },
     [rf, flowStore, layoutRef],
   );
@@ -353,6 +361,7 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
       edgeTypes={edgeTypes}
       aria-label={labels.canvas}
       colorMode={colorMode}
+      attributionPosition="bottom-left"
       ariaLabelConfig={ariaLabelConfig}
       nodesDraggable={false}
       nodesConnectable={false}

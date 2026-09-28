@@ -149,10 +149,27 @@
     opacity: 0;
     pointer-events: none;
   }
+  /*
+   * React Flow's attribution sits in the bottom-left chrome, right of the zoom controls (3 × 30px
+   * buttons + borders), on a surface of its own: edge labels and cards panning under it are
+   * covered rather than overprinted, and nothing fixed shares the spot. It stays visible, as
+   * React Flow's license asks unless you have React Flow Pro.
+   */
   .fk-canvas .react-flow__attribution {
-    background: transparent;
+    display: flex;
+    align-items: center;
+    height: 22px;
+    margin: 0;
+    padding: 0 7px;
     font-size: 10px;
-    opacity: 0.6;
+    line-height: 1;
+    background: var(--fk-surface);
+    border: 1px solid var(--fk-border);
+    border-radius: 6px;
+  }
+  .fk-canvas .react-flow__attribution.bottom.left {
+    bottom: 20px;
+    left: calc(15px + 94px + 8px);
   }
   .fk-canvas .react-flow__attribution a {
     color: var(--fk-text-muted);
@@ -3596,8 +3613,22 @@
     gap: 6px;
     min-width: 0;
   }
+  /* Its text area matches the value field's below, which reserves room for the {} button. */
   .fk-case__label {
+    padding-right: 38px;
     font-weight: 500;
+  }
+  /* A sub-flow's output mapping, under the trigger's config. */
+  .fk-output {
+    padding-top: 2px;
+  }
+  .fk-output__type {
+    font-size: 11px;
+    color: var(--fk-text-muted);
+  }
+  .fk-output .fk-icon-btn {
+    width: 24px;
+    height: 24px;
   }
   .fk-case__id {
     font-family: var(--fk-font-mono);
@@ -3613,9 +3644,12 @@
     flex: 1 1 auto;
     min-width: 0;
   }
+  /* Sized to its widest option ("True / false", or a translation), never cut off. */
   .fk-decl__type {
     flex: 0 0 auto;
-    width: 104px;
+    width: auto;
+    min-width: 96px;
+    max-width: 55%;
   }
   .fk-decl__sub {
     display: flex;
@@ -3804,9 +3838,6 @@
   @container fk-app (max-width: 420px) {
     .fk-webhook__row {
       flex-direction: column;
-    }
-    .fk-decl__type {
-      width: 88px;
     }
   }
 

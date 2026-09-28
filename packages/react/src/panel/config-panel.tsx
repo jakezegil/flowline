@@ -17,6 +17,7 @@ import { Hint } from "../ui/primitives";
 import { IssueNotes } from "./fields/shell";
 import { metaOf, propertiesOf, topKey } from "./schema";
 import { SchemaForm } from "./schema-form";
+import { outputIssues } from "./subflow-output";
 import { TestStep } from "./test-step";
 import { TriggerConfigure, TriggerSample, triggerIssues } from "./trigger-config";
 
@@ -246,7 +247,10 @@ function PanelTabs({
   const allIssues = useEditorStore((s) => s.issues);
   // The store's test state is the one source of truth, shared with the canvas cards.
   const testState = useEditorStore((s) => s.testState[selection]);
-  const issues = selection === TRIGGER_KEY ? triggerIssues(allIssues) : (info?.issues ?? []);
+  const issues =
+    selection === TRIGGER_KEY
+      ? [...triggerIssues(allIssues), ...outputIssues(allIssues)]
+      : (info?.issues ?? []);
   const errors = issues.filter((i) => i.severity === "error").length;
   const count = issues.length;
   const tabs: Tab[] = ["configure", "test"];

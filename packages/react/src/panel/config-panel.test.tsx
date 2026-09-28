@@ -2,6 +2,7 @@ import type { Manifest, WorkflowDoc } from "@flowkit/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import builtin from "../../playground/builtin-manifest.json";
+import { editorView, typeInto } from "../../test/codemirror-dom";
 import { mockClient, setupDom } from "../../test/dom";
 import { docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
 import { FlowkitProvider } from "../provider";
@@ -233,5 +234,62 @@ describe("ConfigPanel for the trigger", () => {
     fireEvent.change(sample, { target: { value: '{"email":"x@y.z"}' } });
     fireEvent.click(screen.getByRole("button", { name: "Save sample" }));
     await waitFor(() => expect(store.getState().samples[TRIGGER_KEY]).toEqual({ email: "x@y.z" }));
+  });
+
+  test("Fill from fields gives each field a sample value that suits its name", () => {
+    const doc: WorkflowDoc = {
+      ...docWith([]),
+      trigger: {
+        type: "core.manual",
+        config: {
+          fields: [
+            { name: "firstName", type: "string" },
+            { name: "lastName", type: "string" },
+            { name: "contactId", type: "string" },
+            { name: "amount", type: "number" },
+          ],
+        },
+      },
+    };
+    setup({ doc, select: TRIGGER_KEY, manifest: withBuiltinTriggers });
+    fireEvent.click(screen.getByRole("tab", { name: /Test/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Fill from fields" }));
+    const sample = screen.getByRole("textbox", { name: "Sample input" }) as HTMLTextAreaElement;
+    expect(JSON.parse(sample.value)).toEqual({
+      firstName: "Ada",
+      lastName: "Lovelace",
+      contactId: "contact_123",
+      amount: 1200,
+    });
+  });
+
+  test("a sub-flow maps its declared outputs, with issues and undeclared keys shown", () => {
+    const doc: WorkflowDoc = {
+      ...fixtureDoc(),
+      trigger: {
+        type: "core.subflow",
+        config: {
+          fields: [{ name: "contactId", type: "string", required: true }],
+          output: [
+            { name: "email", type: "string", required: true },
+            { name: "score", type: "number" },
+          ],
+        },
+      },
+      output: { stale: "x" },
+    };
+    const { store } = setup({ doc, select: TRIGGER_KEY, manifest: withBuiltinTriggers });
+    expect(screen.getByText("Output values")).toBeTruthy();
+    expect(screen.getByText('"email" is required')).toBeTruthy();
+    expect(screen.getByText(/Not a declared output field/)).toBeTruthy();
+
+    act(() => typeInto(editorView("Output email"), "a@b.c"));
+    expect(store.getState().doc.output).toEqual({ stale: "x", email: "a@b.c" });
+    expect(screen.queryByText('"email" is required')).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove output stale" }));
+    expect(store.getState().doc.output).toEqual({ email: "a@b.c" });
+    act(() => store.getState().undo());
+    expect(store.getState().doc.output).toEqual({ stale: "x", email: "a@b.c" });
   });
 });

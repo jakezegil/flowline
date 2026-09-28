@@ -128,6 +128,13 @@ export interface EditorActions {
   setTrigger(type: string): void;
   /** Like {@link EditorActions.setConfig}, for the trigger's config. */
   setTriggerConfig(key: string, value: ValueExpr | undefined): void;
+  /**
+   * Sets (or, with `undefined`, removes) output `key` of the workflow's output mapping
+   * (`doc.output`, what a sub-flow returns to its caller). Removing the last key removes the
+   * mapping. Bursts of edits to the same key coalesce into one undo step, like
+   * {@link EditorActions.setConfig}; an unchanged value does nothing.
+   */
+  setOutput(key: string, value: ValueExpr | undefined): void;
   /** Selects a step, the trigger ({@link TRIGGER_KEY}), or nothing. Not recorded in history. */
   select(id: string | null): void;
   /** Copies a step (with its subtree) to the editor clipboard. Unknown IDs are ignored. */
@@ -506,6 +513,18 @@ export function createEditorStore(init: {
           },
           needsTest(TRIGGER_KEY),
           `trigger\u0000${key}`,
+        );
+      },
+
+      setOutput(key, value) {
+        const { doc } = get();
+        if (jsonEqual(doc.output?.[key], value)) return;
+        const { output: _, ...rest } = doc;
+        const output = withConfigValue(doc.output ?? {}, key, value);
+        commit(
+          Object.keys(output).length > 0 ? { ...rest, output } : rest,
+          {},
+          `output\u0000${key}`,
         );
       },
 

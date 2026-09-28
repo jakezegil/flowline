@@ -236,7 +236,8 @@ export function EnumField(p: FieldProps): JSX.Element {
   const { labels } = useFlowkitAppearance();
   const id = useId();
   const values = enumOptions(p.schema);
-  const options = values.map((v) => ({ value: v, label: optionLabel(v) }));
+  const meta = metaOf(p.schema);
+  const options = values.map((v) => ({ value: v, label: optionLabel(v, meta) }));
   const current = p.value !== undefined ? p.value : (p.schema.default as ValueExpr | undefined);
   const always = p.required || p.schema.default !== undefined;
   const compact =
@@ -289,33 +290,19 @@ function isJsonLiteral(v: ValueExpr | undefined): boolean {
 }
 
 /**
- * A value of any type: text with pills, or JSON for numbers, lists and objects (references go in
- * as `{ "$ref": "…" }` there).
+ * A value of any type: text with pills, or JSON for numbers, lists and objects. In JSON,
+ * references are pills too: a pill in value position is a reference, one inside a string makes a
+ * template, and the picker and `{{` autocomplete insert them as in any text field.
  */
 export function AnyField(p: FieldProps): JSX.Element {
   const env = useFormEnv();
   const { labels } = useFlowkitAppearance();
   const meta = metaOf(p.schema);
-  const id = useId();
   const [json, setJson] = useState(() => isJsonLiteral(p.value));
-  const [draft, setDraft] = useState<string | null>(null);
+  const [bad, setBad] = useState(false);
   // Like the `{x}` toggle: turning JSON off keeps the JSON value to restore when it's turned back on.
   const stash = useRef<ValueExpr | undefined>(undefined);
   const refOnly = meta.refOnly === true;
-  const text = p.value === undefined ? "" : JSON.stringify(p.value, null, 2);
-  let draftValue: unknown;
-  let bad = false;
-  if (draft !== null && draft.trim() !== "") {
-    try {
-      draftValue = JSON.parse(draft);
-    } catch {
-      bad = true;
-    }
-  }
-  const shown =
-    draft !== null && (bad || JSON.stringify(draftValue) === JSON.stringify(p.value))
-      ? draft
-      : text;
   const jsonMode = json || isJsonLiteral(p.value);
   const toggle =
     meta.literalOnly || refOnly ? undefined : (
@@ -333,7 +320,7 @@ export function AnyField(p: FieldProps): JSX.Element {
             if (p.value === undefined || p.value === "") p.onChange(stash.current);
             stash.current = undefined;
           }
-          setDraft(null);
+          setBad(false);
           setJson(!jsonMode);
         }}
       >
@@ -347,37 +334,30 @@ export function AnyField(p: FieldProps): JSX.Element {
       description={p.schema.description as string | undefined}
       issues={env.issues.filter((i) => i.field === p.path)}
       aside={toggle}
-      {...(jsonMode ? { htmlFor: id } : {})}
       bare={p.bare}
     >
       {jsonMode ? (
         <>
-          <textarea
-            id={id}
-            className="fk-input fk-input--mono"
-            rows={Math.min(12, Math.max(3, shown.split("\n").length))}
-            spellCheck={false}
-            value={shown}
+          <RefTextInput
+            key="json"
+            json
+            multiline
+            onJsonError={setBad}
+            value={p.value}
+            onChange={p.onChange}
+            scope={env.scope}
+            samples={env.samples}
             placeholder={labels.jsonPlaceholder}
-            aria-invalid={bad || undefined}
-            aria-label={p.bare ? p.label : undefined}
+            invalidRefs={env.invalidRefs}
+            ariaLabel={p.label}
+            literalOnly={meta.literalOnly === true}
             readOnly={env.readOnly}
-            onChange={(e) => {
-              const t = e.target.value;
-              setDraft(t);
-              if (t.trim() === "") return p.onChange(undefined);
-              try {
-                p.onChange(JSON.parse(t) as ValueExpr);
-              } catch {
-                // Keep the draft; the error shows below.
-              }
-            }}
-            onBlur={() => !bad && setDraft(null)}
           />
           {bad && <p className="fk-f__local">{labels.invalidJson}</p>}
         </>
       ) : (
         <RefTextInput
+          key="text"
           value={p.value}
           onChange={p.onChange}
           scope={env.scope}

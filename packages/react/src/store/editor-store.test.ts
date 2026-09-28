@@ -678,3 +678,48 @@ describe("performance", () => {
     expect(best).toBeLessThan(20);
   });
 });
+
+describe("setOutput", () => {
+  test("sets and removes output mappings as undoable steps, revalidating", () => {
+    const store = storeFor();
+    const s = store.getState;
+    s().setOutput("email", { $ref: "steps.load.email" });
+    expect(s().doc.output).toEqual({ email: { $ref: "steps.load.email" } });
+    expect(s().dirty).toBe(true);
+    vi.advanceTimersByTime(1000);
+    s().setOutput("bad", { $ref: "steps.ghost.x" });
+    expect(s().issues).toContainEqual(
+      expect.objectContaining({ code: "ref.unresolved", field: "output.bad" }),
+    );
+    // Removing the last key removes the mapping.
+    vi.advanceTimersByTime(1000);
+    s().setOutput("bad", undefined);
+    vi.advanceTimersByTime(1000);
+    s().setOutput("email", undefined);
+    expect("output" in s().doc).toBe(false);
+    s().undo();
+    expect(s().doc.output).toEqual({ email: { $ref: "steps.load.email" } });
+    s().undo();
+    expect(s().doc.output).toEqual({
+      email: { $ref: "steps.load.email" },
+      bad: { $ref: "steps.ghost.x" },
+    });
+    s().redo();
+    s().redo();
+    expect(s().doc.output).toBeUndefined();
+  });
+
+  test("an unchanged value adds no history; a burst on one key coalesces", () => {
+    const store = storeFor();
+    const s = store.getState;
+    s().setOutput("x", undefined);
+    expect(s().canUndo).toBe(false);
+    s().setOutput("note", "a");
+    s().setOutput("note", "ab");
+    s().setOutput("note", "ab");
+    s().undo();
+    expect(s().doc.output).toBeUndefined();
+    expect(s().canUndo).toBe(false);
+    expect(s().dirty).toBe(false);
+  });
+});

@@ -39,6 +39,7 @@ import { PortalContainerContext } from "../canvas/canvas-context";
 import { useFlowkitAppearance } from "../provider";
 import { DataPickerView, type PickerExit, type PickVia } from "./data-picker";
 import { refInputTheme } from "./picker/editor-theme";
+import { jsonToParts, partsToJson } from "./picker/json-parts";
 import {
   addPill,
   docParts,
@@ -140,6 +141,30 @@ const pillOnly = EditorState.transactionFilter.of((tr) => {
   return [];
 });
 
+/** The editor's text and pills for a value, in the field's mode. */
+function docOf(
+  value: ValueExpr | undefined,
+  literalOnly: boolean,
+  json: boolean,
+): { doc: string; pills: { from: number; to: number; ref: string }[] } {
+  if (literalOnly) {
+    const doc = json
+      ? value === undefined
+        ? ""
+        : JSON.stringify(value, null, 2)
+      : valueToParts(value, true)
+          .map((p) => ("text" in p ? p.text : ""))
+          .join("");
+    return { doc, pills: [] };
+  }
+  return partsToDoc(json ? jsonToParts(value) : valueToParts(value));
+}
+
+/** JSON text in the mono font of code. */
+const jsonTheme = EditorView.theme({
+  ".cm-content": { fontFamily: "var(--fk-font-mono)", fontSize: "12px" },
+});
+
 /**
  * A text field that mixes literal text with references to upstream data, shown as pills.
  * Emits a literal string for plain text, `{ $ref }` for exactly one pill and nothing else, and
@@ -150,6 +175,9 @@ const pillOnly = EditorState.transactionFilter.of((tr) => {
  * - `literalOnly`: plain text only, no pills and no picker.
  * - `invalidRefs`: references to show as stale (warning-styled); references that don't resolve
  *   in `scope` are shown stale too.
+ * - `json`: the content is JSON (any value), with pills standing for `{ $ref }` values and
+ *   strings holding pills for `{ $tpl }` values. Text that isn't valid JSON isn't emitted;
+ *   `onJsonError` hears whether the content currently parses.
  */
 export function RefTextInput(props: {
   value: ValueExpr | undefined;
@@ -163,6 +191,8 @@ export function RefTextInput(props: {
   singlePill?: boolean;
   literalOnly?: boolean;
   readOnly?: boolean;
+  json?: boolean;
+  onJsonError?(invalid: boolean): void;
 }): JSX.Element {
   const {
     value,
@@ -175,7 +205,10 @@ export function RefTextInput(props: {
     singlePill = false,
     literalOnly = false,
     readOnly = false,
+    json = false,
   } = props;
+  const onJsonErrorRef = useRef(props.onJsonError);
+  onJsonErrorRef.current = props.onJsonError;
   const { labels, resolveIcon } = useFlowkitAppearance();
   const portal = useContext(PortalContainerContext);
   const id = useId();
@@ -239,7 +272,15 @@ export function RefTextInput(props: {
 
   const emit = (state: EditorState) => {
     let next: ValueExpr | undefined;
-    if (literalOnly) {
+    if (json) {
+      const read = literalOnly
+        ? partsToJson([{ text: state.doc.toString() }])
+        : partsToJson(docParts(state));
+      onJsonErrorRef.current?.(!read.ok);
+      // Invalid JSON stays in the editor (and out of the value) until it parses again.
+      if (!read.ok) return;
+      next = read.value;
+    } else if (literalOnly) {
       const text = state.doc.toString();
       next = text === "" ? undefined : text;
     } else {
@@ -274,16 +315,10 @@ export function RefTextInput(props: {
     const host = hostRef.current;
     if (!host) return;
     const c = compartments.current;
-    const { doc, pills } = literalOnly
-      ? {
-          doc: valueToParts(value, true)
-            .map((p) => ("text" in p ? p.text : ""))
-            .join(""),
-          pills: [],
-        }
-      : partsToDoc(valueToParts(value));
+    const { doc, pills } = docOf(value, literalOnly, json);
     const extensions: Extension[] = [
       refInputTheme,
+      ...(json ? [jsonTheme] : []),
       history(),
       EditorView.lineWrapping,
       c.attrs.of(attrs()),
@@ -341,7 +376,7 @@ export function RefTextInput(props: {
       view.destroy();
       viewRef.current = null;
     };
-  }, [multiline, singlePill, literalOnly, portal]);
+  }, [multiline, singlePill, literalOnly, json, portal]);
 
   // Props → editor.
   useEffect(() => {
@@ -377,21 +412,16 @@ export function RefTextInput(props: {
     const view = viewRef.current;
     if (!view || valueKey(value) === lastKey.current) return;
     lastKey.current = valueKey(value);
-    const { doc, pills } = literalOnly
-      ? {
-          doc: valueToParts(value, true)
-            .map((p) => ("text" in p ? p.text : ""))
-            .join(""),
-          pills: [],
-        }
-      : partsToDoc(valueToParts(value));
+    const { doc, pills } = docOf(value, literalOnly, json);
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: doc },
       ...(literalOnly ? {} : { effects: setPills.of(pills) }),
       // Not an edit of the user's: undo mustn't bring back the value it replaced.
       annotations: [external.of(true), Transaction.addToHistory.of(false)],
     });
-  }, [value, literalOnly]);
+    // A value from outside (e.g. undo) replaces any unparsed JSON draft.
+    if (json) onJsonErrorRef.current?.(false);
+  }, [value, literalOnly, json]);
 
   // A pill's hover card would sit over the picker: none while it's open.
   useEffect(() => {

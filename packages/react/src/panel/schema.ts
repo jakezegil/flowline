@@ -68,8 +68,13 @@ export function humanize(key: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** Display text of an enum value: kept as written unless it is a lowercase word. */
-export function optionLabel(value: unknown): string {
+/**
+ * Display text of an enum value: its `x-flowkit.enumLabels` entry (keyed by the value as a
+ * string) when `meta` has one, else the value as written unless it is a lowercase word.
+ */
+export function optionLabel(value: unknown, meta?: UiMeta): string {
+  const custom = meta?.enumLabels?.[typeof value === "string" ? value : JSON.stringify(value)];
+  if (typeof custom === "string" && custom !== "") return custom;
   if (typeof value !== "string") return JSON.stringify(value);
   if (value === "") return "(empty)";
   if (/^[a-z][a-zA-Z0-9_-]*$/.test(value)) return humanize(value);

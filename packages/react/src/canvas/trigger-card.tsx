@@ -38,9 +38,12 @@ function triggerCaption(
   }
 }
 
+/** Issues shown on the trigger: its own, and the output mapping's (edited in its panel). */
 const isTriggerIssue = (i: Issue) =>
   i.stepId === undefined &&
-  (i.code === "trigger.unknown" || i.field?.startsWith("trigger.") === true);
+  (i.code === "trigger.unknown" ||
+    i.field?.startsWith("trigger.") === true ||
+    i.field?.startsWith("output.") === true);
 
 /** The workflow's trigger card, at the top of the canvas. */
 export const TriggerCard = memo(function TriggerCard({ selected }: NodeProps<TriggerNode>) {

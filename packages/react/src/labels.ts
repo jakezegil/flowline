@@ -257,6 +257,18 @@ export interface FlowkitLabels {
   copyUrl: string;
   /** Explains an event trigger. */
   eventTriggerHint(event: string): string;
+  /** Heading of a sub-flow's output mapping (in the trigger panel). */
+  outputMapping: string;
+  /** Explains the output mapping. */
+  outputMappingHint: string;
+  /** Instead of the output rows while the sub-flow declares no output fields. */
+  outputMappingEmpty: string;
+  /** Accessible name of an output's value field. */
+  outputValue(name: string): string;
+  /** Marks a mapped output that isn't declared (any more). */
+  outputUndeclared: string;
+  /** Removes an undeclared output from the mapping. */
+  removeOutput(name: string): string;
   /** Screen-reader text of the required-field marker. */
   requiredField: string;
   /** Ref-mode toggle of number, boolean, choice and list fields. */
@@ -662,6 +674,13 @@ export const defaultLabels: FlowkitLabels = {
   webhookSaveFirst: "Save the workflow to generate its URL.",
   copyUrl: "Copy URL",
   eventTriggerHint: (event) => `Runs every time the ${event} event happens.`,
+  outputMapping: "Output values",
+  outputMappingHint:
+    "What this sub-flow returns to the workflow that ran it. Pick each value from the trigger or the top-level steps.",
+  outputMappingEmpty: "Declare output fields above to map their values here.",
+  outputValue: (name) => `Output ${name}`,
+  outputUndeclared: "Not a declared output field, so calling workflows can't pick it.",
+  removeOutput: (name) => `Remove output ${name}`,
   requiredField: "(required)",
   useReference: "Use data from earlier steps",
   useLiteral: "Enter a value instead",

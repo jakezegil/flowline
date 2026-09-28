@@ -7,6 +7,7 @@
 import {
   availableScope,
   type Issue,
+  isFieldShown,
   type JSONSchema,
   type ScopeEntry,
   type ValueExpr,
@@ -196,6 +197,9 @@ export function ObjectFields({
     const prop = deref(env.root, raw);
     const meta = metaOf(unwrapNullable(env.root, prop));
     if (meta.hidden) continue;
+    // Conditional fields (`showIf`) keep their value while hidden, so switching back restores it.
+    if (!isFieldShown(meta.showIf, value, s.properties as Record<string, unknown> | undefined))
+      continue;
     const fieldPath = path === "" ? key : `${path}.${key}`;
     const el = (
       <Field
