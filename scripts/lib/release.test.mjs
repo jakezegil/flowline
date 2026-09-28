@@ -21,6 +21,7 @@ import {
   releaseGroups,
   tagsFor,
   topoSort,
+  waitBudgetMs,
   waitForVersion,
 } from "./release.mjs";
 
@@ -132,11 +133,16 @@ describe("fetchPublishedVersions", () => {
     ).rejects.toThrow(/503/);
   });
 
-  it("bypasses the CDN when fresh", async () => {
-    const { f, calls } = scripted({ status: 404 });
+  it("reads the full packument with a cache-bust query when fresh", async () => {
+    const { f, calls } = scripted({ status: 404 }, { status: 404 });
     await fetchPublishedVersions("@f/x", { fetch: f, registry: "https://r.example", fresh: true });
     expect(calls[0].url).toMatch(/^https:\/\/r\.example\/@f%2Fx\?cache-bust=\d+-0$/);
+    expect(calls[0].init.headers.accept).toBe("application/json");
     expect(calls[0].init.headers["cache-control"]).toBe("no-cache");
+
+    await fetchPublishedVersions("@f/x", { fetch: f, registry: "https://r.example" });
+    expect(calls[1].url).toBe("https://r.example/@f%2Fx");
+    expect(calls[1].init.headers.accept).toBe("application/vnd.npm.install-v1+json");
   });
 });
 
@@ -173,6 +179,22 @@ describe("waitForVersion", () => {
       await waitForVersion("@f/x", "0.2.0", { fetch: f, attempts: 3, sleep: async () => {} }),
     ).toBe(false);
     expect(calls).toHaveLength(3);
+  });
+
+  it("is bounded: capped backoff that outlasts the CDN's 300s max-age", async () => {
+    const delays = [];
+    const { f, calls } = seq(...Array(20).fill(404));
+    expect(
+      await waitForVersion("@f/x", "0.2.0", {
+        fetch: f,
+        sleep: async (ms) => void delays.push(ms),
+      }),
+    ).toBe(false);
+    expect(calls).toHaveLength(9);
+    expect(delays).toEqual([5000, 10000, 20000, 40000, 60000, 60000, 60000, 60000]);
+    expect(waitBudgetMs()).toBe(315000);
+    expect(waitBudgetMs()).toBeGreaterThan(300000);
+    expect(waitBudgetMs()).toBeLessThan(8 * 60000);
   });
 });
 
@@ -243,6 +265,23 @@ describe("classifyTip", () => {
   });
   it("fast-forwards over our own release commit (re-run after a failed publish)", () => {
     expect(classifyTip({ isAncestor: true, ahead: [bot] })).toBe("fast-forward");
+  });
+  it("fast-forwards over a pre-mode release commit (consumed changesets move to .changeset/pre/)", () => {
+    const pre = {
+      ...bot,
+      subject: `${RELEASE_COMMIT_SUBJECT} v1.0.0-rc.1 [skip ci]`,
+      files: [
+        ".changeset/pre.json",
+        ".changeset/pre/brave-lions-sing.md",
+        "packages/core/CHANGELOG.md",
+        "packages/core/package.json",
+      ],
+    };
+    expect(classifyTip({ isAncestor: true, ahead: [pre] })).toBe("fast-forward");
+    const nested = { ...pre, files: [".changeset/pre/x/y.md"] };
+    expect(classifyTip({ isAncestor: true, ahead: [nested] })).toBe("superseded");
+    const notMd = { ...pre, files: [".changeset/pre/run.sh"] };
+    expect(classifyTip({ isAncestor: true, ahead: [notMd] })).toBe("superseded");
   });
   it("is superseded by any other commit", () => {
     expect(

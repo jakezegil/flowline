@@ -114,8 +114,11 @@ const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * Network errors and 5xx are retried with backoff; anything else throws. Guessing "unpublished"
  * could cause a spurious publish attempt, and guessing "published" could skip a release.
  *
- * `fresh` bypasses the registry CDN (the abbreviated packument is served with max-age=300, and a
- * brand-new package's earlier 404 can be cached too): a unique query string plus no-cache.
+ * Normal reads use the abbreviated packument, which the registry CDN caches (max-age=300). That
+ * includes a brand-new package's earlier 404, and a query string does not bust it (measured).
+ * `fresh` reads request the full packument (`accept: application/json`) with a unique query
+ * string instead. Measured against registry.npmjs.org, that read misses the CDN cache and sees a
+ * publish immediately.
  * @param {string} name
  * @param {{ fetch?: typeof fetch, registry?: string, fresh?: boolean, retries?: number,
  *   delayMs?: number, sleep?: (ms: number) => Promise<void> }} [opts]
@@ -128,8 +131,9 @@ export async function fetchPublishedVersions(name, opts = {}) {
   const delayMs = opts.delayMs ?? 1000;
   const registry = (opts.registry ?? DEFAULT_REGISTRY).replace(/\/$/, "");
   const base = `${registry}/${name.replace("/", "%2F")}`;
-  const headers = { accept: "application/vnd.npm.install-v1+json" };
-  if (opts.fresh) headers["cache-control"] = "no-cache";
+  const headers = opts.fresh
+    ? { accept: "application/json", "cache-control": "no-cache" }
+    : { accept: "application/vnd.npm.install-v1+json" };
   for (let attempt = 0; ; attempt++) {
     const url = opts.fresh ? `${base}?cache-bust=${Date.now()}-${attempt}` : base;
     let res;
@@ -152,8 +156,13 @@ export async function fetchPublishedVersions(name, opts = {}) {
 }
 
 /**
- * Waits until `name@version` is visible on the registry, polling with fresh (uncached) reads and
- * backoff. Used right after a publish, when a cached "not found" is expected for a little while.
+ * Waits until `name@version` is visible on the registry, polling with fresh reads and backoff.
+ * Used right after a publish, when stale metadata is expected for a little while.
+ *
+ * The wait is bounded. The delay doubles from `delayMs` and is capped at `12 * delayMs`. With the
+ * defaults (9 attempts, 5s) that is 5+10+20+40+60+60+60+60 = 315s of sleep, just past the CDN's
+ * 300s max-age in case even the fresh read is served stale. Callers poll packages concurrently,
+ * so the total stays inside github-release's 10-minute job timeout.
  * @param {string} name
  * @param {string} version
  * @param {Parameters<typeof fetchPublishedVersions>[1] & { attempts?: number }} [opts]
@@ -161,13 +170,21 @@ export async function fetchPublishedVersions(name, opts = {}) {
  */
 export async function waitForVersion(name, version, opts = {}) {
   const sleep = opts.sleep ?? defaultSleep;
-  const attempts = opts.attempts ?? 6;
+  const attempts = opts.attempts ?? 9;
   const delayMs = opts.delayMs ?? 5000;
+  const maxDelayMs = 12 * delayMs;
   for (let i = 0; i < attempts; i++) {
     if ((await fetchPublishedVersions(name, { ...opts, fresh: true })).has(version)) return true;
-    if (i < attempts - 1) await sleep(delayMs * 2 ** i);
+    if (i < attempts - 1) await sleep(Math.min(delayMs * 2 ** i, maxDelayMs));
   }
   return false;
+}
+
+/** Sleep schedule of `waitForVersion` (for docs/tests): total ms slept before giving up. */
+export function waitBudgetMs({ attempts = 9, delayMs = 5000 } = {}) {
+  let total = 0;
+  for (let i = 0; i < attempts - 1; i++) total += Math.min(delayMs * 2 ** i, 12 * delayMs);
+  return total;
 }
 
 /**
@@ -196,7 +213,7 @@ export function distTagFor(version) {
 
 /** Paths a version commit may touch: manifests, changelogs, changesets, the lockfile. */
 const RELEASE_COMMIT_PATH =
-  /^(\.changeset\/[^/]+|pnpm-lock\.yaml|(packages|examples)\/[^/]+\/(package\.json|CHANGELOG\.md))$/;
+  /^(\.changeset\/[^/]+|\.changeset\/pre\/[^/]+\.md|pnpm-lock\.yaml|(packages|examples)\/[^/]+\/(package\.json|CHANGELOG\.md))$/;
 
 /**
  * Our own version commit: bot identity, our subject, and only version-bump files. The file check

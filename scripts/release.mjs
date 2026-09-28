@@ -380,21 +380,23 @@ async function cmdPublish(flags, extra) {
 async function cmdGithubRelease(flags) {
   const sha = typeof flags.sha === "string" ? flags.sha : git(["rev-parse", "HEAD"]).stdout.trim();
   // Versions the publish job just confirmed (--published) are trusted as-is. Anything else is
-  // checked on the registry, and a miss is re-checked with uncached reads and backoff: right
-  // after a publish the CDN can still serve the old packument (max-age=300), or a cached 404 for
-  // a brand-new package.
+  // checked on the registry. A miss is re-checked with fresh full-packument reads (bounded
+  // backoff), because right after a publish the CDN can still serve the old abbreviated
+  // packument (max-age=300), or a cached 404 for a brand-new package.
   const confirmed = new Set(
     typeof flags.published === "string" ? flags.published.split(/\s+/).filter(Boolean) : [],
   );
   const pkgs = await withPublishState(readPublishablePackages(root));
-  const missing = [];
-  for (const p of pkgs) {
-    const id = `${p.name}@${p.version}`;
-    if (p.published || confirmed.has(id)) continue;
-    log(`${id} is not visible on the registry yet; waiting`);
-    if (await waitForVersion(p.name, p.version, { registry, delayMs: WAIT_MS })) continue;
-    missing.push(id);
-  }
+  // Poll the unconfirmed packages concurrently so the bounded wait (see waitForVersion) is paid
+  // once, not once per package.
+  const pending = pkgs.filter((p) => !p.published && !confirmed.has(`${p.name}@${p.version}`));
+  const visible = await Promise.all(
+    pending.map((p) => {
+      log(`${p.name}@${p.version} is not visible on the registry yet; waiting`);
+      return waitForVersion(p.name, p.version, { registry, delayMs: WAIT_MS });
+    }),
+  );
+  const missing = pending.filter((_, i) => !visible[i]).map((p) => `${p.name}@${p.version}`);
   if (missing.length) fail(`not on the registry: ${missing.join(", ")}`);
 
   for (const tag of tagsFor(pkgs)) {

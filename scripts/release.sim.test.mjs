@@ -81,6 +81,7 @@ appendFileSync(file, JSON.stringify({ tool: "gh", args, notes: i >= 0 ? readFile
 let server;
 let env;
 let staleReads = 0;
+let staleFullReads = false;
 let registryLog = [];
 
 async function release(args, extraEnv = {}) {
@@ -132,10 +133,13 @@ beforeAll(async () => {
   server = createServer((req, res) => {
     const url = new URL(req.url, "http://registry.test");
     const name = decodeURIComponent(url.pathname.slice(1));
-    registryLog.push(url.search);
-    // CDN lag: the next `staleReads` requests see a cached 404, whatever the registry holds.
-    const stale = staleReads > 0;
-    if (stale) staleReads--;
+    const full = req.headers.accept === "application/json" && url.search.startsWith("?cache-bust=");
+    registryLog.push({ search: url.search, full });
+    // CDN lag, as measured on registry.npmjs.org: the next `staleReads` abbreviated reads see a
+    // cached 404 whatever the registry holds, while a cache-busted full-packument read is fresh
+    // (unless `staleFullReads` simulates an outage that outlasts the wait).
+    const stale = full ? staleFullReads : staleReads > 0;
+    if (!full && staleReads > 0) staleReads--;
     const pkg = stale ? undefined : registry()[name];
     if (!pkg) {
       res.writeHead(404).end("{}");
@@ -345,13 +349,16 @@ describe("release simulation", { timeout: 60_000 }, () => {
   });
 
   describe("github-release right after a publish, while the registry CDN is stale", () => {
-    it("waits with uncached reads until the versions show up", async () => {
-      staleReads = 3; // both cached reads miss, and so does the first uncached re-check
+    it("re-checks with fresh full-packument reads, which the stale CDN doesn't affect", async () => {
+      staleReads = 1000; // every abbreviated (cacheable) read is a cached 404
       registryLog = [];
       const res = await release(["github-release"]);
+      staleReads = 0;
       expect(res.code).toBe(0);
       expect(res.stderr).toMatch(/@sim\/a@0\.2\.0 is not visible on the registry yet; waiting/);
-      expect(registryLog.filter((q) => q.startsWith("?cache-bust=")).length).toBeGreaterThan(0);
+      expect(res.stderr).toMatch(/@sim\/b@0\.2\.0 is not visible on the registry yet; waiting/);
+      // One fresh read per package is enough: no backoff was needed.
+      expect(registryLog.filter((r) => r.full)).toHaveLength(2);
     });
 
     it("trusts versions the publish job confirmed, without polling", async () => {
@@ -360,13 +367,17 @@ describe("release simulation", { timeout: 60_000 }, () => {
       const res = await release(["github-release", "--published", "@sim/a@0.2.0 @sim/b@0.2.0"]);
       staleReads = 0;
       expect(res.code).toBe(0);
-      expect(registryLog.some((q) => q.startsWith("?cache-bust="))).toBe(false);
+      expect(registryLog.some((r) => r.full)).toBe(false);
     });
 
-    it("still fails when a version never appears", async () => {
+    it("still fails when a version never appears (bounded wait)", async () => {
       staleReads = 1000;
+      staleFullReads = true;
+      registryLog = [];
       const res = await release(["github-release", "--published", "@sim/a@0.2.0"]);
       staleReads = 0;
+      staleFullReads = false;
+      expect(registryLog.filter((r) => r.full)).toHaveLength(9);
       expect(res.code).toBe(1);
       expect(res.stderr).toMatch(/not on the registry: @sim\/b@0\.2\.0/);
     });

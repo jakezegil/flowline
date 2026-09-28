@@ -163,7 +163,8 @@ jobs:
           node-version: "22"
 
       # PUBLISHED is what the publish job just confirmed. The registry CDN can lag a few minutes
-      # behind a publish, so those versions aren't re-checked; any others are polled uncached.
+      # behind a publish, so those versions aren't re-checked. Any others are polled, concurrently and with bounded
+      # backoff (about 315s at most), using cache-busted full-packument reads.
       - name: Tag and create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

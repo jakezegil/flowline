@@ -134,15 +134,24 @@ This is for bootstrapping only. Don't keep the secret around.
 to see a version that was published by hand, it tags **that run's commit**. The registry doesn't
 record which commit a tarball came from.
 
-The 0.1.0 bootstrap is an example: it was published from 1bf1d5c. Before the first CI run, you
-can pin the tags to that commit yourself, and CI then leaves existing tags alone:
+The 0.1.0 bootstrap is an example: it was published from 1bf1d5c. You can pin the tags to that
+commit yourself, and CI then leaves existing tags alone. Do this **before merging the CI/CD
+change to `main`**, because the first `release.yml` run on `main` would otherwise tag its own
+commit. Push the seven tags by name, so that no other local tags go up with them:
 
 ```sh
 for p in core engine nodes-builtin react storage-memory storage-postgres; do
   git tag "@flowlinejs/$p@0.1.0" 1bf1d5c
 done
 git tag v0.1.0 1bf1d5c
-git push origin --tags
+git push origin \
+  refs/tags/v0.1.0 \
+  "refs/tags/@flowlinejs/core@0.1.0" \
+  "refs/tags/@flowlinejs/engine@0.1.0" \
+  "refs/tags/@flowlinejs/nodes-builtin@0.1.0" \
+  "refs/tags/@flowlinejs/react@0.1.0" \
+  "refs/tags/@flowlinejs/storage-memory@0.1.0" \
+  "refs/tags/@flowlinejs/storage-postgres@0.1.0"
 ```
 
 The GitHub Release for `v0.1.0` is then still created by the next run.
@@ -200,9 +209,11 @@ never release. A newer push waits for the running release; it never cancels it.
 4. **github-release** pushes the tags (`@flowlinejs/<pkg>@X.Y.Z` for each package, plus
    `vX.Y.Z`) and creates one GitHub Release, `vX.Y.Z`, whose notes are the CHANGELOG sections of
    all six packages. Tags and releases that already exist are left alone. It trusts the versions
-   the publish job just confirmed. It re-checks any other version on the registry, with uncached
-   reads and backoff for up to about 2.5 minutes, because npm's CDN can serve stale metadata for
-   a few minutes after a publish.
+   the publish job just confirmed, and re-checks any other version on the registry. npm's CDN
+   can serve the abbreviated metadata stale for up to 5 minutes after a publish, so the
+   re-check reads the full package document with a cache-busting query instead. It polls all
+   the packages at once, with capped backoff, for at most about 5¼ minutes (315s) before it
+   fails.
 
 The version commit, the tags and the GitHub Release are pushed with `GITHUB_TOKEN`. The checkout
 doesn't persist credentials: only the steps that fetch or push receive the token, so dependency
