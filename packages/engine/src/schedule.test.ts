@@ -1,4 +1,10 @@
-import { createRegistry, defineNode, definePlugin, suspend, type WorkflowDoc } from "@flowline/core";
+import {
+  createRegistry,
+  defineNode,
+  definePlugin,
+  suspend,
+  type WorkflowDoc,
+} from "@flowline/core";
 import { createMemoryStorage } from "@flowline/storage-memory";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";

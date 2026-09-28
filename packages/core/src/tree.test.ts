@@ -157,8 +157,12 @@ describe("insertStep", () => {
   test("throws when index is out of range", () => {
     const doc = frozenClone(baseDoc());
     const newStep: Step = { id: "x", type: "log.write", config: {} };
-    expect(() => insertStep(doc, { parentId: null, index: 99 }, newStep)).toThrow(FlowlineTreeError);
-    expect(() => insertStep(doc, { parentId: null, index: -1 }, newStep)).toThrow(FlowlineTreeError);
+    expect(() => insertStep(doc, { parentId: null, index: 99 }, newStep)).toThrow(
+      FlowlineTreeError,
+    );
+    expect(() => insertStep(doc, { parentId: null, index: -1 }, newStep)).toThrow(
+      FlowlineTreeError,
+    );
   });
 
   test("throws when step id already exists in doc", () => {

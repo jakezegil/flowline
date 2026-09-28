@@ -641,7 +641,7 @@ describe("WorkflowCanvas", () => {
         <WorkflowCanvas store={store} />
       </FlowlineProvider>,
     );
-    expect(root().dataset.fkTheme).toBe("dark");
+    expect(root().dataset.flTheme).toBe("dark");
     expect(root().style.getPropertyValue("--fl-accent")).toBe("#0f766e");
     expect(root().style.getPropertyValue("--fl-radius")).toBe("4px");
   });

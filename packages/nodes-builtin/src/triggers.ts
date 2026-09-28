@@ -57,7 +57,9 @@ export const webhookTrigger = defineTrigger({
       )
       .default([]),
     secret: ui(secret(), { label: "Signing secret" })
-      .describe("Verify the X-Flowline-Signature header (HMAC-SHA256 of the body) with this secret.")
+      .describe(
+        "Verify the X-Flowline-Signature header (HMAC-SHA256 of the body) with this secret.",
+      )
       .optional(),
     dedupeHeader: ui(z.string(), { label: "Deduplication header", placeholder: "X-Request-Id" })
       .describe("Requests repeating this header's value start no new run.")

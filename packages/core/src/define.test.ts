@@ -264,7 +264,11 @@ describe("ui helpers", () => {
   test("ui returns the same schema type and attaches x-flowline", () => {
     const s = ui(z.string().min(1), { label: "Name" });
     expectTypeOf(s).toEqualTypeOf<z.ZodString>();
-    expect(json(s)).toMatchObject({ type: "string", minLength: 1, "x-flowline": { label: "Name" } });
+    expect(json(s)).toMatchObject({
+      type: "string",
+      minLength: 1,
+      "x-flowline": { label: "Name" },
+    });
   });
 
   test("ui merges with metadata from an earlier ui call", () => {

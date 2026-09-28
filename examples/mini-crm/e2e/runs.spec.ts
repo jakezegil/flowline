@@ -266,9 +266,9 @@ test("the run viewer steps through loop iterations and switches inspector tabs",
   });
   expect(saved.ok()).toBe(true);
   const { version } = (await saved.json()) as { version: number };
-  expect((await request.post(`/flowline/workflows/${id}/publish`, { data: { version } })).ok()).toBe(
-    true,
-  );
+  expect(
+    (await request.post(`/flowline/workflows/${id}/publish`, { data: { version } })).ok(),
+  ).toBe(true);
   const started = await request.post(`/flowline/workflows/${id}/run`, {
     data: { input: { names: ["Ada", "Grace", "Linus"] } },
   });
