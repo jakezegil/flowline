@@ -112,12 +112,16 @@ never stores a callback token or resume URL.
    once the run can be resumed.
 3. The decision endpoint claims the approval synchronously, so a concurrent second decision gets
    409.
-4. It checks with `engine.getRunDetail` that the run still waits at that step.
-5. It resumes the run with the authorized `engine.resumeRun(tenantId, runId, { decision }, userId)`.
-   That call records `by` on the `run.resumed` event, and it only resumes a run that is still
-   waiting.
-6. If the resume throws, the approval goes back to `pending` and the request fails with 500, so
-   the client can retry.
+4. It resumes the run with the authorized
+   `engine.resumeRun(tenantId, runId, { decision }, userId, { expectStep: stepPath })`. With
+   `expectStep`, the engine resumes only the callback wait of that step, checking and resuming in
+   one compare-and-set, and answers `"gone"` otherwise. The call records `by` on the
+   `run.resumed` event. Over HTTP the same guard is `POST /flowkit/runs/:id/resume?step=<stepPath>`.
+5. If the resume throws while the run still waits at the step, the approval goes back to
+   `pending` and the request fails with 500, so the client can retry. If the run stopped waiting
+   meanwhile, the approval becomes `expired`.
+6. `GET /api/approvals` expires pending approvals whose run has finished, e.g. one cancelled from
+   the run viewer.
 
 **Test step changes real data.** The editor's "Test step" runs a node's real handler. Testing
 `crm.sendEmail` writes to the outbox, and testing `crm.createContact` creates a contact.

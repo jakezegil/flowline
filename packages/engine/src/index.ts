@@ -1,7 +1,12 @@
 /** Package version. */
 export const VERSION = "0.1.0";
 
-export { createEngine, type Engine, type EngineOptions } from "./engine";
+export {
+  createEngine,
+  type Engine,
+  type EngineOptions,
+  type ResumeRunOptions,
+} from "./engine";
 export {
   FatalError,
   type FatalErrorOptions,

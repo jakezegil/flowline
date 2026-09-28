@@ -196,8 +196,8 @@ describe("inbound lead routing", () => {
 
   it("answers 410 and expires the approval when its run was cancelled", async () => {
     const runId = await postLead(enterpriseLead, "lead-8");
-    expect((await call("POST", `/flowkit/runs/${runId}/cancel`)).status).toBe(200);
     const [approval] = await get<Approval[]>("/api/approvals");
+    expect((await call("POST", `/flowkit/runs/${runId}/cancel`)).status).toBe(200);
     const res = await call("POST", `/api/approvals/${approval?.id}/decision`, {
       decision: "approved",
     });
@@ -230,6 +230,46 @@ describe("inbound lead routing", () => {
     await crm.engine.drain();
     expect((await runDetail(runId)).run.status).toBe("completed");
     expect(await get<OutboxMessage[]>("/api/outbox")).toHaveLength(1);
+  });
+
+  it("expires the approval when resuming fails and the run stopped waiting meanwhile", async () => {
+    let runId = "";
+    const flaky: StorageAdapter = Object.create(storage);
+    flaky.resumeByToken = async () => {
+      await crm.engine.cancelRun(TENANT_ID, runId); // e.g. cancelled from the run viewer
+      throw new Error("connection reset");
+    };
+    crm = await start({ storage: flaky });
+    runId = await postLead(enterpriseLead, "lead-13");
+    const [approval] = await get<Approval[]>("/api/approvals");
+
+    const res = await call("POST", `/api/approvals/${approval?.id}/decision`, {
+      decision: "approved",
+    });
+    expect(res.status).toBe(500);
+    expect(errors).toHaveLength(1);
+    errors.length = 0;
+    expect((await get<Approval[]>("/api/approvals"))[0]?.status).toBe("expired");
+  });
+
+  it("resumes the run only at the approval's step", async () => {
+    await postLead(enterpriseLead, "lead-14");
+    const [approval] = await get<Approval[]>("/api/approvals");
+    const seen: unknown[] = [];
+    const resumeRun = crm.engine.resumeRun;
+    crm.engine.resumeRun = (...args) => {
+      seen.push(args[4]);
+      return resumeRun(...args);
+    };
+    await call("POST", `/api/approvals/${approval?.id}/decision`, { decision: "approved" });
+    expect(seen).toEqual([{ expectStep: "size/if/approval" }]);
+  });
+
+  it("lists an approval as expired once its run was cancelled elsewhere", async () => {
+    const runId = await postLead(enterpriseLead, "lead-15");
+    await crm.engine.cancelRun(TENANT_ID, runId);
+    const [approval] = await get<Approval[]>("/api/approvals");
+    expect(approval).toMatchObject({ runId, status: "expired" });
   });
 
   it("records the deciding user on the run", async () => {

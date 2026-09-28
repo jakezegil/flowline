@@ -159,6 +159,15 @@ describe("createClient requests", () => {
       expected: undefined,
     },
     {
+      name: "resumeRun at an expected step",
+      call: (c) => c.resumeRun("r1", { approved: true }, { expectStep: "size/if/approval" }),
+      method: "POST",
+      path: "/runs/r1/resume?step=size%2Fif%2Fapproval",
+      body: { approved: true },
+      status: 202,
+      expected: undefined,
+    },
+    {
       name: "resumeRun without body",
       call: (c) => c.resumeRun("r1"),
       method: "POST",
