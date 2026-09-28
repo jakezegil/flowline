@@ -148,10 +148,43 @@ describe("WorkflowEditor", () => {
   test("a publish rejected by the server shows its issues in a toast", async () => {
     const { client } = setup(fixtureDoc());
     await screen.findByText("Draft · v3");
-    client.publish.mockRejectedValue(httpError(422, { error: "Invalid", issues: [{}, {}] }));
+    const issue = { code: "x", message: "Server says no", severity: "error", stepId: "email" };
+    // Malformed entries aren't counted (Minor 3).
+    client.publish.mockRejectedValue(
+      httpError(422, { error: "Invalid", issues: [{}, issue, { ...issue, stepId: "load" }] }),
+    );
     fireEvent.click(button("Publish"));
     await screen.findByText("Publishing was blocked by 2 issues");
     expect(client.saveWorkflow).not.toHaveBeenCalled();
+  });
+
+  test("Minor 4: a save rejected by the server shows its issues like a publish", async () => {
+    const { client } = setup(fixtureDoc());
+    const name = await screen.findByRole("textbox", { name: "Workflow name" });
+    fireEvent.change(name, { target: { value: "Onboarding" } });
+    fireEvent.blur(name);
+    const before = screen.queryByRole("button", { name: /issue/ })?.textContent ?? "";
+    const issue = { code: "x", message: "Server says no", severity: "error", stepId: "email" };
+    client.saveWorkflow.mockRejectedValue(httpError(422, { error: "Invalid", issues: [issue] }));
+    fireEvent.click(button("Save"));
+    await screen.findByText("Saving was blocked by 1 issue");
+    const pill = await screen.findByRole("button", { name: /\d+ issues?/ });
+    expect(pill.textContent).not.toBe(before);
+    fireEvent.click(button("Show"));
+    await waitFor(() => expect(selectedId()).toBe("step:email"));
+  });
+
+  test("Minor 12: Enter in the name box commits and keeps focus there", async () => {
+    setup(fixtureDoc());
+    const name = (await screen.findByRole("textbox", {
+      name: "Workflow name",
+    })) as HTMLInputElement;
+    name.focus();
+    fireEvent.change(name, { target: { value: "Onboarding" } });
+    fireEvent.keyDown(name, { key: "Enter" });
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+    expect(document.activeElement).toBe(name);
+    expect(name.value).toBe("Onboarding");
   });
 
   test("Show on a server rejection selects the step the server flagged", async () => {

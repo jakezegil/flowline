@@ -248,6 +248,8 @@ export interface FlowkitLabels {
   alreadyPublished: string;
   /** Toast when the server rejects a publish (422). */
   publishRejected(issues: number): string;
+  /** Toast when the server rejects a save (422). */
+  saveRejected(issues: number): string;
   publishFailed(message: string): string;
   showIssues: string;
   closePanel: string;
@@ -698,6 +700,8 @@ export const defaultLabels: FlowkitLabels = {
     n === 0
       ? "Publishing was blocked"
       : `Publishing was blocked by ${n === 1 ? "1 issue" : `${n} issues`}`,
+  saveRejected: (n) =>
+    n === 0 ? "Saving was blocked" : `Saving was blocked by ${n === 1 ? "1 issue" : `${n} issues`}`,
   publishFailed: (m) => `Couldn't publish. ${m}`,
   showIssues: "Show",
   closePanel: "Close panel",

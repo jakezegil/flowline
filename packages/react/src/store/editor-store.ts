@@ -156,6 +156,11 @@ export interface EditorActions {
    * alongside the editor's own: on the issues pill, the steps and their fields. Each one lasts
    * until what it's about changes: its step (or the trigger, or the output mapping), or for a
    * workflow-level issue, anything. Duplicates of the editor's own issues are dropped.
+   *
+   * Dropping is deliberately eager, since the server's verdict can't be re-checked locally: a
+   * workflow-level issue goes with the first edit of any kind, even an unrelated one, and once
+   * dropped an issue doesn't come back, even if undo returns the doc to the version the server
+   * judged. Saving or publishing again asks the server afresh.
    */
   setServerIssues(issues: Issue[]): void;
   /** Copies a step (with its subtree) to the editor clipboard. Unknown IDs are ignored. */
@@ -695,7 +700,9 @@ function copyName(base: string, taken: ReadonlySet<string>): string {
 
 /**
  * Whether a server issue reported for `base` still applies to `doc`: its step (or the trigger, or
- * the output mapping) is unchanged; a workflow-level issue, only while nothing changed.
+ * the output mapping) is unchanged; a workflow-level issue, only while nothing changed. Callers
+ * filter the kept list on every change, so an issue dropped once stays dropped (an undo back to
+ * `base` doesn't restore it); see `setServerIssues`.
  */
 function stillApplies(issue: Issue, base: WorkflowDoc, doc: WorkflowDoc): boolean {
   if (doc === base) return true;

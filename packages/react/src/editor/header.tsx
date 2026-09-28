@@ -16,7 +16,10 @@ export interface HeaderCallbacks {
   onRunStarted?(runId: string): void;
 }
 
-/** The workflow's name, edited in place. Enter or blur commits, Escape reverts. */
+/**
+ * The workflow's name, edited in place. Enter or blur commits, Escape reverts; Enter and Escape
+ * keep focus in the box (with its text selected), so the keyboard doesn't drop to the page.
+ */
 function NameField() {
   const { labels } = useFlowkitAppearance();
   const name = useEditorStore((s) => s.doc.name);
@@ -38,11 +41,17 @@ function NameField() {
         setDraft(null);
       }}
       onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        if (e.key === "Escape") {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (draft !== null) rename(draft);
           setDraft(null);
-          // Revert before blurring so the blur doesn't commit the draft.
-          requestAnimationFrame(() => (e.target as HTMLInputElement).blur());
+          e.currentTarget.select();
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setDraft(null);
+          const input = e.currentTarget;
+          requestAnimationFrame(() => input.select());
         }
       }}
     />
@@ -147,7 +156,8 @@ export function EditorHeader({
       if (!inPublish) toast({ message: labels.saved(v.version), tone: "success" });
       return v.version;
     } catch (err) {
-      toast({ message: labels.saveFailed(reason(err)), tone: "danger" });
+      if (!showRejection(err, labels.saveRejected))
+        toast({ message: labels.saveFailed(reason(err)), tone: "danger" });
       return null;
     } finally {
       if (!inPublish) setBusy(null);
@@ -159,6 +169,24 @@ export function EditorHeader({
     const { doc, select, issues: local } = store.getState();
     const first = issueTargets(doc, issues)[0] ?? issueTargets(doc, local)[0];
     if (first) select(first.key);
+  };
+
+  /**
+   * Shows a 422 (the server's validator rejected the doc) where the editor's own issues are: the
+   * pill, the steps and their fields (M7), with a toast that counts the well-formed issues and
+   * jumps to the first. Returns whether `err` was one.
+   */
+  const showRejection = (err: unknown, message: (issues: number) => string): boolean => {
+    if (httpStatus(err) !== 422) return false;
+    const body = (err as { body?: { issues?: unknown } }).body;
+    const server = (Array.isArray(body?.issues) ? (body.issues as unknown[]) : []).filter(isIssue);
+    store.getState().setServerIssues(server);
+    toast({
+      message: message(server.length),
+      tone: "danger",
+      action: { label: labels.showIssues, run: () => showFirstIssue(server) },
+    });
+    return true;
   };
 
   const publish = async () => {
@@ -175,19 +203,8 @@ export function EditorHeader({
       cb.current.onPublish?.(version);
       toast({ message: labels.published(version), tone: "success" });
     } catch (err) {
-      if (httpStatus(err) === 422) {
-        const body = (err as { body?: { issues?: unknown } }).body;
-        const server = Array.isArray(body?.issues) ? (body.issues as Issue[]) : [];
-        // Shown where the editor's own issues are: the pill, the steps and their fields (M7).
-        store.getState().setServerIssues(server.filter(isIssue));
-        toast({
-          message: labels.publishRejected(server.length),
-          tone: "danger",
-          action: { label: labels.showIssues, run: () => showFirstIssue(server) },
-        });
-      } else {
+      if (!showRejection(err, labels.publishRejected))
         toast({ message: labels.publishFailed(reason(err)), tone: "danger" });
-      }
     } finally {
       setBusy(null);
     }
