@@ -192,7 +192,7 @@ describe("WorkflowCanvas", () => {
     const menu = await screen.findByRole("menu");
     fireEvent.click(within(menu).getByText("Delete"));
     expect(findStep(store.getState().doc, "email")).toBeUndefined();
-    const toast = await screen.findByText("Step deleted");
+    const toast = await screen.findByText("Deleted “Send email”");
     fireEvent.click(
       within(toast.parentElement as HTMLElement).getByRole("button", { name: "Undo" }),
     );
@@ -467,7 +467,7 @@ describe("WorkflowCanvas", () => {
     act(() => store.getState().select("email"));
     fireEvent.keyDown(root(), { key: "Delete" });
     expect(store.getState().selection).toBe("load");
-    const toast = await screen.findByText("Step deleted");
+    const toast = await screen.findByText("Deleted “Send email”");
     // Focus moves to the neighbour on the next frame; wait so it doesn't steal focus back.
     await waitFor(() => expect(document.activeElement).toBe(card("load")));
     within(toast.parentElement as HTMLElement)

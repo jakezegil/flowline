@@ -100,7 +100,7 @@ export function FlowkitProvider(props: {
    */
   icons?: Record<string, ComponentType<{ size?: number }>>;
   /**
-   * Routes Flowkit's notices ("Saved as v3", "Run resumed", "Step deleted · Undo", errors) to
+   * Routes Flowkit's notices ("Saved as v3", "Run resumed", "Deleted “Send email” · Undo", errors) to
    * your app's own toasts instead of Flowkit's. Without it Flowkit shows them itself. Return
    * `false` for a notice to have Flowkit show it after all.
    *

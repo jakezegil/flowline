@@ -187,6 +187,9 @@ export function stepActions(
     pasteAfter: () => after(s().paste(locationAfter(store, stepId))),
     pasteInside: (branch) => after(s().paste({ parentId: stepId, branch, index: 0 })),
     remove() {
+      // Named in the toast, so a Delete on the focused card (not the open one) is plain to see.
+      const doomed = findStep(s().doc, stepId)?.step;
+      const name = doomed?.name ?? nodeIndex(s().manifest).get(doomed?.type ?? "")?.name ?? stepId;
       const next = neighbourOf(store, stepId);
       const before = s().selection;
       s().removeStep(stepId);
@@ -196,7 +199,7 @@ export function stepActions(
       if (before !== null && s().selection === null) s().select(next);
       focusNode(root(), next);
       const { labels } = ui.getState();
-      ui.getState().toast(labels.stepDeleted, { label: labels.undo, run: () => s().undo() });
+      ui.getState().toast(labels.stepDeleted(name), { label: labels.undo, run: () => s().undo() });
     },
     target() {
       if (s().selection !== null) s().select(stepId);

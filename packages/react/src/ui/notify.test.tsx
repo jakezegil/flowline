@@ -68,8 +68,10 @@ describe("onNotify", () => {
     act(() => store.getState().select("email"));
     fireEvent.keyDown(document.querySelector(".fk-canvas") as HTMLElement, { key: "Delete" });
     expect(findStep(store.getState().doc, "email")).toBeUndefined();
-    expect(screen.queryByText("Step deleted")).toBeNull();
-    expect(notices).toMatchObject([{ message: "Step deleted", tone: "neutral", source: "canvas" }]);
+    expect(screen.queryByText("Deleted “Send email”")).toBeNull();
+    expect(notices).toMatchObject([
+      { message: "Deleted “Send email”", tone: "neutral", source: "canvas" },
+    ]);
     act(() => notices[0]?.action?.run());
     expect(findStep(store.getState().doc, "email")).toBeDefined();
   });

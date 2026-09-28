@@ -205,9 +205,12 @@
       0 0 0 3px var(--fk-ring),
       var(--fk-shadow-md);
   }
+  /* Keyboard focus is a dashed outline set off from the card, unlike the selection's solid
+     border and ring, so the card keys act on (focus) and the one whose panel is open (selection)
+     can't be mistaken for each other. */
   .react-flow__node:focus-visible .fk-card {
-    border-color: var(--fk-accent);
-    box-shadow: 0 0 0 3px var(--fk-ring);
+    outline: 2px dashed var(--fk-accent);
+    outline-offset: 4px;
   }
   .fk-card[data-disabled] {
     opacity: 0.5;

@@ -173,7 +173,8 @@ export interface FlowkitLabels {
   referenceCopied: string;
   copyFailed(reference: string): string;
   stepCopied: string;
-  stepDeleted: string;
+  /** Toast after deleting a step, naming it: `Deleted “Send email”`. */
+  stepDeleted(name: string): string;
   undo: string;
   dismiss: string;
 
@@ -646,7 +647,7 @@ export const defaultLabels: FlowkitLabels = {
   referenceCopied: "Reference copied",
   copyFailed: (reference) => `Couldn't copy. The reference is ${reference}`,
   stepCopied: "Step copied",
-  stepDeleted: "Step deleted",
+  stepDeleted: (name) => `Deleted “${name}”`,
   undo: "Undo",
   dismiss: "Dismiss",
 
