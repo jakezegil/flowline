@@ -31,8 +31,16 @@ export interface RunOverlay {
    * Branch edges of a step that ran but aren't in this set are dimmed.
    */
   takenEdges: Set<string>;
-  /** The iteration shown per loop step ID, its iteration count and the first failed iteration. */
-  loopIteration: Record<string, { index: number; count: number; failedIndex?: number }>;
+  /**
+   * The iteration shown per loop step ID, its iteration count, the first failed iteration and
+   * every failed iteration (marked in the stepper).
+   */
+  loopIteration: Record<
+    string,
+    { index: number; count: number; failedIndex?: number; failedIndices?: number[] }
+  >;
+  /** Steps the run never reached because their branch wasn't taken; drawn faded, without a badge. */
+  dimmedSteps?: Set<string>;
   /** Called by a loop card's iteration stepper. */
   onIterationChange?(stepId: string, index: number): void;
 }

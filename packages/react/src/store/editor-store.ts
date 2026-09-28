@@ -141,8 +141,16 @@ export interface EditorActions {
   undo(): void;
   /** Re-applies the last undone change. */
   redo(): void;
-  /** Records that the current doc was saved as `version`; clears `dirty`. */
-  markSaved(version: number): void;
+  /**
+   * Sets the workflow's display name (trimmed; blank is ignored). Bursts of renames coalesce
+   * into one undo step.
+   */
+  renameWorkflow(name: string): void;
+  /**
+   * Records that `doc` (default: the current doc) was saved as `version`. `dirty` is cleared
+   * unless the doc changed since `doc` was sent, e.g. edits made while a save was in flight.
+   */
+  markSaved(version: number, doc?: WorkflowDoc): void;
   /** Records that `version` is now published. */
   markPublished(version: number): void;
   /**
@@ -450,9 +458,16 @@ export function createEditorStore(init: {
         travel(redoEdit);
       },
 
-      markSaved(version) {
-        savedDoc = get().doc;
-        set({ savedVersion: version, dirty: false });
+      renameWorkflow(name) {
+        const trimmed = name.trim();
+        const { doc } = get();
+        if (trimmed === "" || trimmed === doc.name) return;
+        commit({ ...doc, name: trimmed }, {}, "workflowName");
+      },
+
+      markSaved(version, doc) {
+        savedDoc = doc ?? get().doc;
+        set({ savedVersion: version, dirty: get().doc !== savedDoc });
       },
 
       markPublished(version) {

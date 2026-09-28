@@ -4,9 +4,11 @@
  * @module
  */
 import { definePlugin, type PluginDefinition } from "@flowkit/core";
+import { httpRequest } from "./http";
 import { conditionNode, forEachNode, stopNode, switchNode } from "./logic";
 import { callSubflowNode } from "./subflow";
 import { delayNode, waitForCallbackNode } from "./time";
+import { transform } from "./transform";
 import {
   eventTrigger,
   manualTrigger,
@@ -18,6 +20,7 @@ import {
 /** Package version. */
 export const VERSION = "0.1.0";
 
+export { httpRequest as httpRequestNode } from "./http";
 export { conditionNode, forEachNode, stopNode, switchNode } from "./logic";
 export {
   and,
@@ -51,6 +54,7 @@ export {
 } from "./rules";
 export { callSubflowNode } from "./subflow";
 export { delayNode, MAX_DURATION_MS, parseDuration, waitForCallbackNode } from "./time";
+export { transform as transformNode } from "./transform";
 export {
   eventTrigger,
   manualTrigger,
@@ -60,15 +64,16 @@ export {
 } from "./triggers";
 
 /**
- * The built-in `core` plugin: logic, timing and sub-flow nodes plus the event, webhook, manual,
- * schedule and sub-flow triggers. `createEngine` registers it automatically (unless
- * `builtins: false`); add it to your own registry to build a manifest for the editor.
+ * The built-in `core` plugin: logic, timing, sub-flow, HTTP request and transform nodes plus the
+ * event, webhook, manual, schedule and sub-flow triggers. `createEngine` registers it
+ * automatically (unless `builtins: false`); add it to your own registry to build a manifest for
+ * the editor.
  */
 export const builtinPlugin: PluginDefinition = definePlugin({
   id: "core",
   name: "Built-in",
   icon: "blocks",
-  description: "Logic, timing, sub-flows and the standard triggers.",
+  description: "Logic, timing, sub-flows, HTTP requests, transforms and the standard triggers.",
   nodes: [
     conditionNode,
     switchNode,
@@ -77,6 +82,8 @@ export const builtinPlugin: PluginDefinition = definePlugin({
     delayNode,
     waitForCallbackNode,
     callSubflowNode,
+    httpRequest,
+    transform,
   ],
   triggers: [eventTrigger, webhookTrigger, manualTrigger, scheduleTrigger, subflowTrigger],
 });

@@ -246,6 +246,13 @@ describe("signals", () => {
     }
     expect(signals[1]).toMatchObject({ kind: "suspend", callback: handle });
     expect(suspend({ until: 42 })).toMatchObject({ kind: "suspend", until: 42 });
+    const afterCommit = async () => {};
+    expect(suspend({ until: 42, afterCommit })).toMatchObject({ until: 42, afterCommit });
+    expect(suspend({ callback: handle, afterCommit })).toMatchObject({
+      callback: handle,
+      afterCommit,
+    });
+    expect(suspend({ until: 42 })).not.toHaveProperty("afterCommit");
     expect(stop("why")).toMatchObject({ kind: "stop", reason: "why" });
     expectTypeOf(branch("x", { a: 1 }).output).toEqualTypeOf<{ a: number }>();
   });

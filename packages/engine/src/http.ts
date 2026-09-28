@@ -217,7 +217,8 @@ function tooLarge(max: number): FatalError {
  * each hop re-checked; a 303 (or a 301/302 after POST) continues as GET without a body, and
  * when a redirect changes origin only safelisted headers (Accept, Accept-Language,
  * Content-Language, Content-Type while the body is kept, User-Agent, Idempotency-Key) follow it,
- * minus any named in `init.credentialHeaders`.
+ * minus any named in `init.credentialHeaders`. `init.redirect: "error"` fails on a redirect
+ * instead (a `FatalError`, nothing re-sent) and `"manual"` returns the redirect response as is.
  * `init.timeoutMs` bounds the connect, header and body timeouts. The response body is read fully
  * (up to `maxResponseBytes`) before the returned `Response` resolves.
  */
@@ -239,6 +240,7 @@ export function createGuardedFetch(opts: GuardedFetchOptions = {}): GuardedFetch
     const timeoutMs = init.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const connectTimeout = Math.min(DEFAULT_CONNECT_TIMEOUT_MS, timeoutMs);
     const credentials = new Set((init.credentialHeaders ?? []).map((h) => h.toLowerCase()));
+    const redirect = init.redirect ?? "follow";
 
     for (let hop = 0; ; hop++) {
       const addresses = await checkTarget(url, opts, allowHosts, signal);
@@ -257,8 +259,9 @@ export function createGuardedFetch(opts: GuardedFetchOptions = {}): GuardedFetch
           dispatcher,
         });
         const location = res.headers.get("location");
-        if (REDIRECT_STATUSES.has(res.status) && location !== null) {
+        if (REDIRECT_STATUSES.has(res.status) && location !== null && redirect !== "manual") {
           await res.body?.cancel().catch(() => {});
+          if (redirect === "error") throw new FatalError("redirects are not allowed");
           if (hop >= MAX_REDIRECTS) throw new FatalError("too many redirects");
           let next: URL;
           try {

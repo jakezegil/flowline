@@ -45,7 +45,7 @@ describe("builtinPlugin", () => {
     ]);
   });
 
-  it("registers every logic, timing and sub-flow node and every trigger", () => {
+  it("registers every logic, timing, sub-flow, HTTP and transform node and every trigger", () => {
     expect(manifest.nodes.map((n) => n.type)).toEqual([
       "core.condition",
       "core.switch",
@@ -54,6 +54,8 @@ describe("builtinPlugin", () => {
       "core.delay",
       "core.waitForCallback",
       "core.callSubflow",
+      "core.httpRequest",
+      "core.transform",
     ]);
     expect(manifest.triggers.map((t) => [t.type, t.kind])).toEqual([
       ["core.event", "event"],
@@ -129,6 +131,17 @@ describe("builtinPlugin", () => {
         { id: "resumed", label: "Resumed" },
         { id: "timeout", label: "Timed out" },
       ],
+    });
+    expect(node("core.httpRequest")).toMatchObject({
+      category: "Integrations",
+      icon: "globe",
+      summary: "{{method}} {{url}}",
+    });
+    expect(node("core.transform")).toMatchObject({
+      category: "Data",
+      icon: "code",
+      output: { kind: "fields", configPath: "outputFields" },
+      input: { properties: { code: { "x-flowkit": { widget: "code" } } } },
     });
     expect(node("core.callSubflow")).toMatchObject({
       output: { kind: "subflow", configPath: "workflowId" },

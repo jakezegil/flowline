@@ -1,3 +1,4 @@
+import { copyFile } from "node:fs/promises";
 import { defineConfig } from "tsup";
 
 export default defineConfig({
@@ -6,4 +7,7 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
+  // The stylesheet ships as-is (`import "@flowkit/react/styles.css"`); its xyflow base import
+  // resolves from the consumer's node_modules.
+  onSuccess: () => copyFile("src/styles.css", "dist/styles.css"),
 });
