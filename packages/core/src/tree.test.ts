@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   allStepIds,
+  codeBlocksRename,
   duplicateStep,
   FlowkitTreeError,
   findStep,
@@ -13,7 +14,7 @@ import {
   updateStep,
   walkSteps,
 } from "./tree";
-import type { Step, WorkflowDoc } from "./types";
+import type { Manifest, Step, WorkflowDoc } from "./types";
 
 function deepFreeze<T>(obj: T): T {
   if (obj !== null && typeof obj === "object" && !Object.isFrozen(obj)) {
@@ -299,6 +300,96 @@ describe("renameStepId / isGeneratedStepId (L25)", () => {
     expect(renameStepId(doc, "checkVip", "checkVip")).toBe(doc);
     expect(() => renameStepId(doc, "checkVip", "loadContact")).toThrow(FlowkitTreeError);
     expect(() => renameStepId(doc, "nope", "x")).toThrow(FlowkitTreeError);
+  });
+
+  test("I2: rewrites steps.<id> and steps['<id>'] in code, leaving strings and comments", () => {
+    const code = [
+      "// steps.httpRequest is the call",
+      "const s = 'steps.httpRequest';",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the code holds a template literal
+      "const t = `${steps.httpRequest.output.status} steps.httpRequest`;",
+      "const r = /steps.httpRequest/;",
+      "return { n: steps.httpRequest.output.status, m: steps['httpRequest'].body,",
+      '  o: steps?.httpRequest, p: steps["httpRequest"], q: input.steps.httpRequest,',
+      "  x: other.steps.httpRequest, y: steps.httpRequestOld };",
+    ].join("\n");
+    const doc: WorkflowDoc = {
+      ...baseDoc(),
+      steps: [
+        { id: "httpRequest", type: "core.httpRequest", config: {} },
+        { id: "calc", type: "core.transform", config: { code, label: "steps.httpRequest" } },
+      ],
+    };
+    const manifest = {
+      nodes: [
+        {
+          type: "core.transform",
+          input: {
+            properties: { code: { "x-flowkit": { widget: "code" } }, label: { type: "string" } },
+          },
+        },
+      ],
+    } as unknown as Manifest;
+    const next = renameStepId(doc, "httpRequest", "sendEmail", manifest);
+    const config = findStep(next, "calc")?.step.config;
+    expect(config?.code).toBe(
+      [
+        "// steps.httpRequest is the call",
+        "const s = 'steps.httpRequest';",
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the code holds a template literal
+        "const t = `${steps.sendEmail.output.status} steps.httpRequest`;",
+        "const r = /steps.httpRequest/;",
+        "return { n: steps.sendEmail.output.status, m: steps['sendEmail'].body,",
+        '  o: steps?.sendEmail, p: steps["sendEmail"], q: input.steps.sendEmail,',
+        "  x: other.steps.httpRequest, y: steps.httpRequestOld };",
+      ].join("\n"),
+    );
+    // Not a code field: left alone.
+    expect(config?.label).toBe("steps.httpRequest");
+    // The review's case, without a manifest.
+    const plain = renameStepId(
+      {
+        ...baseDoc(),
+        steps: [
+          { id: "httpRequest", type: "core.httpRequest", config: {} },
+          {
+            id: "calc",
+            type: "core.transform",
+            config: {
+              code: "return { n: steps.httpRequest.output.status, m: steps['httpRequest'].body }",
+            },
+          },
+        ],
+      },
+      "httpRequest",
+      "sendEmail",
+    );
+    expect(findStep(plain, "calc")?.step.config.code).toBe(
+      "return { n: steps.sendEmail.output.status, m: steps['sendEmail'].body }",
+    );
+  });
+
+  test("I2: code that reads steps dynamically blocks a rename of a step it names", () => {
+    const withCode = (code: string): WorkflowDoc => ({
+      ...baseDoc(),
+      steps: [
+        { id: "httpRequest", type: "core.httpRequest", config: {} },
+        { id: "calc", type: "core.transform", config: { code } },
+      ],
+    });
+    expect(
+      codeBlocksRename(withCode("const k = 'httpRequest'; return steps[k];"), "httpRequest"),
+    ).toBe(true);
+    expect(
+      codeBlocksRename(
+        withCode("const { httpRequest } = steps; return httpRequest;"),
+        "httpRequest",
+      ),
+    ).toBe(true);
+    // Dynamic, but the ID isn't written anywhere: nothing to break by name.
+    expect(codeBlocksRename(withCode("return Object.keys(steps);"), "httpRequest")).toBe(false);
+    // Static accesses are rewritten, not blocking.
+    expect(codeBlocksRename(withCode("return steps.httpRequest;"), "httpRequest")).toBe(false);
   });
 
   test("tells generated IDs from chosen ones", () => {

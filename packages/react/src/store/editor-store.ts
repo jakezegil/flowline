@@ -1,4 +1,5 @@
 import {
+  codeBlocksRename,
   duplicateStep as coreDuplicateStep,
   insertStep as coreInsertStep,
   moveStep as coreMoveStep,
@@ -476,7 +477,13 @@ export function createEditorStore(init: {
         const found = findStep(get().doc, id);
         if (found?.step.type === nodeType) return;
         const replaced = replaceStepType(get().doc, id, m);
-        if (!found || !isGeneratedStepId(id, found.step.type) || isGeneratedStepId(id, nodeType)) {
+        if (
+          !found ||
+          !isGeneratedStepId(id, found.step.type) ||
+          isGeneratedStepId(id, nodeType) ||
+          // Code that reads this step dynamically would break silently: keep its ID.
+          codeBlocksRename(replaced, id, manifest)
+        ) {
           commit(replaced, needsTest(id));
           return;
         }
@@ -484,7 +491,7 @@ export function createEditorStore(init: {
         // Transform): regenerate it, and point references at the new ID.
         const free = generateStepId(replaced, nodeType);
         const { samples, testState, sampleTypes, selection } = get();
-        commit(renameStepId(replaced, id, free), {
+        commit(renameStepId(replaced, id, free, manifest), {
           ...setLocal({
             samples: without(samples, [free]),
             testState: without(testState, [free]),

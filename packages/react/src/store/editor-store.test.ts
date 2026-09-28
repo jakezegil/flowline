@@ -565,6 +565,43 @@ describe("replaceStep", () => {
     expect(store.getState().doc.steps.map((s) => s.id)).toEqual(["loadContact", "email"]);
   });
 
+  test("I2: code reading the step is rewritten, or keeps the ID when it reads steps dynamically", () => {
+    const base = manifest.nodes.find((n) => n.type === "crm.sendEmail");
+    if (!base) throw new Error("no sendEmail");
+    const withCode = {
+      ...manifest,
+      nodes: [
+        ...manifest.nodes,
+        {
+          ...base,
+          type: "t.code",
+          name: "Code",
+          input: {
+            type: "object",
+            properties: { code: { type: "string", "x-flowkit": { widget: "code" } } },
+          },
+        },
+      ],
+    };
+    const make = (code: string) =>
+      createEditorStore({
+        doc: docWith([
+          step("loadContact", "crm.loadContact", {}),
+          step("calc", "t.code", { code }),
+        ]),
+        manifest: withCode,
+      });
+    const store = make("return { a: steps.loadContact.email, b: steps['loadContact'].name };");
+    store.getState().replaceStep("loadContact", "crm.sendEmail");
+    expect(store.getState().doc.steps.map((s) => s.id)).toEqual(["sendEmail", "calc"]);
+    expect(findStep(store.getState().doc, "calc")?.step.config.code).toBe(
+      "return { a: steps.sendEmail.email, b: steps['sendEmail'].name };",
+    );
+    const dynamic = make("const k = 'loadContact'; return { a: steps[k].email };");
+    dynamic.getState().replaceStep("loadContact", "crm.sendEmail");
+    expect(dynamic.getState().doc.steps.map((s) => s.id)).toEqual(["loadContact", "calc"]);
+  });
+
   test("replacing with the same type is a no-op", () => {
     const store = storeFor();
     store.getState().setConfig("load", "contactId", "c1");

@@ -1,6 +1,8 @@
+import { codeReadsStepOpaquely, rewriteCodeStepRefs } from "./code-refs";
 import { isValidStepId, RESERVED_STEP_IDS } from "./ids";
 import { formatRefPath, isRef, isTpl, parseRefPath, parseTemplate } from "./refs";
-import type { Step, ValueExpr, WorkflowDoc } from "./types";
+import type { Manifest, Step, ValueExpr, WorkflowDoc } from "./types";
+import { UI_META_KEY } from "./ui";
 
 /** Thrown when a tree operation targets a step, branch, or index that doesn't exist. */
 export class FlowkitTreeError extends Error {
@@ -298,22 +300,84 @@ export function isGeneratedStepId(id: string, nodeType: string): boolean {
 }
 
 /**
+ * The config keys of `step` that hold code (`widget: "code"`, like a Transform's `code`), or
+ * `undefined` without a manifest: then every top-level text value is treated as code.
+ */
+function codeKeys(step: Step, manifest: Manifest | undefined): Set<string> | undefined {
+  if (!manifest) return undefined;
+  const node = manifest.nodes.find((n) => n.type === step.type);
+  const props = (node?.input as { properties?: Record<string, Record<string, unknown>> })
+    ?.properties;
+  const keys = new Set<string>();
+  for (const [key, schema] of Object.entries(props ?? {})) {
+    const meta = schema?.[UI_META_KEY] as { widget?: unknown } | undefined;
+    if (meta?.widget === "code") keys.add(key);
+  }
+  return keys;
+}
+
+/** The code strings of a step's config (see {@link codeKeys}), by key. */
+function codeValues(step: Step, manifest: Manifest | undefined): [string, string][] {
+  const keys = codeKeys(step, manifest);
+  return Object.entries(step.config).flatMap(([k, v]) =>
+    typeof v === "string" && (keys === undefined || keys.has(k))
+      ? [[k, v] as [string, string]]
+      : [],
+  );
+}
+
+/**
+ * Whether some step's code (a Transform's `code`) might read step `id` in a way
+ * {@link renameStepId} can't rewrite: `steps[key]`, `const { a } = steps` and the like, with the
+ * ID also written in the code. Renaming the step would then break that code silently, so callers
+ * that rename on their own (Replace regenerating a generated ID) keep the ID instead.
+ * `manifest` tells code fields apart; without it every top-level text value counts.
+ */
+export function codeBlocksRename(doc: WorkflowDoc, id: string, manifest?: Manifest): boolean {
+  let blocked = false;
+  const walk = (list: Step[]) => {
+    for (const step of list) {
+      if (blocked) return;
+      if (codeValues(step, manifest).some(([, code]) => codeReadsStepOpaquely(code, id))) {
+        blocked = true;
+        return;
+      }
+      for (const branch of Object.values(step.branches ?? {})) walk(branch);
+    }
+  };
+  walk(doc.steps);
+  return blocked;
+}
+
+/**
  * Renames step `id` to `newId`, rewriting every reference to it: in step configs anywhere in the
- * tree and in the workflow's output mapping. Returns `doc` itself when the IDs are equal.
+ * tree, in the workflow's output mapping, and in code (`steps.<id>`, `steps?.<id>`,
+ * `steps['<id>']`, `steps["<id>"]`, also after `input.`, found with a tokenizer so comments and
+ * strings are left alone). `manifest` tells code fields (`widget: "code"`) apart; without it every
+ * top-level text value is treated as code. Code that reads `steps` dynamically can't be
+ * rewritten; check {@link codeBlocksRename} first. Returns `doc` itself when the IDs are equal.
  *
  * @throws {FlowkitTreeError} If `id` doesn't exist, or `newId` is taken or not a valid step ID.
  */
-export function renameStepId(doc: WorkflowDoc, id: string, newId: string): WorkflowDoc {
+export function renameStepId(
+  doc: WorkflowDoc,
+  id: string,
+  newId: string,
+  manifest?: Manifest,
+): WorkflowDoc {
   if (id === newId) return doc;
   if (!findStep(doc, id)) throw new FlowkitTreeError(`Step "${id}" not found`);
   if (allStepIds(doc).has(newId) || !isValidStepId(newId))
     throw new FlowkitTreeError(`Step ID "${newId}" is taken or invalid`);
   const idMap = new Map([[id, newId]]);
-  const rename = (step: Step): Step => ({
-    ...step,
-    id: step.id === id ? newId : step.id,
-    config: rewriteRefs(step.config, idMap) as Record<string, ValueExpr>,
-  });
+  const rename = (step: Step): Step => {
+    const config = rewriteRefs(step.config, idMap) as Record<string, ValueExpr>;
+    for (const [key, code] of codeValues(step, manifest)) {
+      const next = rewriteCodeStepRefs(code, idMap);
+      if (next !== code) config[key] = next;
+    }
+    return { ...step, id: step.id === id ? newId : step.id, config };
+  };
   const walk = (list: Step[]): Step[] =>
     list.map((step) => {
       const renamed = rename(step);

@@ -115,6 +115,7 @@ export {
 } from "./show-if";
 export {
   allStepIds,
+  codeBlocksRename,
   duplicateStep,
   FlowkitTreeError,
   type FoundStep,
