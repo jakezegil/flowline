@@ -931,12 +931,12 @@
   .fk-ref[data-readonly]:hover {
     border-color: var(--fk-border);
   }
-  .fk-ref[data-multiline] .fk-ref__editor {
-    min-height: 76px;
-  }
   .fk-ref__editor {
     flex: 1;
     min-width: 0;
+  }
+  .fk-ref[data-multiline] .fk-ref__editor {
+    min-height: 76px;
   }
   .fk-ref__browse {
     display: grid;
@@ -982,9 +982,6 @@
     animation: fk-pop 140ms var(--fk-ease);
     transform-origin: var(--radix-popover-content-transform-origin);
   }
-  .fk-ref-popover .fk-dp__tree {
-    max-height: min(320px, 45vh);
-  }
 
   /* ---------------------------------------------------------------- data picker */
   .fk-dp {
@@ -1025,6 +1022,9 @@
     overscroll-behavior: contain;
     scroll-padding: 4px;
   }
+  .fk-ref-popover .fk-dp__tree {
+    max-height: min(320px, 45vh);
+  }
   .fk-dp__row {
     --fk-dp-indent: calc(var(--fk-dp-depth, 0) * 14px);
     position: relative;
@@ -1049,10 +1049,6 @@
   }
   .fk-dp__row--section:not(:first-child) {
     margin-top: 6px;
-  }
-  .fk-dp__row[data-disabled] .fk-dp__icon,
-  .fk-dp__row[data-disabled] .fk-dp__section-name {
-    opacity: 0.55;
   }
   .fk-dp__chevron {
     display: grid;
@@ -1089,6 +1085,10 @@
     font-weight: 560;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+  .fk-dp__row[data-disabled] .fk-dp__icon,
+  .fk-dp__row[data-disabled] .fk-dp__section-name {
+    opacity: 0.55;
   }
   .fk-dp__caption {
     overflow: hidden;
@@ -1138,7 +1138,7 @@
     background: var(--fk-subtle);
     border-radius: 4px;
   }
-  .fk-dp:focus-within .fk-dp__row[data-active] .fk-dp__type,
+  :where(.fk-dp:focus-within) .fk-dp__row[data-active] .fk-dp__type,
   .fk-dp__row:hover .fk-dp__type {
     background: var(--fk-surface);
   }
@@ -1161,11 +1161,11 @@
     opacity: 0;
     transition: opacity 120ms var(--fk-ease);
   }
-  .fk-dp:focus-within .fk-dp__row[data-active] .fk-dp__insert,
+  :where(.fk-dp:focus-within) .fk-dp__row[data-active] .fk-dp__insert,
   .fk-dp__row:hover .fk-dp__insert {
     opacity: 1;
   }
-  .fk-dp:focus-within .fk-dp__row[data-active]:has(.fk-dp__insert) .fk-dp__type,
+  :where(.fk-dp:focus-within) .fk-dp__row[data-active]:has(.fk-dp__insert) .fk-dp__type,
   .fk-dp__row:hover:has(.fk-dp__insert) .fk-dp__type {
     visibility: hidden;
   }

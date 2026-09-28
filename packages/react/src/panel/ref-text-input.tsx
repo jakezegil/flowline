@@ -445,7 +445,15 @@ export function RefTextInput(props: {
               collisionPadding={8}
               onOpenAutoFocus={(e) => e.preventDefault()}
               onCloseAutoFocus={(e) => e.preventDefault()}
-              onEscapeKeyDown={(e) => e.preventDefault()}
+              // Escape is handled here, before the editor or picker see it: in the field it
+              // closes the picker; in the picker, the picker's own handler clears the search or
+              // returns to the field. Either way the key is marked used, so an enclosing panel
+              // doesn't close too (see onKeyDown above).
+              onEscapeKeyDown={(e) => {
+                e.preventDefault();
+                if (!(e.target instanceof Node && contentRef.current?.contains(e.target)))
+                  setOpen(false);
+              }}
               onInteractOutside={(e) => {
                 if (inside(e.target)) e.preventDefault();
               }}

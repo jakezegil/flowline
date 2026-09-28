@@ -127,10 +127,10 @@ function parentMap(flat: readonly PickerNode[]): Map<string, string> {
   return parents;
 }
 
-/** Sections open at first: the loop, the trigger and the nearest step (the likeliest picks). */
+/** Sections open at first: the loop, the trigger and the nearest enabled step (likeliest picks). */
 function initialExpanded(scope: ScopeEntry[], samples: Record<string, unknown>): Set<string> {
   const sections = sectionNodes(scope, samples);
-  const nearestStep = sections.find((s) => s.entry.kind === "step");
+  const nearestStep = sections.find((s) => s.entry.kind === "step" && !s.entry.disabled);
   return new Set(
     sections.filter((s) => s.entry.kind !== "step" || s === nearestStep).map((s) => s.id),
   );

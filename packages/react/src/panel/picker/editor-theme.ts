@@ -122,10 +122,11 @@ export const refInputTheme: Extension = EditorView.theme({
     gap: "4px",
     maxWidth: "100%",
     height: "20px",
-    margin: "0 1px",
+    margin: "1px 1px 0",
     padding: "0 7px 0 3px",
     overflow: "hidden",
-    verticalAlign: "-4px",
+    // Top-aligned in the 22px line (an inline-flex box's baseline comes from its icon).
+    verticalAlign: "top",
     fontSize: "12px",
     fontWeight: "520",
     lineHeight: "20px",
@@ -279,8 +280,15 @@ export const codeEditorTheme: Extension = [
         color: "var(--fk-accent-text)",
         fontWeight: "550",
       },
-      { tag: [t.string, t.special(t.string), t.regexp], color: "var(--fk-success)" },
-      { tag: [t.number, t.bool, t.null, t.atom], color: "var(--fk-warning)" },
+      // Mixed toward the text color so they keep AA contrast on both backgrounds.
+      {
+        tag: [t.string, t.special(t.string), t.regexp],
+        color: "color-mix(in srgb, var(--fk-success) 78%, var(--fk-text))",
+      },
+      {
+        tag: [t.number, t.bool, t.null, t.atom],
+        color: "color-mix(in srgb, var(--fk-warning) 75%, var(--fk-text))",
+      },
       {
         tag: [t.comment, t.lineComment, t.blockComment],
         color: "var(--fk-text-muted)",
