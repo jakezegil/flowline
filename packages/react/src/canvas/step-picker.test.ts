@@ -109,6 +109,15 @@ describe("step picker search (H3)", () => {
     );
   });
 
+  test("Minor 9: one typo still finds the step, below exact matches", () => {
+    expect(top("emial")).toBe("Send email");
+    expect(top("aproval")).toBe("Request approval");
+    expect(top("contcat")).toBe("Find contact by email");
+    expect(names("emial")).toEqual(["Send email", "Find contact by email"]);
+    // Short words need an exact start: "wiat" is too far from anything of three letters.
+    expect(names("zzzz")).toEqual([]);
+  });
+
   test("an empty query matches everything in order", () => {
     expect(names("  ")).toEqual(nodes.map((n) => n.name));
   });

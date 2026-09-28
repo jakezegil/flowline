@@ -83,8 +83,41 @@ function wordsOf(text: string): string[] {
  * must start a word of the node's name, keywords, category, plugin name or type (or, from three
  * letters, occur inside the name). The name counts most: an exact name wins, then a name that
  * starts with the query, then one containing it as words; keywords and the category come next,
- * the plugin and type last. Descriptions aren't searched (their many words match almost anything).
+ * the plugin and type last. A word of four letters or more one typo away from a name or keyword
+ * word (or its start) still matches, below any exact match. Descriptions aren't searched (their
+ * many words match almost anything).
  */
+/**
+ * Whether `a` and `b` are at most one typo apart: one letter added, dropped, changed, or two
+ * neighbours swapped ("emial" and "email").
+ */
+function oneTypo(a: string, b: string): boolean {
+  if (a === b) return true;
+  const la = a.length;
+  const lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  let i = 0;
+  while (i < la && i < lb && a[i] === b[i]) i++;
+  if (la === lb) {
+    // Changed letter, or swapped neighbours.
+    if (a.slice(i + 1) === b.slice(i + 1)) return true;
+    return a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2);
+  }
+  // Added or dropped letter.
+  return la > lb ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+}
+
+/** Whether token `t` (four letters or more) is one typo from a word of `words` or its start. */
+function nearly(t: string, words: readonly string[]): boolean {
+  if (t.length < 4) return false;
+  return words.some(
+    (w) =>
+      oneTypo(t, w) ||
+      oneTypo(t, w.slice(0, t.length)) ||
+      (w.length > t.length && oneTypo(t, w.slice(0, t.length + 1))),
+  );
+}
+
 export function stepMatchScore(node: NodeManifest, query: string, pluginName = ""): number {
   const q = query.trim().toLowerCase().replace(/\s+/g, " ");
   if (q === "") return 1;
@@ -99,14 +132,19 @@ export function stepMatchScore(node: NodeManifest, query: string, pluginName = "
     else if (t.length >= 3 && name.includes(t)) score += 10;
     else if (keywordWords.some((w) => w.startsWith(t))) score += 8;
     else if (otherWords.some((w) => w.startsWith(t))) score += 3;
+    // Typo tolerance, below every exact match: "emial" still finds Send email.
+    else if (nearly(t, nameWords)) score += 5;
+    else if (nearly(t, keywordWords)) score += 2;
     else return 0;
   }
   if (score === 0) return 0;
   if (name === q) score += 1000;
   else if (name.startsWith(q)) score += 500;
   else if (` ${name}`.includes(` ${q}`)) score += 200;
-  if (node.category?.toLowerCase().startsWith(q)) score += 40;
-  if ((node.keywords ?? []).some((k) => k.toLowerCase().startsWith(q))) score += 40;
+  // The query names the category or a keyword (or is one typo from one).
+  const names = (k: string) => k.startsWith(q) || nearly(q, [k]);
+  if (node.category && names(node.category.toLowerCase())) score += 40;
+  if ((node.keywords ?? []).some((k) => names(k.toLowerCase()))) score += 40;
   return score;
 }
 
