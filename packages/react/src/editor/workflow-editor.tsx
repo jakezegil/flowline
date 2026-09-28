@@ -109,7 +109,8 @@ function EditorBody({
           // Enter on a canvas node opens its panel: move focus there so the keyboard follows.
           if (e.key !== "Enter" || e.metaKey || e.ctrlKey || e.altKey) return;
           const target = e.target as HTMLElement;
-          if (!target.classList?.contains("react-flow__node")) return;
+          if (target.closest("button, input, textarea, select, [contenteditable='true']")) return;
+          if (store.getState().selection === null) return;
           const body = e.currentTarget.parentElement;
           requestAnimationFrame(() =>
             body?.querySelector<HTMLElement>(".fk-panel [data-autofocus]")?.focus(),

@@ -11,6 +11,7 @@ import {
   type ScopeEntry,
   type ValueExpr,
 } from "@flowkit/core";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import { ChevronRight } from "lucide-react";
 import { type JSX, useContext, useId, useMemo, useState, useSyncExternalStore } from "react";
 import { EditorContext } from "../hooks";
@@ -305,10 +306,12 @@ export function SchemaForm(props: {
     [schema, stepId, scope, samples, issues, invalidRefs, readOnly, value],
   );
   return (
-    <FormContext.Provider value={env}>
-      <div className="fk-form">
-        <ObjectFields schema={schema} path="" value={value} onChange={onChange} />
-      </div>
-    </FormContext.Provider>
+    <Tooltip.Provider delayDuration={300} skipDelayDuration={100}>
+      <FormContext.Provider value={env}>
+        <div className="fk-form">
+          <ObjectFields schema={schema} path="" value={value} onChange={onChange} />
+        </div>
+      </FormContext.Provider>
+    </Tooltip.Provider>
   );
 }

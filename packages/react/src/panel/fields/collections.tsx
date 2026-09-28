@@ -159,6 +159,7 @@ function newItem(root: JSONSchema, items: JSONSchema): ValueExpr {
 
 /** A text label of a list item from its `label`/`name`/`title`, if it has one. */
 function itemName(v: ValueExpr | undefined): string | undefined {
+  if (typeof v === "string" && v.trim() !== "" && v.length <= 40) return v;
   const obj = asObject(v);
   for (const k of ["label", "name", "title"]) {
     const s = obj?.[k];

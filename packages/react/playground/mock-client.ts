@@ -10,11 +10,14 @@ import type {
   RunStatus,
   RunSummary,
   Step,
+  SubflowInfo,
+  TestStepRequest,
+  TestStepResponse,
   WorkflowDoc,
   WorkflowVersion,
 } from "@flowkit/core";
 import type { FlowkitClient } from "@flowkit/core/client";
-import { manifest, nestedDoc } from "./fixtures";
+import { manifest, nestedDoc, webhookDoc } from "./fixtures";
 
 const T0 = Date.now();
 const min = 60_000;
@@ -452,16 +455,77 @@ function version(doc: WorkflowDoc, v: number): WorkflowVersion {
   };
 }
 
+const SUBFLOWS: SubflowInfo[] = [
+  {
+    id: "enrich-company",
+    name: "Enrich company",
+    input: {
+      type: "object",
+      properties: {
+        domain: { type: "string", "x-flowkit": { label: "Company domain" } },
+        includeContacts: {
+          type: "boolean",
+          "x-flowkit": { label: "Include contacts" },
+          default: false,
+        },
+      },
+      required: ["domain"],
+    },
+    output: {
+      type: "object",
+      properties: { industry: { type: "string" }, employees: { type: "number" } },
+    },
+  },
+  {
+    id: "notify-owner",
+    name: "Notify account owner",
+    input: { type: "object", properties: { message: { type: "string" } } },
+    output: { type: "object", properties: {} },
+  },
+];
+
+/** Canned step test results (the panel resolves the input itself): sending email fails. */
+function testResult({ step }: TestStepRequest): TestStepResponse {
+  switch (step.type) {
+    case "crm.loadContact":
+      return { ok: true, output: contact, durationMs: 182 };
+    case "crm.sendEmail":
+      return {
+        ok: false,
+        error: "SMTP relay rejected the recipient: mailbox ada@analytical.co is unavailable (550)",
+
+        durationMs: 911,
+      };
+    case "core.condition":
+      return { ok: true, output: { matched: true }, branch: "if", durationMs: 3 };
+    case "core.switch":
+      return { ok: true, output: { matched: "emea" }, branch: "emea", durationMs: 2 };
+    case "core.httpRequest":
+      return {
+        ok: true,
+        output: {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: { ok: true },
+        },
+
+        durationMs: 348,
+      };
+    default:
+      return { ok: true, output: { id: `${step.id}_1`, ok: true }, durationMs: 64 };
+  }
+}
+
 /** The playground client. `wf=clean` edits the onboarding flow with a manual trigger. */
 export function mockClient(): FlowkitClient {
   const docs: Record<string, WorkflowDoc> = {
     "deal-won": nestedDoc(),
     onboarding: onboardingDoc("core.manual"),
+    "inbound-lead": webhookDoc(),
   };
   let saved = 7;
-  const reject = (what: string) => () =>
-    Promise.reject(new Error(`${what} is not available in the playground`));
   return {
+    baseUrl: "/api/flowkit",
     getManifest: () => delay(manifest),
     listWorkflows: () => delay([]),
     getWorkflow: (id) => {
@@ -469,12 +533,15 @@ export function mockClient(): FlowkitClient {
       if (!doc) return Promise.reject(Object.assign(new Error("Not found"), { status: 404 }));
       return delay({ latest: version(doc, saved), published: version(doc, saved - 1) });
     },
-    saveWorkflow: (doc) => delay(version(doc, ++saved), 400),
+    saveWorkflow: (doc) => {
+      docs[doc.id] = doc;
+      return delay(version(doc, ++saved), 400);
+    },
     publish: () => delay(undefined, 400),
     validate: () => delay([]),
-    listSubflows: () => delay([]),
-    listSecrets: () => delay([]),
-    testStep: reject("Testing steps"),
+    listSubflows: () => delay(SUBFLOWS),
+    listSecrets: () => delay(["DATA_TEAM_TOKEN", "SLACK_WEBHOOK", "STRIPE_KEY"]),
+    testStep: (req) => delay(testResult(req), 700),
     runWorkflow: () => delay({ runId: "run_new" }, 400),
     listRuns: (filter = {}) =>
       delay(summaries().filter((r) => !filter.status || r.status === filter.status)),

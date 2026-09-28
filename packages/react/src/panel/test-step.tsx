@@ -79,7 +79,7 @@ function TestStatus({ stepId }: { stepId: string }): JSX.Element {
     return (
       <p className="fk-test__status" data-tone="warning">
         <TriangleAlert size={14} aria-hidden />
-        <span>
+        <span className="fk-test__text">
           <strong>{labels.needsRetest}</strong>
           <span className="fk-test__why">
             {typeChanged ? labels.sampleTypeChanged : labels.needsTest}
@@ -246,9 +246,13 @@ export function TestStep({ stepId }: { stepId: string }): JSX.Element | null {
               {(response?.branch || response?.signal) && (
                 <p className="fk-test__facts">
                   {response.branch && (
-                    <span>{labels.testBranch(branchLabel(response.branch))}</span>
+                    <span className="fk-test__fact">
+                      {labels.testBranch(branchLabel(response.branch))}
+                    </span>
                   )}
-                  {response.signal && <span>{labels.testSignal[response.signal]}</span>}
+                  {response.signal && (
+                    <span className="fk-test__fact">{labels.testSignal[response.signal]}</span>
+                  )}
                 </p>
               )}
               <JsonTree value={response?.output ?? null} label={labels.testOutput} />

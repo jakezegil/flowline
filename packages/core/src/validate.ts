@@ -124,8 +124,17 @@ function report(r: Reporter, code: IssueCode, message: string, field?: string): 
   });
 }
 
+/**
+ * A trial reporter for one union member. It reports at full severity even inside a disabled step,
+ * so members can be compared by their errors; {@link adopt} downgrades what is kept.
+ */
 function fork(r: Reporter): Reporter {
-  return { ...r, issues: [] };
+  return { ...r, disabled: false, issues: [] };
+}
+
+/** Keeps a trial's issues, downgraded to warnings inside a disabled step. */
+function adopt(r: Reporter, trial: Reporter): void {
+  for (const i of trial.issues) r.issues.push(r.disabled ? { ...i, severity: "warning" } : i);
 }
 
 function uiMeta(schema: JSONSchema | undefined): UiMeta | undefined {
@@ -417,7 +426,7 @@ function checkValue(r: Reporter, value: unknown, schema: JSONSchema, f: FieldCtx
     }
     const isContainer = typeof value === "object" && value !== null;
     if (best && (errorCount(best) === 0 || isContainer)) {
-      r.issues.push(...best.issues);
+      adopt(r, best);
     } else {
       report(
         r,

@@ -585,6 +585,29 @@ describe("validateWorkflow", () => {
     expect(hasErrors(issues)).toBe(false);
   });
 
+  test("a valid union member in a disabled step reports nothing", () => {
+    const authNode = defineNode({
+      type: "x.auth",
+      name: "Auth",
+      input: z.object({
+        auth: z.discriminatedUnion("type", [
+          z.object({ type: z.literal("none") }),
+          z.object({ type: z.literal("bearer"), secret: z.string() }),
+        ]),
+      }),
+      run: () => ({}),
+    });
+    const m = extend([authNode]);
+    const valid = { auth: { type: "bearer", secret: "TOKEN" } };
+    const bad = { auth: { type: "bearer" } };
+    const docOf = (config: Step["config"]) =>
+      docWith([step("a", "x.auth", config, { disabled: true })]);
+    expect(validateWorkflow(docOf(valid), m)).toEqual([]);
+    const issues = validateWorkflow(docOf(bad), m);
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.every((i) => i.severity === "warning")).toBe(true);
+  });
+
   test("steps inside a disabled block only produce warnings", () => {
     const doc = docWith([
       step(

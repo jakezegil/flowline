@@ -6,6 +6,7 @@
  * @module
  */
 import type { Issue } from "@flowkit/core";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import { CircleOff, Copy, X } from "lucide-react";
 import { type JSX, type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { nodeElement, nodeIdOf } from "../canvas/actions";
@@ -317,7 +318,9 @@ export function ConfigPanel({
 }): JSX.Element | null {
   return (
     <EditorContext.Provider value={store}>
-      <PanelContent store={store} {...(onClose ? { onClose } : {})} />
+      <Tooltip.Provider delayDuration={300} skipDelayDuration={100}>
+        <PanelContent store={store} {...(onClose ? { onClose } : {})} />
+      </Tooltip.Provider>
     </EditorContext.Provider>
   );
 }
