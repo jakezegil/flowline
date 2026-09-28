@@ -1,4 +1,5 @@
-import { FatalError } from "@flowkit/core";
+import { createHash } from "node:crypto";
+import { FatalError, type NodeContext, RetryableError, type SuspendSignal } from "@flowkit/core";
 import { describe, expect, it } from "vitest";
 import { fakeContext, NOW } from "../test/fake-context";
 import { delayNode, MAX_DURATION_MS, parseDuration, waitForCallbackNode } from "./time";
@@ -157,6 +158,129 @@ describe("core.waitForCallback", () => {
       kind: "branch",
       branch: "timeout",
       output: { body: null, timedOut: true },
+    });
+  });
+
+  describe("notify", () => {
+    type Call = { url: string; init: Parameters<NodeContext["http"]["fetch"]>[1] };
+    const notifying = (respond: () => Promise<Response>) => {
+      const calls: Call[] = [];
+      const ctx = fakeContext({
+        runId: "run-7",
+        idempotencyKey: "idem-1",
+        http: {
+          async fetch(url, init) {
+            calls.push({ url, init });
+            return respond();
+          },
+        },
+      });
+      return { calls, ctx };
+    };
+    const input = () =>
+      waitForCallbackNode.input.parse({
+        timeout: "1d",
+        notify: { url: "https://hooks.example/approvals" },
+      });
+
+    it("accepts only an http(s) URL", () => {
+      expect(waitForCallbackNode.input.safeParse({ notify: { url: "ftp://x/y" } }).success).toBe(
+        false,
+      );
+      expect(waitForCallbackNode.input.safeParse({ notify: { url: "nope" } }).success).toBe(false);
+      expect(waitForCallbackNode.input.parse({})).not.toHaveProperty("notify");
+    });
+
+    /** Runs the handler to its suspension and returns the signal. */
+    const suspendWith = async (ctx: NodeContext) =>
+      (await waitForCallbackNode.run({ input: input(), ctx })) as SuspendSignal;
+    const keyFor = (token: string) =>
+      createHash("sha256").update(`run-7:step:${token}`).digest("hex");
+
+    it("sends nothing itself, but hands the engine an afterCommit that notifies", async () => {
+      const { calls, ctx } = notifying(async () => new Response(null, { status: 204 }));
+      const result = await suspendWith(ctx);
+      expect(result).toMatchObject({ kind: "suspend", callback: { token: "tok" } });
+      expect(calls).toEqual([]);
+      expect(result.afterCommit).toEqual(expect.any(Function));
+    });
+
+    it("POSTs the resume URL, expiry and run ID, keyed by the token, without redirects", async () => {
+      const { calls, ctx } = notifying(async () => new Response(null, { status: 204 }));
+      const { signal } = new AbortController();
+      await (await suspendWith(ctx)).afterCommit?.({ signal });
+      expect(calls).toHaveLength(1);
+      const [call] = calls;
+      expect(call?.url).toBe("https://hooks.example/approvals");
+      expect(call?.init?.method).toBe("POST");
+      expect(call?.init?.signal).toBe(signal);
+      expect(call?.init?.redirect).toBe("error");
+      const headers = new Headers(call?.init?.headers);
+      expect(headers.get("content-type")).toBe("application/json");
+      expect(headers.get("idempotency-key")).toBe(keyFor("tok"));
+      expect(JSON.parse(String(call?.init?.body))).toEqual({
+        resumeUrl: "https://x/flowkit/resume/tok",
+        expiresAt: NOW + DAY,
+        runId: "run-7",
+      });
+    });
+
+    const failure = async (respond: () => Promise<Response>) => {
+      const { ctx } = notifying(respond);
+      const hook = (await suspendWith(ctx)).afterCommit;
+      return (hook as NonNullable<typeof hook>)({ signal: new AbortController().signal }).then(
+        () => undefined,
+        (e: unknown) => e as Error,
+      );
+    };
+
+    it.each([
+      ["a 5xx response", async () => new Response("down", { status: 503 })],
+      ["a 408 response", async () => new Response("slow", { status: 408 })],
+      ["a 429 response", async () => new Response("busy", { status: 429 })],
+      [
+        "a network error",
+        async (): Promise<Response> => {
+          throw new TypeError("fetch failed", { cause: new Error("ECONNREFUSED") });
+        },
+      ],
+    ])("fails retryably on %s, without the token in the message", async (_, respond) => {
+      const err = await failure(respond);
+      expect(err).toBeInstanceOf(RetryableError);
+      expect(err?.message).toMatch(/^Notify request failed/);
+      expect(err?.message).not.toContain("tok");
+    });
+
+    it.each([400, 404, 410])("fails permanently on a %i response", async (status) => {
+      const err = await failure(async () => new Response("no", { status }));
+      expect(err).toBeInstanceOf(FatalError);
+      expect(err?.message).toBe(`Notify request failed: HTTP ${status}`);
+    });
+
+    it("keeps a fatal error from the network guard fatal", async () => {
+      const err = await failure(async () => {
+        throw new FatalError("blocked private network address");
+      });
+      expect(err).toBeInstanceOf(FatalError);
+    });
+
+    it("doesn't notify again when resumed", async () => {
+      for (const resume of [{ kind: "callback", body: 1 }, { kind: "timeout" }] as const) {
+        const { calls, ctx } = notifying(async () => new Response(null, { status: 204 }));
+        ctx.resume = resume;
+        expect(await waitForCallbackNode.run({ input: input(), ctx })).not.toHaveProperty(
+          "afterCommit",
+        );
+        expect(calls).toEqual([]);
+      }
+    });
+
+    it("hands no afterCommit without notify", async () => {
+      const result = (await waitForCallbackNode.run({
+        input: waitForCallbackNode.input.parse({}),
+        ctx: fakeContext(),
+      })) as SuspendSignal;
+      expect(result).not.toHaveProperty("afterCommit");
     });
   });
 });

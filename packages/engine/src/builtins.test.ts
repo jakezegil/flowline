@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import {
   createRegistry,
   defineNode,
@@ -17,14 +20,16 @@ import {
   delayNode,
   eq,
   forEachNode,
+  httpRequestNode,
   manualTrigger,
   stopNode,
   subflowTrigger,
   switchNode,
+  transformNode,
   waitForCallbackNode,
 } from "@flowkit/nodes-builtin";
 import { createMemoryStorage } from "@flowkit/storage-memory";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createEngine, type Engine } from "./engine";
 import type { StorageAdapter } from "./storage";
@@ -101,6 +106,13 @@ describe("createEngine registers the built-ins", () => {
     expect(engine.registry.getNode("core.condition")).toBe(conditionNode);
     expect(engine.registry.getNode("t.echo")).toBe(echo);
     expect(engine.registry.manifest().plugins.map((p) => p.id)).toEqual(["core", "t"]);
+  });
+
+  it("includes the HTTP request and transform nodes", () => {
+    expect(httpRequestNode.type).toBe("core.httpRequest");
+    expect(transformNode.type).toBe("core.transform");
+    expect(engine.registry.getNode("core.httpRequest")).toBe(httpRequestNode);
+    expect(engine.registry.getNode("core.transform")).toBe(transformNode);
   });
 
   it("uses a registry that already has the core plugin as is", () => {
@@ -485,5 +497,266 @@ describe("core.callSubflow", () => {
     const id = await start(child({ contactId: 42 }), { email: "ada@example.com" });
     await engine.drain();
     expect((await getRun(id)).status).toBe("completed");
+  });
+});
+
+describe("core.transform", () => {
+  it("runs on the engine's default QuickJS runtime", async () => {
+    const doc = workflow("calc")
+      .trigger(manualTrigger, { fields: [{ name: "n", type: "number" }] })
+      .step("calc", transformNode, {
+        code: "return { doubled: trigger.n * 2 };",
+        outputFields: [{ name: "doubled", type: "number" }],
+      })
+      .step("after", echo, { value: ref("steps.calc.doubled") })
+      .build();
+    const id = await start(doc, { n: 21 });
+    await engine.drain();
+    const run = await getRun(id);
+    expect(run.status).toBe("completed");
+    expect(outputAt(run.journal, "after")).toEqual({ value: 42 });
+  });
+});
+
+type Received = { method: string | undefined; headers: IncomingHttpHeaders; body: string };
+
+describe("built-ins over HTTP", () => {
+  let server: Server;
+  let base: string;
+  let received: Received[];
+  /** Responses to give, in order: a status, or a redirect; then 200. */
+  let statuses: (number | { status: number; location: string })[];
+  /** Runs when a request arrives, before it is answered. */
+  let onRequest: (() => Promise<void>) | undefined;
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      let body = "";
+      req.setEncoding("utf8");
+      req.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      req.on("end", async () => {
+        received.push({ method: req.method, headers: req.headers, body });
+        await onRequest?.();
+        const next = statuses.shift() ?? 200;
+        if (typeof next === "number") {
+          res.writeHead(next, { "content-type": "application/json" });
+        } else {
+          res.writeHead(next.status, { location: next.location });
+        }
+        res.end('{"ok":true}');
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  let emitted: unknown[];
+  let local: Engine;
+
+  beforeEach(() => {
+    received = [];
+    statuses = [];
+    onRequest = undefined;
+    emitted = [];
+    local = createEngine({
+      registry: createRegistry([testPlugin]),
+      storage,
+      clock: () => now,
+      publicUrl: "https://crm.example",
+      http: { allowPrivateNetworks: true },
+      onEvent: (e) => emitted.push(e),
+    });
+  });
+
+  describe("core.httpRequest", () => {
+    const doc = (url: string) =>
+      workflow("call")
+        .trigger(manualTrigger, {})
+        .step("call", httpRequestNode, { method: "GET", url })
+        .step("after", echo, { value: ref("steps.call.body.ok") })
+        .build();
+
+    it("calls through the engine's network policy", async () => {
+      const id = await start(doc(`${base}/items`));
+      await local.drain();
+      const run = await getRun(id);
+      expect(run.status).toBe("completed");
+      expect(outputAt(run.journal, "after")).toEqual({ value: true });
+      expect(received).toHaveLength(1);
+    });
+
+    it("blocks private networks by default", async () => {
+      const id = await start(doc(`${base}/items`));
+      await engine.drain();
+      const run = await getRun(id);
+      expect(run.status).toBe("failed");
+      expect(run.error?.message).toContain("blocked private network address");
+      expect(received).toEqual([]);
+    });
+  });
+
+  describe("core.waitForCallback notify", () => {
+    const doc = (notify?: { url: string }) =>
+      workflow("approval")
+        .trigger(manualTrigger, {})
+        .step("wait", waitForCallbackNode, notify ? { timeout: "1d", notify } : { timeout: "1d" }, {
+          resumed: (b) => b.step("ok", echo, { value: ref("steps.wait.body.approved") }),
+          timeout: (b) => b.step("late", echo, { value: true }),
+        })
+        .build();
+
+    /** Everything a run leaks to the audit trail: journal, stored events and emitted events. */
+    const audit = async (id: string) =>
+      JSON.stringify([(await getRun(id)).journal, await storage.listEvents(TENANT, id), emitted]);
+    const eventTypes = async (id: string) =>
+      (await storage.listEvents(TENANT, id)).map((e) => e.type);
+    const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+
+    it("POSTs the resume URL once the token is stored, and the posted URL resumes the run", async () => {
+      const id = await start(doc({ url: `${base}/hooks` }));
+      const storedAtPost: unknown[] = [];
+      onRequest = async () => {
+        const run = await getRun(id);
+        storedAtPost.push({ status: run.status, token: run.callbackToken });
+      };
+      await local.drain();
+      const waiting = await getRun(id);
+      expect(waiting).toMatchObject({ status: "waiting", waitReason: "callback" });
+      const token = waiting.callbackToken as string;
+      expect(storedAtPost).toEqual([{ status: "waiting", token }]);
+
+      expect(received).toHaveLength(1);
+      const [post] = received;
+      expect(post?.method).toBe("POST");
+      expect(post?.headers["content-type"]).toBe("application/json");
+      expect(post?.headers["idempotency-key"]).toBe(sha256(`${id}:wait:${token}`));
+      expect(JSON.parse(post?.body ?? "")).toEqual({
+        resumeUrl: `https://crm.example/flowkit/resume/${token}`,
+        expiresAt: now + DAY,
+        runId: id,
+      });
+
+      expect(await audit(id)).not.toContain(token);
+
+      expect(await local.resume(token, { approved: true })).toBe("resumed");
+      await local.drain();
+      const run = await getRun(id);
+      expect(run.status).toBe("completed");
+      expect(outputAt(run.journal, "wait/resumed/ok")).toEqual({ value: true });
+      expect(received).toHaveLength(1);
+      expect(await audit(id)).not.toContain(token);
+    });
+
+    it.each([
+      ["a 5xx", 503],
+      ["a 408", 408],
+      ["a 429", 429],
+    ])("retries %s inline with the same URL and key", async (_, status) => {
+      statuses = [status];
+      const id = await start(doc({ url: `${base}/hooks` }));
+      await local.drain();
+      const waiting = await getRun(id);
+      expect(waiting).toMatchObject({ status: "waiting", waitReason: "callback", attempt: 1 });
+      expect(received).toHaveLength(2);
+      expect(received[1]?.body).toBe(received[0]?.body);
+      expect(received[1]?.headers["idempotency-key"]).toBe(received[0]?.headers["idempotency-key"]);
+      const types = await eventTypes(id);
+      expect(types).not.toContain("step.retrying");
+      expect(types).not.toContain("step.notifyFailed");
+      expect(await audit(id)).not.toContain(waiting.callbackToken as string);
+    });
+
+    it("gives up after 3 attempts, records step.notifyFailed and keeps waiting", async () => {
+      statuses = [500, 500, 500];
+      const id = await start(doc({ url: `${base}/hooks` }));
+      await local.drain();
+      const waiting = await getRun(id);
+      expect(waiting).toMatchObject({ status: "waiting", waitReason: "callback" });
+      expect(received).toHaveLength(3);
+      const events = await storage.listEvents(TENANT, id);
+      const failed = events.filter((e) => e.type === "step.notifyFailed");
+      expect(failed).toEqual([
+        expect.objectContaining({
+          stepPath: "wait",
+          data: { error: { message: "Notify request failed: HTTP 500" }, attempts: 3 },
+        }),
+      ]);
+      expect(emitted).toContainEqual(expect.objectContaining({ type: "step.notifyFailed" }));
+      const token = waiting.callbackToken as string;
+      expect(await audit(id)).not.toContain(token);
+      expect(await audit(id)).not.toContain("/resume/");
+
+      // The ops resume API still works.
+      expect(await local.resumeRun(TENANT, id, { approved: true }, "u1")).toBe("resumed");
+      await local.drain();
+      expect(outputAt((await getRun(id)).journal, "wait/resumed/ok")).toEqual({ value: true });
+    });
+
+    it("doesn't retry a permanent 4xx", async () => {
+      statuses = [404];
+      const id = await start(doc({ url: `${base}/hooks` }));
+      await local.drain();
+      expect(await getRun(id)).toMatchObject({ status: "waiting", waitReason: "callback" });
+      expect(received).toHaveLength(1);
+      expect(await eventTypes(id)).toContain("step.notifyFailed");
+    });
+
+    it("doesn't follow a redirect to another origin with the body", async () => {
+      const other = base.replace("127.0.0.1", "localhost");
+      statuses = [{ status: 307, location: `${other}/elsewhere` }];
+      const id = await start(doc({ url: `${base}/hooks` }));
+      await local.drain();
+      expect(await getRun(id)).toMatchObject({ status: "waiting", waitReason: "callback" });
+      expect(received).toHaveLength(1);
+      const events = await storage.listEvents(TENANT, id);
+      expect(events.find((e) => e.type === "step.notifyFailed")?.data).toMatchObject({
+        attempts: 1,
+      });
+    });
+
+    it("doesn't notify when the park commit fails, and notifies once when the step re-runs", async () => {
+      let crash = true;
+      const crashing = createEngine({
+        registry: createRegistry([testPlugin]),
+        storage,
+        clock: () => now,
+        publicUrl: "https://crm.example",
+        http: { allowPrivateNetworks: true },
+        __testHooks: {
+          beforeCommit(_runId, stepPath, phase) {
+            if (crash && stepPath === "wait" && phase === "result") {
+              crash = false;
+              throw new Error("simulated crash");
+            }
+          },
+        },
+      });
+      const id = await start(doc({ url: `${base}/hooks` }));
+      await expect(crashing.drain()).rejects.toThrow("simulated crash");
+      expect(received).toEqual([]);
+      expect((await getRun(id)).callbackToken ?? null).toBeNull();
+
+      now += 60_000;
+      await local.drain();
+      const waiting = await getRun(id);
+      expect(waiting).toMatchObject({ status: "waiting", waitReason: "callback" });
+      expect(received).toHaveLength(1);
+      expect(JSON.parse(received[0]?.body ?? "").resumeUrl).toBe(
+        `https://crm.example/flowkit/resume/${waiting.callbackToken}`,
+      );
+    });
+
+    it("sends nothing without notify", async () => {
+      const id = await start(doc());
+      await local.drain();
+      expect(await getRun(id)).toMatchObject({ status: "waiting", waitReason: "callback" });
+      expect(received).toEqual([]);
+    });
   });
 });

@@ -5,7 +5,6 @@ import {
   defineNode,
   definePlugin,
   defineTrigger,
-  type NodeDefinition,
   type WorkflowDoc,
 } from "@flowkit/core";
 import { isPrivateAddress } from "@flowkit/nodes-builtin/ssrf";
@@ -402,6 +401,46 @@ describe("redirects", () => {
     expect(await res.json()).toEqual({ method: "POST", body: "payload", type: "text/plain" });
   });
 
+  describe("with init.redirect", () => {
+    const redirectElsewhere = () => {
+      handler = (req, res) => {
+        if (req.url === "/a") {
+          res.writeHead(307, { location: `http://other.test:${port}/b` });
+          res.end();
+          return;
+        }
+        res.end("followed");
+      };
+    };
+    const post = { method: "POST", body: "resume-url-inside" } as const;
+    const other = () =>
+      ctxWith({
+        resolve: tableResolver({ "public.test": ["127.0.0.1"], "other.test": ["127.0.0.1"] })
+          .resolve,
+        isPrivate: loopbackIsPublic,
+      });
+
+    it('"error" fails on a redirect without re-sending the body', async () => {
+      redirectElsewhere();
+      const err = await fatal(
+        other().http.fetch(`http://public.test:${port}/a`, { ...post, redirect: "error" }),
+      );
+      expect(err.message).toBe("redirects are not allowed");
+      expect(hits).toHaveLength(1);
+    });
+
+    it('"manual" returns the redirect response as is', async () => {
+      redirectElsewhere();
+      const res = await other().http.fetch(`http://public.test:${port}/a`, {
+        ...post,
+        redirect: "manual",
+      });
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe(`http://other.test:${port}/b`);
+      expect(hits).toHaveLength(1);
+    });
+  });
+
   it("gives up after 5 redirects", async () => {
     handler = (req, res) => {
       const n = Number(req.url?.slice(1) ?? 0);
@@ -536,21 +575,8 @@ describe("engine wiring", () => {
 
 describe("core.httpRequest auth end to end", () => {
   it("sends the secret on the wire but keeps it out of output, journal and events", async () => {
-    // Imported by path until builtinPlugin (Task 9) registers core.httpRequest in the engine.
-    const path = new URL("../../nodes-builtin/src/http.ts", import.meta.url).href;
-    const { httpRequest } = (await import(/* @vite-ignore */ path)) as {
-      httpRequest: NodeDefinition;
-    };
-    const registry = createRegistry([
-      definePlugin({
-        id: "core",
-        name: "Core",
-        nodes: [httpRequest],
-        triggers: [
-          defineTrigger({ type: "core.manual", name: "M", kind: "manual", config: z.object({}) }),
-        ],
-      }),
-    ]);
+    // core.httpRequest and core.manual come from the built-ins createEngine registers.
+    const registry = createRegistry([]);
     const storage = createMemoryStorage();
     const doc: WorkflowDoc = {
       id: "wf",
@@ -590,7 +616,6 @@ describe("core.httpRequest auth end to end", () => {
     await createEngine({
       registry,
       storage,
-      builtins: false,
       http: { allowPrivateNetworks: true },
       secrets: { get: async (_t, name) => (name === "apiToken" ? "tok-s3cr3t" : undefined) },
       onEvent: (e) => emitted.push(e),
