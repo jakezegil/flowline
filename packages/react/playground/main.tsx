@@ -1,13 +1,24 @@
 /**
  * Dev playground: `pnpm --filter @flowkit/react playground`. URL params pick the state, so the
- * screenshot script can drive it: `?theme=light|dark|system&doc=nested|empty&mode=edit|readonly|run`.
+ * screenshot script can drive it: `?theme=light|dark|system&doc=nested|empty&mode=edit|readonly|run`
+ * for the bare canvas, `?page=editor&wf=deal-won|onboarding` for the editor, and
+ * `?page=run&run=running|waiting|failed|loop` for the run viewer beside the run list.
  */
 import type { FlowkitClient } from "@flowkit/core/client";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { createEditorStore, FlowkitProvider, type RunOverlay, WorkflowCanvas } from "../src/index";
+import {
+  createEditorStore,
+  FlowkitProvider,
+  RunList,
+  type RunOverlay,
+  RunViewer,
+  WorkflowCanvas,
+  WorkflowEditor,
+} from "../src/index";
 import "../src/styles.css";
 import { emptyDoc, manifest, nestedDoc } from "./fixtures";
+import { mockClient, runIdOf } from "./mock-client";
 
 type Theme = "light" | "dark" | "system";
 type DocName = "nested" | "empty";
@@ -64,7 +75,7 @@ function Select<T extends string>(props: {
   );
 }
 
-function App() {
+function CanvasPage() {
   const [theme, setTheme] = useState<Theme>(initial.theme);
   const [docName, setDocName] = useState<DocName>(initial.doc);
   const [mode, setMode] = useState<Mode>(initial.mode);
@@ -142,6 +153,56 @@ function App() {
       </div>
     </FlowkitProvider>
   );
+}
+
+const appClient = mockClient();
+
+function AppPage({ page }: { page: "editor" | "run" }) {
+  const theme = (params.get("theme") as Theme | null) ?? "system";
+  const themeValue = useMemo(() => ({ colorMode: theme }), [theme]);
+  const [runId, setRunId] = useState(
+    () => params.get("runId") ?? runIdOf(params.get("run") ?? "failed"),
+  );
+  const [log, setLog] = useState("");
+  return (
+    <FlowkitProvider client={appClient} theme={themeValue}>
+      <div className="pg pg--app" data-theme={theme}>
+        {page === "editor" ? (
+          <WorkflowEditor
+            workflowId={params.get("wf") ?? "deal-won"}
+            headerLeft={
+              <a className="pg-back" href="?page=run">
+                Workflows
+              </a>
+            }
+            onSaved={(v) => setLog(`onSaved(v${v})`)}
+            onPublish={(v) => setLog(`onPublish(v${v})`)}
+            onRunStarted={(id) => setLog(`onRunStarted(${id})`)}
+          />
+        ) : (
+          <div className="pg-runs">
+            <RunList
+              className="pg-runs__list"
+              workflowId="onboarding"
+              selectedRunId={runId}
+              onSelect={(id) => {
+                setRunId(id);
+                setParam("runId", id);
+              }}
+            />
+            <RunViewer className="pg-runs__viewer" runId={runId} onRetried={setRunId} />
+          </div>
+        )}
+        {log && <output className="pg-log pg-log--float">{log}</output>}
+      </div>
+    </FlowkitProvider>
+  );
+}
+
+function App() {
+  const page = params.get("page");
+  if (page === "editor" || page === "run") return <AppPage page={page} />;
+  return <CanvasPage />;
 }
 
 createRoot(document.getElementById("root") as HTMLElement).render(

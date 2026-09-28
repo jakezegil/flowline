@@ -3,7 +3,7 @@ export const VERSION = "0.1.0";
 
 export type { RunOverlay, RunStepStatus } from "./canvas/canvas-context";
 export { WorkflowCanvas } from "./canvas/workflow-canvas";
-
+export { WorkflowEditor } from "./editor/workflow-editor";
 export {
   EditorContext,
   FlowkitClientContext,
@@ -36,6 +36,10 @@ export {
   FlowkitProvider,
   useFlowkit,
 } from "./provider";
+export { RunList } from "./run/run-list";
+export { buildRunOverlay } from "./run/run-overlay";
+export type { RunDisplayState } from "./run/run-status";
+export { RunViewer } from "./run/run-viewer";
 export {
   createEditorStore,
   type EditorActions,

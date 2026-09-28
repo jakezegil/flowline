@@ -5,6 +5,7 @@
  * @module
  */
 
+import type { RunEventType, RunOrigin } from "@flowkit/core";
 import type { RunStepStatus } from "./canvas/canvas-context";
 
 /** The canvas's visible and accessible text. Functions build text that includes values. */
@@ -119,15 +120,158 @@ export interface FlowkitLabels {
   tabAll: string;
   /** The tab of Flowkit's built-in nodes. */
   tabLogic: string;
+
+  // Formatting
+  /** A time relative to now; `deltaMs` is negative in the past: "5 min ago", "in 6 days". */
+  relativeTime(deltaMs: number): string;
+  /** An absolute date and time, for tooltips. */
+  dateTime(ts: number): string;
+
+  // Workflow editor
+  loadingWorkflow: string;
+  loadWorkflowFailed: string;
+  tryAgain: string;
+  /** Accessible name of the workflow name field. */
+  workflowName: string;
+  untitledWorkflow: string;
+  editorToolbar: string;
+  redo: string;
+  /** Status chip: unsaved edits. */
+  statusUnsaved: string;
+  /** Status chip: saved, not (or not this version) published. `null` = never saved. */
+  statusDraft(version: number | null): string;
+  /** Status chip: the saved version is the published one. */
+  statusPublished(version: number): string;
+  /** Status chip tooltip when an older version is live. */
+  statusLive(version: number): string;
+  /** Issues pill text. */
+  issueCount(n: number): string;
+  /** Issues pill accessible description. */
+  showNextIssue: string;
+  /** Issues pill tooltip while cycling: "Issue 2 of 5". */
+  issuePosition(i: number, n: number): string;
+  save: string;
+  saving: string;
+  saved(version: number): string;
+  saveFailed(message: string): string;
+  run: string;
+  /** Tooltip of Run when nothing is published yet. */
+  runNeedsPublish: string;
+  runDialogTitle: string;
+  runDialogDescription(version: number): string;
+  /** Note in the run dialog when the draft has changes the published version lacks. */
+  runDraftNote: string;
+  startRun: string;
+  runStarted: string;
+  runFailed(message: string): string;
+  cancel: string;
+  required: string;
+  /** Placeholder of a JSON field in the run dialog. */
+  jsonPlaceholder: string;
+  invalidJson: string;
+  invalidNumber: string;
+  invalidDate: string;
+  publish: string;
+  publishing: string;
+  published(version: number): string;
+  /** Publish tooltip while the workflow has errors. */
+  publishBlocked(errors: number): string;
+  /** Publish tooltip when the saved version is already live. */
+  alreadyPublished: string;
+  /** Toast when the server rejects a publish (422). */
+  publishRejected(issues: number): string;
+  publishFailed(message: string): string;
+  showIssues: string;
+  closePanel: string;
+  /** Right-panel placeholder until a configuration panel is plugged in. */
+  panelPlaceholder: string;
+  stepSettings: string;
+
+  // Run viewer
+  loadingRun: string;
+  loadRunFailed: string;
+  /** Run status names. */
+  runState: Record<"queued" | "running" | "waiting" | "completed" | "failed" | "cancelled", string>;
+  /** A completed run that a Stop step ended early. */
+  runStopped: string;
+  cancelling: string;
+  version(version: number): string;
+  started(relative: string): string;
+  /** What started a run. */
+  origin(origin: RunOrigin): string;
+  retryFromFailed: string;
+  retryStarted: string;
+  retryFailed(message: string): string;
+  cancelRun: string;
+  cancelFailed(message: string): string;
+  resume: string;
+  resumeTitle: string;
+  resumeDescription: string;
+  callbackBody: string;
+  resumed: string;
+  resumeFailed(message: string): string;
+  /** The waiting step's callback line, e.g. "Waiting for callback · expires in 6 days". */
+  waitingForCallback(expires: string | undefined): string;
+  waitingUntil(when: string): string;
+  waitingForSubflow: string;
+  failedAt(step: string): string;
+  iterationOf(i: number, n: number): string;
+  showStep: string;
+  runSummary: string;
+  tabInput: string;
+  tabOutput: string;
+  tabError: string;
+  tabTimeline: string;
+  inspectorTabs: string;
+  noInput: string;
+  noOutput: string;
+  noError: string;
+  noEvents: string;
+  notRun: string;
+  notTaken: string;
+  /** Tab names when the trigger is inspected: payload, run output, run error, all events. */
+  triggerInput: string;
+  runOutput: string;
+  errorCode: string;
+  /** Timeline detail of a branching step's completion. */
+  tookBranch(branch: string): string;
+  /** A timeline retry event: "Attempt 2 in 4s". */
+  retryAttempt(attempt: number, delayMs?: number): string;
+  /** Audit event names. */
+  eventType: Record<RunEventType, string>;
+  copyJson: string;
+  copied: string;
+  expand: string;
+  collapse: string;
+  /** Tooltip on masked values. */
+  redacted: string;
+  /** Short text shown in place of a masked value. */
+  redactedValue: string;
+  keys(n: number): string;
+
+  // Run list
+  runs: string;
+  filterRuns: string;
+  /** The run list filter showing every status. */
+  allRuns: string;
+  noRuns: string;
+  noRunsWithStatus(status: string): string;
+  loadRunsFailed: string;
 }
 
-/** Formats a run duration: `850ms`, `1.2s`, `2m 5s`. */
+/** Formats a run duration: `850ms`, `1.2s`, `2m 5s`, `1h 35m`, `1d 2h`. */
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.round((ms % 60_000) / 1000);
-  return s ? `${m}m ${s}s` : `${m}m`;
+  const pair = (big: number, bigUnit: string, small: number, smallUnit: string) =>
+    small ? `${big}${bigUnit} ${small}${smallUnit}` : `${big}${bigUnit}`;
+  if (ms < 3_600_000) {
+    return pair(Math.floor(ms / 60_000), "m", Math.round((ms % 60_000) / 1000), "s");
+  }
+  if (ms < 86_400_000) {
+    return pair(Math.floor(ms / 3_600_000), "h", Math.floor((ms % 3_600_000) / 60_000), "m");
+  }
+  return pair(Math.floor(ms / 86_400_000), "d", Math.floor((ms % 86_400_000) / 3_600_000), "h");
 }
 
 /** "Subject" → "No subject"; acronyms like "URL" keep their case. */
@@ -225,7 +369,175 @@ export const defaultLabels: FlowkitLabels = {
   stepCategories: "Step categories",
   tabAll: "All",
   tabLogic: "Logic",
+
+  relativeTime,
+  dateTime: (ts) =>
+    new Date(ts).toLocaleString("en", {
+      dateStyle: "medium",
+      timeStyle: "medium",
+    }),
+
+  loadingWorkflow: "Loading workflow…",
+  loadWorkflowFailed: "Couldn't load this workflow.",
+  tryAgain: "Try again",
+  workflowName: "Workflow name",
+  untitledWorkflow: "Untitled workflow",
+  editorToolbar: "Workflow actions",
+  redo: "Redo",
+  statusUnsaved: "Unsaved changes",
+  statusDraft: (v) => (v === null ? "Draft" : `Draft · v${v}`),
+  statusPublished: (v) => `Published v${v}`,
+  statusLive: (v) => `v${v} is live`,
+  issueCount: (n) => (n === 1 ? "1 issue" : `${n} issues`),
+  showNextIssue: "Select the next step with an issue",
+  issuePosition: (i, n) => `Issue ${i} of ${n}`,
+  save: "Save",
+  saving: "Saving…",
+  saved: (v) => `Saved as v${v}`,
+  saveFailed: (m) => `Couldn't save. ${m}`,
+  run: "Run",
+  runNeedsPublish: "Publish the workflow to run it",
+  runDialogTitle: "Run workflow",
+  runDialogDescription: (v) => `Starts a run of the published version, v${v}.`,
+  runDraftNote: "Your unpublished changes aren't part of this run.",
+  startRun: "Start run",
+  runStarted: "Run started",
+  runFailed: (m) => `Couldn't start the run. ${m}`,
+  cancel: "Cancel",
+  required: "Required",
+  jsonPlaceholder: "JSON, e.g. {}",
+  invalidJson: "Enter valid JSON",
+  invalidNumber: "Enter a number",
+  invalidDate: "Enter a date and time",
+  publish: "Publish",
+  publishing: "Publishing…",
+  published: (v) => `Published v${v}`,
+  publishBlocked: (n) => `Fix ${n === 1 ? "1 error" : `${n} errors`} to publish`,
+  alreadyPublished: "This version is already live",
+  publishRejected: (n) =>
+    n === 0
+      ? "Publishing was blocked"
+      : `Publishing was blocked by ${n === 1 ? "1 issue" : `${n} issues`}`,
+  publishFailed: (m) => `Couldn't publish. ${m}`,
+  showIssues: "Show",
+  closePanel: "Close panel",
+  panelPlaceholder: "Settings for this step appear here.",
+  stepSettings: "Step settings",
+
+  loadingRun: "Loading run…",
+  loadRunFailed: "Couldn't load this run.",
+  runState: {
+    queued: "Queued",
+    running: "Running",
+    waiting: "Waiting",
+    completed: "Completed",
+    failed: "Failed",
+    cancelled: "Cancelled",
+  },
+  runStopped: "Stopped",
+  cancelling: "Cancelling…",
+  version: (v) => `v${v}`,
+  started: (rel) => `Started ${rel}`,
+  origin: (o) => {
+    switch (o.kind) {
+      case "event":
+        return `Event ${o.event}`;
+      case "webhook":
+        return "Webhook";
+      case "manual":
+        return "Run manually";
+      case "schedule":
+        return "Schedule";
+      case "subflow":
+        return "Called by another workflow";
+    }
+  },
+  retryFromFailed: "Retry from failed step",
+  retryStarted: "Retry started",
+  retryFailed: (m) => `Couldn't retry. ${m}`,
+  cancelRun: "Cancel run",
+  cancelFailed: (m) => `Couldn't cancel. ${m}`,
+  resume: "Resume…",
+  resumeTitle: "Resume run",
+  resumeDescription:
+    "The waiting step continues as if its callback arrived, with this JSON as the callback body.",
+  callbackBody: "Callback body",
+  resumed: "Run resumed",
+  resumeFailed: (m) => `Couldn't resume. ${m}`,
+  waitingForCallback: (expires) =>
+    expires ? `Waiting for callback · expires ${expires}` : "Waiting for callback",
+  waitingUntil: (when) => `Waiting until ${when}`,
+  waitingForSubflow: "Waiting for a called workflow to finish",
+  failedAt: (step) => `Failed at ${step}`,
+  iterationOf: (i, n) => `iteration ${i} of ${n}`,
+  showStep: "Show step",
+  runSummary: "Run details",
+  tabInput: "Input",
+  tabOutput: "Output",
+  tabError: "Error",
+  tabTimeline: "Timeline",
+  inspectorTabs: "Step details",
+  noInput: "No input was recorded for this step.",
+  noOutput: "This step has no output yet.",
+  noError: "No error.",
+  noEvents: "Nothing has happened here yet.",
+  notRun: "This step hasn't run.",
+  notTaken: "The run took another branch, so this step didn't run.",
+  triggerInput: "Payload",
+  runOutput: "Run output",
+  errorCode: "Code",
+  tookBranch: (b) => `Took the “${b}” branch`,
+  retryAttempt: (n, delay) =>
+    delay !== undefined ? `Attempt ${n} in ${formatDuration(delay)}` : `Attempt ${n}`,
+  eventType: {
+    "run.started": "Run started",
+    "step.started": "Started",
+    "step.completed": "Completed",
+    "step.failed": "Failed",
+    "step.retrying": "Retrying",
+    "step.skipped": "Skipped",
+    "run.suspended": "Waiting",
+    "run.resumed": "Resumed",
+    "run.completed": "Run completed",
+    "run.failed": "Run failed",
+    "run.cancelled": "Run cancelled",
+    "run.stopped": "Run stopped",
+  },
+  copyJson: "Copy JSON",
+  copied: "Copied",
+  expand: "Expand",
+  collapse: "Collapse",
+  redacted: "Hidden: secret or sensitive value",
+  redactedValue: "hidden",
+  keys: (n) => (n === 1 ? "1 field" : `${n} fields`),
+
+  runs: "Runs",
+  filterRuns: "Filter runs by status",
+  allRuns: "All",
+  noRuns: "No runs yet. Runs appear here as soon as the workflow is triggered.",
+  noRunsWithStatus: (status) => `No ${status.toLowerCase()} runs.`,
+  loadRunsFailed: "Couldn't load runs.",
 };
+
+/** "just now", "5 min ago", "in 6 days". */
+function relativeTime(deltaMs: number): string {
+  const abs = Math.abs(deltaMs);
+  if (abs < 45_000) return "just now";
+  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto", style: "short" });
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["minute", 60_000],
+    ["hour", 3_600_000],
+    ["day", 86_400_000],
+    ["week", 604_800_000],
+    ["month", 2_592_000_000],
+    ["year", 31_536_000_000],
+  ];
+  let [unit, size] = units[0] as [Intl.RelativeTimeFormatUnit, number];
+  for (const [u, s] of units) {
+    if (abs >= s * 0.9) [unit, size] = [u, s];
+  }
+  return rtf.format(Math.round(deltaMs / size), unit);
+}
 
 /** `defaultLabels` with `overrides` applied (run statuses merge key by key). */
 export function resolveLabels(overrides: Partial<FlowkitLabels> | undefined): FlowkitLabels {
@@ -234,5 +546,7 @@ export function resolveLabels(overrides: Partial<FlowkitLabels> | undefined): Fl
     ...defaultLabels,
     ...overrides,
     runStatus: { ...defaultLabels.runStatus, ...overrides.runStatus },
+    runState: { ...defaultLabels.runState, ...overrides.runState },
+    eventType: { ...defaultLabels.eventType, ...overrides.eventType },
   };
 }

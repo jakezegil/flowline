@@ -558,6 +558,27 @@ describe("save state", () => {
     expect(store.getState().dirty).toBe(true);
   });
 
+  test("markSaved with the doc that was sent stays dirty if edits happened meanwhile", () => {
+    const store = storeFor();
+    store.getState().renameStep("load", "X");
+    const sent = store.getState().doc;
+    store.getState().renameStep("email", "Y");
+    store.getState().markSaved(4, sent);
+    expect(store.getState()).toMatchObject({ dirty: true, savedVersion: 4 });
+    store.getState().undo();
+    expect(store.getState().dirty).toBe(false);
+  });
+
+  test("renameWorkflow trims, ignores blanks and is undoable", () => {
+    const store = storeFor();
+    store.getState().renameWorkflow("  Onboarding  ");
+    expect(store.getState().doc.name).toBe("Onboarding");
+    store.getState().renameWorkflow("   ");
+    expect(store.getState().doc.name).toBe("Onboarding");
+    store.getState().undo();
+    expect(store.getState().doc.name).toBe("Welcome");
+  });
+
   test("replaceDoc swaps the document, clears history and loads that workflow's samples", () => {
     localStorage.setItem(
       "flowkit:samples:other",

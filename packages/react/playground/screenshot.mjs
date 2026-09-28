@@ -46,6 +46,82 @@ async function shot(page, name) {
   console.log(path);
 }
 
+// Editor and run viewer pages (`--app` shoots only these).
+async function appShots() {
+  for (const theme of ["light", "dark"]) {
+    for (const [size, viewport] of [
+      ["wide", wide],
+      ["narrow", narrow],
+    ]) {
+      const page = await open(`page=editor&wf=deal-won&theme=${theme}`, viewport, theme);
+      await shot(page, `editor-${theme}-${size}`);
+      await page.click(".fk-issues");
+      await page.waitForTimeout(450);
+      await shot(page, `editor-issue-${theme}-${size}`);
+      await page.close();
+      for (const run of ["running", "waiting", "failed", "loop"]) {
+        const p = await open(`page=run&run=${run}&theme=${theme}`, viewport, theme);
+        await p.waitForTimeout(300);
+        await shot(p, `run-${run}-${theme}-${size}`);
+        await p.close();
+      }
+    }
+  }
+  {
+    const page = await open("page=editor&wf=onboarding&theme=light", wide);
+    await page.click(".react-flow__node[data-id='step:approval'] .fk-card");
+    await page.waitForTimeout(350);
+    await shot(page, "editor-selected-light");
+    await page.fill(".fk-name", "Onboarding v2");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(150);
+    await shot(page, "editor-unsaved-light");
+    await page.keyboard.press("ControlOrMeta+s");
+    await page.waitForTimeout(700);
+    await shot(page, "editor-saved-toast-light");
+    await page.click("button:has-text('Run')");
+    await page.waitForSelector(".fk-dialog");
+    await page.waitForTimeout(250);
+    await shot(page, "editor-run-dialog-light");
+    await page.close();
+  }
+  for (const theme of ["light", "dark"]) {
+    const page = await open(`page=run&run=failed&theme=${theme}`, wide, theme);
+    await page.click("role=tab[name=/Timeline/]");
+    await page.waitForTimeout(200);
+    await shot(page, `run-timeline-${theme}`);
+    // Off-screen once the run opens on its failed step: click it without scrolling.
+    await page
+      .locator(".react-flow__node[data-id='step:loadContact'] .fk-card")
+      .evaluate((el) => el.click());
+    await page.waitForTimeout(300);
+    await shot(page, `run-output-${theme}`);
+    await page.close();
+  }
+  {
+    const page = await open("page=run&run=waiting&theme=light", wide);
+    await page.locator("button:has-text('Resume…')").first().click();
+    await page.waitForSelector(".fk-dialog");
+    await page.waitForTimeout(250);
+    await shot(page, "run-resume-dialog-light");
+    await page.close();
+  }
+  {
+    const page = await open("page=run&run=loop&theme=dark", narrow, "dark");
+    await page.click(".fk-panel .fk-icon-btn[aria-label='Close panel']");
+    await page.waitForTimeout(300);
+    await shot(page, "run-loop-dark-narrow-closed");
+    await page.close();
+  }
+}
+await appShots();
+if (process.argv.includes("--app")) {
+  await browser.close();
+  await server.close();
+  if (errors.length) console.error(`\nBrowser errors/warnings:\n${errors.join("\n")}`);
+  process.exit(errors.length ? 1 : 0);
+}
+
 // Canvas states, light and dark, wide and narrow.
 for (const theme of ["light", "dark"]) {
   for (const [size, viewport] of [

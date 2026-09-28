@@ -209,9 +209,12 @@ export function useIssues(): {
 /** Debounce (ms) between a live run event and the refetch it triggers. */
 const RUN_REFETCH_DEBOUNCE_MS = 150;
 
+const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
+
 /**
  * Loads a run with `client.getRun` and keeps it fresh: refetches (debounced 150ms) whenever
- * `client.subscribeRun` delivers an event, until the stream ends. `loading` is true until the
+ * `client.subscribeRun` delivers an event, until the stream ends or a fetch shows the run
+ * finished (completed, failed or cancelled). `loading` is true until the
  * first response for this `runId`; a failed refetch sets `error` and keeps the last `detail`.
  * Requires a {@link FlowkitClientContext} (provided by `<FlowkitProvider>`).
  */
@@ -232,11 +235,15 @@ export function useRun(runId: string): {
     let active = true;
     let latest = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let unsubscribe = () => {};
     const load = () => {
       const request = ++latest;
       client.getRun(runId).then(
         (detail) => {
-          if (active && request === latest) setState({ runId, detail });
+          if (!active || request !== latest) return;
+          setState({ runId, detail });
+          // A finished run doesn't change anymore: stop listening.
+          if (TERMINAL_RUN_STATUSES.has(detail.run.status)) unsubscribe();
         },
         (err: unknown) => {
           if (!active || request !== latest) return;
@@ -247,7 +254,7 @@ export function useRun(runId: string): {
     };
     loadRef.current = load;
     load();
-    const unsubscribe = client.subscribeRun(runId, () => {
+    unsubscribe = client.subscribeRun(runId, () => {
       clearTimeout(timer);
       timer = setTimeout(load, RUN_REFETCH_DEBOUNCE_MS);
     });
