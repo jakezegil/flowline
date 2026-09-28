@@ -84,7 +84,11 @@ export const api = {
   createContact: (c: NewContact) => request<Contact>("POST", "/api/contacts", c),
   listDeals: () => request<Deal[]>("GET", "/api/deals"),
   updateDeal: (id: string, changes: Partial<Pick<Deal, "stage" | "amount" | "ownerId" | "name">>) =>
-    request<{ deal: Deal; changes: string[] }>("PATCH", `/api/deals/${encodeURIComponent(id)}`, changes),
+    request<{ deal: Deal; changes: string[] }>(
+      "PATCH",
+      `/api/deals/${encodeURIComponent(id)}`,
+      changes,
+    ),
   listUsers: () => request<User[]>("GET", "/api/users"),
   listOutbox: () => request<OutboxMessage[]>("GET", "/api/outbox"),
   listApprovals: () => request<Approval[]>("GET", "/api/approvals"),

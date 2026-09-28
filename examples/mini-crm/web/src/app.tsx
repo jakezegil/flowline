@@ -7,12 +7,18 @@ import { FlowkitProvider, type FlowkitTheme } from "@flowkit/react";
 import {
   Activity,
   BadgeCheck,
+  Blocks,
+  Building2,
+  CalendarClock,
+  Contact,
   Handshake,
   Inbox,
+  LogIn,
   Monitor,
   Moon,
   PanelLeft,
   RotateCcw,
+  Route as RouteIcon,
   Sun,
   Users,
   Webhook,
@@ -25,7 +31,6 @@ import { ApprovalsPage } from "./pages/approvals";
 import { ContactsPage } from "./pages/contacts";
 import { DealsPage } from "./pages/deals";
 import { OutboxPage } from "./pages/outbox";
-import { RunDetailPage } from "./pages/run-detail";
 import { RunsPage } from "./pages/runs";
 import { WebhookTesterPage } from "./pages/webhook-tester";
 import { WidgetHarnessPage } from "./pages/widget-harness";
@@ -36,6 +41,20 @@ import { UserSelect } from "./widgets/user-select";
 
 /** Custom config field widgets, by the `x-flowkit.widget` name the server's plugin uses. */
 const WIDGETS = { "crm.userSelect": UserSelect };
+
+/**
+ * Icons the manifest names that Flowkit doesn't bundle (it bundles a common Lucide set and shows
+ * a neutral box for anything else).
+ */
+const ICONS = {
+  "badge-check": BadgeCheck,
+  blocks: Blocks,
+  "building-2": Building2,
+  "calendar-clock": CalendarClock,
+  contact: Contact,
+  "log-in": LogIn,
+  route: RouteIcon,
+};
 
 type ThemePref = "system" | "light" | "dark";
 const THEME_KEY = "mini-crm:theme";
@@ -105,8 +124,9 @@ function NavItem(props: {
       <span className="nav__icon">{props.icon}</span>
       <span className="nav__label">{props.label}</span>
       {props.count ? (
-        <span className="nav__count" aria-label={`${props.count} pending`}>
+        <span className="nav__count">
           {props.count}
+          <span className="sr-only"> pending</span>
         </span>
       ) : null}
     </NavLink>
@@ -170,6 +190,8 @@ function Sidebar(props: {
   theme: ThemePref;
   onTheme(t: ThemePref): void;
   collapsed: boolean;
+  /** False when the rail is forced (editor, narrow window): no toggle then. */
+  canExpand: boolean;
   onToggle(): void;
 }): JSX.Element {
   const approvals = useQuery("approvals", api.listApprovals, 5000);
@@ -178,7 +200,7 @@ function Sidebar(props: {
     <nav className="sidebar" aria-label="Main">
       <div className="sidebar__brand">
         <span className="brand-mark" aria-hidden>
-          <svg viewBox="0 0 32 32" width="28" height="28">
+          <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
             <rect width="32" height="32" rx="8" fill="currentColor" />
             <path
               d="M9 21V11l7 6 7-6v10"
@@ -194,15 +216,17 @@ function Sidebar(props: {
           <span className="sidebar__org">Acme Inc.</span>
           <span className="sidebar__product">Mini CRM</span>
         </span>
-        <button
-          type="button"
-          className="icon-btn sidebar__toggle"
-          aria-label={props.collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          aria-pressed={props.collapsed}
-          onClick={props.onToggle}
-        >
-          <PanelLeft size={16} aria-hidden />
-        </button>
+        {props.canExpand && (
+          <button
+            type="button"
+            className="icon-btn sidebar__toggle"
+            aria-label={props.collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={props.collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={props.onToggle}
+          >
+            <PanelLeft size={16} aria-hidden />
+          </button>
+        )}
       </div>
 
       <div className="nav">
@@ -241,39 +265,42 @@ function Sidebar(props: {
   );
 }
 
-/** Whether the OS asks for dark mode (for `system`). */
-function usePrefersDark(): boolean {
-  const query = "(prefers-color-scheme: dark)";
-  const [dark, setDark] = useState(() => window.matchMedia(query).matches);
+/** Whether a media query matches, kept up to date. */
+function useMedia(query: string): boolean {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
   useEffect(() => {
     const m = window.matchMedia(query);
-    const on = () => setDark(m.matches);
+    const on = () => setMatches(m.matches);
+    on();
     m.addEventListener("change", on);
     return () => m.removeEventListener("change", on);
-  }, []);
-  return dark;
+  }, [query]);
+  return matches;
 }
 
 /** The whole app: providers, sidebar and routes. */
 export function App(): JSX.Element {
   const [theme, setTheme] = useThemePref();
-  const prefersDark = usePrefersDark();
+  const prefersDark = useMedia("(prefers-color-scheme: dark)");
+  const narrow = useMedia("(max-width: 1100px)");
   const location = useLocation();
   const [userCollapsed, setUserCollapsed] = useState(false);
-  // The editor wants every pixel: it gets the icon rail regardless of the toggle.
+  // The editor wants every pixel, and narrow windows need the room: both get the icon rail.
   const fullBleed = /^\/workflows\/[^/]+/.test(location.pathname);
-  const collapsed = userCollapsed || fullBleed;
+  const forced = fullBleed || narrow;
+  const collapsed = userCollapsed || forced;
   const resolved = theme === "system" ? (prefersDark ? "dark" : "light") : theme;
   const flowkitTheme = useMemo<FlowkitTheme>(() => ({ colorMode: resolved }), [resolved]);
 
   return (
-    <FlowkitProvider client={flowkit} widgets={WIDGETS} theme={flowkitTheme}>
+    <FlowkitProvider client={flowkit} widgets={WIDGETS} icons={ICONS} theme={flowkitTheme}>
       <ToastProvider>
         <div className="shell" data-collapsed={collapsed || undefined}>
           <Sidebar
             theme={theme}
             onTheme={setTheme}
             collapsed={collapsed}
+            canExpand={!forced}
             onToggle={() => setUserCollapsed((c) => !c)}
           />
           <main className="main" data-bleed={fullBleed || undefined}>
@@ -284,7 +311,7 @@ export function App(): JSX.Element {
               <Route path="/workflows" element={<WorkflowsPage />} />
               <Route path="/workflows/:id" element={<WorkflowEditPage />} />
               <Route path="/runs" element={<RunsPage />} />
-              <Route path="/runs/:id" element={<RunDetailPage />} />
+              <Route path="/runs/:id" element={<RunsPage />} />
               <Route path="/approvals" element={<ApprovalsPage />} />
               <Route path="/outbox" element={<OutboxPage />} />
               <Route path="/webhook-tester" element={<WebhookTesterPage />} />

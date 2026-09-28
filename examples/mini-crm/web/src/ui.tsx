@@ -111,6 +111,16 @@ export function ErrorState(props: { message: string; onRetry(): void }): JSX.Ele
   );
 }
 
+/** An empty table cell: a quiet dash, read as "None". */
+export function Blank(): JSX.Element {
+  return (
+    <span className="muted">
+      <span aria-hidden>–</span>
+      <span className="sr-only">None</span>
+    </span>
+  );
+}
+
 /** Placeholder rows while a table loads. */
 export function SkeletonRows(props: { rows?: number; cols: number }): JSX.Element {
   return (
@@ -282,7 +292,10 @@ export function Dialog(props: {
         if (e.target === e.currentTarget) {
           const r = e.currentTarget.getBoundingClientRect();
           const inside =
-            e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+            e.clientX >= r.left &&
+            e.clientX <= r.right &&
+            e.clientY >= r.top &&
+            e.clientY <= r.bottom;
           if (!inside) onClose();
         }
       }}

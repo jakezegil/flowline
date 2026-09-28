@@ -16,5 +16,6 @@ export default defineConfig({
       "/flowkit": { target, changeOrigin: true },
     },
   },
-  build: { outDir: "dist", emptyOutDir: true },
+  // One bundle is fine for a demo (the editor, CodeMirror and React Flow make it ~750 kB).
+  build: { outDir: "dist", emptyOutDir: true, chunkSizeWarningLimit: 1500 },
 });

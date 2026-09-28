@@ -16,7 +16,10 @@ import { type JSX, useId } from "react";
 import { type User, useUsers } from "../api";
 import { Avatar } from "../ui";
 
-const TEAM_LABELS: Record<User["team"], string> = { smb: "SMB team", enterprise: "Enterprise team" };
+const TEAM_LABELS: Record<User["team"], string> = {
+  smb: "SMB team",
+  enterprise: "Enterprise team",
+};
 
 /** `"Manager · Enterprise"` style description of a user. */
 export function describeUser(u: User): string {
