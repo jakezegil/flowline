@@ -3,16 +3,8 @@
  *
  * @module
  */
-import { defineNode, invokeSubflow, ui } from "@flowkit/core";
+import { defineNode, FatalError, invokeSubflow, ui } from "@flowkit/core";
 import { z } from "zod";
-
-/**
- * A permanent step failure. The engine recognises fatal errors by `name` (so this package need not
- * depend on `@flowkit/engine`, which depends on it): the step fails without retries.
- */
-class SubflowFailedError extends Error {
-  override readonly name = "FatalError";
-}
 
 /**
  * Runs another published workflow (one with a `core.subflow` trigger) and waits for it. The step's
@@ -38,7 +30,7 @@ export const callSubflowNode = defineNode({
   run: ({ input, ctx }) => {
     if (ctx.resume?.kind === "subflow") return ctx.resume.output ?? {};
     if (ctx.resume?.kind === "subflowFailed") {
-      throw new SubflowFailedError(ctx.resume.error.message);
+      throw new FatalError(ctx.resume.error.message);
     }
     return invokeSubflow({ workflowId: input.workflowId, input: input.input });
   },

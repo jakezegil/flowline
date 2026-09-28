@@ -5,6 +5,7 @@ import { defineNode, definePlugin, defineTrigger } from "./define";
 import { createRegistry } from "./registry";
 import { removeStep } from "./tree";
 import type { JSONSchema, Manifest, NodeManifest, Step, WorkflowDoc } from "./types";
+import { UI_META_KEY, ui } from "./ui";
 import { hasErrors, type Issue, validateWorkflow } from "./validate";
 
 const issue = (partial: Partial<Issue>) => expect.objectContaining(partial);
@@ -640,4 +641,115 @@ test("hasErrors", () => {
   expect(hasErrors([])).toBe(false);
   expect(hasErrors([{ code: "doc.empty", severity: "warning", message: "" }])).toBe(false);
   expect(hasErrors([{ code: "node.unknown", severity: "error", message: "" }])).toBe(true);
+});
+
+describe("oneOfRequired", () => {
+  const wait = defineNode({
+    type: "x.wait",
+    name: "Wait",
+    input: ui(
+      z.object({
+        duration: ui(z.string(), { label: "Wait for" }).optional(),
+        until: ui(z.string(), { label: "Wait until" }).optional(),
+      }),
+      { oneOfRequired: [["duration"], ["until"]] },
+    ),
+    run: () => ({}),
+  });
+  const window = defineNode({
+    type: "x.window",
+    name: "Window",
+    input: ui(
+      z.object({
+        from: z.string().optional(),
+        to: z.string().optional(),
+        preset: ui(z.string(), { label: "Preset" }).optional(),
+        tag: z.string().optional(),
+      }),
+      { oneOfRequired: [["from", "to"], ["preset"], ["tag"]] },
+    ),
+    run: () => ({}),
+  });
+  const m = extend([wait, window]);
+  const check = (type: string, config: Step["config"]) =>
+    validateWorkflow(docWith([step("s", type, config)]), m);
+
+  test("passes when exactly one group is set", () => {
+    expect(check("x.wait", { duration: "5m" })).toEqual([]);
+    expect(check("x.wait", { until: { $ref: "trigger.contactId" } })).toEqual([]);
+    expect(check("x.window", { from: "a", to: "b" })).toEqual([]);
+  });
+
+  test("reports config.required when no group is set", () => {
+    expect(check("x.wait", {})).toEqual([
+      issue({
+        code: "config.required",
+        severity: "error",
+        stepId: "s",
+        field: "duration",
+        message: 'Set "Wait for" or "Wait until"',
+      }),
+    ]);
+    // An empty string doesn't count, and a group needs all of its fields.
+    expect(check("x.window", { preset: "", from: "a" })).toEqual([
+      issue({ code: "config.required", message: 'Set "from" and "to", "Preset" or "tag"' }),
+    ]);
+  });
+
+  test("reports config.required when several groups are set", () => {
+    expect(check("x.wait", { duration: "5m", until: "2026-01-01T00:00:00Z" })).toEqual([
+      issue({
+        code: "config.required",
+        field: "until",
+        message: 'Set either "Wait for" or "Wait until", not both',
+      }),
+    ]);
+    expect(check("x.window", { from: "a", to: "b", preset: "p", tag: "t" })).toEqual([
+      issue({ message: 'Set only one of "from" and "to", "Preset" or "tag"' }),
+    ]);
+  });
+
+  test("ignores malformed groups", () => {
+    const odd = defineNode({
+      type: "x.odd",
+      name: "Odd",
+      input: z.object({ a: z.string().optional() }).meta({
+        [UI_META_KEY]: { oneOfRequired: [[], [1], "a"] },
+      }),
+      run: () => ({}),
+    });
+    expect(validateWorkflow(docWith([step("s", "x.odd", {})]), extend([odd]))).toEqual([]);
+  });
+});
+
+describe("warnIfEmpty", () => {
+  const tags = defineNode({
+    type: "x.tags",
+    name: "Tags",
+    input: z.object({
+      tags: ui(z.array(z.string()), {
+        label: "Tags",
+        warnIfEmpty: "No tags, so nothing is tagged",
+      }),
+    }),
+    run: () => ({}),
+  });
+  const m = extend([tags]);
+
+  test("warns on a literal empty list only", () => {
+    const empty = validateWorkflow(docWith([step("s", "x.tags", { tags: [] })]), m);
+    expect(empty).toEqual([
+      issue({
+        code: "config.empty",
+        severity: "warning",
+        field: "tags",
+        message: "No tags, so nothing is tagged",
+      }),
+    ]);
+    expect(hasErrors(empty)).toBe(false);
+    expect(validateWorkflow(docWith([step("s", "x.tags", { tags: ["a"] })]), m)).toEqual([]);
+    expect(
+      validateWorkflow(docWith([step("s", "x.tags", { tags: { $ref: "trigger.tags" } })]), m),
+    ).not.toContainEqual(issue({ code: "config.empty" }));
+  });
 });

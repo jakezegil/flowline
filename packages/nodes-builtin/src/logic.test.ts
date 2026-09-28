@@ -1,4 +1,4 @@
-import { isSignal } from "@flowkit/core";
+import { isSignal, loop } from "@flowkit/core";
 import { describe, expect, it } from "vitest";
 import { fakeContext } from "../test/fake-context";
 import { conditionNode, forEachNode, stopNode, switchNode } from "./logic";
@@ -68,11 +68,11 @@ describe("core.switch", () => {
 });
 
 describe("core.forEach", () => {
-  it("hands the items to the engine to iterate", async () => {
+  it("hands the items to the engine to iterate with loop()", async () => {
     const items = [{ name: "Ada" }, { name: "Bob" }];
-    expect(await forEachNode.run({ input: forEachNode.input.parse({ items }), ctx })).toEqual({
-      items,
-    });
+    const result = await forEachNode.run({ input: forEachNode.input.parse({ items }), ctx });
+    expect(isSignal(result)).toBe(true);
+    expect(result).toEqual(loop(items));
   });
 
   it("requires a list", () => {

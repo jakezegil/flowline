@@ -34,6 +34,7 @@ export type IssueCode =
   | "step.invalidId"
   | "config.required"
   | "config.invalid"
+  | "config.empty"
   | "ref.syntax"
   | "ref.unresolved"
   | "ref.outOfScope"
@@ -62,7 +63,12 @@ export interface Issue {
 }
 
 /** Severity of each code outside disabled steps (inside them everything is a warning). */
-const WARNING_CODES = new Set<IssueCode>(["ref.typeMismatch", "branch.missing", "doc.empty"]);
+const WARNING_CODES = new Set<IssueCode>([
+  "ref.typeMismatch",
+  "branch.missing",
+  "doc.empty",
+  "config.empty",
+]);
 
 const KIND_WORDS: Record<Kind, string> = {
   string: "text",
@@ -542,8 +548,14 @@ function checkObject(
       }
       if (value === undefined) continue;
     }
+    const emptyWarning = uiMeta(declared)?.warnIfEmpty;
+    if (typeof emptyWarning === "string" && Array.isArray(value) && value.length === 0) {
+      report(r, "config.empty", emptyWarning, f.path);
+    }
     guarded(r, f, () => checkValue(r, value, propSchema, f));
   }
+  const oneOf = uiMeta(schema)?.oneOfRequired;
+  if (Array.isArray(oneOf)) checkOneOfRequired(r, obj, props, root, prefix, oneOf);
   for (const key of required) {
     if (!Object.hasOwn(props, key) && isEmptyValue(obj[key], root, {})) {
       report(r, "config.required", `"${key}" is required`, joinPath(prefix, key));
@@ -558,6 +570,46 @@ function checkObject(
       continue;
     }
     guarded(r, f, () => checkValue(r, value, asSchema(extra), f));
+  }
+}
+
+/** Joins quoted labels as `A or B` / `A, B or C`. */
+function orList(items: string[]): string {
+  return items.length <= 2
+    ? items.join(" or ")
+    : `${items.slice(0, -1).join(", ")} or ${items[items.length - 1]}`;
+}
+
+/**
+ * The `oneOfRequired` keyword (see `UiMeta`): exactly one group of properties must be set, a
+ * group being set when all of its properties are non-empty. Malformed groups are ignored.
+ */
+function checkOneOfRequired(
+  r: Reporter,
+  obj: Record<string, unknown>,
+  props: Record<string, unknown>,
+  root: JSONSchema,
+  prefix: string,
+  groups: unknown[],
+): void {
+  const valid = groups.filter(
+    (g): g is string[] => Array.isArray(g) && g.length > 0 && g.every((k) => typeof k === "string"),
+  );
+  const first = valid[0]?.[0];
+  if (first === undefined) return;
+  const propSchema = (k: string) => (Object.hasOwn(props, k) ? asSchema(props[k]) : {});
+  const isSet = (k: string) => !isEmptyValue(obj[k], root, propSchema(k));
+  const name = (g: string[]) => g.map((k) => `"${labelOf(propSchema(k), k)}"`).join(" and ");
+  const set = valid.filter((g) => g.every(isSet));
+  if (set.length === 0) {
+    report(r, "config.required", `Set ${orList(valid.map(name))}`, joinPath(prefix, first));
+  } else if (set.length > 1) {
+    const names = set.map(name);
+    const message =
+      names.length === 2
+        ? `Set either ${names[0]} or ${names[1]}, not both`
+        : `Set only one of ${orList(names)}`;
+    report(r, "config.required", message, joinPath(prefix, set[1]?.[0] ?? first));
   }
 }
 

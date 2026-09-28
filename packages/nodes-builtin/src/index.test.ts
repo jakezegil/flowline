@@ -307,6 +307,64 @@ describe("validation of built-in configs", () => {
     );
   });
 
+  it("warns about a condition without rules", () => {
+    const doc: WorkflowDoc = {
+      id: "wf",
+      name: "Wf",
+      trigger: { type: "core.manual", config: {} },
+      steps: [
+        {
+          id: "check",
+          type: "core.condition",
+          config: { rules: { combinator: "and", rules: [] } },
+          branches: { if: [], else: [] },
+        },
+      ],
+    };
+    expect(validateWorkflow(doc, manifest)).toEqual([
+      expect.objectContaining({
+        code: "config.empty",
+        severity: "warning",
+        stepId: "check",
+        message: expect.stringContaining("Condition has no rules"),
+      }),
+    ]);
+    // Empty nested groups are left alone.
+    (doc.steps[0] as Step).config.rules = {
+      combinator: "and",
+      rules: [
+        { left: 1, op: "eq", right: 1 },
+        { combinator: "or", rules: [] },
+      ],
+    };
+    expect(validateWorkflow(doc, manifest)).toEqual([]);
+  });
+
+  it("shows rule labels and the case-sensitivity option in the manifest", () => {
+    const rules = node("core.condition").input.properties as Record<string, unknown>;
+    const text = JSON.stringify(rules);
+    expect(text).toContain('"Match case"');
+    expect(text).toContain("UTC unless they include an offset");
+    expect(text).toContain("comma-separated");
+  });
+
+  it("requires exactly one of delay duration and until", () => {
+    const doc = (config: Step["config"]): WorkflowDoc => ({
+      id: "wf",
+      name: "Wf",
+      trigger: { type: "core.manual", config: {} },
+      steps: [{ id: "wait", type: "core.delay", config }],
+    });
+    expect(validateWorkflow(doc({ duration: "2d" }), manifest)).toEqual([]);
+    expect(validateWorkflow(doc({ until: "2026-02-01T09:00:00Z" }), manifest)).toEqual([]);
+    expect(validateWorkflow(doc({}), manifest)).toEqual([
+      expect.objectContaining({ code: "config.required", severity: "error", stepId: "wait" }),
+    ]);
+    expect(
+      validateWorkflow(doc({ duration: "2d", until: "2026-02-01T09:00:00Z" }), manifest),
+    ).toEqual([expect.objectContaining({ code: "config.required", stepId: "wait" })]);
+  });
+
   it("flags a malformed delay duration", () => {
     const doc: WorkflowDoc = {
       id: "wf",

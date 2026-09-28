@@ -3,9 +3,9 @@
  *
  * @module
  */
-import { branch, defineNode, stop, ui } from "@flowkit/core";
+import { branch, defineNode, loop, stop, ui } from "@flowkit/core";
 import { z } from "zod";
-import { evaluateRules, looseEquals, RuleGroupSchema } from "./rules";
+import { ConditionRulesSchema, evaluateRules, looseEquals } from "./rules";
 
 /** Branch IDs are part of step paths, so they must not contain `/`, `[` or `]`. */
 const BRANCH_ID = /^[A-Za-z0-9_-]+$/;
@@ -20,7 +20,9 @@ export const conditionNode = defineNode({
   category: "Logic",
   summary: "If conditions match",
   input: z.object({
-    rules: ui(RuleGroupSchema, { label: "Conditions", widget: "rules" }),
+    rules: ui(ConditionRulesSchema, { label: "Conditions", widget: "rules" }).describe(
+      'Text compares ignoring case unless Match case is on. Dates and times are UTC unless they include an offset. "Is in" takes a list or comma-separated text.',
+    ),
   }),
   output: z.object({ matched: z.boolean() }),
   branches: {
@@ -116,9 +118,8 @@ export const forEachNode = defineNode({
     results: z.array(z.unknown()).describe("The last step's output of each iteration."),
   }),
   branches: { kind: "loop", itemsField: "items", branch: "body" },
-  // The engine iterates `items` and builds `{ count, results }` itself, so the handler's return
-  // value is the loop instruction rather than the declared output.
-  run: ({ input }) => ({ items: input.items }) as never,
+  // The engine iterates the items and builds `{ count, results }` itself.
+  run: ({ input }) => loop(input.items),
 });
 
 /** Ends the run successfully; no further steps run. */

@@ -3,16 +3,21 @@
  *
  * @module
  */
-import { branch, defineNode, suspend, ui } from "@flowkit/core";
+import { branch, defineNode, FatalError, suspend, ui } from "@flowkit/core";
 import { z } from "zod";
 
 const UNIT_MS = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 } as const;
 const DURATION = /^([1-9][0-9]*)([smhd])$/;
 const DURATION_MESSAGE = "Use a whole number and a unit: 30s, 5m, 2h or 3d";
 
+/** The longest duration `core.delay` and `core.waitForCallback` accept: 365 days. */
+export const MAX_DURATION_MS = 365 * UNIT_MS.d;
+const MAX_DURATION_MESSAGE = "Durations can be at most 365d";
+
 /**
  * Milliseconds in a duration such as `"30s"`, `"5m"`, `"2h"` or `"3d"` (a positive whole number
- * followed by `s`, `m`, `h` or `d`), or `undefined` if `text` is not one.
+ * followed by `s`, `m`, `h` or `d`), or `undefined` if `text` is not one. Doesn't apply
+ * {@link MAX_DURATION_MS}.
  */
 export function parseDuration(text: string): number | undefined {
   const match = DURATION.exec(text);
@@ -20,7 +25,19 @@ export function parseDuration(text: string): number | undefined {
   return Number(match[1]) * UNIT_MS[match[2] as keyof typeof UNIT_MS];
 }
 
-const duration = () => z.string().regex(DURATION, DURATION_MESSAGE);
+/** {@link parseDuration}, throwing a {@link FatalError} for a malformed or too long duration. */
+function durationMs(text: string): number {
+  const ms = parseDuration(text);
+  if (ms === undefined) throw new FatalError(DURATION_MESSAGE);
+  if (ms > MAX_DURATION_MS) throw new FatalError(MAX_DURATION_MESSAGE);
+  return ms;
+}
+
+const duration = () =>
+  z
+    .string()
+    .regex(DURATION, DURATION_MESSAGE)
+    .refine((text) => (parseDuration(text) ?? 0) <= MAX_DURATION_MS, MAX_DURATION_MESSAGE);
 
 /** Pauses the run for a duration or until a point in time, then continues. */
 export const delayNode = defineNode({
@@ -30,31 +47,36 @@ export const delayNode = defineNode({
   icon: "timer",
   category: "Timing",
   summary: "Wait {{duration}}{{until}}",
-  input: z
-    .object({
-      duration: ui(duration(), { label: "Wait for", placeholder: "2d" })
-        .describe("How long to wait, e.g. 30s, 5m, 2h or 3d.")
-        .optional(),
-      until: ui(z.iso.datetime({ offset: true }), {
-        label: "Wait until",
-        placeholder: "2026-01-31T09:00:00Z",
+  // `oneOfRequired` lets the validator report a missing or doubled choice; the refinement below
+  // enforces the same rule at runtime.
+  input: ui(
+    z
+      .object({
+        duration: ui(duration(), { label: "Wait for", placeholder: "2d" })
+          .describe("How long to wait, e.g. 30s, 5m, 2h or 3d.")
+          .optional(),
+        until: ui(z.iso.datetime({ offset: true }), {
+          label: "Wait until",
+          placeholder: "2026-01-31T09:00:00Z",
+        })
+          .describe("Continue at this date and time instead.")
+          .optional(),
       })
-        .describe("Continue at this date and time instead.")
-        .optional(),
-    })
-    .superRefine((v, check) => {
-      if (v.duration === undefined && v.until === undefined) {
-        check.addIssue({
-          code: "custom",
-          message: "Set how long to wait, or the date and time to wait until",
-        });
-      } else if (v.duration !== undefined && v.until !== undefined) {
-        check.addIssue({
-          code: "custom",
-          message: "Set how long to wait or the date and time to wait until, not both",
-        });
-      }
-    }),
+      .superRefine((v, check) => {
+        if (v.duration === undefined && v.until === undefined) {
+          check.addIssue({
+            code: "custom",
+            message: "Set how long to wait, or the date and time to wait until",
+          });
+        } else if (v.duration !== undefined && v.until !== undefined) {
+          check.addIssue({
+            code: "custom",
+            message: "Set how long to wait or the date and time to wait until, not both",
+          });
+        }
+      }),
+    { oneOfRequired: [["duration"], ["until"]] },
+  ),
   output: z.object({
     resumedAt: z.iso.datetime().describe("When the run continued."),
   }),
@@ -64,7 +86,7 @@ export const delayNode = defineNode({
     const until =
       input.until !== undefined
         ? Date.parse(input.until)
-        : ctx.now() + (parseDuration(input.duration ?? "") ?? 0);
+        : ctx.now() + durationMs(input.duration ?? "");
     return until <= ctx.now() ? resumedAt() : suspend({ until });
   },
 });
@@ -104,7 +126,7 @@ export const waitForCallbackNode = defineNode({
     if (ctx.resume?.kind === "timeout") {
       return branch("timeout", { body: null, timedOut: true });
     }
-    const callback = await ctx.callback({ timeoutMs: parseDuration(input.timeout) ?? 0 });
+    const callback = await ctx.callback({ timeoutMs: durationMs(input.timeout) });
     return suspend({ callback });
   },
 });

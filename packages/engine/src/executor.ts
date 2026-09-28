@@ -689,7 +689,43 @@ export function createExecutor(opts: EngineOptions): Executor {
       const kind = manifest.branches.kind;
       const base = { at: clock(), startedAt, input: shownInput };
 
+      /** Start iterating a loop node's `body` over `items`. */
+      const startLoop = async (items: unknown): Promise<Flow> => {
+        if (!Array.isArray(items)) {
+          return fatal(`Step "${label}": must return loop(items) with a list`, shownInput);
+        }
+        let copy: unknown[];
+        try {
+          copy = structuredClone(items);
+        } catch {
+          return fatal(`Step "${label}": items must be JSON-serializable`, shownInput);
+        }
+        const { at, input: loopInput } = base;
+        const ok = await commitEntry(
+          path,
+          {
+            status: "looping",
+            items: copy,
+            results: [],
+            at,
+            startedAt,
+            attempts: attempt,
+            input: loopInput,
+          },
+          settled,
+          [],
+        );
+        if (ok) settle();
+        return ok ? "continue" : "stop";
+      };
+
       if (isSignal(result)) {
+        if (result.kind === "loop") {
+          if (kind !== "loop") {
+            return fatal(`Step "${label}": loop() is only for looping nodes`, shownInput);
+          }
+          return startLoop(result.items);
+        }
         if (result.kind === "stop") {
           const output: Record<string, unknown> = { stopped: true };
           const runOutput: Record<string, unknown> = { stoppedAt: path };
@@ -727,8 +763,7 @@ export function createExecutor(opts: EngineOptions): Executor {
           return "stop";
         }
         if (result.kind === "branch") {
-          if (kind === "loop")
-            return fatal(`Step "${label}": must return { items: [...] }`, shownInput);
+          if (kind === "loop") return fatal(`Step "${label}": must return loop(items)`, shownInput);
           const allowed = branchesFor(manifest, step).map((b) => b.id);
           if (!allowed.includes(result.branch)) {
             return fatal(`Step "${label}": returned unknown branch "${result.branch}"`, shownInput);
@@ -850,32 +885,8 @@ export function createExecutor(opts: EngineOptions): Executor {
         return fatal(`Step "${label}": must return branch()`, shownInput);
       }
       if (kind === "loop") {
-        const items = (result as { items?: unknown } | null)?.items;
-        if (!Array.isArray(items))
-          return fatal(`Step "${label}": must return { items: [...] }`, shownInput);
-        let copy: unknown[];
-        try {
-          copy = structuredClone(items);
-        } catch {
-          return fatal(`Step "${label}": items must be JSON-serializable`, shownInput);
-        }
-        const { at, input: loopInput } = base;
-        const ok = await commitEntry(
-          path,
-          {
-            status: "looping",
-            items: copy,
-            results: [],
-            at,
-            startedAt,
-            attempts: attempt,
-            input: loopInput,
-          },
-          settled,
-          [],
-        );
-        if (ok) settle();
-        return ok ? "continue" : "stop";
+        // Back-compat: a plain `{ items }` return works like `loop(items)`.
+        return startLoop((result as { items?: unknown } | null)?.items);
       }
 
       const checked = await validateOutput(result);

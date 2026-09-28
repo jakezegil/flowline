@@ -9,6 +9,7 @@ import {
   FlowkitDefinitionError,
   invokeSubflow,
   isSignal,
+  loop,
   type NodeContext,
   type NodeDefinition,
   type Signal,
@@ -212,10 +213,15 @@ describe("signals", () => {
     expect(isSignal(suspend({ until: 5 }))).toBe(true);
     expect(isSignal(stop("done"))).toBe(true);
     expect(isSignal(invokeSubflow({ workflowId: "wf", input: {} }))).toBe(true);
+    expect(isSignal(loop([1, 2]))).toBe(true);
     expect(isSignal({})).toBe(false);
     expect(isSignal(null)).toBe(false);
     expect(isSignal("branch")).toBe(false);
     expect(isSignal({ kind: "branch", branch: "if" })).toBe(false);
+  });
+
+  test("loop carries its items", () => {
+    expect(loop(["a", "b"])).toMatchObject({ kind: "loop", items: ["a", "b"] });
   });
 
   test("the signal key survives duplicated package copies", () => {

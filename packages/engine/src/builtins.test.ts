@@ -3,6 +3,7 @@ import {
   defineNode,
   definePlugin,
   type JournalEntry,
+  loop,
   ref,
   tpl,
   type WorkflowDoc,
@@ -343,6 +344,62 @@ describe("core.waitForCallback", () => {
       output: { body: null, timedOut: true },
     });
     expect(outputAt(run.journal, "wait/timeout/late")).toEqual({ value: true });
+  });
+
+  it("takes Timed out for a callback arriving exactly at expiresAt", async () => {
+    const id = await start(doc);
+    await engine.drain();
+    const waiting = await getRun(id);
+    expect(waiting.callbackExpiresAt).toBe(now + DAY);
+    now = waiting.callbackExpiresAt as number;
+    expect(await engine.resume(waiting.callbackToken as string, { approved: true })).toBe("gone");
+    await engine.drain();
+    const run = await getRun(id);
+    expect(run.status).toBe("completed");
+    expect(run.journal.wait).toMatchObject({ branch: "timeout", output: { timedOut: true } });
+    expect(outputAt(run.journal, "wait/resumed/ok")).toBeUndefined();
+  });
+});
+
+describe("loop()", () => {
+  it("fails a step that isn't a looping node", async () => {
+    const looper = defineNode({
+      type: "t.looper",
+      name: "Looper",
+      input: z.object({}),
+      run: () => loop([1, 2]),
+    });
+    const registry = createRegistry([definePlugin({ id: "t", name: "Test", nodes: [looper] })]);
+    engine = createEngine({ registry, storage, clock: () => now });
+    const doc: WorkflowDoc = {
+      id: "loops",
+      name: "Loops",
+      trigger: { type: "core.manual", config: {} },
+      steps: [{ id: "l", type: "t.looper", config: {} }],
+    };
+    const id = await start(doc);
+    await engine.drain();
+    expect((await getRun(id)).error).toMatchObject({
+      message: 'Step "l": loop() is only for looping nodes',
+      fatal: true,
+    });
+  });
+});
+
+describe("durations over 365 days", () => {
+  it("fail the delay step with a clear message", async () => {
+    const doc: WorkflowDoc = {
+      id: "forever",
+      name: "Forever",
+      trigger: { type: "core.manual", config: {} },
+      steps: [{ id: "wait", type: "core.delay", config: { duration: "400d" } }],
+    };
+    const id = await start(doc);
+    await engine.drain();
+    expect((await getRun(id)).error).toMatchObject({
+      message: expect.stringContaining("Durations can be at most 365d"),
+      fatal: true,
+    });
   });
 });
 

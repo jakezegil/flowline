@@ -31,13 +31,14 @@ describe("evaluateRules: operators", () => {
   const cases: [string, Rule, boolean][] = [
     // eq / neq: loose on number/string, dates as timestamps, deep for objects
     ["eq same string", { left: "won", op: "eq", right: "won" }, true],
-    ["eq is case-sensitive", { left: "Won", op: "eq", right: "won" }, false],
+    ["eq ignores case by default", { left: "Won", op: "eq", right: "won" }, true],
+    ["eq with caseSensitive", { left: "Won", op: "eq", right: "won", caseSensitive: true }, false],
     ["eq numeric string vs number", { left: "5", op: "eq", right: 5 }, true],
     ["eq number vs numeric string", { left: 5, op: "eq", right: "5.0" }, true],
     ["eq non-numeric string vs number", { left: "five", op: "eq", right: 5 }, false],
     ["eq empty string is not 0", { left: "", op: "eq", right: 0 }, false],
     ["eq booleans", { left: true, op: "eq", right: true }, true],
-    ["eq boolean vs string is strict", { left: true, op: "eq", right: "yes" }, false],
+    ["eq boolean vs other text", { left: true, op: "eq", right: "yes" }, false],
     ["eq null vs undefined", { left: null, op: "eq", right: undefined }, true],
     ["eq null vs 0", { left: null, op: "eq", right: 0 }, false],
     [
@@ -87,7 +88,8 @@ describe("evaluateRules: operators", () => {
     ["in list", { left: "won", op: "in", right: ["won", "lost"] }, true],
     ["in list loose", { left: 3, op: "in", right: ["1", "3"] }, true],
     ["not in list", { left: "open", op: "in", right: ["won", "lost"] }, false],
-    ["in string", { left: "ll", op: "in", right: "hello" }, true],
+    ["in comma-separated text", { left: "lost", op: "in", right: "won, lost" }, true],
+    ["in text is not a substring test", { left: "ll", op: "in", right: "hello" }, false],
     ["in non-list", { left: 1, op: "in", right: 1 }, false],
 
     // emptiness & booleans
@@ -233,10 +235,108 @@ describe("rule helpers", () => {
   });
 });
 
+describe("eq coercion matrix", () => {
+  const cases: [unknown, unknown, boolean][] = [
+    // string/string: numeric when both sides are numeric
+    ["5", "5.0", true],
+    ["10", "1e1", true],
+    [" 7 ", "7", true],
+    ["5", "6", false],
+    ["5", "five", false],
+    // booleans coerce like isTrue/isFalse
+    [true, "true", true],
+    ["false", false, true],
+    [true, "false", false],
+    [false, "", false],
+    [true, 1, false],
+    [false, 0, false],
+    [false, null, false],
+    // numbers
+    [5, "5", true],
+    [0, "", false],
+    [0, "0", true],
+    // dates by instant, UTC unless an offset is given
+    ["2026-01-01", "2026-01-01T00:00:00Z", true],
+    ["2026-01-01T09:00", "2026-01-01T09:00:00Z", true],
+    ["2026-01-01 09:00:00", "2026-01-01T09:00:00.000Z", true],
+    ["2026-01-01T10:00:00+0100", "2026-01-01T09:00:00Z", true],
+    ["2026-01-01T09:00", "2026-01-01T10:00", false],
+    // text ignores case by default
+    ["Won", "WON", true],
+    ["Won", "lost", false],
+  ];
+
+  it.each(cases)("%j eq %j is %s", (left, right, expected) => {
+    expect(one({ left, op: "eq", right })).toBe(expected);
+    expect(one({ left: right, op: "eq", right: left })).toBe(expected);
+    expect(one({ left, op: "neq", right })).toBe(!expected);
+  });
+});
+
+describe("in with comma-separated text", () => {
+  const cases: [string, Rule, boolean][] = [
+    ["trims items", { left: "b", op: "in", right: " a ,  b , c" }, true],
+    ["compares numbers loosely", { left: 3, op: "in", right: "1, 2, 3" }, true],
+    ["compares booleans loosely", { left: true, op: "in", right: "true,false" }, true],
+    ["ignores case by default", { left: "WON", op: "in", right: "won, lost" }, true],
+    ["respects caseSensitive", { left: "WON", op: "in", right: "won", caseSensitive: true }, false],
+    ["needs a whole item", { left: "wo", op: "in", right: "won, lost" }, false],
+    ["single item", { left: "won", op: "in", right: "won" }, true],
+    ["empty text has an empty item only", { left: "", op: "in", right: "" }, true],
+  ];
+
+  it.each(cases)("%s", (_name, rule, expected) => {
+    expect(one(rule)).toBe(expected);
+  });
+});
+
+describe("case sensitivity", () => {
+  const ops = [
+    ["contains", "Hello World", "WORLD"],
+    ["startsWith", "Acme Corp", "acme"],
+    ["endsWith", "jane@ACME.com", "@acme.com"],
+    ["eq", "Gold", "gold"],
+  ] as const;
+
+  it.each(ops)("%s ignores case by default and respects caseSensitive", (op, left, right) => {
+    expect(one({ left, op, right })).toBe(true);
+    expect(one({ left, op, right, caseSensitive: false })).toBe(true);
+    expect(one({ left, op, right, caseSensitive: true })).toBe(false);
+  });
+
+  it("applies to list items and negated operators", () => {
+    expect(one({ left: ["Gold"], op: "contains", right: "gold" })).toBe(true);
+    expect(one({ left: ["Gold"], op: "contains", right: "gold", caseSensitive: true })).toBe(false);
+    expect(one({ left: "Hello", op: "notContains", right: "hello" })).toBe(false);
+    expect(one({ left: "A", op: "neq", right: "a", caseSensitive: true })).toBe(true);
+  });
+
+  it("is set by the helpers' options", () => {
+    expect(eq("A", "a", { caseSensitive: true })).toEqual({
+      left: "A",
+      op: "eq",
+      right: "a",
+      caseSensitive: true,
+    });
+    expect(evaluateRules(and(contains("ABC", "b"), isIn("X", "x, y")))).toBe(true);
+  });
+
+  it("round-trips through RuleGroupSchema", () => {
+    const g = and(eq("A", "a", { caseSensitive: true }));
+    expect(RuleGroupSchema.parse(g)).toEqual(g);
+  });
+});
+
 describe("looseEquals", () => {
   it("is exported for switch-style matching", () => {
     expect(looseEquals("7", 7)).toBe(true);
     expect(looseEquals("a", "b")).toBe(false);
+    expect(looseEquals(true, "true")).toBe(true);
+  });
+
+  it("is case-sensitive unless asked otherwise", () => {
+    expect(looseEquals("Gold", "gold")).toBe(false);
+    expect(looseEquals("Gold", "gold", { caseSensitive: false })).toBe(true);
   });
 });
 

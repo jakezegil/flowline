@@ -1,6 +1,7 @@
+import { FatalError } from "@flowkit/core";
 import { describe, expect, it } from "vitest";
 import { fakeContext, NOW } from "../test/fake-context";
-import { delayNode, parseDuration, waitForCallbackNode } from "./time";
+import { delayNode, MAX_DURATION_MS, parseDuration, waitForCallbackNode } from "./time";
 
 const SEC = 1000;
 const DAY = 86_400 * SEC;
@@ -42,6 +43,29 @@ describe("core.delay", () => {
       "Use a whole number and a unit: 30s, 5m, 2h or 3d",
     );
     expect(parse({ until: "next tuesday" }).success).toBe(false);
+  });
+
+  it("caps durations at 365 days", () => {
+    expect(parse({ duration: "365d" }).success).toBe(true);
+    expect(parse({ duration: "8760h" }).success).toBe(true);
+    expect(parse({ duration: "366d" }).error?.issues[0]?.message).toBe(
+      "Durations can be at most 365d",
+    );
+    expect(parse({ duration: "999999999999d" }).error?.issues[0]?.message).toBe(
+      "Durations can be at most 365d",
+    );
+    expect(MAX_DURATION_MS).toBe(365 * DAY);
+  });
+
+  it("fails fatally on a duration that skipped validation", async () => {
+    for (const [duration, message] of [
+      ["2 days", "Use a whole number and a unit: 30s, 5m, 2h or 3d"],
+      ["400d", "Durations can be at most 365d"],
+    ]) {
+      const run = async () => delayNode.run({ input: { duration }, ctx: fakeContext() });
+      await expect(run()).rejects.toThrow(FatalError);
+      await expect(run()).rejects.toThrow(message);
+    }
   });
 
   it("suspends until now + duration", async () => {
@@ -93,6 +117,19 @@ describe("core.waitForCallback", () => {
     });
     expect(seen).toEqual([2 * 3600 * SEC]);
     expect(result).toMatchObject({ kind: "suspend", callback: { token: "tok" } });
+  });
+
+  it("caps the timeout at 365 days", () => {
+    expect(waitForCallbackNode.input.safeParse({ timeout: "366d" }).error?.issues[0]?.message).toBe(
+      "Durations can be at most 365d",
+    );
+  });
+
+  it("fails fatally on a timeout that skipped validation", async () => {
+    const run = async () =>
+      waitForCallbackNode.run({ input: { timeout: "soon" }, ctx: fakeContext() });
+    await expect(run()).rejects.toThrow(FatalError);
+    await expect(run()).rejects.toThrow("Use a whole number and a unit: 30s, 5m, 2h or 3d");
   });
 
   it("takes Resumed with the callback body", async () => {

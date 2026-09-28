@@ -21,7 +21,9 @@ export const VERSION = "0.1.0";
 export { conditionNode, forEachNode, stopNode, switchNode } from "./logic";
 export {
   and,
+  ConditionRulesSchema,
   contains,
+  type EqualsOptions,
   endsWith,
   eq,
   evaluateRules,
@@ -43,11 +45,12 @@ export {
   type RuleGroup,
   RuleGroupSchema,
   type RuleOp,
+  type RuleOptions,
   RuleSchema,
   startsWith,
 } from "./rules";
 export { callSubflowNode } from "./subflow";
-export { delayNode, parseDuration, waitForCallbackNode } from "./time";
+export { delayNode, MAX_DURATION_MS, parseDuration, waitForCallbackNode } from "./time";
 export {
   eventTrigger,
   manualTrigger,

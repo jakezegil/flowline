@@ -83,8 +83,11 @@ async function subflowPayload(
 /**
  * @internal Why `output` (a finished sub-flow run's mapped output) does not match the output
  * fields its workflow declares, prefixed `Sub-flow output: `; `undefined` when it matches or
- * nothing is declared. Declared output lives in `config.output` of a trigger of kind `subflow`
- * (`core.subflow`); a missing output mapping counts as `{}`.
+ * nothing is declared. A missing output mapping counts as `{}`.
+ *
+ * Contract for every trigger of kind `subflow` (`core.subflow` and plugin sub-flow triggers alike,
+ * see `TriggerKind` in `@flowkit/core`): the declared output is the `FieldDecl` list at config path
+ * `"output"`. A plugin trigger that keeps its output fields anywhere else is not checked.
  */
 export function subflowOutputProblem(
   registry: Registry,

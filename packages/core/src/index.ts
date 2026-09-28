@@ -45,6 +45,8 @@ export {
   invokeSubflow,
   isSignal,
   type Logger,
+  type LoopSignal,
+  loop,
   type NodeContext,
   type NodeDefinition,
   type NodeResult,
