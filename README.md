@@ -346,6 +346,19 @@ export const requestApproval = defineNode({
   by the API. `POST <basePath>/resume/:token` is the public resume route: the token is the
   credential. The authorized `POST <basePath>/runs/:id/resume` route (`engine.resumeRun`) is the
   ops path, used by the run viewer.
+- Declare how a waiting node is resumed with `resume` on its definition. `resume.body` is a Zod
+  schema for the callback body. The engine checks every resume against it (token route,
+  authorized route and `engine.resume`/`engine.resumeRun`) and rejects a mismatch with 400 or a
+  `FlowkitValidationError`; the run viewer's Resume dialog starts empty and checks it too.
+  `resume.hostHandled: true` (with an optional `hint`) means your app resumes it, for example
+  from an approvals page: `POST <basePath>/runs/:id/resume` answers 409 with
+  `code: "resume_host_handled"`, and the viewer shows the hint instead of Resume…. Your own code
+  still resumes it with `engine.resumeRun` (only the generic route passes `refuseHostHandled`).
+  The public token route (`POST <basePath>/resume/:token`, `engine.resume`) resumes it too: a
+  callback token is a bearer capability, so never expose the token or `resumeUrl` of a
+  host-handled step. A resume the engine can't check (the pinned version, the step or its node
+  type is missing) is refused with 409 `resume_unverifiable`.
+  Hosts can also hide or replace the viewer's action with `<RunViewer resumeAction={…}>`.
 - `core.waitForCallback` has an optional `notify: { url }`. Once the wait is committed, the engine
   POSTs `{ resumeUrl, expiresAt, runId }` to that URL, with redirects refused.
 

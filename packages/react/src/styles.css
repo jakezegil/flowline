@@ -209,6 +209,9 @@
     border-color: var(--fk-border-strong);
     box-shadow: none;
   }
+  .fk-card[data-run="cancelled"] {
+    opacity: 0.8;
+  }
   .fk-card[data-run="failed"] {
     border-color: color-mix(in srgb, var(--fk-danger) 60%, var(--fk-border));
   }
@@ -2062,6 +2065,9 @@
   .fk-banner[data-tone="warning"] {
     --fk-tone: var(--fk-warning);
   }
+  .fk-banner[data-tone="neutral"] {
+    --fk-tone: var(--fk-text-muted);
+  }
   .fk-banner__icon {
     display: flex;
     flex: none;
@@ -2169,6 +2175,12 @@
     flex: 1 1 auto;
     min-width: 0;
     font-weight: 500;
+  }
+  .fk-callout__hint {
+    display: block;
+    margin-top: 2px;
+    font-weight: 400;
+    color: var(--fk-text-muted);
   }
   .fk-tabs {
     display: flex;
@@ -2499,9 +2511,53 @@
     border-width: 0 0 1px;
     flex: none;
     gap: 4px;
-    flex-wrap: wrap;
+    /* One row that scrolls sideways when narrow, instead of wrapping onto two. */
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
     padding: 10px 10px 8px;
     border-bottom: 1px solid var(--fk-border);
+  }
+  .fk-runs__filters::-webkit-scrollbar {
+    display: none;
+  }
+  /*
+   * Scrollable: fade the edge(s) with more chips past them, so the row reads as cut off. The
+   * second mask layer keeps the bottom border (1px) unfaded.
+   */
+  .fk-runs__filters[data-overflow] {
+    -webkit-mask-image: var(--fk-runs-fade), linear-gradient(#000, #000);
+    mask-image: var(--fk-runs-fade), linear-gradient(#000, #000);
+    -webkit-mask-size:
+      100% 100%,
+      100% 1px;
+    mask-size:
+      100% 100%,
+      100% 1px;
+    -webkit-mask-position:
+      0 0,
+      0 100%;
+    mask-position:
+      0 0,
+      0 100%;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+  }
+  .fk-runs__filters[data-overflow="end"] {
+    --fk-runs-fade: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  }
+  .fk-runs__filters[data-overflow="start"] {
+    --fk-runs-fade: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+  }
+  .fk-runs__filters[data-overflow="both"] {
+    --fk-runs-fade: linear-gradient(
+      to right,
+      transparent,
+      #000 32px,
+      #000 calc(100% - 32px),
+      transparent
+    );
   }
   .fk-runs__filter {
     flex: none;

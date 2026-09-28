@@ -162,8 +162,36 @@ export interface RunPatch {
   createChild?: NewRun;
 }
 
+/**
+ * The path of the Stop step that ended `run` early, or `undefined` when it didn't stop: the run
+ * is `completed`, its output is `{ stoppedAt }` and the step at that path journaled a stop
+ * (`{ stopped: true }` output). Adapters use it to fill {@link RunSummary.stoppedAt}.
+ */
+export function stoppedAtOf(run: Pick<Run, "status" | "output" | "journal">): string | undefined {
+  if (run.status !== "completed") return undefined;
+  const at = (run.output as { stoppedAt?: unknown } | null | undefined)?.stoppedAt;
+  if (typeof at !== "string" || !Object.hasOwn(run.journal, at)) return undefined;
+  const entry = run.journal[at];
+  const out = entry?.status === "done" ? (entry.output as { stopped?: unknown } | null) : null;
+  return out?.stopped === true ? at : undefined;
+}
+
 /** An event to append; storage assigns `id` and `seq`. */
 export type NewRunEvent = Omit<RunEvent, "id" | "seq">;
+
+/** Filter of {@link StorageAdapter.listRuns}. */
+export interface ListRunsFilter {
+  /** Only runs of this workflow. */
+  workflowId?: string;
+  /** Only runs in this state. */
+  status?: RunStatus;
+  /** Leave out sub-flow runs. */
+  topLevel?: boolean;
+  /** `true`: only runs a Stop step ended; `false`: leave those out. */
+  stopped?: boolean;
+  /** At most this many rows (default 50). */
+  limit?: number;
+}
 
 /**
  * The event appended atomically with a resume ({@link StorageAdapter.resumeByToken},
@@ -218,6 +246,18 @@ export interface StorageAdapter {
     actor: string,
     now: number,
   ): Promise<WorkflowVersion>;
+
+  /**
+   * Like {@link StorageAdapter.saveWorkflowVersion}, but only for a workflow that has no version
+   * yet: saves `doc` as version 1, or returns `null` (writing nothing) when the workflow exists.
+   * Of concurrent calls for one workflow, exactly one creates it.
+   */
+  createWorkflowVersion(
+    tenantId: string,
+    doc: WorkflowDoc,
+    actor: string,
+    now: number,
+  ): Promise<WorkflowVersion | null>;
 
   /** A specific version, or `null` if it does not exist. */
   getWorkflowVersion(
@@ -278,13 +318,20 @@ export interface StorageAdapter {
   getRunById(runId: string): Promise<Run | null>;
 
   /**
-   * Summaries of the tenant's runs, newest first (`createdAt` descending, then `id` descending),
-   * optionally filtered by workflow and/or status, at most `limit` rows (default 50).
+   * The `waiting` run whose `callbackToken` is `token`, or `null`. The token's expiry is not
+   * checked. The engine reads it to check a callback body before resuming with
+   * {@link StorageAdapter.resumeByToken} (which only succeeds while the same wait holds the token).
    */
-  listRuns(
-    tenantId: string,
-    f: { workflowId?: string; status?: RunStatus; limit?: number },
-  ): Promise<RunSummary[]>;
+  getRunByCallbackToken(token: string): Promise<Run | null>;
+
+  /**
+   * Summaries of the tenant's runs, newest first (`createdAt` descending, then `id` descending),
+   * optionally filtered by workflow and/or status, at most `limit` rows (default 50). `topLevel`
+   * leaves out sub-flow runs (`startedBy.kind === "subflow"`). `stopped: true` keeps only runs a
+   * Stop step ended ({@link stoppedAtOf}), `stopped: false` leaves them out. A summary carries
+   * `stoppedAt` when {@link stoppedAtOf} gives one. Filters apply before `limit`.
+   */
+  listRuns(tenantId: string, f: ListRunsFilter): Promise<RunSummary[]>;
 
   /**
    * Atomically lease one runnable run (across all tenants), or return `null` if none is eligible.

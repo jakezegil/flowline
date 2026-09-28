@@ -2,10 +2,12 @@ import type { Issue, NodeManifest, Step } from "@flowkit/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import type { Node, NodeProps } from "@xyflow/react";
 import {
+  Ban,
   Check,
   ChevronLeft,
   ChevronRight,
   CircleDashed,
+  CircleStop,
   Clock,
   LoaderCircle,
   Minus,
@@ -123,6 +125,8 @@ const RUN_TONE = {
   waiting: "warning",
   skipped: "muted",
   pending: "muted",
+  stopped: "muted",
+  cancelled: "muted",
 } as const satisfies Record<RunStepStatus["status"], string>;
 
 /** Run status badge. */
@@ -135,6 +139,8 @@ function RunBadge({ run }: { run: RunStepStatus }) {
     waiting: <Clock size={11} strokeWidth={2.5} aria-hidden />,
     skipped: <Minus size={11} strokeWidth={3} aria-hidden />,
     pending: <CircleDashed size={11} strokeWidth={2.5} aria-hidden />,
+    stopped: <CircleStop size={11} strokeWidth={2.5} aria-hidden />,
+    cancelled: <Ban size={11} strokeWidth={2.5} aria-hidden />,
   }[run.status];
   return (
     <Badge tone={RUN_TONE[run.status]} label={label} tooltip={label}>

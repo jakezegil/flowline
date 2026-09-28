@@ -82,6 +82,13 @@ describe("createClient requests", () => {
       body: doc,
     },
     {
+      name: "saveWorkflow creating",
+      call: (c) => c.saveWorkflow(doc, { create: true }),
+      method: "PUT",
+      path: "/workflows/wf%201?create=true",
+      body: doc,
+    },
+    {
       name: "publish",
       call: (c) => c.publish("wf", 3),
       method: "POST",
@@ -131,6 +138,18 @@ describe("createClient requests", () => {
       call: (c) => c.listRuns({ workflowId: "wf", status: "failed", limit: 10 }),
       method: "GET",
       path: "/runs?workflowId=wf&status=failed&limit=10",
+    },
+    {
+      name: "listRuns top-level only",
+      call: (c) => c.listRuns({ topLevel: true, limit: 5 }),
+      method: "GET",
+      path: "/runs?topLevel=true&limit=5",
+    },
+    {
+      name: "listRuns without stopped runs",
+      call: (c) => c.listRuns({ status: "completed", stopped: false }),
+      method: "GET",
+      path: "/runs?status=completed&stopped=false",
     },
     { name: "getRun", call: (c) => c.getRun("r1"), method: "GET", path: "/runs/r1" },
     {

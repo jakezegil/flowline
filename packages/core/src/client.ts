@@ -30,8 +30,12 @@ export interface FlowkitClient {
   listWorkflows(): Promise<WorkflowSummary[]>;
   /** `GET /workflows/:id` — latest and published versions. */
   getWorkflow(id: string): Promise<WorkflowDetail>;
-  /** `PUT /workflows/:id` — save `doc` as a new immutable version. */
-  saveWorkflow(doc: WorkflowDoc): Promise<WorkflowVersion>;
+  /**
+   * `PUT /workflows/:id` — save `doc` as a new immutable version. With `create: true`, only a
+   * workflow that doesn't exist yet is saved (as version 1); an existing one rejects with 409
+   * `{ code: "workflow_exists" }`.
+   */
+  saveWorkflow(doc: WorkflowDoc, opts?: { create?: boolean }): Promise<WorkflowVersion>;
   /** `POST /workflows/:id/publish` — publish `version`; rejects with 422 if it has errors. */
   publish(id: string, version: number): Promise<void>;
   /** `POST /workflows/validate` — server-side validation issues for `doc`. */
@@ -44,10 +48,16 @@ export interface FlowkitClient {
   testStep(req: TestStepRequest): Promise<TestStepResponse>;
   /** `POST /workflows/:id/run` — start a manual run of the published version. */
   runWorkflow(id: string, input?: unknown): Promise<{ runId: string }>;
-  /** `GET /runs` — runs, optionally filtered. */
+  /**
+   * `GET /runs` — runs, optionally filtered. `topLevel: true` leaves out runs started by a
+   * sub-flow step (`startedBy.kind === "subflow"`). `stopped: true` keeps only runs a Stop step
+   * ended, `stopped: false` leaves them out.
+   */
   listRuns(filter?: {
     workflowId?: string;
     status?: RunStatus;
+    topLevel?: boolean;
+    stopped?: boolean;
     limit?: number;
   }): Promise<RunSummary[]>;
   /** `GET /runs/:id` — run with journal, events and pinned doc. */
@@ -250,7 +260,10 @@ export function createClient(opts: ClientOptions): FlowkitClient {
     getManifest: () => request("GET", "/manifest"),
     listWorkflows: () => request("GET", "/workflows"),
     getWorkflow: (id) => request("GET", `/workflows/${enc(id)}`),
-    saveWorkflow: (doc) => request("PUT", `/workflows/${enc(doc.id)}`, { value: doc }),
+    saveWorkflow: (doc, opts = {}) =>
+      request("PUT", `/workflows/${enc(doc.id)}${opts.create ? "?create=true" : ""}`, {
+        value: doc,
+      }),
     publish: async (id, version) => {
       await request("POST", `/workflows/${enc(id)}/publish`, { value: { version } });
     },
@@ -266,6 +279,8 @@ export function createClient(opts: ClientOptions): FlowkitClient {
       const params = new URLSearchParams();
       if (filter.workflowId !== undefined) params.set("workflowId", filter.workflowId);
       if (filter.status !== undefined) params.set("status", filter.status);
+      if (filter.topLevel === true) params.set("topLevel", "true");
+      if (filter.stopped !== undefined) params.set("stopped", String(filter.stopped));
       if (filter.limit !== undefined) params.set("limit", String(filter.limit));
       const qs = params.toString();
       return request("GET", `/runs${qs ? `?${qs}` : ""}`);

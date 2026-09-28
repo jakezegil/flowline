@@ -62,7 +62,9 @@ describe("RunList", () => {
     );
     await screen.findByText(/No runs yet/);
     fireEvent.click(screen.getByRole("button", { name: "Failed" }));
-    await waitFor(() => expect(client.listRuns).toHaveBeenLastCalledWith({ status: "failed" }));
+    await waitFor(() =>
+      expect(client.listRuns).toHaveBeenLastCalledWith({ status: "failed", topLevel: true }),
+    );
     expect(await screen.findByText("No failed runs.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Failed" }).getAttribute("aria-pressed")).toBe(
       "true",
@@ -109,6 +111,89 @@ describe("RunList", () => {
     }
   });
 
+  it("reads a run a Stop step ended as Stopped", async () => {
+    const client = mockClient({
+      listRuns: vi.fn(async () => [
+        row("r1", "completed", { stoppedAt: "size/if/halt" }),
+        row("r2", "completed"),
+      ]),
+    });
+    render(
+      <FlowkitProvider client={client}>
+        <RunList workflowId="welcome" onSelect={() => {}} />
+      </FlowkitProvider>,
+    );
+    const list = await screen.findByRole("list", { name: "Runs" });
+    const [stopped, completed] = within(list).getAllByRole("button");
+    expect(stopped?.querySelector(".fk-runs__status")?.textContent).toBe("Stopped");
+    expect(stopped?.dataset.status).toBe("stopped");
+    expect(completed?.querySelector(".fk-runs__status")?.textContent).toBe("Completed");
+  });
+
+  it("across workflows, leaves out sub-flow runs and names each run's workflow", async () => {
+    const client = mockClient({
+      listRuns: vi.fn(async () => [
+        row("r1", "completed", { workflowId: "lead-routing" }),
+        row("r2", "failed", { workflowId: "gone" }),
+      ]),
+      listWorkflows: vi.fn(async () => [
+        {
+          id: "lead-routing",
+          name: "Inbound lead routing",
+          triggerType: "core.webhook",
+          latestVersion: 1,
+          publishedVersion: 1,
+          publishedAt: 0,
+          updatedAt: 0,
+        },
+      ]),
+    });
+    render(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} />
+      </FlowkitProvider>,
+    );
+    const list = await screen.findByRole("list", { name: "Runs" });
+    expect(client.listRuns).toHaveBeenCalledWith({ topLevel: true });
+    await waitFor(() =>
+      expect(within(list).getByRole("button", { name: /Completed/ }).textContent).toContain(
+        "Inbound lead routing · ",
+      ),
+    );
+    // An ID the list doesn't know stays as it is, and doesn't reload the names.
+    expect(within(list).getByRole("button", { name: /Failed/ }).textContent).toContain("gone · ");
+    expect(client.listWorkflows).toHaveBeenCalledTimes(1);
+  });
+
+  it("includeSubflowRuns lists sub-flow runs too; one workflow's list includes them by default", async () => {
+    const client = mockClient({ listRuns: vi.fn(async () => []) });
+    const { rerender } = render(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} includeSubflowRuns />
+      </FlowkitProvider>,
+    );
+    await waitFor(() => expect(client.listRuns).toHaveBeenLastCalledWith({}));
+    rerender(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} workflowId="get-contact" />
+      </FlowkitProvider>,
+    );
+    await waitFor(() =>
+      expect(client.listRuns).toHaveBeenLastCalledWith({ workflowId: "get-contact" }),
+    );
+    rerender(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} workflowId="get-contact" includeSubflowRuns={false} />
+      </FlowkitProvider>,
+    );
+    await waitFor(() =>
+      expect(client.listRuns).toHaveBeenLastCalledWith({
+        workflowId: "get-contact",
+        topLevel: true,
+      }),
+    );
+  });
+
   it("shows a retryable error", async () => {
     const listRuns = vi
       .fn()
@@ -126,5 +211,78 @@ describe("RunList", () => {
         name: /Waiting/,
       }),
     ).toBeTruthy();
+  });
+});
+
+describe("RunList: stopped runs and narrow widths", () => {
+  it("has a Stopped filter, and Completed leaves stopped runs out", async () => {
+    const client = mockClient({ listRuns: vi.fn(async () => []) });
+    render(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} />
+      </FlowkitProvider>,
+    );
+    await screen.findByText(/No runs yet/);
+    fireEvent.click(screen.getByRole("button", { name: "Stopped" }));
+    await waitFor(() =>
+      expect(client.listRuns).toHaveBeenLastCalledWith({
+        status: "completed",
+        stopped: true,
+        topLevel: true,
+      }),
+    );
+    expect(await screen.findByText("No stopped runs.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Completed" }));
+    await waitFor(() =>
+      expect(client.listRuns).toHaveBeenLastCalledWith({
+        status: "completed",
+        stopped: false,
+        topLevel: true,
+      }),
+    );
+  });
+
+  it("keeps the filter chips on one row that scrolls sideways", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const css = readFileSync(resolve(__dirname, "../styles.css"), "utf8");
+    const rule = /\.fk-runs__filters \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/flex-wrap: nowrap/);
+    expect(rule).toMatch(/overflow-x: auto/);
+    expect(css).toMatch(
+      /\.fk-runs__filters\[data-overflow\] \{[^}]*mask-image: var\(--fk-runs-fade\)/,
+    );
+    for (const edge of ["start", "end", "both"]) {
+      expect(css).toContain(`.fk-runs__filters[data-overflow="${edge}"] {\n    --fk-runs-fade:`);
+    }
+  });
+
+  it("marks which ends of the chip row have more chips past them", async () => {
+    render(
+      <FlowkitProvider client={mockClient({ listRuns: async () => [] })}>
+        <RunList onSelect={() => {}} />
+      </FlowkitProvider>,
+    );
+    const row = screen.getByRole("group", { name: "Filter runs by status" });
+    await screen.findByText(/No runs yet/);
+    // Everything fits (jsdom's default: no layout).
+    expect(row.hasAttribute("data-overflow")).toBe(false);
+    const size = { scrollLeft: 0, clientWidth: 320, scrollWidth: 520 };
+    for (const key of Object.keys(size) as (keyof typeof size)[]) {
+      Object.defineProperty(row, key, { configurable: true, get: () => size[key] });
+    }
+    const scrollTo = (left: number) => {
+      size.scrollLeft = left;
+      fireEvent.scroll(row);
+    };
+    scrollTo(0);
+    expect(row.getAttribute("data-overflow")).toBe("end");
+    scrollTo(100);
+    expect(row.getAttribute("data-overflow")).toBe("both");
+    scrollTo(200);
+    expect(row.getAttribute("data-overflow")).toBe("start");
+    size.scrollWidth = 320;
+    scrollTo(0);
+    expect(row.hasAttribute("data-overflow")).toBe(false);
   });
 });

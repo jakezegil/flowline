@@ -39,9 +39,16 @@ export type ResumeInfo =
 
 /** A one-shot URL that resumes a suspended step, created with `ctx.callback()`. */
 export interface CallbackHandle {
-  /** Opaque token identifying the waiting step. */
+  /**
+   * Opaque token identifying the waiting step. It is a bearer capability: whoever holds it can
+   * resume the wait through the public token route, even when the node declares
+   * `resume.hostHandled`. Hand it only to whoever may decide the wait.
+   */
   token: string;
-  /** Absolute URL an external system calls to resume the step. */
+  /**
+   * Absolute URL an external system calls to resume the step (it contains the token). Never
+   * expose it for a step only your app may decide (`resume.hostHandled`).
+   */
   resumeUrl: string;
   /** Epoch ms after which the callback times out. */
   expiresAt: number;
@@ -349,6 +356,30 @@ export interface NodeDefinition<I extends z.ZodObject = z.ZodObject, O = unknown
   retry?: Partial<RetryPolicy>;
   /** Handler wall-clock limit in ms, enforced via `ctx.signal`. Default `300_000`. */
   timeoutMs?: number;
+  /**
+   * For nodes that wait on a callback: how the wait is resumed. The run viewer validates its
+   * resume form against `body`, and with `hostHandled` shows `hint` instead of the form (use it
+   * when your app resumes the wait itself, e.g. from an approvals page).
+   *
+   * @example
+   * resume: {
+   *   body: z.object({ decision: z.enum(["approved", "rejected"]) }),
+   *   hostHandled: true,
+   *   hint: "Approve or reject it in Approvals.",
+   * }
+   */
+  resume?: {
+    /** Schema of the callback body the handler reads from `ctx.resume.body`. */
+    body?: z.ZodType;
+    /**
+     * The host app resumes this wait: the run viewer offers no raw resume form and the generic
+     * `POST /runs/:id/resume` route answers 409. The public token route still resumes it (the
+     * token is a bearer capability), so never hand out this step's token or resume URL.
+     */
+    hostHandled?: boolean;
+    /** Where or how to resume it, shown in the run viewer. */
+    hint?: string;
+  };
   /** The handler. Receives validated input; returns output or a signal. */
   run(args: { input: z.infer<I>; ctx: NodeContext }): Promise<NodeResult<R>> | NodeResult<R>;
 }

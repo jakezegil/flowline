@@ -221,3 +221,26 @@ describe("ui metadata survives JSON Schema conversion", () => {
     expect(props(item).q!["x-flowkit"]).toEqual({ multiline: true });
   });
 });
+
+test("a node's resume declaration reaches the manifest with its body as JSON Schema", () => {
+  const approve = defineNode({
+    type: "crm.approve",
+    name: "Approve",
+    input: z.object({}),
+    resume: {
+      body: z.object({ decision: z.enum(["approved", "rejected"]) }),
+      hostHandled: true,
+      hint: "Decide it in Approvals.",
+    },
+    run: () => ({}),
+  });
+  const m = createRegistry([definePlugin({ id: "crm", name: "CRM", nodes: [approve] })]).manifest();
+  const resume = m.nodes[0]?.resume;
+  expect(resume?.hostHandled).toBe(true);
+  expect(resume?.hint).toBe("Decide it in Approvals.");
+  expect(props(resume?.body as JSONSchema).decision).toMatchObject({
+    enum: ["approved", "rejected"],
+  });
+  // Nodes without one have no `resume` key.
+  expect(createRegistry([crm]).manifest().nodes[0]).not.toHaveProperty("resume");
+});

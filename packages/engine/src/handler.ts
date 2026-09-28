@@ -11,8 +11,16 @@
  */
 import type { ApiErrorBody, RunStatus, TestStepRequest, WorkflowDoc } from "@flowkit/core";
 import type { Engine, EngineCore } from "./engine";
-import { EngineConflictError, EngineNotFoundError, FlowkitValidationError } from "./errors";
+import {
+  EngineConflictError,
+  EngineNotFoundError,
+  FlowkitValidationError,
+  ResumeHostHandledError,
+  ResumeUnverifiableError,
+  WorkflowExistsError,
+} from "./errors";
 import { runEventStream } from "./sse";
+import type { ListRunsFilter } from "./storage";
 import type { Triggers } from "./triggers";
 import { DEFAULT_BASE_PATH, isPlainObject } from "./util";
 import { docShapeProblem } from "./workflows";
@@ -155,8 +163,15 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
       }
     }
     if (seg.length === 2 && seg[0] === "resume") {
-      const outcome = await engine.resume(seg[1] as string, await readJson(req));
-      return outcome === "resumed" ? json(202, {}) : json(410, { error: "gone" });
+      try {
+        const outcome = await engine.resume(seg[1] as string, await readJson(req));
+        return outcome === "resumed" ? json(202, {}) : json(410, { error: "gone" });
+      } catch (err) {
+        if (err instanceof ResumeUnverifiableError) {
+          throw new HttpError(409, err.message, { code: err.code });
+        }
+        throw err;
+      }
     }
     return undefined;
   };
@@ -211,7 +226,19 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
         if ((doc as WorkflowDoc).id !== id) {
           throw new HttpError(400, "The workflow id in the body does not match the URL");
         }
-        return json(200, await engine.saveWorkflow(tenantId, doc as WorkflowDoc, userId));
+        const create = url.searchParams.get("create");
+        if (create !== null && create !== "true" && create !== "false") {
+          throw new HttpError(400, "create must be true or false");
+        }
+        try {
+          const opts = { create: create === "true" };
+          return json(200, await engine.saveWorkflow(tenantId, doc as WorkflowDoc, userId, opts));
+        } catch (err) {
+          if (err instanceof WorkflowExistsError) {
+            throw new HttpError(409, err.message, { code: err.code });
+          }
+          throw err;
+        }
       }
       if (method === "POST" && n === 3 && action === "publish") {
         const body = await readJson(req);
@@ -272,9 +299,23 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
     if (first === "runs") {
       if (method === "GET" && n === 1) {
         const q = url.searchParams;
-        const filter: { workflowId?: string; status?: RunStatus; limit?: number } = {};
+        const filter: ListRunsFilter = {};
         const workflowId = q.get("workflowId");
         if (workflowId) filter.workflowId = workflowId;
+        const topLevel = q.get("topLevel");
+        if (topLevel !== null) {
+          if (topLevel !== "true" && topLevel !== "false") {
+            throw new HttpError(400, "topLevel must be true or false");
+          }
+          if (topLevel === "true") filter.topLevel = true;
+        }
+        const stopped = q.get("stopped");
+        if (stopped !== null) {
+          if (stopped !== "true" && stopped !== "false") {
+            throw new HttpError(400, "stopped must be true or false");
+          }
+          filter.stopped = stopped === "true";
+        }
         const status = q.get("status");
         if (status) {
           if (!RUN_STATUSES.has(status)) throw new HttpError(400, `Unknown status "${status}"`);
@@ -332,9 +373,20 @@ export function createHandler({ core, engine, triggers }: HandlerDeps) {
       }
       if (method === "POST" && n === 3 && action === "resume") {
         const step = url.searchParams.get("step");
-        const opts = step === null ? {} : { expectStep: step };
-        const outcome = await engine.resumeRun(tenantId, id, await readJson(req), userId, opts);
-        return outcome === "resumed" ? json(202, {}) : json(410, { error: "gone" });
+        // Steps the host app resumes itself (`resume.hostHandled`) are refused here: 409.
+        const opts = {
+          refuseHostHandled: true,
+          ...(step === null ? {} : { expectStep: step }),
+        };
+        try {
+          const outcome = await engine.resumeRun(tenantId, id, await readJson(req), userId, opts);
+          return outcome === "resumed" ? json(202, {}) : json(410, { error: "gone" });
+        } catch (err) {
+          if (err instanceof ResumeHostHandledError || err instanceof ResumeUnverifiableError) {
+            throw new HttpError(409, err.message, { code: err.code });
+          }
+          throw err;
+        }
       }
     }
     throw notFound();

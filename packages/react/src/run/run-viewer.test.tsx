@@ -1,9 +1,17 @@
-import type { RunDetail, RunEvent } from "@flowkit/core";
+import type { Manifest, RunDetail, RunEvent } from "@flowkit/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { httpError, mockClient, setupDom } from "../../test/dom";
 import { manifest } from "../../test/fixtures";
-import { failedLoopRun, runDetail, waitingRun } from "../../test/run-fixtures";
+import {
+  approvalManifest,
+  approvalStoppedRun,
+  approvalWaitingRun,
+  failedLoopRun,
+  runDetail,
+  waitingRun,
+} from "../../test/run-fixtures";
 import { FlowkitProvider } from "../provider";
 import { RunViewer } from "./run-viewer";
 
@@ -11,11 +19,17 @@ beforeAll(setupDom);
 beforeEach(() => localStorage.clear());
 afterEach(cleanup);
 
-function setup(initial: RunDetail) {
+function setup(
+  initial: RunDetail,
+  opts: {
+    manifest?: Manifest;
+    props?: Partial<ComponentProps<typeof RunViewer>>;
+  } = {},
+) {
   let current = initial;
   let listener: ((e: RunEvent) => void) | undefined;
   const client = mockClient({
-    getManifest: async () => manifest,
+    getManifest: async () => opts.manifest ?? manifest,
     getRun: async () => current,
     subscribeRun: (_id, onEvent) => {
       listener = onEvent;
@@ -28,7 +42,7 @@ function setup(initial: RunDetail) {
   render(
     <FlowkitProvider client={client}>
       <div style={{ height: 800 }}>
-        <RunViewer runId="r1" onRetried={onRetried} />
+        <RunViewer runId="r1" onRetried={onRetried} {...opts.props} />
       </div>
     </FlowkitProvider>,
   );
@@ -128,7 +142,12 @@ describe("RunViewer", () => {
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Resume run" }));
     });
-    expect(client.resumeRun).toHaveBeenCalledWith("r1", { approved: true });
+    // Resumes only the wait it was opened for.
+    expect(client.resumeRun).toHaveBeenCalledWith(
+      "r1",
+      { approved: true },
+      { expectStep: "cond/if/email" },
+    );
   });
 
   test("Cancel shows Cancelling… until the run is terminal", async () => {
@@ -181,12 +200,43 @@ describe("RunViewer", () => {
     await waitFor(() => expect(card("load")).toBeTruthy());
   });
 
-  test("a stopped run reads as stopped", async () => {
-    const detail = runDetail("completed", {}, [
-      { ...waitingRun().events[0], seq: 5, type: "run.stopped" } as RunEvent,
-    ]);
-    setup(detail);
+  test("a stopped run reads as stopped, from its stoppedAt (not its events)", async () => {
+    setup(runDetail("completed", {}, [], { stoppedAt: "halt" }));
     expect(await screen.findByText("Stopped")).toBeTruthy();
+    cleanup();
+    // A run.stopped event alone (e.g. a trimmed or partial event list) doesn't decide it.
+    setup(
+      runDetail("completed", {}, [
+        { ...waitingRun().events[0], seq: 5, type: "run.stopped" } as RunEvent,
+      ]),
+    );
+    expect(await screen.findByText("Completed")).toBeTruthy();
+  });
+
+  test("a run that doesn't exist shows Run not found with the host's action, not Try again", async () => {
+    const t = setup(failedLoopRun());
+    t.client.getRun.mockRejectedValue(httpError(404, { error: "Run not found" }));
+    cleanup();
+    const back = vi.fn();
+    const { unmount } = render(
+      <FlowkitProvider client={t.client}>
+        <RunViewer runId="nope" notFoundAction={{ label: "Back to runs", onClick: back }} />
+      </FlowkitProvider>,
+    );
+    expect(await screen.findByText("Run not found")).toBeTruthy();
+    expect(screen.getByText(/There is no run with the ID “nope”/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back to runs" }));
+    expect(back).toHaveBeenCalled();
+    unmount();
+    // Without an action: just the message.
+    render(
+      <FlowkitProvider client={t.client}>
+        <RunViewer runId="nope" />
+      </FlowkitProvider>,
+    );
+    expect(await screen.findByText("Run not found")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   test("shows an error with a retry when the run can't be loaded", async () => {
@@ -199,5 +249,143 @@ describe("RunViewer", () => {
       </FlowkitProvider>,
     );
     expect(await screen.findByText("Couldn't load this run.")).toBeTruthy();
+  });
+});
+
+describe("RunViewer: stopping inside branches", () => {
+  test("a run a Stop ended inside two blocks shows them and the steps before as done", async () => {
+    setup(approvalStoppedRun(), { manifest: approvalManifest() });
+    await waitFor(() => expect(card("halt")?.dataset.run).toBe("stopped"));
+    expect(
+      within(card("halt") as HTMLElement).getAllByText("Stopped the run").length,
+    ).toBeGreaterThan(0);
+    expect(card("size")?.dataset.run).toBe("done");
+    expect(card("approval")?.dataset.run).toBe("done");
+    expect(card("load")?.dataset.run).toBe("done");
+    expect(card("after_halt")?.dataset.run).toBe("pending");
+    expect(screen.getByText("Stopped")).toBeTruthy();
+  });
+
+  test("a stopped run has a banner naming the Stop step and its reason, and opens it", async () => {
+    setup(approvalStoppedRun(), { manifest: approvalManifest() });
+    const banner = (await screen.findByText(/^Stopped at /)).closest(".fk-banner") as HTMLElement;
+    expect(banner.dataset.tone).toBe("neutral");
+    expect(within(banner).getByText("No")).toBeTruthy();
+    // The Stop step is opened, like a failed or waiting step.
+    const inspector = await screen.findByRole("complementary", { name: "Step details" });
+    await waitFor(() =>
+      expect(within(inspector).getAllByText("Stopped the run").length).toBeGreaterThan(0),
+    );
+    expect(within(banner).getByRole("button", { name: "Show step" })).toBeTruthy();
+  });
+
+  test("a run cancelled while waiting shows the wait as Cancelled", async () => {
+    const detail = approvalWaitingRun();
+    detail.run = { ...detail.run, status: "cancelled" };
+    setup(detail, { manifest: approvalManifest() });
+    await waitFor(() => expect(card("approval")?.dataset.run).toBe("cancelled"));
+    expect(card("size")?.dataset.run).toBe("cancelled");
+    expect(screen.queryByRole("button", { name: "Resume…" })).toBeNull();
+  });
+
+  test("a block with a waiting child reads as waiting", async () => {
+    setup(approvalWaitingRun(), { manifest: approvalManifest() });
+    await waitFor(() => expect(card("approval")?.dataset.run).toBe("waiting"));
+    expect(card("size")?.dataset.run).toBe("waiting");
+  });
+});
+
+describe("RunViewer: resuming", () => {
+  const resumeButtons = () => screen.queryAllByRole("button", { name: "Resume…" });
+  const waitForInspector = async () => {
+    const inspector = await screen.findByRole("complementary", { name: "Step details" });
+    await waitFor(() =>
+      expect(within(inspector).getAllByText(/^Waiting for callback/).length).toBeGreaterThan(0),
+    );
+    return inspector;
+  };
+
+  test("resumeAction={false} hides Resume… in the header and the inspector", async () => {
+    setup(waitingRun(), { props: { resumeAction: false } });
+    await waitForInspector();
+    expect(resumeButtons()).toHaveLength(0);
+    // Cancel stays available.
+    expect(screen.getByRole("button", { name: "Cancel run" })).toBeTruthy();
+  });
+
+  test("a resumeAction function renders the host's control in both places", async () => {
+    const resumeAction = vi.fn(({ placement, stepId, stepPath }) => (
+      <a href={`/approvals?step=${stepPath}`}>{`Decide ${stepId} (${placement})`}</a>
+    ));
+    setup(waitingRun(), { props: { resumeAction } });
+    const inspector = await waitForInspector();
+    expect(await screen.findByRole("link", { name: "Decide email (header)" })).toBeTruthy();
+    expect(within(inspector).getByRole("link", { name: "Decide email (inspector)" })).toBeTruthy();
+    expect(resumeButtons()).toHaveLength(0);
+    expect(resumeAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stepId: "email",
+        stepPath: "cond/if/email",
+        node: expect.anything(),
+      }),
+    );
+  });
+
+  test("a host-handled wait shows the node's guidance instead of Resume…", async () => {
+    setup(approvalWaitingRun(), {
+      manifest: approvalManifest({ hostHandled: true, hint: "Decide it in Approvals." }),
+    });
+    const inspector = await screen.findByRole("complementary", { name: "Step details" });
+    await waitFor(() =>
+      expect(within(inspector).getByText("Decide it in Approvals.")).toBeTruthy(),
+    );
+    expect(
+      screen.getByText(/Waiting for callback · expires .*\. Decide it in Approvals\./),
+    ).toBeTruthy();
+    expect(resumeButtons()).toHaveLength(0);
+  });
+
+  test("a declared body schema: the form starts empty, and a body must match it", async () => {
+    const t = setup(approvalWaitingRun(), {
+      manifest: approvalManifest({
+        body: {
+          type: "object",
+          properties: { decision: { type: "string", enum: ["approved", "rejected"] } },
+          required: ["decision"],
+        },
+      }),
+    });
+    t.client.resumeRun.mockResolvedValue(undefined);
+    await waitFor(() => expect(resumeButtons().length).toBeGreaterThan(0));
+    fireEvent.click(resumeButtons()[0] as HTMLElement);
+    const dialog = await screen.findByRole("dialog", { name: "Resume run" });
+    const body = within(dialog).getByRole("textbox", {
+      name: "Callback body",
+    }) as HTMLTextAreaElement;
+    // No `{}` to send by accident; the placeholder shows the expected shape.
+    expect(body.value).toBe("");
+    expect(JSON.parse(body.placeholder)).toEqual({ decision: "approved" });
+    expect(within(dialog).getByText("Expects { decision }")).toBeTruthy();
+    const submit = within(dialog).getByRole("button", { name: "Resume run" });
+    fireEvent.click(submit);
+    expect(await within(dialog).findByText("Enter the callback body")).toBeTruthy();
+    fireEvent.change(body, { target: { value: "{}" } });
+    fireEvent.click(submit);
+    expect(await within(dialog).findByText('"decision" is required')).toBeTruthy();
+    fireEvent.change(body, { target: { value: '{"decision": "maybe"}' } });
+    fireEvent.click(submit);
+    expect(
+      await within(dialog).findByText('"decision" must be one of: "approved", "rejected"'),
+    ).toBeTruthy();
+    expect(t.client.resumeRun).not.toHaveBeenCalled();
+    fireEvent.change(body, { target: { value: '{"decision": "approved"}' } });
+    await act(async () => {
+      fireEvent.click(submit);
+    });
+    expect(t.client.resumeRun).toHaveBeenCalledWith(
+      "r1",
+      { decision: "approved" },
+      { expectStep: "size/if/approval" },
+    );
   });
 });
