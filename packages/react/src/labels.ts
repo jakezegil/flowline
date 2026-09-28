@@ -525,12 +525,15 @@ function noValue(label: string): string {
 }
 
 const nav = "Use the arrow keys to move between steps, and Enter or Space to open one.";
+/** The "+" buttons between steps are pointer targets outside the Tab order; ⌘K reaches them. */
+const add =
+  'Press Control+K (Command+K on a Mac) to add a step after this one (what the "+" between steps does), Shift with it to add one before';
 
 /** The English defaults. */
 export const defaultLabels: FlowkitLabels = {
   canvas: "Workflow canvas",
   canvasHelpReadOnly: nav,
-  canvasHelp: `${nav} Press Control+K (Command+K on a Mac) to add a step after this one, Shift with it to add one before, Delete to remove it, and Escape to clear the selection.`,
+  canvasHelp: `${nav} ${add}, Delete to remove it, and Escape to clear the selection.`,
   edgeDescription: "Connection between steps.",
   controls: "Canvas controls",
   zoomIn: "Zoom in",

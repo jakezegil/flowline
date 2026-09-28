@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { branchyDoc, docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
 import * as hooks from "../hooks";
-import { createEditorStore, type EditorStore, TRIGGER_KEY } from "../store/editor-store";
+import { createEditorStore, type EditorStore } from "../store/editor-store";
 import type { RunOverlay, RunStepStatus } from "./canvas-context";
 import { WorkflowCanvas } from "./workflow-canvas";
 
@@ -60,6 +60,11 @@ const PLUS = /^Add (first step$|step (after|to) )/;
 
 function root(): HTMLElement {
   return document.querySelector(".fk-root") as HTMLElement;
+}
+
+/** The canvas node that has focus (`"trigger"`, `"step:<id>"`), if any. */
+function focused(): string | null | undefined {
+  return document.activeElement?.closest(".react-flow__node")?.getAttribute("data-id");
 }
 
 describe("WorkflowCanvas", () => {
@@ -314,8 +319,9 @@ describe("WorkflowCanvas", () => {
     expect(ids()).toEqual(["load", "email", "sendEmail"]);
     expect(store.getState().selection).toBeNull();
     fireEvent.keyDown(card("load"), { key: "ArrowDown" });
-    expect(store.getState().selection).toBe("email");
-    act(() => store.getState().select(null));
+    // Minor 8: arrows move focus, not the selection (no panel opens on the way).
+    expect(focused()).toBe("step:email");
+    expect(store.getState().selection).toBeNull();
     fireEvent.keyDown(card("load"), { key: " " });
     expect(store.getState().selection).toBe("load");
     expect(onStepClick).toHaveBeenLastCalledWith("load");
@@ -386,7 +392,7 @@ describe("WorkflowCanvas", () => {
     expect(findStep(store.getState().doc, "email")?.step.type).toBe("crm.loadContact");
   });
 
-  test("ArrowDown/ArrowUp move the selection in tree order; ←/→ switch branch columns", () => {
+  test("ArrowDown/ArrowUp move focus in tree order; ←/→ switch branch columns; Enter opens", () => {
     const doc = branchyDoc();
     (doc.steps[1] as (typeof doc.steps)[number]).branches = {
       if: [step("email", "crm.sendEmail", { to: "a", subject: "b" })],
@@ -396,19 +402,22 @@ describe("WorkflowCanvas", () => {
     render(<WorkflowCanvas store={store} />);
     const key = (k: string) => fireEvent.keyDown(root(), { key: k });
     key("ArrowDown");
-    expect(store.getState().selection).toBe(TRIGGER_KEY);
+    expect(focused()).toBe("trigger");
     key("ArrowDown");
-    expect(store.getState().selection).toBe("load");
+    expect(focused()).toBe("step:load");
     key("ArrowDown");
     key("ArrowDown");
-    expect(store.getState().selection).toBe("email");
+    expect(focused()).toBe("step:email");
     key("ArrowRight");
-    expect(store.getState().selection).toBe("other");
+    expect(focused()).toBe("step:other");
     key("ArrowRight");
-    expect(store.getState().selection).toBe("other");
+    expect(focused()).toBe("step:other");
     key("ArrowLeft");
-    expect(store.getState().selection).toBe("email");
+    expect(focused()).toBe("step:email");
     key("ArrowUp");
+    expect(focused()).toBe("step:cond");
+    expect(store.getState().selection).toBeNull();
+    key("Enter");
     expect(store.getState().selection).toBe("cond");
     key("Escape");
     expect(store.getState().selection).toBeNull();
@@ -483,7 +492,7 @@ describe("WorkflowCanvas", () => {
     await user.keyboard(finish);
     await waitFor(() => expect(document.activeElement).toBe(card("load")));
     await user.keyboard("{ArrowDown}");
-    expect(store.getState().selection).toBe("email");
+    expect(focused()).toBe("step:email");
   });
 
   test('Esc in the picker returns focus to its "+", and arrow keys still work', async () => {
@@ -497,7 +506,7 @@ describe("WorkflowCanvas", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(plus));
     await user.keyboard("{ArrowDown}");
-    expect(store.getState().selection).toBe("email");
+    expect(focused()).toBe("step:email");
   });
 
   test("L20: Esc after ⌘K returns focus to the card it was pressed on", async () => {
@@ -536,7 +545,7 @@ describe("WorkflowCanvas", () => {
     expect(store.getState().doc.steps).toHaveLength(3);
     // Navigation still works.
     fireEvent.keyDown(root(), { key: "ArrowDown" });
-    expect(store.getState().selection).toBe("cond");
+    expect(focused()).toBe("step:cond");
   });
 
   test("an invalid step shows a badge whose label lists its issues", () => {

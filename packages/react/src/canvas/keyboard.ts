@@ -1,8 +1,8 @@
 /**
- * Canvas keyboard shortcuts. Focus and selection move together: arrow keys go from the focused
- * card (else the selected one) in tree order, never nudging cards; Enter or Space opens the
- * focused card; shortcuts act on the focused card, whether or not its panel is open. Shortcuts
- * are ignored while typing in inputs, editors and open menus.
+ * Canvas keyboard shortcuts. Arrow keys move focus only, from the focused card (else the selected
+ * one) in tree order, never nudging cards and never opening a panel; Enter or Space opens (selects)
+ * the focused card; shortcuts act on the focused card, whether or not its panel is open.
+ * Shortcuts are ignored while typing in inputs, editors and open menus.
  *
  * @module
  */
@@ -125,7 +125,7 @@ export interface KeyboardDeps {
 /**
  * Handles a keydown on the canvas root. Returns `true` when the key was a canvas shortcut.
  *
- * ↑/↓ previous/next in tree order · ←/→ neighbouring branch column · Enter or Space open the
+ * ↑/↓ focus previous/next in tree order · ←/→ neighbouring branch column · Enter or Space open the
  * focused card · Delete/Backspace delete (with an undo toast) · ⌘Z/⇧⌘Z undo/redo · ⌘C/⌘V
  * copy/paste after · ⌘D duplicate · ⌘K add step after (⇧⌘K before) · F2 rename · Esc deselect. Keys act on the
  * focused card, else the selection. Read-only canvases only navigate.
@@ -139,26 +139,30 @@ export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   const state = store.getState();
   const { readOnly } = ui.getState();
   // The card keys act on: the focused one (panel open or not), else the selected one.
-  const selection = focusedKey(e.target) ?? state.selection;
+  const active = deps.root()?.ownerDocument.activeElement ?? null;
+  const selection =
+    focusedKey(e.target) ??
+    (deps.root()?.contains(active) ? focusedKey(active) : undefined) ??
+    state.selection;
   const key = e.key.length === 1 && e.key !== " " ? e.key.toLowerCase() : e.key;
   const stepSelected = selection !== null && selection !== TRIGGER_KEY;
-  const select = (id: string | undefined) => {
+  /** Arrow keys: focus moves, the selection (and its open panel) stays; Enter opens. */
+  const moveTo = (id: string | undefined) => {
     if (id === undefined) return;
-    state.select(id);
-    focusNode(deps.root(), id);
+    nodeElement(deps.root(), nodeIdOf(id))?.focus({ preventScroll: true });
   };
 
   if (!mod && !e.altKey && (key === "ArrowUp" || key === "ArrowDown")) {
     const order = treeOrder(deps.layout().nodes);
     const at = selection === null ? -1 : order.indexOf(selection);
     const next = at === -1 ? 0 : at + (key === "ArrowDown" ? 1 : -1);
-    select(order[Math.max(0, Math.min(order.length - 1, next))]);
+    moveTo(order[Math.max(0, Math.min(order.length - 1, next))]);
     return true;
   }
   if (!mod && !e.altKey && (key === "ArrowLeft" || key === "ArrowRight")) {
     if (!stepSelected) return false;
     const { nodes, edges } = deps.layout();
-    select(siblingColumnStep(store, nodes, edges, selection, key === "ArrowLeft" ? -1 : 1));
+    moveTo(siblingColumnStep(store, nodes, edges, selection, key === "ArrowLeft" ? -1 : 1));
     return true;
   }
   if ((key === "Enter" || key === " ") && !mod && selection !== null) {
