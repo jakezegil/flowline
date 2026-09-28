@@ -3,7 +3,13 @@
  *
  * @module
  */
-import { ui } from "@flowlinejs/core";
+import {
+  FatalError,
+  type RuleOperatorMeta,
+  type RuleValueType,
+  type UiMeta,
+  ui,
+} from "@flowlinejs/core";
 import { z } from "zod";
 
 /** Comparison operators a {@link Rule} can use. */
@@ -28,13 +34,17 @@ export type RuleOp =
 export interface Rule {
   /** The value being tested, usually a reference such as `trigger.deal.stage`. */
   left: unknown;
-  /** How to compare. */
-  op: RuleOp;
+  /**
+   * How to compare: a built-in {@link RuleOp}, or the id of a {@link CustomOperator} registered
+   * with `createBuiltinPlugin({ operators })`.
+   */
+  op: RuleOp | (string & {});
   /** The value to compare against. Not used by unary operators. */
   right?: unknown;
   /**
    * Compare text case-sensitively (`eq`, `neq`, `contains`, `notContains`, `startsWith`,
-   * `endsWith`, `in`). Default `false`: `"Won"` equals `"won"`.
+   * `endsWith`, `in`). Default `false`: `"Won"` equals `"won"`. Only used in `"loose"` mode:
+   * `"strict"` always matches case.
    */
   caseSensitive?: boolean;
 }
@@ -45,6 +55,67 @@ export interface RuleGroup {
   combinator: "and" | "or";
   /** The rules and nested groups. */
   rules: (Rule | RuleGroup)[];
+}
+
+/**
+ * How a rule set compares values (see {@link evaluateRules}):
+ * - `"loose"`: numeric text as numbers, `"true"`/`"false"` as booleans, ISO dates by instant,
+ *   `null` equals a missing value, text ignoring case unless `caseSensitive` (`"5"` equals `5`);
+ * - `"strict"`: values of the same type only, with no conversion and case-sensitive text
+ *   (`"5"` does not equal `5`).
+ */
+export type CompareMode = "strict" | "loose";
+
+/** Every {@link CompareMode}. */
+const COMPARE_MODES = ["strict", "loose"] as const satisfies readonly CompareMode[];
+
+/** The top-level group of a condition: a rule group plus the compare mode. */
+export interface ConditionRules extends RuleGroup {
+  /**
+   * How the rules compare values; nested groups use the same mode. Default: the mode
+   * `createBuiltinPlugin` was given, else `"loose"`.
+   */
+  compare?: CompareMode;
+}
+
+/**
+ * A host-registered rule operator, e.g. `isUnassigned`, registered with
+ * `createBuiltinPlugin({ operators })`. `core.condition` evaluates it (switch cases don't use
+ * operators); the editor offers it through the manifest (`UiMeta.operators`).
+ *
+ * @example
+ * ```ts
+ * const isUnassigned: CustomOperator = {
+ *   id: "isUnassigned", label: "is unassigned", arity: "unary",
+ *   types: ["string", "object", "any"],
+ *   evaluate: (left) => left === null || left === undefined || left === "",
+ * };
+ * ```
+ */
+export interface CustomOperator {
+  /** Operator id used in rules, e.g. `"isUnassigned"`. Must not collide with a built-in {@link RuleOp}. */
+  id: string;
+  /** Editor label, e.g. `"is unassigned"`. */
+  label: string;
+  /** `unary` operators take no right-hand value; `binary` ones do. */
+  arity: "unary" | "binary";
+  /** Left-value types the editor offers it for. Default: every type. */
+  types?: RuleValueType[];
+  /**
+   * Evaluate a resolved rule. A unary operator always gets `right === undefined`; a binary one
+   * gets the rule's `right` (`undefined` when unset). `ctx.compare` is the rule set's mode, for
+   * operators that honour it. Throwing fails the step fatally (a bug in host code, not a
+   * retryable condition).
+   */
+  evaluate(left: unknown, right: unknown, ctx: { compare: CompareMode }): boolean;
+}
+
+/** Options of {@link evaluateRules}. */
+export interface EvaluateOptions {
+  /** Compare mode when the group sets none. Default `"loose"`. */
+  compare?: CompareMode;
+  /** Host operators by id (from `createBuiltinPlugin({ operators })`). */
+  operators?: Readonly<Record<string, CustomOperator>>;
 }
 
 /** Every {@link RuleOp}, in the order the editor offers them. */
@@ -66,44 +137,112 @@ export const RULE_OPS = [
   "isFalse",
 ] as const satisfies readonly RuleOp[];
 
-/** Zod schema of a {@link Rule}, with editor labels and help text. */
-export const RuleSchema = z.object({
-  left: ui(z.unknown(), { label: "Value" }),
-  op: ui(z.enum(RULE_OPS), { label: "Operator" }),
-  right: ui(z.unknown(), { label: "Compare with" })
-    .describe(
-      'Numbers and text compare loosely ("5" equals 5). Dates and times are UTC unless they include an offset. For "is one of", give a list or comma-separated text.',
-    )
-    .optional(),
-  caseSensitive: ui(z.boolean(), { label: "Match case" })
-    .describe('Off by default, so "Won" equals "won".')
-    .optional(),
-});
+/** A rule schema around an operator field. */
+const ruleSchema = <Op extends z.ZodType>(op: Op) =>
+  z.object({
+    left: ui(z.unknown(), { label: "Value" }),
+    op,
+    right: ui(z.unknown(), { label: "Compare with" })
+      .describe(
+        'In Loose mode numbers and text compare loosely ("5" equals 5); Strict mode compares values of the same type only. Dates and times are UTC unless they include an offset. For "is one of", give a list (Loose mode also takes comma-separated text).',
+      )
+      .optional(),
+    caseSensitive: ui(z.boolean(), { label: "Match case" })
+      .describe('Off by default, so "Won" equals "won". Strict mode always matches case.')
+      .optional(),
+  });
+
+/** Zod schema of a {@link Rule} with a built-in operator, with editor labels and help text. */
+export const RuleSchema = ruleSchema(ui(z.enum(RULE_OPS), { label: "Operator" }));
 
 const combinator = () =>
   ui(z.enum(["and", "or"]), { label: "Match" }).describe(
     "and: every rule must match. or: at least one rule must match.",
   );
 
-/** Zod schema of a {@link RuleGroup}; groups nest to any depth. */
-export const RuleGroupSchema: z.ZodType<RuleGroup, RuleGroup> = z.object({
-  combinator: combinator(),
-  get rules() {
-    return ui(z.array(z.union([RuleSchema, RuleGroupSchema])), { label: "Rules" });
-  },
-});
+/** A rule group schema whose rules use `rule`; groups nest to any depth. */
+function ruleGroupSchema(rule: z.ZodType<Rule, Rule>): z.ZodType<RuleGroup, RuleGroup> {
+  const group: z.ZodType<RuleGroup, RuleGroup> = z.object({
+    combinator: combinator(),
+    get rules() {
+      return ui(z.array(z.union([rule, group])), { label: "Rules" });
+    },
+  });
+  return group;
+}
+
+/** Zod schema of a {@link RuleGroup} with built-in operators; groups nest to any depth. */
+export const RuleGroupSchema: z.ZodType<RuleGroup, RuleGroup> = ruleGroupSchema(RuleSchema);
+
+/** Options of {@link createConditionRulesSchema}. */
+export interface ConditionRulesSchemaOptions {
+  /** Default of the `compare` field, published in the manifest. */
+  defaultCompare: CompareMode;
+  /** Host operators the `op` field accepts after the built-in ones. */
+  operators: readonly CustomOperator[];
+}
 
 /**
- * Zod schema of the top-level group of a condition: a {@link RuleGroup} for which the validator
- * warns when it has no rules.
+ * Zod schema of the top-level group of a condition ({@link ConditionRules}): its `compare` field
+ * defaults to `defaultCompare`, and its rules (nested ones included) accept the built-in
+ * operators plus `operators`, whose labels travel in the `op` field's `enumLabels` and
+ * `operators` editor hints. The validator warns when the group has no rules.
+ * `createBuiltinPlugin` uses it; hosts rarely need it directly.
  */
-export const ConditionRulesSchema: z.ZodType<RuleGroup, RuleGroup> = z.object({
-  combinator: combinator(),
-  rules: ui(z.array(z.union([RuleSchema, RuleGroupSchema])), {
-    label: "Rules",
-    warnIfEmpty: "Condition has no rules, so it always takes the same path",
-  }),
-});
+export function createConditionRulesSchema(
+  opts: ConditionRulesSchemaOptions,
+): z.ZodType<ConditionRules, ConditionRules> {
+  const { defaultCompare, operators } = opts;
+  let rule: z.ZodType<Rule, Rule> = RuleSchema;
+  let group = RuleGroupSchema;
+  if (operators.length > 0) {
+    const meta: UiMeta = {
+      label: "Operator",
+      enumLabels: Object.fromEntries(operators.map((o) => [o.id, o.label])),
+      operators: operators.map(operatorMeta),
+    };
+    const ids = [...RULE_OPS, ...operators.map((o) => o.id)] as [string, ...string[]];
+    rule = ruleSchema(ui(z.enum(ids), meta));
+    group = ruleGroupSchema(rule);
+  }
+  return z.object({
+    combinator: combinator(),
+    rules: ui(z.array(z.union([rule, group])), {
+      label: "Rules",
+      warnIfEmpty: "Condition has no rules, so it always takes the same path",
+    }),
+    compare: compareSchema(defaultCompare),
+  });
+}
+
+/** The editor metadata of a custom operator (everything but `evaluate`). */
+function operatorMeta({ id, label, arity, types }: CustomOperator): RuleOperatorMeta {
+  return types === undefined ? { id, label, arity } : { id, label, arity, types: [...types] };
+}
+
+/**
+ * Zod schema of a `compare` field defaulting to `defaultCompare`, as `core.condition`'s rules and
+ * `core.switch` use it.
+ */
+export function compareSchema(
+  defaultCompare: CompareMode,
+): z.ZodDefault<z.ZodEnum<{ strict: "strict"; loose: "loose" }>> {
+  return ui(z.enum(COMPARE_MODES), {
+    label: "Compare",
+    enumLabels: { strict: "Strict", loose: "Loose" },
+  })
+    .describe(
+      'Strict: values must have the same type and text must match case ("5" does not equal 5). Loose: numeric text, "true"/"false" and dates are converted, and text ignores case unless Match case is on.',
+    )
+    .default(defaultCompare);
+}
+
+/**
+ * Zod schema of the top-level group of a condition with the built-in operators and a `"loose"`
+ * default: `createConditionRulesSchema({ defaultCompare: "loose", operators: [] })`.
+ */
+export const ConditionRulesSchema: z.ZodType<ConditionRules, ConditionRules> =
+  createConditionRulesSchema({ defaultCompare: "loose", operators: [] });
 
 const NUMERIC = /^\s*[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?\s*$/i;
 /**
@@ -164,6 +303,15 @@ function orderable(a: unknown, b: unknown): [number, number] | [string, string] 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
+/** An object literal (prototype `Object.prototype` or `null`), not a class instance. */
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
+const isUnset = (v: unknown): v is null | undefined => v === null || v === undefined;
+
 /** Options of {@link looseEquals}. */
 export interface EqualsOptions {
   /** Compare text case-sensitively. Default `true`. */
@@ -211,6 +359,27 @@ export function looseEquals(a: unknown, b: unknown, opts: EqualsOptions = {}): b
   return false;
 }
 
+/**
+ * Equality of `"strict"` mode: `===` for primitives (so `NaN` never equals itself, and `-0`
+ * equals `0`), arrays deeply by index, plain objects deeply by own keys (key order doesn't
+ * matter); anything else (dates, class instances) is not equal. `null` and `undefined` are
+ * different values.
+ */
+export function strictEquals(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a)) {
+    return Array.isArray(b) && a.length === b.length && a.every((v, i) => strictEquals(v, b[i]));
+  }
+  if (isPlainRecord(a) && isPlainRecord(b)) {
+    const keys = Object.keys(a);
+    return (
+      keys.length === Object.keys(b).length &&
+      keys.every((k) => Object.hasOwn(b, k) && strictEquals(a[k], b[k]))
+    );
+  }
+  return false;
+}
+
 /** Text form of a primitive for text operators (lower-cased unless case-sensitive). */
 function asText(v: unknown, caseSensitive: boolean): string | undefined {
   const text =
@@ -222,12 +391,14 @@ function asText(v: unknown, caseSensitive: boolean): string | undefined {
   return text !== undefined && !caseSensitive ? text.toLowerCase() : text;
 }
 
-/** A substring of text `haystack`, or an item of list `haystack` equal to `needle`. */
+/**
+ * A substring of text `haystack` (numbers and booleans as text), or an item of list `haystack`
+ * equal to `needle`.
+ */
 function containsValue(haystack: unknown, needle: unknown, caseSensitive: boolean): boolean {
   if (Array.isArray(haystack)) {
     return haystack.some((item) => looseEquals(item, needle, { caseSensitive }));
   }
-  if (typeof haystack !== "string") return false;
   const text = asText(haystack, caseSensitive);
   const part = asText(needle, caseSensitive);
   return text !== undefined && part !== undefined && text.includes(part);
@@ -249,7 +420,8 @@ function isEmptyValue(v: unknown): boolean {
   return isPlainObject(v) && Object.keys(v).length === 0;
 }
 
-function evaluateRule({ left, op, right, caseSensitive = false }: Rule): boolean {
+/** A rule with a built-in operator in `"loose"` mode. */
+function evaluateLoose({ left, op, right, caseSensitive = false }: Rule): boolean {
   switch (op) {
     case "eq":
       return looseEquals(left, right, { caseSensitive });
@@ -293,10 +465,108 @@ function evaluateRule({ left, op, right, caseSensitive = false }: Rule): boolean
   }
 }
 
+/**
+ * Two numbers, or two strings (by instant when both are ISO dates, else by code unit), as a pair
+ * of comparable keys; `undefined` for any other pair.
+ */
+function strictOrderable(a: unknown, b: unknown): [number, number] | [string, string] | undefined {
+  if (typeof a === "number" && typeof b === "number") return [a, b];
+  if (typeof a !== "string" || typeof b !== "string") return undefined;
+  const ta = asTimestamp(a);
+  const tb = asTimestamp(b);
+  return ta !== undefined && tb !== undefined ? [ta, tb] : [a, b];
+}
+
+/** `"strict"` contains: a case-sensitive substring of text, or an item `strictEquals` `right`. */
+function strictContains(left: unknown, right: unknown): boolean {
+  if (isUnset(left) || isUnset(right)) return false;
+  if (Array.isArray(left)) return left.some((item) => strictEquals(item, right));
+  return typeof left === "string" && typeof right === "string" && left.includes(right);
+}
+
+/** A rule with a built-in operator in `"strict"` mode. `caseSensitive` is ignored. */
+function evaluateStrict({ left, op, right }: Rule): boolean {
+  switch (op) {
+    case "eq":
+      return strictEquals(left, right);
+    case "neq":
+      return !strictEquals(left, right);
+    case "contains":
+      return strictContains(left, right);
+    case "notContains":
+      return !strictContains(left, right);
+    case "isEmpty":
+      return isEmptyValue(left);
+    case "isNotEmpty":
+      return !isEmptyValue(left);
+    case "isTrue":
+      return left === true;
+    case "isFalse":
+      return left === false;
+  }
+  // Every other binary operator is false when either side is unset.
+  if (isUnset(left) || isUnset(right)) return false;
+  switch (op) {
+    case "gt":
+    case "gte":
+    case "lt":
+    case "lte": {
+      const pair = strictOrderable(left, right);
+      if (!pair) return false;
+      const [a, b] = pair;
+      if (op === "gt") return a > b;
+      if (op === "gte") return a >= b;
+      if (op === "lt") return a < b;
+      return a <= b;
+    }
+    case "startsWith":
+    case "endsWith":
+      if (typeof left !== "string" || typeof right !== "string") return false;
+      return op === "startsWith" ? left.startsWith(right) : left.endsWith(right);
+    case "in":
+      return Array.isArray(right) && right.some((item) => strictEquals(left, item));
+    default:
+      return false;
+  }
+}
+
+const BUILTIN_OPS: ReadonlySet<string> = new Set(RULE_OPS);
+
+/** `id` is a built-in {@link RuleOp}, so no {@link CustomOperator} may use it. */
+export const isBuiltinRuleOp = (id: string): id is RuleOp => BUILTIN_OPS.has(id);
+
+type Operators = Readonly<Record<string, CustomOperator>>;
+
+function evaluateRule(rule: Rule, compare: CompareMode, operators: Operators): boolean {
+  if (isBuiltinRuleOp(rule.op)) {
+    return compare === "strict" ? evaluateStrict(rule) : evaluateLoose(rule);
+  }
+  const operator = Object.hasOwn(operators, rule.op) ? operators[rule.op] : undefined;
+  if (!operator) return false;
+  const right = operator.arity === "unary" ? undefined : rule.right;
+  try {
+    return operator.evaluate(rule.left, right, { compare }) === true;
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    throw new FatalError(`Rule operator "${rule.op}" threw: ${reason}`, { cause });
+  }
+}
+
 const isGroup = (r: Rule | RuleGroup): r is RuleGroup => "combinator" in r;
+
+function evaluateGroup(g: RuleGroup, compare: CompareMode, operators: Operators): boolean {
+  const results = (item: Rule | RuleGroup) =>
+    isGroup(item)
+      ? evaluateGroup(item, compare, operators)
+      : evaluateRule(item, compare, operators);
+  return g.combinator === "or" ? g.rules.some(results) : g.rules.every(results);
+}
 
 /**
  * Evaluate a rule group whose values are already resolved.
+ *
+ * The compare mode is the group's `compare` ({@link ConditionRules}), else `opts.compare`, else
+ * `"loose"`; nested groups use the top-level mode. In `"loose"` mode:
  *
  * - Text comparisons (`eq`, `neq`, `contains`, `notContains`, `startsWith`, `endsWith`, `in`)
  *   ignore case unless the rule sets `caseSensitive: true`.
@@ -311,11 +581,27 @@ const isGroup = (r: Rule | RuleGroup): r is RuleGroup => "combinator" in r;
  * - `isEmpty` matches `null`, a missing value, `""`, `[]` and `{}`; `isTrue`/`isFalse` also accept
  *   the strings `"true"`/`"false"`.
  * - An empty `and` group matches; an empty `or` group doesn't.
+ *
+ * In `"strict"` mode values compare only with values of the same type: no numeric or boolean
+ * parsing of text, no case folding (`caseSensitive` is ignored), no comma-separated lists.
+ *
+ * - `eq`/`neq` use {@link strictEquals}; `null` and a missing value are different.
+ * - `gt`/`gte`/`lt`/`lte` compare two numbers, or two strings (by instant when both are ISO
+ *   dates, else by code unit).
+ * - `contains` looks for a substring when both sides are text, or for an item that
+ *   `strictEquals` `right` in list `left`; `notContains` is its opposite. `startsWith`/`endsWith`
+ *   need two strings; `in` needs list `right`.
+ * - The other binary operators (all but `eq`, `neq` and `notContains`) are false when either
+ *   side is `null` or missing. `isEmpty`/`isNotEmpty` work as in loose mode; `isTrue`/`isFalse`
+ *   match only `true`/`false`.
+ *
+ * In both modes, a rule whose `op` is one of `opts.operators` is evaluated by that
+ * {@link CustomOperator} (a unary one gets `right === undefined`); one that throws fails with a
+ * `FatalError` naming the operator. Any other unknown operator never matches.
  */
-export function evaluateRules(g: RuleGroup): boolean {
-  const results = (item: Rule | RuleGroup) =>
-    isGroup(item) ? evaluateRules(item) : evaluateRule(item);
-  return g.combinator === "or" ? g.rules.some(results) : g.rules.every(results);
+export function evaluateRules(g: RuleGroup | ConditionRules, opts: EvaluateOptions = {}): boolean {
+  const compare = ("compare" in g ? g.compare : undefined) ?? opts.compare ?? "loose";
+  return evaluateGroup(g, compare, opts.operators ?? {});
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -329,6 +615,24 @@ export function and(...rules: (Rule | RuleGroup)[]): RuleGroup {
 /** A group that matches when at least one rule matches. */
 export function or(...rules: (Rule | RuleGroup)[]): RuleGroup {
   return { combinator: "or", rules };
+}
+
+/** `group` as a condition's top-level rules, compared strictly: `{ ...group, compare: "strict" }`. */
+export function strictly(group: RuleGroup): ConditionRules {
+  return { ...group, compare: "strict" };
+}
+
+/** `group` as a condition's top-level rules, compared loosely: `{ ...group, compare: "loose" }`. */
+export function loosely(group: RuleGroup): ConditionRules {
+  return { ...group, compare: "loose" };
+}
+
+/**
+ * A rule using a host-registered operator ({@link CustomOperator}), e.g.
+ * `custom("isUnassigned", ref("trigger.deal.ownerId"))`. Leave `right` out for a unary operator.
+ */
+export function custom(op: string, left: unknown, right?: unknown): Rule {
+  return right === undefined ? { left, op } : { left, op, right };
 }
 
 /** Options of the binary rule helpers. */
@@ -349,7 +653,10 @@ const unary =
   (op: RuleOp) =>
   (left: unknown): Rule => ({ left, op });
 
-/** `left` equals `right` (loosely, see {@link looseEquals}; case-insensitive by default). */
+/**
+ * `left` equals `right` in the rule set's compare mode: loosely by default (see
+ * {@link looseEquals}; case-insensitive unless `caseSensitive`), else {@link strictEquals}.
+ */
 export const eq: BinaryHelper = binary("eq");
 /** `left` does not equal `right`. */
 export const neq: BinaryHelper = binary("neq");

@@ -26,6 +26,12 @@ import { builtinPlugin } from "@flowlinejs/nodes-builtin";
 export const registry = createRegistry([builtinPlugin /*, ...yourPlugins */]);
 ```
 
+`createBuiltinPlugin({ compare, operators })` returns the same `core` plugin with host choices:
+`compare: "strict"` makes conditions and switches compare strictly by default (same-type values
+only, case-sensitive text), and `operators` adds your own rule operators to `core.condition`.
+Register it in your registry and `createEngine` won't add the default `builtinPlugin`.
+
 Individual nodes, triggers and rule helpers (`conditionNode`, `httpRequestNode`, `eventTrigger`,
-`evaluateRules`, and so on) are also exported for use in tests or custom registries. See the
-[root README](../../README.md) for the full quick start and `docs/` for the design spec.
+`evaluateRules`, `strictly`, `custom`, and so on) are also exported for use in tests or custom
+registries. See the [root README](../../README.md) for the full quick start and `docs/` for the
+design spec.

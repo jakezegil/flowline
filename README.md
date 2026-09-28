@@ -321,6 +321,33 @@ so `"VIP"` equals `"vip"`. They are also loose: `"5"` equals `5`. To match case,
 `caseSensitive: true` on a rule, or on the whole switch in its config. The rule helpers take it as
 an option too: `eq(ref("trigger.tier"), "VIP", { caseSensitive: true })`.
 
+Rules and switches can compare strictly instead: a value only matches a value of the same type,
+text always matches case, and `null` is not the same as a missing value, so `"5"` doesn't equal
+`5`. Set `compare: "strict"` on a condition's rules (`strictly(and(...))` in code) or on a switch.
+To make strict the default, or to add your own rule operators, register the built-in plugin
+yourself with `createBuiltinPlugin`. `createEngine` then leaves out its default `builtinPlugin`:
+
+```ts file=flowline/strict-registry.ts
+import { createRegistry } from "@flowlinejs/core";
+import { type CustomOperator, createBuiltinPlugin } from "@flowlinejs/nodes-builtin";
+
+// Use it in a rule as custom("isUnassigned", ref("trigger.deal.ownerId")).
+const isUnassigned: CustomOperator = {
+  id: "isUnassigned",
+  label: "is unassigned",
+  arity: "unary",
+  types: ["string", "object", "any"],
+  evaluate: (left) => left === null || left === undefined || left === "",
+};
+
+export const registry = createRegistry([
+  createBuiltinPlugin({ compare: "strict", operators: [isUnassigned] }),
+  // ...your plugins
+]);
+```
+
+The default stays loose, so existing workflows behave as before.
+
 Every save creates an immutable, numbered version. Triggers start only the published version, and
 each run stays pinned to the version it started on.
 

@@ -17,6 +17,7 @@ import {
   builtinPlugin,
   callSubflowNode,
   conditionNode,
+  createBuiltinPlugin,
   delayNode,
   eq,
   forEachNode,
@@ -118,6 +119,23 @@ describe("createEngine registers the built-ins", () => {
   it("uses a registry that already has the core plugin as is", () => {
     const registry = createRegistry([builtinPlugin, testPlugin]);
     expect(createEngine({ registry, storage }).registry).toBe(registry);
+  });
+
+  it("keeps a core plugin made by createBuiltinPlugin instead of adding a second one", async () => {
+    const strictCore = createBuiltinPlugin({ compare: "strict" });
+    const registry = createRegistry([strictCore, testPlugin]);
+    const strictEngine = createEngine({ registry, storage, clock: () => now });
+    expect(strictEngine.registry).toBe(registry);
+    expect(strictEngine.registry.manifest().plugins.map((p) => p.id)).toEqual(["core", "t"]);
+    expect(strictEngine.registry.getNode("core.condition")).not.toBe(conditionNode);
+
+    const doc = workflow("strict-check")
+      .trigger(manualTrigger, { fields: [{ name: "n", type: "string" }] })
+      .step("check", conditionNode, { rules: and(eq(ref("trigger.n"), 5)) })
+      .build();
+    const id = await start(doc, { n: "5" });
+    await strictEngine.drain();
+    expect((await getRun(id)).journal.check).toMatchObject({ status: "done", branch: "else" });
   });
 
   it("leaves them out with builtins: false", () => {

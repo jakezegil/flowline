@@ -3,30 +3,28 @@
  *
  * @module
  */
-import { definePlugin, type PluginDefinition } from "@flowlinejs/core";
-import { httpRequest } from "./http";
-import { conditionNode, forEachNode, stopNode, switchNode } from "./logic";
-import { callSubflowNode } from "./subflow";
-import { delayNode, waitForCallbackNode } from "./time";
-import { transform } from "./transform";
-import {
-  eventTrigger,
-  manualTrigger,
-  scheduleTrigger,
-  subflowTrigger,
-  webhookTrigger,
-} from "./triggers";
+import type { PluginDefinition } from "@flowlinejs/core";
+import { createBuiltinPlugin } from "./builtin-plugin";
 
 /** Package version. */
 export const VERSION = "0.1.0";
 
+export type { RuleOperatorMeta, RuleValueType } from "@flowlinejs/core";
+export { type BuiltinOptions, createBuiltinPlugin } from "./builtin-plugin";
 export { httpRequest as httpRequestNode } from "./http";
 export { conditionNode, forEachNode, stopNode, switchNode } from "./logic";
 export {
   and,
+  type CompareMode,
+  type ConditionRules,
   ConditionRulesSchema,
+  type ConditionRulesSchemaOptions,
+  type CustomOperator,
   contains,
+  createConditionRulesSchema,
+  custom,
   type EqualsOptions,
+  type EvaluateOptions,
   endsWith,
   eq,
   evaluateRules,
@@ -38,6 +36,7 @@ export {
   isNotEmpty,
   isTrue,
   looseEquals,
+  loosely,
   lt,
   lte,
   neq,
@@ -51,6 +50,8 @@ export {
   type RuleOptions,
   RuleSchema,
   startsWith,
+  strictEquals,
+  strictly,
 } from "./rules";
 export { callSubflowNode } from "./subflow";
 export { delayNode, MAX_DURATION_MS, parseDuration, waitForCallbackNode } from "./time";
@@ -64,26 +65,11 @@ export {
 } from "./triggers";
 
 /**
- * The built-in `core` plugin: logic, timing, sub-flow, HTTP request and transform nodes plus the
- * event, webhook, manual, schedule and sub-flow triggers. `createEngine` registers it
- * automatically (unless `builtins: false`); add it to your own registry to build a manifest for
- * the editor.
+ * The built-in `core` plugin with the defaults: `createBuiltinPlugin()` (loose comparisons, no
+ * custom rule operators). It holds logic, timing, sub-flow, HTTP request and transform nodes plus
+ * the event, webhook, manual, schedule and sub-flow triggers. `createEngine` registers it
+ * automatically (unless `builtins: false`, or the registry already has a `core` plugin, e.g. one
+ * from {@link createBuiltinPlugin}); add it to your own registry to build a manifest for the
+ * editor.
  */
-export const builtinPlugin: PluginDefinition = definePlugin({
-  id: "core",
-  name: "Built-in",
-  icon: "blocks",
-  description: "Logic, timing, sub-flows, HTTP requests, transforms and the standard triggers.",
-  nodes: [
-    conditionNode,
-    switchNode,
-    forEachNode,
-    stopNode,
-    delayNode,
-    waitForCallbackNode,
-    callSubflowNode,
-    httpRequest,
-    transform,
-  ],
-  triggers: [eventTrigger, webhookTrigger, manualTrigger, scheduleTrigger, subflowTrigger],
-});
+export const builtinPlugin: PluginDefinition = createBuiltinPlugin();

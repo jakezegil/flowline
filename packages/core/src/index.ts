@@ -144,6 +144,8 @@ export type {
   PluginManifest,
   RefExpr,
   ResumeSpec,
+  RuleOperatorMeta,
+  RuleValueType,
   ShowIf,
   Step,
   TplExpr,
