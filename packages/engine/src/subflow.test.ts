@@ -303,6 +303,71 @@ describe("sub-flows", () => {
     expect(resumes).toEqual([{ kind: "subflowFailed", error: { message: "Sub-flow cancelled" } }]);
   });
 
+  it("resumes the parent with subflowFailed when a child is cancelled while it executes", async () => {
+    let started!: () => void;
+    const running = new Promise<void>((r) => {
+      started = r;
+    });
+    behaviours.make = (ctx) =>
+      new Promise((_, reject) => {
+        started();
+        ctx.signal.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    await publish(childDoc);
+    const parentId = await startRun(parentDoc, { email: "a@x.test" });
+    // Real renewal ticks every 20 ms poll for the cancel request.
+    const engine = makeEngine({ leaseMs: 40 });
+    await engine.runOnce(); // parent: starts the child and suspends
+    const [child] = await childRuns("get-or-create");
+    const claim = engine.runOnce(); // child: its handler blocks
+    await running;
+    expect(await engine.cancelRun(TENANT, child!.id)).toBe("requested");
+    await claim;
+    expect((await getRun(child!.id)).status).toBe("cancelled");
+    expect((await getRun(parentId)).status).toBe("queued");
+    await engine.drain();
+    expect(resumes).toEqual([{ kind: "subflowFailed", error: { message: "Sub-flow cancelled" } }]);
+    expect((await getRun(parentId)).status).toBe("failed");
+  });
+
+  it("refuses to retry a failed child whose parent no longer waits on it", async () => {
+    behaviours.make = () => {
+      throw new FatalError("down");
+    };
+    await publish(childDoc);
+    const parentId = await startRun(parentDoc, { email: "a@x.test" });
+    const engine = makeEngine();
+    await engine.drain();
+    const [child] = await childRuns("get-or-create");
+    expect(child?.status).toBe("failed");
+    expect((await getRun(parentId)).status).toBe("failed");
+    await expect(engine.retryRun(TENANT, child!.id)).rejects.toThrow(
+      /parent run "run-\d+" no longer waits on it; retry the parent instead/,
+    );
+    expect((await getRun(child!.id)).status).toBe("failed");
+  });
+
+  it("fails the step when no child run id is free", async () => {
+    await publish(childDoc);
+    const parentId = await startRun(parentDoc, { email: "a@x.test" });
+    const base = storage;
+    let lookups = 0;
+    storage = {
+      ...base,
+      async getRunById(id) {
+        if (!id.startsWith("sub_")) return base.getRunById(id);
+        lookups++;
+        const parent = await base.getRunById(parentId);
+        return { ...parent!, id, status: "completed" };
+      },
+    };
+    await makeEngine().drain();
+    const parent = await base.getRun(TENANT, parentId);
+    expect(parent?.status).toBe("failed");
+    expect(parent?.error).toMatchObject({ code: "subflow.id", fatal: true, stepPath: "call" });
+    expect(lookups).toBe(1000);
+  });
+
   it("does not cancel children when the parent is cancelled", async () => {
     behaviours.make = (ctx) => (ctx.resume ? {} : suspend({ until: ctx.now() + 60_000 }));
     await publish(childDoc);

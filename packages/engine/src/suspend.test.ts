@@ -334,6 +334,23 @@ describe("callbacks", () => {
     expect(run.error).toMatchObject({ fatal: true, stepPath: "a" });
     expect(run.callbackToken).toBeUndefined();
   });
+
+  it("fails fatally when a step issues a second callback", async () => {
+    behaviours.a = async (ctx) => {
+      await ctx.callback({ timeoutMs: 1000 });
+      return suspend({ callback: await ctx.callback({ timeoutMs: 1000 }) });
+    };
+    const id = await startRun(wf([step("a")]));
+    await makeEngine().drain();
+    const run = await getRun(id);
+    expect(run.status).toBe("failed");
+    expect(run.error).toMatchObject({
+      message: "callback already issued for this step",
+      fatal: true,
+      stepPath: "a",
+    });
+    expect(run.callbackToken).toBeUndefined();
+  });
 });
 
 describe("resumeRun", () => {
@@ -442,7 +459,7 @@ describe("cancelRun", () => {
     const engine = makeEngine();
     await engine.drain();
 
-    await engine.cancelRun(TENANT, id);
+    expect(await engine.cancelRun(TENANT, id)).toBe("cancelled");
     const run = await getRun(id);
     expect(run.status).toBe("cancelled");
     expect(run.callbackToken).toBeUndefined();
@@ -452,11 +469,108 @@ describe("cancelRun", () => {
     expect(await engine.runOnce()).toBe(false);
     expect((await eventsOf(id)).at(-1)?.type).toBe("run.cancelled");
     // Cancelling again is a no-op.
-    await engine.cancelRun(TENANT, id);
+    expect(await engine.cancelRun(TENANT, id)).toBe("finished");
     expect((await eventsOf(id)).filter((e) => e.type === "run.cancelled")).toHaveLength(1);
   });
 
   it("rejects unknown runs", async () => {
     await expect(makeEngine().cancelRun(TENANT, "missing")).rejects.toThrow(/not found/);
+    const id = await startRun(wf([step("a")]));
+    await expect(makeEngine().cancelRun("other", id)).rejects.toThrow(/not found/);
+  });
+
+  it("aborts a long-running handler: the signal fires, the run is cancelled, no later step runs", async () => {
+    let started!: () => void;
+    const running = new Promise<void>((r) => {
+      started = r;
+    });
+    let abortReason: unknown;
+    behaviours.a = (ctx) =>
+      new Promise((_, reject) => {
+        started();
+        ctx.signal.addEventListener("abort", () => {
+          abortReason = ctx.signal.reason;
+          reject(new Error("aborted by signal"));
+        });
+      });
+    const id = await startRun(wf([step("a"), step("b")]));
+    // Real renewal ticks every 20 ms; the fake clock stands still, so the lease stays live.
+    const engine = makeEngine({ leaseMs: 40 });
+    const claim = engine.runOnce();
+    await running;
+
+    expect(await engine.cancelRun(TENANT, id)).toBe("requested");
+    expect((await getRun(id)).status).toBe("running");
+    await claim;
+
+    const run = await getRun(id);
+    expect(run.status).toBe("cancelled");
+    expect(run.leaseOwner).toBeUndefined();
+    expect(abortReason).toBeInstanceOf(Error);
+    expect((abortReason as Error).message).toBe("run cancelled");
+    expect(calls).toEqual({ a: 1 });
+    expect(run.journal.a).toBeUndefined();
+    const events = await eventsOf(id);
+    expect(events.at(-1)).toMatchObject({ type: "run.cancelled", stepPath: "a" });
+    expect(events.filter((e) => e.type === "run.cancelled")).toHaveLength(1);
+    expect(await engine.runOnce()).toBe(false);
+  });
+
+  it("cancels between steps once the current step committed", async () => {
+    let result: string | undefined;
+    const engine: ReturnType<typeof makeEngine> = makeEngine({
+      __testHooks: {
+        async beforeCommit(_runId, stepPath, phase) {
+          if (stepPath === "a" && phase === "result" && result === undefined) {
+            result = await engine.cancelRun(TENANT, id);
+          }
+        },
+      },
+    });
+    const id = await startRun(wf([step("a"), step("b")]));
+    await engine.drain();
+    expect(result).toBe("requested");
+    const run = await getRun(id);
+    expect(run.status).toBe("cancelled");
+    expect(run.journal.a?.status).toBe("done");
+    expect(run.journal.b).toBeUndefined();
+    expect(calls).toEqual({ a: 1 });
+    expect((await eventsOf(id)).map((e) => e.type)).toEqual([
+      "run.started",
+      "step.started",
+      "step.completed",
+      "run.cancelled",
+    ]);
+  });
+
+  it("cancels instead of suspending when the request arrives while the step runs", async () => {
+    behaviours.a = (ctx) => suspend({ until: ctx.now() + 60_000 });
+    let result: string | undefined;
+    const engine: ReturnType<typeof makeEngine> = makeEngine({
+      __testHooks: {
+        async beforeCommit(_runId, stepPath, phase) {
+          if (stepPath === "a" && phase === "start") result = await engine.cancelRun(TENANT, id);
+        },
+      },
+    });
+    const id = await startRun(wf([step("a")]));
+    await engine.drain();
+    expect(result).toBe("requested");
+    const run = await getRun(id);
+    expect(run.status).toBe("cancelled");
+    expect(run.wakeAt).toBeUndefined();
+    expect(run.journal.a).toBeUndefined();
+    expect((await eventsOf(id)).some((e) => e.type === "run.suspended")).toBe(false);
+  });
+
+  it("cancels a flagged run right after it is claimed", async () => {
+    const id = await startRun(wf([step("a")]));
+    expect(await storage.requestCancel(TENANT, id, now)).toBe(true);
+    const engine = makeEngine();
+    expect(await engine.runOnce()).toBe(true);
+    const run = await getRun(id);
+    expect(run.status).toBe("cancelled");
+    expect(calls).toEqual({});
+    expect((await eventsOf(id)).map((e) => e.type)).toEqual(["run.started", "run.cancelled"]);
   });
 });

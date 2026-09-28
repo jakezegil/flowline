@@ -105,20 +105,37 @@ export interface Engine {
     userId: string,
   ): Promise<"resumed" | "gone">;
   /**
-   * Cancel a queued or waiting run (or a running one whose worker's lease has expired). A
-   * cancelled sub-flow resumes its parent step with `subflowFailed` ("Sub-flow cancelled").
-   * Cancelling a parent does NOT cancel its child runs: they run to completion, and their
-   * wake-up of the cancelled parent is ignored. Cancelling a finished run does nothing.
+   * Cancel a run. A queued or waiting run (or a running one whose worker's lease has expired) is
+   * cancelled at once: resolves `"cancelled"`. A run a worker is executing right now is flagged
+   * instead (`Run.cancelRequestedAt`): resolves `"requested"`, and that worker aborts `ctx.signal`
+   * and cancels the run under its lease at its next check (right after claiming, before each
+   * step, before it would wait or be re-queued, and on every lease renewal while a handler runs).
+   * Resolves `"finished"` when the run had already completed, failed or been cancelled.
    *
-   * @throws Error if the run does not exist, or a worker is executing it right now.
+   * A request is a request, not a guarantee: a run whose last step finishes before the worker's
+   * next check still completes (or fails). In the rare case that the request lands between the
+   * worker's final check and its commit that parks the run (`waiting`/`queued`), the run stays
+   * flagged and is cancelled when it is next claimed; calling `cancelRun` again cancels such a
+   * parked run at once.
+   *
+   * A cancelled sub-flow resumes its parent step with `subflowFailed` ("Sub-flow cancelled").
+   * Cancelling a parent does NOT cancel its child runs: they run to completion, and their
+   * wake-up of the cancelled parent is ignored.
+   *
+   * @throws Error if the run does not exist in the tenant.
    */
-  cancelRun(tenantId: string, runId: string): Promise<void>;
+  cancelRun(tenantId: string, runId: string): Promise<"cancelled" | "requested" | "finished">;
   /**
    * Continue a failed run from its failed step: the failed journal entry is removed and the run
    * is queued again (same run id, attempt 1); steps that completed are not re-run. Resolves the
    * run id.
    *
-   * @throws Error if the run does not exist or is not failed.
+   * A failed sub-flow run can be retried only while its parent step still waits on it. A child
+   * that fails wakes its parent (with `subflowFailed`) in the same write, so normally the parent
+   * has moved on: retry the parent instead, whose step then starts a new child run.
+   *
+   * @throws Error if the run does not exist, is not failed, or is a sub-flow run whose parent no
+   * longer waits on it.
    */
   retryRun(tenantId: string, runId: string): Promise<string>;
 }
@@ -163,18 +180,31 @@ export function createEngine(opts: EngineOptions): Engine {
     return opts.redact ? opts.redact(e) : e;
   };
 
-  /** Append events written outside a run commit and report them. */
-  const append = async (events: NewRunEvent[]) => {
-    await storage.appendEvents(events);
-    executor.publish(events);
+  /** Whether the parent of sub-flow run `run` is still suspended on it (so it can be retried). */
+  const parentWaitsOn = async (run: Run): Promise<boolean> => {
+    if (!run.parent) return false;
+    const parent = await storage.getRunById(run.parent.runId);
+    if (parent?.status !== "waiting" || parent.waitReason !== "subflow") return false;
+    if (parent.currentStep !== run.parent.stepPath) return false;
+    const entry = entryAt(parent.journal, run.parent.stepPath);
+    const pending = entry?.status === "suspended" ? entry.pending : undefined;
+    return pending !== undefined && "childRunId" in pending && pending.childRunId === run.id;
   };
 
-  /** Resume by token; the `run.resumed` event is appended right after the storage transition. */
+  /** Resume by token; storage appends the `run.resumed` event in the same atomic write. */
   const resumeWithToken = async (token: string, body: unknown, by?: string) => {
-    const run = await storage.resumeByToken(token, { kind: "callback", body }, clock());
-    if (!run) return "gone" as const;
     const data = by === undefined ? { kind: "callback" } : { kind: "callback", by };
-    await append([runEvent(run, "run.resumed", run.currentStep, data)]);
+    const now = clock();
+    const run = await storage.resumeByToken(token, { kind: "callback", body }, now, {
+      type: "run.resumed",
+      data,
+    });
+    if (!run) return "gone" as const;
+    // Report the event storage wrote (the same fields, minus the storage-assigned id and seq).
+    const e: NewRunEvent = { runId: run.id, tenantId: run.tenantId, type: "run.resumed", at: now };
+    if (run.currentStep !== undefined) e.stepPath = run.currentStep;
+    e.data = data;
+    executor.publish([e]);
     return "resumed" as const;
   };
 
@@ -200,7 +230,7 @@ export function createEngine(opts: EngineOptions): Engine {
     async cancelRun(tenantId, runId) {
       const run = await storage.getRun(tenantId, runId);
       if (!run) throw new Error(`Run "${runId}" not found`);
-      if (TERMINAL.has(run.status)) return;
+      if (TERMINAL.has(run.status)) return "finished";
       const patch: RunPatch = {
         status: "cancelled",
         wakeAt: null,
@@ -226,12 +256,11 @@ export function createEngine(opts: EngineOptions): Engine {
       );
       if (ok) {
         executor.publish(events);
-        return;
+        return "cancelled";
       }
-      // Lost the race: fine if the run finished meanwhile, otherwise a worker holds its lease.
-      const latest = await storage.getRun(tenantId, runId);
-      if (latest && TERMINAL.has(latest.status)) return;
-      throw new Error(`Run "${runId}" is being executed and cannot be cancelled right now`);
+      // Lost the race: the run finished meanwhile, or a worker holds its lease and must cancel it
+      // cooperatively.
+      return (await storage.requestCancel(tenantId, runId, clock())) ? "requested" : "finished";
     },
 
     async retryRun(tenantId, runId) {
@@ -246,7 +275,13 @@ export function createEngine(opts: EngineOptions): Engine {
         waitReason: null,
         resume: null,
         wakeAt: null,
+        cancelRequestedAt: null,
       };
+      if (run.status === "failed" && run.parent && !(await parentWaitsOn(run))) {
+        throw new Error(
+          `Run "${runId}" is a sub-flow whose parent run "${run.parent.runId}" no longer waits on it; retry the parent instead`,
+        );
+      }
       if (failedPath !== undefined && entryAt(run.journal, failedPath)?.status === "failed") {
         patch.journal = { [failedPath]: null };
       }

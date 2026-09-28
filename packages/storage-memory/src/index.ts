@@ -17,6 +17,7 @@ import {
   type Lease,
   type NewRun,
   type NewRunEvent,
+  type ResumeEvent,
   type Run,
   type RunPatch,
   type StorageAdapter,
@@ -37,6 +38,7 @@ interface Published {
 }
 
 const clone = <T>(value: T): T => structuredClone(value);
+const FINISHED: ReadonlySet<Run["status"]> = new Set(["completed", "failed", "cancelled"]);
 const wfKey = (tenantId: string, workflowId: string) => `${tenantId}\u0000${workflowId}`;
 
 /** Set `key` from a patch value: `undefined` keeps, `null` deletes, anything else sets. */
@@ -73,6 +75,7 @@ function applyPatch(stored: StoredRun, patch: RunPatch, now: number): void {
   setOpt(run, "resume", patch.resume);
   if (patch.output !== undefined) run.output = clone(patch.output);
   setOpt(run, "error", patch.error);
+  setOpt(run, "cancelRequestedAt", patch.cancelRequestedAt);
   // Only a running run can hold a lease.
   if (patch.release || (patch.status !== undefined && patch.status !== "running")) {
     clearLease(stored);
@@ -187,6 +190,15 @@ export function createMemoryStorage(): StorageAdapter {
       }
     }
     append(child && !insertChild ? newEvents.filter((e) => e.runId !== child.id) : newEvents);
+  };
+
+  /** Append a resume's event to `run`, completed with the run's identity (see `ResumeEvent`). */
+  const appendResumeEvent = (run: Run, event: ResumeEvent | undefined, now: number): void => {
+    if (!event) return;
+    const e: NewRunEvent = { runId: run.id, tenantId: run.tenantId, type: event.type, at: now };
+    if (run.currentStep !== undefined) e.stepPath = run.currentStep;
+    if (event.data !== undefined) e.data = event.data;
+    append([e]);
   };
 
   const isClaimable = (run: Run, now: number): boolean => {
@@ -364,22 +376,32 @@ export function createMemoryStorage(): StorageAdapter {
       return true;
     },
 
-    async resumeByToken(token, resume, now) {
+    async resumeByToken(token, resume, now, event) {
       for (const stored of runs.values()) {
         const run = stored.run;
         if (run.status !== "waiting" || run.callbackToken !== token) continue;
         if (run.callbackExpiresAt !== undefined && run.callbackExpiresAt <= now) return null;
         resumeTransition(run, resume, now);
+        appendResumeEvent(run, event, now);
         return clone(run);
       }
       return null;
     },
 
-    async resumeRun(runId, expectCurrentStep, resume, now) {
+    async resumeRun(runId, expectCurrentStep, resume, now, event) {
       const run = runs.get(runId)?.run;
       if (run?.status !== "waiting") return false;
       if (run.currentStep !== expectCurrentStep) return false;
       resumeTransition(run, resume, now);
+      appendResumeEvent(run, event, now);
+      return true;
+    },
+
+    async requestCancel(tenantId, runId, now) {
+      const run = runs.get(runId)?.run;
+      if (!run || run.tenantId !== tenantId || FINISHED.has(run.status)) return false;
+      run.cancelRequestedAt ??= now;
+      run.updatedAt = now;
       return true;
     },
 

@@ -66,6 +66,11 @@ export interface Run {
   output?: unknown;
   /** Failure details. */
   error?: RunError;
+  /**
+   * When cancellation was requested ({@link StorageAdapter.requestCancel}) while a worker may be
+   * executing the run; that worker cancels the run under its lease.
+   */
+  cancelRequestedAt?: number;
   /** What started the run. */
   startedBy: RunOrigin;
   /** Worker currently holding the lease, if any. */
@@ -126,6 +131,8 @@ export interface RunPatch {
   output?: unknown;
   /** New error; `null` clears. */
   error?: RunError | null;
+  /** New cancel-request time; `null` clears. */
+  cancelRequestedAt?: number | null;
   /**
    * Clear the lease (`leaseOwner`, `leaseUntil` and the lease token) in the same write. Implied
    * whenever `status` is set to anything other than `"running"`.
@@ -157,6 +164,13 @@ export interface RunPatch {
 
 /** An event to append; storage assigns `id` and `seq`. */
 export type NewRunEvent = Omit<RunEvent, "id" | "seq">;
+
+/**
+ * The event appended atomically with a resume ({@link StorageAdapter.resumeByToken},
+ * {@link StorageAdapter.resumeRun}). Storage completes it with the resumed run's `runId` and
+ * `tenantId`, `stepPath = run.currentStep` (when set) and `at = now`.
+ */
+export type ResumeEvent = Pick<NewRunEvent, "type" | "data">;
 
 /** An audit record of a workflow save or publish. */
 export interface WorkflowAuditEntry {
@@ -320,20 +334,38 @@ export interface StorageAdapter {
    * `callbackToken`, `callbackExpiresAt` and `wakeAt` cleared (`waitReason` kept), so the token
    * is single use: of concurrent calls with the same token, exactly one returns the run. Returns
    * the updated run, or `null` (no write) when no run matches.
+   *
+   * When `event` is given, it is appended to the resumed run in the SAME atomic write (see
+   * {@link ResumeEvent}); a call that resumes nothing appends nothing.
    */
-  resumeByToken(token: string, resume: ResumeInfo, now: number): Promise<Run | null>;
+  resumeByToken(
+    token: string,
+    resume: ResumeInfo,
+    now: number,
+    event?: ResumeEvent,
+  ): Promise<Run | null>;
 
   /**
    * Resume run `runId` if it is `waiting` with `currentStep === expectCurrentStep`, with the same
-   * transition as {@link StorageAdapter.resumeByToken}. Returns whether it was resumed; of
-   * concurrent calls, exactly one returns `true`.
+   * transition (and optional `event`) as {@link StorageAdapter.resumeByToken}. Returns whether it
+   * was resumed; of concurrent calls, exactly one returns `true`.
    */
   resumeRun(
     runId: string,
     expectCurrentStep: string,
     resume: ResumeInfo,
     now: number,
+    event?: ResumeEvent,
   ): Promise<boolean>;
+
+  /**
+   * Ask the worker executing run `runId` to cancel it: sets `cancelRequestedAt = now` (keeping an
+   * earlier request's time) on a run of the tenant that is not `completed`, `failed` or
+   * `cancelled`, whether or not it is leased. The lease is left untouched; the executor notices
+   * the flag and cancels the run under its lease. Returns `false` (no write) when the run does not
+   * exist in the tenant or is already finished.
+   */
+  requestCancel(tenantId: string, runId: string, now: number): Promise<boolean>;
 
   /**
    * Compare-and-set update for a run no worker is executing (cancel, retry). Applies `patch`

@@ -8,7 +8,6 @@ import {
   branchesFor,
   type CallbackHandle,
   collectRefs,
-  configValueAt,
   isRef,
   isSignal,
   isTpl,
@@ -21,9 +20,7 @@ import {
   type RunEventType,
   resolveValue,
   type Step,
-  type SubflowSignal,
   type ValueExpr,
-  type WorkflowDoc,
   type WorkflowVersion,
 } from "@flowkit/core";
 import type { z } from "zod";
@@ -32,7 +29,8 @@ import type { EngineOptions } from "./engine";
 import { FatalError, RetryableError } from "./errors";
 import { buildScope, childSteps, entryAt, type NextAction, nextAction } from "./interpreter";
 import { redactBySchema } from "./redact";
-import type { Lease, NewRun, NewRunEvent, Run, RunPatch } from "./storage";
+import type { Lease, NewRunEvent, Run, RunPatch } from "./storage";
+import { startSubflow } from "./subflow";
 
 const DEFAULT_LEASE_MS = 30_000;
 const DEFAULT_STEPS_PER_CLAIM = 100;
@@ -41,8 +39,6 @@ const DEFAULT_RETRY: RetryPolicy = { max: 3, backoff: "exponential", initialMs: 
 const MAX_BACKOFF_MS = 3_600_000;
 /** Consecutive `renewLease` rejections tolerated before the claim is abandoned. */
 const MAX_RENEWAL_ERRORS = 3;
-/** Sub-flow levels allowed below a root run. */
-const MAX_SUBFLOW_DEPTH = 8;
 const DEFAULT_BASE_PATH = "/flowkit";
 /** @internal Run statuses that never change again (except through `retryRun`). */
 export const TERMINAL: ReadonlySet<Run["status"]> = new Set(["completed", "failed", "cancelled"]);
@@ -68,6 +64,11 @@ class LeaseLostError extends Error {
   override readonly name = "LeaseLostError";
 }
 
+/** Signals that `cancelRun` flagged the run while a handler ran; the run is cancelled. */
+class CancelRequestedError extends Error {
+  override readonly name = "CancelRequestedError";
+}
+
 // biome-ignore lint/suspicious/noExplicitAny: definitions of any input/output types
 type AnyNode = NodeDefinition<any, any>;
 
@@ -81,39 +82,6 @@ function mergePatch(a: RunPatch, b: RunPatch): RunPatch {
   const out: Record<string, unknown> = { ...a };
   for (const [k, v] of Object.entries(b)) if (v !== undefined) out[k] = v;
   return out as RunPatch;
-}
-
-const isPlainObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
-
-const FIELD_CHECKS: Record<string, (v: unknown) => boolean> = {
-  string: (v) => typeof v === "string",
-  number: (v) => typeof v === "number" && Number.isFinite(v),
-  boolean: (v) => typeof v === "boolean",
-  object: isPlainObject,
-  array: (v) => Array.isArray(v),
-  date: (v) => typeof v === "string" && !Number.isNaN(Date.parse(v)),
-};
-
-/**
- * Why `value` does not match user-declared trigger fields (core's `FieldDecl` list), or
- * `undefined` if it does. Malformed declarations are ignored, as in the editor.
- */
-function fieldsProblem(decls: unknown, value: unknown): string | undefined {
-  if (!isPlainObject(value)) return "must be an object";
-  const record = value;
-  for (const decl of Array.isArray(decls) ? decls : []) {
-    const { name, type, required } = (decl ?? {}) as Record<string, unknown>;
-    if (typeof name !== "string" || typeof type !== "string") continue;
-    const v = Object.hasOwn(record, name) ? record[name] : undefined;
-    if (v === undefined) {
-      if (required === true) return `field "${name}" is required`;
-      continue;
-    }
-    const check = FIELD_CHECKS[type];
-    if (check && !check(v)) return `field "${name}" must be of type ${type}`;
-  }
-  return undefined;
 }
 
 /** Delay before retrying after failed attempt number `attempt` (1-based). */
@@ -272,13 +240,23 @@ export function createExecutor(opts: EngineOptions): Executor {
           }
         : {};
 
-    /** Commit under the lease; `false` means the lease was lost and processing must stop. */
+    /**
+     * Commit under the lease; `false` means processing must stop (the lease was lost, or the run
+     * was cancelled instead). A commit that gives the run up without finishing it (`waiting`, or
+     * `queued` again) first honours a pending cancel request, so a flagged run is not parked.
+     */
     const commit = async (
       patch: RunPatch,
       events: NewRunEvent[],
       stepPath: string,
       phase: "start" | "result" = "result",
-    ) => {
+    ): Promise<boolean> => {
+      if (
+        (patch.status === "waiting" || patch.status === "queued") &&
+        (await cancelIfRequested(stepPath))
+      ) {
+        return false;
+      }
       await hooks?.beforeCommit?.(run.id, stepPath, phase);
       const full = wakePatch ? mergePatch(wakePatch, patch) : patch;
       const all =
@@ -292,6 +270,38 @@ export function createExecutor(opts: EngineOptions): Executor {
         publish(all);
       }
       return ok;
+    };
+
+    /**
+     * Cancel the run under the lease (see `Engine.cancelRun`): the same transition as an unleased
+     * cancel, including the parent's `subflowFailed` wake-up. A `run.resumed` still owed by this
+     * claim is dropped, since the run never resumes.
+     */
+    const cancelUnderLease = async (stepPath: string): Promise<void> => {
+      resumedKind = undefined;
+      await commit(
+        {
+          status: "cancelled",
+          wakeAt: null,
+          resume: null,
+          callbackToken: null,
+          callbackExpiresAt: null,
+          ...wakeParent({ kind: "subflowFailed", error: { message: "Sub-flow cancelled" } }),
+        },
+        [event("run.cancelled", stepPath === "" ? undefined : stepPath)],
+        stepPath,
+      );
+    };
+
+    /** Whether cancellation of this run was requested; reads the run row. */
+    const cancelRequested = async (): Promise<boolean> =>
+      (await storage.getRunById(run.id))?.cancelRequestedAt !== undefined;
+
+    /** Cancel the run if that was requested; `true` when it was (processing must stop). */
+    const cancelIfRequested = async (stepPath: string): Promise<boolean> => {
+      if (!(await cancelRequested())) return false;
+      await cancelUnderLease(stepPath);
+      return true;
     };
 
     /** Commit a journal entry for `path` and adopt it locally. */
@@ -333,6 +343,12 @@ export function createExecutor(opts: EngineOptions): Executor {
       }
       return "stop" as const;
     };
+
+    // Cancellation requested while the run was leased (or parked, see `Engine.cancelRun`).
+    if (run.cancelRequestedAt !== undefined) {
+      await cancelUnderLease(run.currentStep ?? "");
+      return;
+    }
 
     const version = await loadVersion(run.tenantId, run.workflowId, run.version);
     if (!version) {
@@ -383,6 +399,7 @@ export function createExecutor(opts: EngineOptions): Executor {
         if (typeof timeoutMs !== "number" || !(timeoutMs > 0) || !Number.isFinite(timeoutMs)) {
           throw new FatalError("ctx.callback() needs a positive timeoutMs");
         }
+        if (issued) throw new FatalError("callback already issued for this step");
         const token = newCallbackToken();
         issued = {
           token,
@@ -399,10 +416,21 @@ export function createExecutor(opts: EngineOptions): Executor {
       let renewalErrors = 0;
       const renewal = setInterval(() => {
         storage.renewLease(lease, leaseMs, clock()).then(
-          (ok) => {
+          async (ok) => {
             renewalErrors = 0;
-            if (ok) leaseUntil = clock() + leaseMs;
-            else controller.abort(new LeaseLostError("lease lost"));
+            if (!ok) {
+              controller.abort(new LeaseLostError("lease lost"));
+              return;
+            }
+            leaseUntil = clock() + leaseMs;
+            // Each renewal also polls for a cancel request, so a long handler is aborted promptly.
+            try {
+              if (await cancelRequested()) {
+                controller.abort(new CancelRequestedError("run cancelled"));
+              }
+            } catch (err) {
+              opts.logger?.warn("cancel check failed", { runId: run.id, error: errorMessage(err) });
+            }
           },
           (err: unknown) => {
             // A transient storage error: keep the claim and try again on the next tick.
@@ -481,129 +509,6 @@ export function createExecutor(opts: EngineOptions): Executor {
       }
     };
 
-    /** Number of ancestors of this run (0 for a root run), counted up to the nesting cap. */
-    const nestingDepth = async (): Promise<number> => {
-      let depth = 0;
-      let parent = run.parent;
-      while (parent && depth < MAX_SUBFLOW_DEPTH) {
-        depth++;
-        parent = (await storage.getRunById(parent.runId))?.parent;
-      }
-      return depth;
-    };
-
-    /**
-     * The trigger payload for a run of `child`, checked against the child trigger's payload schema
-     * or declared fields.
-     */
-    const subflowPayload = async (
-      child: WorkflowDoc,
-      input: unknown,
-    ): Promise<{ ok: true; value: unknown } | { ok: false; message: string }> => {
-      let value: unknown;
-      try {
-        value = structuredClone(input);
-      } catch {
-        return { ok: false, message: "must be JSON-serializable" };
-      }
-      const trigger = registry.getTrigger(child.trigger.type);
-      if (trigger?.payload) {
-        const res = await (trigger.payload as z.ZodType).safeParseAsync(value);
-        if (res.success) return { ok: true, value: res.data };
-        const issue = res.error.issues[0];
-        const field = issue && issue.path.length > 0 ? `field "${issue.path.join(".")}" ` : "";
-        return { ok: false, message: `${field}${issue?.message ?? "is invalid"}` };
-      }
-      if (trigger?.dynamicPayload?.kind === "fields") {
-        const decls = configValueAt(child.trigger.config, trigger.dynamicPayload.configPath);
-        const problem = fieldsProblem(decls, value);
-        if (problem !== undefined) return { ok: false, message: problem };
-      }
-      return { ok: true, value };
-    };
-
-    /**
-     * The child run id for the step at `path`: `sub_` + the first 24 hex digits of
-     * sha256(`runId:path:attempt`), so re-executing the same call names the same child. If that id
-     * already belongs to a finished run (the step was retried with `retryRun`, or the handler
-     * starts another sub-flow after resuming), the seed gets a `:n` suffix until the id is free.
-     */
-    const subflowRunId = async (path: string, stepAttempt: number): Promise<string> => {
-      for (let n = 0; ; n++) {
-        const seed = `${run.id}:${path}:${stepAttempt}${n === 0 ? "" : `:${n}`}`;
-        const id = `sub_${(await sha256Hex(seed)).slice(0, 24)}`;
-        const existing = await storage.getRunById(id);
-        if (!existing || !TERMINAL.has(existing.status)) return id;
-      }
-    };
-
-    /**
-     * Start the child run of an `invokeSubflow` signal and suspend the step on it: the child is
-     * created in the same atomic commit as the parent's suspension, so a crash leaves either both
-     * or neither.
-     */
-    const startSubflow = async (
-      sig: SubflowSignal,
-      s: {
-        path: string;
-        attempt: number;
-        shownInput: unknown;
-        base: { at: number; startedAt: number; input: unknown };
-        fatal: (message: string, input?: unknown, code?: string) => Promise<Flow>;
-      },
-    ): Promise<Flow> => {
-      const child = await storage.getPublishedVersion(run.tenantId, sig.workflowId);
-      if (!child) {
-        return s.fatal(
-          `Sub-flow "${sig.workflowId}" is not published`,
-          s.shownInput,
-          "subflow.unknown",
-        );
-      }
-      if ((await nestingDepth()) >= MAX_SUBFLOW_DEPTH) {
-        return s.fatal("Sub-flow nesting too deep", s.shownInput, "subflow.depth");
-      }
-      const payload = await subflowPayload(child.doc, sig.input);
-      if (!payload.ok) {
-        return s.fatal(
-          `Sub-flow "${sig.workflowId}" input: ${payload.message}`,
-          s.shownInput,
-          "subflow.input",
-        );
-      }
-      const childRunId = await subflowRunId(s.path, s.attempt);
-      const childRun: NewRun = {
-        id: childRunId,
-        tenantId: run.tenantId,
-        workflowId: child.workflowId,
-        version: child.version,
-        status: "queued",
-        trigger: payload.value,
-        journal: {},
-        attempt: 1,
-        startedBy: { kind: "subflow", parentRunId: run.id, parentStepPath: s.path },
-        parent: { runId: run.id, stepPath: s.path },
-      };
-      await commitEntry(
-        s.path,
-        { status: "suspended", pending: { childRunId }, attempts: s.attempt, ...s.base },
-        {
-          status: "waiting",
-          waitReason: "subflow",
-          wakeAt: null,
-          currentStep: s.path,
-          attempt: 1,
-          resume: null,
-          createChild: childRun,
-        },
-        [
-          event("run.suspended", s.path, { workflowId: child.workflowId, childRunId }),
-          eventFor(childRunId, "run.started"),
-        ],
-      );
-      return "stop";
-    };
-
     const execStep = async (action: Extract<NextAction, { type: "exec" }>): Promise<Flow> => {
       const { step, path } = action;
       const label = step.name ?? step.id;
@@ -669,6 +574,7 @@ export function createExecutor(opts: EngineOptions): Executor {
       const eventOutput = (v: unknown) => redactBySchema(v, outSchema, { mask: "all" });
 
       if (!(await renewIfDue())) return "stop";
+      if (await cancelIfRequested(path)) return "stop";
       // Mark the step in flight (lease-guarded) so a worker that later finds it unsettled knows an
       // attempt was lost.
       const startOk = await commit(
@@ -685,6 +591,10 @@ export function createExecutor(opts: EngineOptions): Executor {
         ({ result, issued } = await invoke(node, input, { step, path, scope }));
       } catch (err) {
         if (err instanceof LeaseLostError) return "stop";
+        if (err instanceof CancelRequestedError) {
+          await cancelUnderLease(path);
+          return "stop";
+        }
         const message = errorMessage(err);
         const code = errorCode(err);
         if (isFatal(err)) return fatal(message, shownInput, code);
@@ -850,7 +760,44 @@ export function createExecutor(opts: EngineOptions): Executor {
           return "stop";
         }
         if (result.kind === "subflow") {
-          return startSubflow(result, { path, attempt, shownInput, base, fatal });
+          // The child is created in the same atomic commit as the parent's suspension, so a crash
+          // leaves either both or neither.
+          return startSubflow<Flow>(result, {
+            storage,
+            registry,
+            run,
+            path,
+            attempt,
+            fail: (message, code) => fatal(message, shownInput, code),
+            suspend: async (child) => {
+              await commitEntry(
+                path,
+                {
+                  status: "suspended",
+                  pending: { childRunId: child.id },
+                  attempts: attempt,
+                  ...base,
+                },
+                {
+                  status: "waiting",
+                  waitReason: "subflow",
+                  wakeAt: null,
+                  currentStep: path,
+                  attempt: 1,
+                  resume: null,
+                  createChild: child,
+                },
+                [
+                  event("run.suspended", path, {
+                    workflowId: child.workflowId,
+                    childRunId: child.id,
+                  }),
+                  eventFor(child.id, "run.started"),
+                ],
+              );
+              return "stop";
+            },
+          });
         }
         return fatal(`Step "${label}": unsupported signal`, shownInput);
       }

@@ -925,12 +925,111 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect(await s.resumeRun("r1", "call", resume, 30)).toBe(false);
       });
 
+      test("resumeByToken appends its event atomically, and only when it resumes", async (s) => {
+        await s.createRun(
+          newRun("r1", {
+            status: "waiting",
+            currentStep: "wait",
+            waitReason: "callback",
+            callbackToken: "tok-1",
+            callbackExpiresAt: 1000,
+          }),
+          [ev("r1", "run.started")],
+          0,
+        );
+        const event = { type: "run.resumed" as const, data: { kind: "callback" } };
+        const resume = { kind: "callback" as const, body: 1 };
+        expect(await s.resumeByToken("tok-1", resume, 10, event)).not.toBeNull();
+        expect(await s.resumeByToken("tok-1", resume, 11, event)).toBeNull();
+        expect(await s.resumeByToken("unknown", resume, 11, event)).toBeNull();
+        const events = await s.listEvents(T1, "r1");
+        expect(events.map((e) => e.type)).toEqual(["run.started", "run.resumed"]);
+        expect(events[1]).toMatchObject({
+          runId: "r1",
+          tenantId: T1,
+          seq: 2,
+          stepPath: "wait",
+          at: 10,
+          data: { kind: "callback" },
+        });
+      });
+
+      test("resumeByToken without an event appends nothing", async (s) => {
+        await s.createRun(
+          newRun("r1", { status: "waiting", waitReason: "callback", callbackToken: "tok-1" }),
+          [],
+          0,
+        );
+        expect(await s.resumeByToken("tok-1", { kind: "callback", body: 1 }, 10)).not.toBeNull();
+        expect(await s.listEvents(T1, "r1")).toEqual([]);
+      });
+
+      test("resumeRun appends its event atomically, and only when it resumes", async (s) => {
+        await s.createRun(
+          newRun("r1", { status: "waiting", currentStep: "call", waitReason: "subflow" }),
+          [],
+          0,
+        );
+        const event = { type: "run.resumed" as const, data: { kind: "timer" } };
+        expect(await s.resumeRun("r1", "wrong", { kind: "timer" }, 5, event)).toBe(false);
+        expect(await s.listEvents(T1, "r1")).toEqual([]);
+        expect(await s.resumeRun("r1", "call", { kind: "timer" }, 10, event)).toBe(true);
+        expect(await s.resumeRun("r1", "call", { kind: "timer" }, 11, event)).toBe(false);
+        const events = await s.listEvents(T1, "r1");
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject({ type: "run.resumed", stepPath: "call", at: 10, seq: 1 });
+      });
+
       test("concurrent resumeRun calls: exactly one succeeds", async (s) => {
         await s.createRun(newRun("r1", { status: "waiting", currentStep: "call" }), [], 0);
         const results = await Promise.all(
           Array.from({ length: 10 }, () => s.resumeRun("r1", "call", { kind: "timer" }, 10)),
         );
         expect(results.filter(Boolean)).toHaveLength(1);
+      });
+    });
+
+    describe("requestCancel", () => {
+      test("flags a leased run without touching its lease", async (s) => {
+        await s.createRun(newRun("r1"), [], 0);
+        const lease = await claimOrFail(s, 10);
+        expect(await s.requestCancel(T1, "r1", 20)).toBe(true);
+        const run = await s.getRun(T1, "r1");
+        expect(run).toMatchObject({ status: "running", cancelRequestedAt: 20, leaseOwner: "w1" });
+        // The worker's lease stays current, so it can cancel the run under it.
+        expect(await s.commit(lease, { status: "cancelled" }, [], 30)).toBe(true);
+      });
+
+      test("keeps the first request time", async (s) => {
+        await s.createRun(newRun("r1", { status: "waiting" }), [], 0);
+        expect(await s.requestCancel(T1, "r1", 20)).toBe(true);
+        expect(await s.requestCancel(T1, "r1", 30)).toBe(true);
+        expect((await s.getRun(T1, "r1"))?.cancelRequestedAt).toBe(20);
+      });
+
+      test("is a no-op on finished runs", async (s) => {
+        for (const status of ["completed", "failed", "cancelled"] as const) {
+          await s.createRun(newRun(status, { status }), [], 0);
+          const before = await s.getRun(T1, status);
+          expect(await s.requestCancel(T1, status, 20)).toBe(false);
+          expect(await s.getRun(T1, status)).toEqual(before);
+        }
+      });
+
+      test("respects tenant scoping", async (s) => {
+        await s.createRun(newRun("r1"), [], 0);
+        expect(await s.requestCancel(T2, "r1", 20)).toBe(false);
+        expect(await s.requestCancel(T1, "missing", 20)).toBe(false);
+        expect((await s.getRun(T1, "r1"))?.cancelRequestedAt).toBeUndefined();
+      });
+
+      test("a patch can clear the flag", async (s) => {
+        await s.createRun(newRun("r1", { status: "failed" }), [], 0);
+        await s.createRun(newRun("r2", { cancelRequestedAt: 5 }), [], 0);
+        expect((await s.getRun(T1, "r2"))?.cancelRequestedAt).toBe(5);
+        const lease = await claimOrFail(s, 10);
+        expect(await s.commit(lease, { cancelRequestedAt: null }, [], 20)).toBe(true);
+        expect((await s.getRun(T1, "r2"))?.cancelRequestedAt).toBeUndefined();
       });
     });
 
