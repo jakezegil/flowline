@@ -1,7 +1,7 @@
 /**
  * Dev playground: `pnpm --filter @flowkit/react playground`. URL params pick the state, so the
  * screenshot script can drive it: `?theme=light|dark|system&doc=nested|empty&mode=edit|readonly|run`
- * for the bare canvas, `?page=editor&wf=deal-won|onboarding` for the editor, and
+ * for the bare canvas, `?page=editor&wf=deal-won|onboarding|inbound-lead` for the editor, and
  * `?page=run&run=running|waiting|failed|loop` for the run viewer beside the run list, and
  * `?page=picker` (or `/picker`) for the reference input, data picker and code editor.
  */

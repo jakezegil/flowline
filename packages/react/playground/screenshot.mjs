@@ -1,7 +1,7 @@
 /**
  * Screenshots the playground in a range of states for visual review.
  *
- *   node packages/react/playground/screenshot.mjs <outDir>
+ *   node packages/react/playground/screenshot.mjs <outDir> [--app | --panel]
  *
  * Starts the playground's Vite dev server, drives it with Playwright (Chromium) and writes PNGs
  * to <outDir> (default: ./playground-shots).
@@ -138,6 +138,163 @@ async function appShots() {
     await shot(page, "run-loop-dark-narrow-closed");
     await page.close();
   }
+}
+
+// Config panel states (`--panel` shoots only these).
+async function selectNode(page, key) {
+  const id = key === "trigger" ? "trigger" : `step:${key}`;
+  await page.locator(`.react-flow__node[data-id='${id}'] .fk-card`).evaluate((el) => el.click());
+  await page.waitForSelector(".fk-cp");
+  await page.waitForTimeout(350);
+}
+async function scrollPanelTo(page, selector) {
+  await page
+    .locator(`.fk-cp__body ${selector}`)
+    .first()
+    .evaluate((el) => {
+      const body = el.closest(".fk-cp__body");
+      body.scrollTop += el.getBoundingClientRect().top - body.getBoundingClientRect().top - 60;
+    });
+  await page.waitForTimeout(150);
+}
+async function panelShots() {
+  for (const theme of ["light", "dark"]) {
+    const page = await open(`page=editor&wf=deal-won&theme=${theme}`, wide, theme);
+    await selectNode(page, "welcomeEmea");
+    await shot(page, `panel-step-${theme}`);
+    await selectNode(page, "isWon");
+    await shot(page, `panel-rules-${theme}`);
+    await selectNode(page, "region");
+    await shot(page, `panel-switch-${theme}`);
+    await selectNode(page, "notify");
+    await scrollPanelTo(page, "[role='radiogroup'][aria-label='Authentication']");
+    await shot(page, `panel-http-auth-${theme}`);
+    await page.click(".fk-cp [role='radio']:has-text('Header')");
+    await page.waitForTimeout(200);
+    await shot(page, `panel-http-auth-header-${theme}`);
+    await selectNode(page, "nudge");
+    await shot(page, `panel-field-issues-${theme}`);
+    await selectNode(page, "loadContact");
+    await page.click(".fk-cp [role='tab']:has-text('Test')");
+    await page.click(".fk-cp button:has-text('Test step')");
+    await page.waitForSelector(".fk-cp section[aria-label='Output']");
+    await page.waitForTimeout(250);
+    await shot(page, `panel-test-output-${theme}`);
+    await selectNode(page, "welcomeEmea");
+    await page.click(".fk-cp button:has-text('Test step')");
+    await page.waitForSelector(".fk-cp [role='alert']");
+    await page.waitForTimeout(250);
+    await shot(page, `panel-test-error-${theme}`);
+    await selectNode(page, "trigger");
+    await page.click(".fk-cp button:has-text('Fill from fields')");
+    await page.waitForTimeout(150);
+    await shot(page, `panel-trigger-sample-${theme}`);
+    await page.close();
+
+    const hook = await open(`page=editor&wf=inbound-lead&theme=${theme}`, wide, theme);
+    await selectNode(hook, "trigger");
+    await hook.waitForSelector(".fk-webhook__url");
+    await shot(hook, `panel-trigger-webhook-${theme}`);
+    await selectNode(hook, "enrich");
+    await hook.waitForSelector("text=Company domain");
+    await shot(hook, `panel-subflow-${theme}`);
+    await selectNode(hook, "summarize");
+    await shot(hook, `panel-transform-${theme}`);
+    await hook.close();
+
+    const narrowPage = await open(`page=editor&wf=deal-won&theme=${theme}`, narrow, theme);
+    await selectNode(narrowPage, "welcomeEmea");
+    await shot(narrowPage, `panel-narrow-${theme}`);
+    await selectNode(narrowPage, "isWon");
+    await shot(narrowPage, `panel-narrow-rules-${theme}`);
+    await narrowPage.close();
+  }
+
+  // Keyboard: Enter on a node moves focus into the panel; Esc closes it and refocuses the node.
+  const kb = await open("page=editor&wf=deal-won&theme=light", wide);
+  await kb.locator(".react-flow__node[data-id='trigger']").focus();
+  await kb.keyboard.press("ArrowDown");
+  await kb.waitForTimeout(150);
+  await kb.keyboard.press("ArrowDown");
+  await kb.waitForTimeout(150);
+  const selectedId = await kb.evaluate(() => document.activeElement?.getAttribute("data-id"));
+  console.log(`keyboard: arrows moved focus to ${selectedId}`);
+  await kb.keyboard.press("Enter");
+  await kb.waitForSelector(".fk-cp");
+  await kb.waitForTimeout(200);
+  const inPanel = await kb.evaluate(() => !!document.activeElement?.closest(".fk-cp"));
+  await kb.keyboard.press("Tab");
+  await kb.keyboard.press("Tab");
+  await kb.waitForTimeout(100);
+  await shot(kb, "panel-keyboard-focus-light");
+  await kb.keyboard.press("Escape");
+  await kb.waitForTimeout(250);
+  const closed = (await kb.locator(".fk-cp").count()) === 0;
+  const back = await kb.evaluate(() => document.activeElement?.getAttribute("data-id"));
+  console.log(
+    `keyboard: focus in panel after Enter=${inPanel}, closed on Esc=${closed}, focus=${back}`,
+  );
+  if (!inPanel || !closed || back !== "step:loadContact")
+    errors.push("keyboard focus check failed");
+  await kb.close();
+
+  // References inside the panel: pills, the picker on focus, `{{` autocomplete, and Esc layering
+  // (the first Esc closes the picker or autocomplete, the next closes the panel).
+  for (const theme of ["light", "dark"]) {
+    const rp = await open(`page=editor&wf=deal-won&theme=${theme}`, wide, theme);
+    await selectNode(rp, "welcomeEmea");
+    const pills = await rp.locator(".fk-cp .fk-ref-pill").count();
+    const editor = rp.locator(".fk-cp .fk-ref__editor .cm-content").first();
+    await editor.click();
+    await rp.waitForTimeout(300);
+    const pickerOnFocus = await rp.locator(".fk-ref-popover").isVisible();
+    await shot(rp, `panel-picker-${theme}`);
+    await rp.keyboard.press("Escape");
+    await rp.waitForTimeout(200);
+    const pickerClosed = (await rp.locator(".fk-ref-popover").count()) === 0;
+    const panelKept1 = (await rp.locator(".fk-cp").count()) === 1;
+    await rp.keyboard.press("End");
+    await rp.keyboard.type(" {{ema");
+    await rp.waitForTimeout(300);
+    const completions = await rp.locator(".cm-tooltip-autocomplete").isVisible();
+    await shot(rp, `panel-autocomplete-${theme}`);
+    await rp.keyboard.press("Escape");
+    await rp.waitForTimeout(200);
+    const acClosed = (await rp.locator(".cm-tooltip-autocomplete").count()) === 0;
+    const panelKept2 = (await rp.locator(".fk-cp").count()) === 1;
+    await rp.keyboard.press("Escape");
+    await rp.waitForTimeout(250);
+    const panelClosed = (await rp.locator(".fk-cp").count()) === 0;
+    const result = {
+      pills,
+      pickerOnFocus,
+      pickerClosed,
+      panelKept1,
+      completions,
+      acClosed,
+      panelKept2,
+      panelClosed,
+    };
+    console.log(`refs (${theme}): ${JSON.stringify(result)}`);
+    const ok =
+      pills > 0 &&
+      pickerOnFocus &&
+      pickerClosed &&
+      panelKept1 &&
+      completions &&
+      acClosed &&
+      panelKept2 &&
+      panelClosed;
+    if (!ok) errors.push(`reference check failed (${theme})`);
+    await rp.close();
+  }
+}
+if (process.argv.includes("--panel")) {
+  await panelShots();
+  await browser.close();
+  await server.close();
+  if (errors.length) console.error(`\nBrowser errors/warnings:\n${errors.join("\n")}`);
+  process.exit(errors.length ? 1 : 0);
 }
 await appShots();
 if (process.argv.includes("--app")) {

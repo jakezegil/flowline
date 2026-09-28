@@ -24,6 +24,11 @@ export type { Issue, Manifest, WorkflowDoc };
 
 /** Typed access to every route of the Flowkit HTTP handler. */
 export interface FlowkitClient {
+  /**
+   * The handler's base URL as given to {@link createClient} (without a trailing slash). The
+   * editor uses it to show webhook URLs (`<baseUrl>/hooks/…`, resolved against the page's origin).
+   */
+  readonly baseUrl?: string;
   /** `GET /manifest` — plugins, nodes and triggers available to the editor. */
   getManifest(): Promise<Manifest>;
   /** `GET /workflows` — the tenant's workflows. */
@@ -257,6 +262,7 @@ export function createClient(opts: ClientOptions): FlowkitClient {
   }
 
   const client: FlowkitClient = {
+    baseUrl: base,
     getManifest: () => request("GET", "/manifest"),
     listWorkflows: () => request("GET", "/workflows"),
     getWorkflow: (id) => request("GET", `/workflows/${enc(id)}`),

@@ -1,0 +1,1089 @@
+{
+  "plugins": [
+    {
+      "id": "core",
+      "name": "Built-in",
+      "icon": "blocks",
+      "description": "Logic, timing, sub-flows, HTTP requests, transforms and the standard triggers."
+    }
+  ],
+  "nodes": [
+    {
+      "type": "core.condition",
+      "plugin": "core",
+      "name": "If / else",
+      "description": "Take the If path when the conditions match, and the Else path when they don't.",
+      "icon": "split",
+      "category": "Logic",
+      "summary": "If conditions match",
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "rules": {
+            "type": "object",
+            "properties": {
+              "combinator": {
+                "type": "string",
+                "enum": ["and", "or"],
+                "x-flowkit": {
+                  "label": "Match"
+                },
+                "description": "and: every rule must match. or: at least one rule must match."
+              },
+              "rules": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "left": {
+                          "x-flowkit": {
+                            "label": "Value"
+                          }
+                        },
+                        "op": {
+                          "type": "string",
+                          "enum": [
+                            "eq",
+                            "neq",
+                            "gt",
+                            "gte",
+                            "lt",
+                            "lte",
+                            "contains",
+                            "notContains",
+                            "startsWith",
+                            "endsWith",
+                            "in",
+                            "isEmpty",
+                            "isNotEmpty",
+                            "isTrue",
+                            "isFalse"
+                          ],
+                          "x-flowkit": {
+                            "label": "Operator"
+                          }
+                        },
+                        "right": {
+                          "x-flowkit": {
+                            "label": "Compare with"
+                          },
+                          "description": "Numbers and text compare loosely (\"5\" equals 5). Dates and times are UTC unless they include an offset. For \"is in\", give a list or comma-separated text."
+                        },
+                        "caseSensitive": {
+                          "type": "boolean",
+                          "x-flowkit": {
+                            "label": "Match case"
+                          },
+                          "description": "Off by default, so \"Won\" equals \"won\"."
+                        }
+                      },
+                      "required": ["left", "op"]
+                    },
+                    {
+                      "$ref": "#/$defs/__schema0"
+                    }
+                  ]
+                },
+                "x-flowkit": {
+                  "label": "Rules",
+                  "warnIfEmpty": "Condition has no rules, so it always takes the same path"
+                }
+              }
+            },
+            "required": ["combinator", "rules"],
+            "x-flowkit": {
+              "label": "Conditions",
+              "widget": "rules"
+            },
+            "description": "Text compares ignoring case unless Match case is on. Dates and times are UTC unless they include an offset. \"Is in\" takes a list or comma-separated text."
+          }
+        },
+        "required": ["rules"],
+        "$defs": {
+          "__schema0": {
+            "type": "object",
+            "properties": {
+              "combinator": {
+                "type": "string",
+                "enum": ["and", "or"],
+                "x-flowkit": {
+                  "label": "Match"
+                },
+                "description": "and: every rule must match. or: at least one rule must match."
+              },
+              "rules": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "left": {
+                          "x-flowkit": {
+                            "label": "Value"
+                          }
+                        },
+                        "op": {
+                          "type": "string",
+                          "enum": [
+                            "eq",
+                            "neq",
+                            "gt",
+                            "gte",
+                            "lt",
+                            "lte",
+                            "contains",
+                            "notContains",
+                            "startsWith",
+                            "endsWith",
+                            "in",
+                            "isEmpty",
+                            "isNotEmpty",
+                            "isTrue",
+                            "isFalse"
+                          ],
+                          "x-flowkit": {
+                            "label": "Operator"
+                          }
+                        },
+                        "right": {
+                          "x-flowkit": {
+                            "label": "Compare with"
+                          },
+                          "description": "Numbers and text compare loosely (\"5\" equals 5). Dates and times are UTC unless they include an offset. For \"is in\", give a list or comma-separated text."
+                        },
+                        "caseSensitive": {
+                          "type": "boolean",
+                          "x-flowkit": {
+                            "label": "Match case"
+                          },
+                          "description": "Off by default, so \"Won\" equals \"won\"."
+                        }
+                      },
+                      "required": ["left", "op"]
+                    },
+                    {
+                      "$ref": "#/$defs/__schema0"
+                    }
+                  ]
+                },
+                "x-flowkit": {
+                  "label": "Rules"
+                }
+              }
+            },
+            "required": ["combinator", "rules"]
+          }
+        }
+      },
+      "output": {
+        "kind": "schema",
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "matched": {
+              "type": "boolean"
+            }
+          },
+          "required": ["matched"],
+          "additionalProperties": false
+        }
+      },
+      "branches": {
+        "kind": "static",
+        "branches": [
+          {
+            "id": "if",
+            "label": "If"
+          },
+          {
+            "id": "else",
+            "label": "Else"
+          }
+        ]
+      }
+    },
+    {
+      "type": "core.switch",
+      "plugin": "core",
+      "name": "Switch",
+      "description": "Compare a value with each case in order and take the path of the first match, or Default when none match.",
+      "icon": "route",
+      "category": "Logic",
+      "summary": "Route by {{value}}",
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "value": {
+            "x-flowkit": {
+              "label": "Value to match"
+            },
+            "description": "Compared with each case. Numbers and text compare loosely, so \"5\" matches 5 and \"EMEA\" matches \"emea\"."
+          },
+          "caseSensitive": {
+            "type": "boolean",
+            "x-flowkit": {
+              "label": "Match case"
+            },
+            "description": "Off by default, so \"EMEA\" matches \"emea\"."
+          },
+          "cases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "x-flowkit": {
+                    "label": "ID"
+                  }
+                },
+                "label": {
+                  "type": "string",
+                  "x-flowkit": {
+                    "label": "Label",
+                    "placeholder": "Gold customers"
+                  }
+                },
+                "value": {
+                  "x-flowkit": {
+                    "label": "Value",
+                    "placeholder": "gold"
+                  }
+                }
+              },
+              "required": ["id", "label", "value"]
+            },
+            "x-flowkit": {
+              "label": "Cases",
+              "widget": "cases"
+            }
+          }
+        },
+        "required": ["value", "cases"]
+      },
+      "output": {
+        "kind": "schema",
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "matched": {
+              "type": "string"
+            }
+          },
+          "required": ["matched"],
+          "additionalProperties": false
+        }
+      },
+      "branches": {
+        "kind": "fromConfig",
+        "configPath": "cases",
+        "idKey": "id",
+        "labelKey": "label",
+        "append": [
+          {
+            "id": "default",
+            "label": "Default"
+          }
+        ]
+      }
+    },
+    {
+      "type": "core.forEach",
+      "plugin": "core",
+      "name": "For each",
+      "description": "Run the steps inside the loop once for every item in a list, one item at a time. Inside, use Loop item and Loop index.",
+      "icon": "repeat",
+      "category": "Logic",
+      "summary": "For each item in {{items}}",
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {},
+            "x-flowkit": {
+              "label": "List",
+              "refOnly": true
+            },
+            "description": "A list from the trigger or an earlier step."
+          }
+        },
+        "required": ["items"]
+      },
+      "output": {
+        "kind": "schema",
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "number",
+              "description": "How many items were processed."
+            },
+            "results": {
+              "type": "array",
+              "items": {},
+              "description": "The last step's output of each iteration."
+            }
+          },
+          "required": ["count", "results"],
+          "additionalProperties": false
+        }
+      },
+      "branches": {
+        "kind": "loop",
+        "itemsField": "items",
+        "branch": "body"
+      }
+    },
+    {
+      "type": "core.stop",
+      "plugin": "core",
+      "name": "Stop",
+      "description": "End the run here as a success. No later steps run.",
+      "icon": "circle-stop",
+      "category": "Logic",
+      "summary": "Stop the run",
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "x-flowkit": {
+              "label": "Reason",
+              "placeholder": "Deal was not won"
+            },
+            "description": "Shown in the run history."
+          }
+        }
+      },
+      "output": {
+        "kind": "schema",
+        "schema": {}
+      },
+      "branches": {
+        "kind": "none"
+      }
+    },
+    {
+      "type": "core.delay",
+      "plugin": "core",
+      "name": "Delay",
+      "description": "Pause the run for a while, or until a date and time, then continue.",
+      "icon": "timer",
+      "category": "Timing",
+      "summary": "Wait {{duration}}{{until}}",
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "duration": {
+            "type": "string",
+            "pattern": "^([1-9][0-9]*)([smhd])$",
+            "x-flowkit": {
+              "label": "Wait for",
+              "placeholder": "2d"
+            },
+            "description": "How long to wait, e.g. 30s, 5m, 2h or 3d."
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "x-flowkit": {
+              "label": "Wait until",
+              "placeholder": "2026-01-31T09:00:00Z"
+            },
+            "description": "Continue at this date and time instead."
+          }
+        },
+        "x-flowkit": {
+          "oneOfRequired": [["duration"], ["until"]]
+        }
+      },
+      "output": {
+        "kind": "schema",
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "resumedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+              "description": "When the run continued."
+            }
+          },
+          "required": ["resumedAt"],
+          "additionalProperties": false
+        }
+      },
+      "branches": {
+        "kind": "none"
+      }
+    },
+    {
+      "type": "core.waitForCallback",
+      "plugin": "core",
+      "name": "Wait for callback",
+      "description": "Pause until another system calls this step's one-time resume URL, or until the timeout passes.",
+      "icon": "hourglass",
+      "category": "Timing",
+      "summary": "Wait for a callback",
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "timeout": {
+            "default": "7d",
+            "type": "string",
+            "pattern": "^([1-9][0-9]*)([smhd])$",
+            "x-flowkit": {
+              "label": "Time out after",
+              "placeholder": "7d"
+            },
+            "description": "Take the Timed out path if no callback arrives in time, e.g. 2h or 7d."
+          },
+          "notify": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "x-flowkit": {
+                  "label": "URL",
+                  "placeholder": "https://hooks.example.com/approvals"
+                },
+                "description": "Receives a POST with the resume URL, its expiry and the run ID."
+              }
+            },
+            "required": ["url"],
+            "x-flowkit": {
+              "label": "Notify"
+            },
+            "description": "Send the one-time resume URL to another system when the wait starts."
+          }
+        }
+      },
+      "output": {
+        "kind": "schema",
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "body": {
+              "description": "The body the callback was called with."
+            },
+            "timedOut": {
+              "type": "boolean",
+              "description": "Whether the wait ended without a callback."
+            }
+          },
+          "required": ["body", "timedOut"],
+          "additionalProperties": false
+        }
+      },
+      "branches": {
+        "kind": "static",
+        "branches": [
+          {
+            "id": "resumed",
+            "label": "Resumed"
+          },
+          {
+            "id": "timeout",
+            "label": "Timed out"
+          }
+        ]
+      }
+    },
+    {
+      "type": "core.callSubflow",
+      "plugin": "core",
+      "name": "Run sub-flow",
+      "description": "Run another workflow with the input you map, wait for it to finish and use its output.",
+      "icon": "workflow",
+      "category": "Sub-flows",
+      "summary": "Run sub-flow {{workflowId}}",
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "minLength": 1,
+            "x-flowkit": {
+              "label": "Sub-flow",
+              "widget": "subflowSelect",
+              "literalOnly": true
+            }
+          },
+          "input": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {},
+            "x-flowkit": {
+              "label": "Input",
+              "widget": "subflowInput"
+            }
+          }
+        },
+        "required": ["workflowId", "input"]
+      },
+      "output": {
+        "kind": "subflow",
+        "configPath": "workflowId"
+      },
+      "branches": {
+        "kind": "none"
+      }
+    },
+    {
+      "type": "core.httpRequest",
+      "plugin": "core",
+      "name": "HTTP request",
+      "description": "Call an external HTTP API.",
+      "icon": "globe",
+      "category": "Integrations",
+      "summary": "{{method}} {{url}}",
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+            "x-flowkit": {
+              "label": "Method"
+            }
+          },
+          "url": {
+            "type": "string",
+            "x-flowkit": {
+              "label": "URL",
+              "placeholder": "https://api.example.com/items"
+            }
+          },
+          "headers": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            },
+            "x-flowkit": {
+              "label": "Headers",
+              "sensitive": true
+            },
+            "description": "Don't put credentials here; use Authentication."
+          },
+          "query": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            },
+            "x-flowkit": {
+              "label": "Query parameters"
+            }
+          },
+          "bodyType": {
+            "default": "none",
+            "type": "string",
+            "enum": ["none", "json", "form", "text"],
+            "x-flowkit": {
+              "label": "Body type"
+            }
+          },
+          "body": {
+            "x-flowkit": {
+              "label": "Body"
+            }
+          },
+          "auth": {
+            "default": {
+              "type": "none"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "none"
+                  }
+                },
+                "required": ["type"]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "bearer"
+                  },
+                  "secret": {
+                    "type": "string",
+                    "minLength": 1,
+                    "x-flowkit": {
+                      "secret": true,
+                      "widget": "secret",
+                      "label": "Secret"
+                    }
+                  }
+                },
+                "required": ["type", "secret"]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "basic"
+                  },
+                  "secret": {
+                    "type": "string",
+                    "minLength": 1,
+                    "x-flowkit": {
+                      "secret": true,
+                      "widget": "secret",
+                      "label": "Secret"
+                    },
+                    "description": "The secret holds \"user:password\"."
+                  }
+                },
+                "required": ["type", "secret"]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "header"
+                  },
+                  "secret": {
+                    "type": "string",
+                    "minLength": 1,
+                    "x-flowkit": {
+                      "secret": true,
+                      "widget": "secret",
+                      "label": "Secret"
+                    }
+                  },
+                  "headerName": {
+                    "type": "string",
+                    "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$",
+                    "x-flowkit": {
+                      "label": "Header name",
+                      "placeholder": "X-Api-Key"
+                    }
+                  }
+                },
+                "required": ["type", "secret", "headerName"]
+              }
+            ],
+            "x-flowkit": {
+              "label": "Authentication"
+            }
+          },
+          "timeoutMs": {
+            "default": 30000,
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "x-flowkit": {
+              "label": "Timeout (ms)",
+              "group": "Advanced"
+            }
+          },
+          "sendIdempotencyKey": {
+            "default": true,
+            "type": "boolean",
+            "x-flowkit": {
+              "label": "Send Idempotency-Key header",
+              "group": "Advanced"
+            }
+          },
+          "failOnHttpError": {
+            "default": true,
+            "type": "boolean",
+            "x-flowkit": {
+              "label": "Fail on 4xx responses",
+              "group": "Advanced"
+            }
+          }
+        },
+        "required": ["method", "url"]
+      },
+      "output": {
+        "kind": "schema",
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "number"
+            },
+            "headers": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "body": {}
+          },
+          "required": ["status", "headers", "body"],
+          "additionalProperties": false
+        }
+      },
+      "branches": {
+        "kind": "none"
+      }
+    },
+    {
+      "type": "core.transform",
+      "plugin": "core",
+      "name": "Transform",
+      "description": "Compute values with a JavaScript snippet.",
+      "icon": "code",
+      "category": "Data",
+      "summary": "Transform data",
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "x-flowkit": {
+              "label": "Code",
+              "widget": "code",
+              "multiline": true,
+              "placeholder": "return { total: steps.load.items.length };"
+            },
+            "description": "Return an object. Keys named __proto__, constructor or prototype are dropped from the result."
+          },
+          "outputFields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": ["string", "number", "boolean", "object", "array", "date"]
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": ["name", "type"]
+            },
+            "x-flowkit": {
+              "widget": "fields",
+              "label": "Output fields"
+            }
+          }
+        },
+        "required": ["code", "outputFields"]
+      },
+      "output": {
+        "kind": "fields",
+        "configPath": "outputFields"
+      },
+      "branches": {
+        "kind": "none"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "type": "core.event",
+      "plugin": "core",
+      "name": "App event",
+      "description": "Start when your app emits an event with this name. The event's data is available as the trigger.",
+      "icon": "zap",
+      "kind": "event",
+      "config": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "event": {
+            "type": "string",
+            "minLength": 1,
+            "x-flowkit": {
+              "label": "Event name",
+              "placeholder": "deal.updated"
+            }
+          }
+        },
+        "required": ["event"]
+      },
+      "payload": {
+        "kind": "schema",
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema"
+        }
+      }
+    },
+    {
+      "type": "core.webhook",
+      "plugin": "core",
+      "name": "Webhook",
+      "description": "Start when another system sends a POST request to this workflow's webhook URL.",
+      "icon": "webhook",
+      "kind": "webhook",
+      "config": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "fields": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": ["string", "number", "boolean", "object", "array", "date"]
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": ["name", "type"]
+            },
+            "x-flowkit": {
+              "widget": "fields",
+              "label": "Body fields"
+            },
+            "description": "The fields you expect in the JSON body. Requests missing a required field are rejected."
+          },
+          "secret": {
+            "type": "string",
+            "x-flowkit": {
+              "secret": true,
+              "widget": "secret",
+              "label": "Signing secret"
+            },
+            "description": "Verify the X-Flowkit-Signature header (HMAC-SHA256 of the body) with this secret."
+          },
+          "dedupeHeader": {
+            "type": "string",
+            "x-flowkit": {
+              "label": "Deduplication header",
+              "placeholder": "X-Request-Id"
+            },
+            "description": "Requests repeating this header's value start no new run."
+          }
+        }
+      },
+      "payload": {
+        "kind": "webhook",
+        "configPath": "fields"
+      }
+    },
+    {
+      "type": "core.manual",
+      "plugin": "core",
+      "name": "Manual",
+      "description": "Start by hand from the editor, the API or your own code, with the input you define.",
+      "icon": "play",
+      "kind": "manual",
+      "config": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "fields": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": ["string", "number", "boolean", "object", "array", "date"]
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": ["name", "type"]
+            },
+            "x-flowkit": {
+              "widget": "fields",
+              "label": "Input fields"
+            },
+            "description": "What to ask for when starting a run."
+          }
+        }
+      },
+      "payload": {
+        "kind": "fields",
+        "configPath": "fields"
+      }
+    },
+    {
+      "type": "core.schedule",
+      "plugin": "core",
+      "name": "Schedule",
+      "description": "Start on a repeating schedule, such as every weekday at 9:00.",
+      "icon": "calendar-clock",
+      "kind": "schedule",
+      "config": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "cron": {
+            "type": "string",
+            "pattern": "^\\s*\\S+(\\s+\\S+){4,5}\\s*$",
+            "x-flowkit": {
+              "label": "Schedule (cron)",
+              "placeholder": "0 9 * * 1-5"
+            },
+            "description": "Minute, hour, day of month, month and day of week."
+          },
+          "timezone": {
+            "default": "UTC",
+            "type": "string",
+            "x-flowkit": {
+              "label": "Time zone",
+              "placeholder": "Europe/Berlin"
+            }
+          }
+        },
+        "required": ["cron"]
+      },
+      "payload": {
+        "kind": "schema",
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "firedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+              "description": "The scheduled time this run was started for."
+            }
+          },
+          "required": ["firedAt"],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "core.subflow",
+      "plugin": "core",
+      "name": "Sub-flow",
+      "description": "Let other workflows run this one with Run sub-flow. Declare the input it takes and the output it returns.",
+      "icon": "log-in",
+      "kind": "subflow",
+      "config": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "input": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": ["string", "number", "boolean", "object", "array", "date"]
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": ["name", "type"]
+            },
+            "x-flowkit": {
+              "widget": "fields",
+              "label": "Input fields"
+            },
+            "description": "What callers pass in."
+          },
+          "output": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": ["string", "number", "boolean", "object", "array", "date"]
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": ["name", "type"]
+            },
+            "x-flowkit": {
+              "widget": "fields",
+              "label": "Output fields"
+            },
+            "description": "What this workflow returns to its caller."
+          }
+        }
+      },
+      "payload": {
+        "kind": "fields",
+        "configPath": "input"
+      }
+    }
+  ]
+}

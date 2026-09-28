@@ -27,9 +27,9 @@ export function setupDom(): void {
 
 /** A client whose every method is a `vi.fn()` that rejects until given an implementation. */
 export function mockClient(overrides: Partial<FlowkitClient> = {}): {
-  [K in keyof FlowkitClient]: ReturnType<typeof vi.fn> & FlowkitClient[K];
+  [K in Exclude<keyof FlowkitClient, "baseUrl">]: ReturnType<typeof vi.fn> & FlowkitClient[K];
 } {
-  const methods: (keyof FlowkitClient)[] = [
+  const methods: Exclude<keyof FlowkitClient, "baseUrl">[] = [
     "getManifest",
     "listWorkflows",
     "getWorkflow",

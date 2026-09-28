@@ -136,6 +136,15 @@ describe("DataPicker", () => {
     );
   });
 
+  test("browsing isn't capped at the search limit, and never asks to refine a search", () => {
+    const wide = Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`k${i}`, i]));
+    render(
+      <DataPicker scope={scope} samples={{ ...samples, __trigger: wide }} onPick={() => {}} />,
+    );
+    expect(screen.getAllByRole("treeitem").length).toBeGreaterThan(300);
+    expect(screen.queryByText(/refine your search/)).toBeNull();
+  });
+
   test("the key help, Shift+Enter included, is available to screen readers", () => {
     render(<DataPicker scope={scope} samples={samples} onPick={() => {}} />);
     const search = screen.getByRole("combobox");

@@ -1,8 +1,10 @@
 /**
- * Playground fixtures: a JSON manifest mirroring the built-in nodes (plugin "core") plus a fake
- * CRM plugin, and sample workflows. The editor only ever sees JSON, so no server code is needed.
+ * Playground fixtures: the real built-in manifest (plugin "core", dumped from
+ * `@flowkit/nodes-builtin` into builtin-manifest.json) plus a fake CRM plugin, and sample
+ * workflows. The editor only ever sees JSON, so no server code is needed.
  */
 import type { Manifest, NodeManifest, Step, TriggerManifest, WorkflowDoc } from "@flowkit/core";
+import builtin from "./builtin-manifest.json";
 
 const S = "https://json-schema.org/draft/2020-12/schema";
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -27,158 +29,6 @@ const contact = {
   tags: { type: "array", items: { type: "string" } },
 };
 
-const core: NodeManifest[] = [
-  {
-    type: "core.condition",
-    plugin: "core",
-    name: "Condition",
-    icon: "split",
-    category: "Flow",
-    description: "Take one path when rules match, another when they don't",
-    summary: "If conditions match",
-    input: obj({ rules: { type: "object", "x-flowkit": { widget: "rules" } } }, ["rules"]),
-    output: out({ matched: { type: "boolean" } }),
-    branches: {
-      kind: "static",
-      branches: [
-        { id: "if", label: "If" },
-        { id: "else", label: "Else" },
-      ],
-    },
-  },
-  {
-    type: "core.switch",
-    plugin: "core",
-    name: "Switch",
-    icon: "git-fork",
-    category: "Flow",
-    description: "Pick a path by comparing a value against cases",
-    summary: "Switch on {{value}}",
-    input: obj(
-      {
-        value: str("Value"),
-        cases: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: { id: { type: "string" }, label: { type: "string" } },
-          },
-          default: [],
-          "x-flowkit": { widget: "cases" },
-        },
-      },
-      ["value", "cases"],
-    ),
-    output: out({ matched: { type: "string" } }),
-    branches: {
-      kind: "fromConfig",
-      configPath: "cases",
-      idKey: "id",
-      labelKey: "label",
-      append: [{ id: "default", label: "Default" }],
-    },
-  },
-  {
-    type: "core.forEach",
-    plugin: "core",
-    name: "For each",
-    icon: "repeat",
-    category: "Flow",
-    description: "Run steps once for every item in a list",
-    summary: "For each of {{items}}",
-    input: obj(
-      { items: { type: "array", items: {}, "x-flowkit": { refOnly: true, label: "Items" } } },
-      ["items"],
-    ),
-    output: out({ items: { type: "array", items: {} } }),
-    branches: { kind: "loop", itemsField: "items", branch: "body" },
-  },
-  {
-    type: "core.stop",
-    plugin: "core",
-    name: "Stop",
-    icon: "circle-stop",
-    category: "Flow",
-    description: "End the run here",
-    summary: "Stop the run",
-    input: obj({ reason: str("Reason") }),
-    output: out({}),
-    branches: { kind: "none" },
-  },
-  {
-    type: "core.delay",
-    plugin: "core",
-    name: "Delay",
-    icon: "hourglass",
-    category: "Timing",
-    description: "Pause for a while, or until a date",
-    summary: "Wait {{duration}}",
-    input: obj({ duration: str("Duration", { default: "1h" }), until: str("Until") }),
-    output: out({ resumedAt: { type: "string" } }),
-    branches: { kind: "none" },
-  },
-  {
-    type: "core.waitForCallback",
-    plugin: "core",
-    name: "Wait for callback",
-    icon: "bell",
-    category: "Timing",
-    description: "Pause until an outside system calls back",
-    summary: "Wait up to {{timeout}}",
-    input: obj({ timeout: str("Timeout", { default: "7d" }) }, ["timeout"]),
-    output: out({ body: {}, timedOut: { type: "boolean" } }),
-    branches: {
-      kind: "static",
-      branches: [
-        { id: "resumed", label: "Resumed" },
-        { id: "timeout", label: "Timed out" },
-      ],
-    },
-  },
-  {
-    type: "core.httpRequest",
-    plugin: "core",
-    name: "HTTP request",
-    icon: "globe",
-    category: "Data",
-    description: "Call any HTTP API",
-    summary: "{{method}} {{url}}",
-    input: obj(
-      {
-        method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"], default: "GET" },
-        url: str("URL"),
-      },
-      ["method", "url"],
-    ),
-    output: out({ status: { type: "number" }, body: {} }),
-    branches: { kind: "none" },
-  },
-  {
-    type: "core.transform",
-    plugin: "core",
-    name: "Transform",
-    icon: "code",
-    category: "Data",
-    description: "Reshape data with a little JavaScript",
-    summary: "Run code",
-    input: obj({ code: str("Code", { default: "return {};" }) }, ["code"]),
-    output: out({}),
-    branches: { kind: "none" },
-  },
-  {
-    type: "core.callSubflow",
-    plugin: "core",
-    name: "Call workflow",
-    icon: "workflow",
-    category: "Data",
-    description: "Run another workflow and use its output",
-    summary: "Run {{workflowId}}",
-    input: obj({ workflowId: str("Workflow") }, ["workflowId"]),
-    output: out({}),
-    branches: { kind: "none" },
-  },
-];
-
 const crm: NodeManifest[] = [
   {
     type: "crm.loadContact",
@@ -200,7 +50,18 @@ const crm: NodeManifest[] = [
     category: "Contacts",
     description: "Change fields on a contact",
     summary: "Update {{contactId}}",
-    input: obj({ contactId: str("Contact"), stage: str("Lifecycle stage") }, ["contactId"]),
+    input: obj(
+      {
+        contactId: str("Contact"),
+        stage: {
+          type: "string",
+          enum: ["lead", "qualified", "customer", "churned"],
+          "x-flowkit": { label: "Lifecycle stage" },
+        },
+        owner: str("Owner", { description: "Email of the new account owner." }),
+      },
+      ["contactId"],
+    ),
     output: out({ id: { type: "string" } }),
     branches: { kind: "none" },
   },
@@ -224,7 +85,28 @@ const crm: NodeManifest[] = [
     category: "Messaging",
     description: "Email a contact from your team inbox",
     summary: "{{subject}}",
-    input: obj({ to: str("To"), subject: str("Subject", { default: "Hello" }) }, ["to", "subject"]),
+    input: obj(
+      {
+        to: str("To", { format: "email" }),
+        subject: str("Subject"),
+        body: {
+          type: "string",
+          "x-flowkit": { label: "Message", multiline: true, placeholder: "Hi {{name}}, …" },
+        },
+        from: {
+          type: "string",
+          enum: ["sales", "success", "support"],
+          default: "sales",
+          "x-flowkit": { label: "Send from" },
+        },
+        trackOpens: {
+          type: "boolean",
+          default: true,
+          "x-flowkit": { label: "Track opens", group: "Advanced" },
+        },
+      },
+      ["to", "subject"],
+    ),
     output: out({ messageId: { type: "string" } }),
     branches: { kind: "none" },
   },
@@ -236,7 +118,20 @@ const crm: NodeManifest[] = [
     category: "Deals",
     description: "Assign a follow-up task to an owner",
     summary: "{{title}}",
-    input: obj({ title: str("Title"), owner: str("Owner") }, ["title"]),
+    input: obj(
+      {
+        title: str("Title"),
+        owner: str("Owner"),
+        dueInDays: { type: "integer", minimum: 0, "x-flowkit": { label: "Due in (days)" } },
+        priority: {
+          type: "string",
+          enum: ["low", "normal", "high"],
+          default: "normal",
+          "x-flowkit": { label: "Priority" },
+        },
+      },
+      ["title"],
+    ),
     output: out({ id: { type: "string" } }),
     branches: { kind: "none" },
   },
@@ -279,24 +174,13 @@ const triggers: TriggerManifest[] = [
     config: obj({}),
     payload: out({ contactId: { type: "string" } }),
   },
-  {
-    type: "core.manual",
-    plugin: "core",
-    name: "Manual",
-    icon: "play",
-    kind: "manual",
-    config: obj({ fields: { type: "array", items: { type: "object" }, default: [] } }),
-    payload: { kind: "fields", configPath: "fields" },
-  },
+  ...(builtin.triggers as TriggerManifest[]),
 ];
 
 /** Built-in nodes + the fake CRM plugin. */
 export const manifest: Manifest = {
-  plugins: [
-    { id: "core", name: "Built-in" },
-    { id: "crm", name: "Acme CRM", icon: "building-2" },
-  ],
-  nodes: [...core, ...crm],
+  plugins: [...builtin.plugins, { id: "crm", name: "Acme CRM", icon: "building-2" }],
+  nodes: [...(builtin.nodes as NodeManifest[]), ...crm],
   triggers,
 };
 
@@ -323,7 +207,21 @@ export function nestedDoc(): WorkflowDoc {
       s(
         "isWon",
         "core.condition",
-        { rules: { combinator: "and", rules: [] } },
+        {
+          rules: {
+            combinator: "and",
+            rules: [
+              { left: { $ref: "trigger.stage" }, op: "eq", right: "won" },
+              {
+                combinator: "or",
+                rules: [
+                  { left: { $ref: "steps.loadContact.region" }, op: "eq", right: "EMEA" },
+                  { left: { $ref: "steps.loadContact.tags" }, op: "contains", right: "vip" },
+                ],
+              },
+            ],
+          },
+        },
         {
           name: "Deal won?",
           branches: {
@@ -334,8 +232,8 @@ export function nestedDoc(): WorkflowDoc {
                 {
                   value: { $ref: "steps.loadContact.region" },
                   cases: [
-                    { id: "emea", label: "EMEA" },
-                    { id: "amer", label: "Americas" },
+                    { id: "emea", label: "EMEA", value: "EMEA" },
+                    { id: "amer", label: "Americas", value: "AMER" },
                   ],
                 },
                 {
@@ -388,7 +286,14 @@ export function nestedDoc(): WorkflowDoc {
       s(
         "notify",
         "core.httpRequest",
-        { method: "POST", url: "https://hooks.example.com/deals" },
+        {
+          method: "POST",
+          url: "https://hooks.example.com/deals",
+          headers: { "X-Source": "flowkit" },
+          bodyType: "json",
+          body: { dealId: { $ref: "trigger.dealId" }, stage: { $ref: "trigger.stage" } },
+          auth: { type: "bearer", secret: "DATA_TEAM_TOKEN" },
+        },
         { name: "Notify data team", disabled: true },
       ),
     ],
@@ -402,5 +307,56 @@ export function emptyDoc(): WorkflowDoc {
     name: "Untitled workflow",
     trigger: { type: "crm.contactCreated", config: {} },
     steps: [],
+  };
+}
+
+/** An inbound-lead workflow started by a webhook. */
+export function webhookDoc(): WorkflowDoc {
+  return {
+    id: "inbound-lead",
+    name: "Inbound lead",
+    trigger: {
+      type: "core.webhook",
+      config: {
+        slug: "k3v9q2hx7m",
+        fields: [
+          { name: "email", type: "string", required: true, description: "Lead's work email" },
+          { name: "company", type: "string" },
+          { name: "seats", type: "number" },
+        ],
+        dedupeHeader: "X-Request-Id",
+      },
+    },
+    steps: [
+      s(
+        "route",
+        "core.switch",
+        {
+          value: { $ref: "trigger.seats" },
+          cases: [
+            { id: "enterprise", label: "Enterprise", value: "100" },
+            { id: "team", label: "Team", value: "10" },
+          ],
+        },
+        {
+          name: "Route by size",
+          branches: {
+            enterprise: [
+              s("aeTask", "crm.createTask", {
+                title: { $tpl: "Call {{trigger.company}}" },
+                priority: "high",
+              }),
+            ],
+            team: [],
+            default: [],
+          },
+        },
+      ),
+      s("summarize", "core.transform", {
+        code: "return { domain: trigger.email.split('@')[1] };",
+        outputFields: [{ name: "domain", type: "string" }],
+      }),
+      s("enrich", "core.callSubflow", { workflowId: "enrich-company", input: {} }),
+    ],
   };
 }

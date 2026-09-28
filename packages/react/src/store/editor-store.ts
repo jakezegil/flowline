@@ -58,6 +58,11 @@ export interface EditorState {
   samples: Record<string, unknown>;
   /** Per step ID ({@link TRIGGER_KEY} for the trigger): tested, or edited since its last test. */
   testState: Record<string, TestState>;
+  /**
+   * Per sample key: the node (or trigger) type the sample was recorded for. A step whose type
+   * has changed since its sample was taken is `needs-test`; its sample may not match its output.
+   */
+  sampleTypes: Record<string, string>;
   /** Whether `doc` differs from the last saved (or loaded) doc. Undoing back to it clears it. */
   dirty: boolean;
   /** Version number of the last save, if any. */
@@ -88,7 +93,8 @@ export interface EditorActions {
   /**
    * Changes a step's node type, keeping its ID. Config resets to the new type's defaults; child
    * steps stay in their branches, and branches the new type doesn't declare are kept (and
-   * flagged by the validator) rather than dropped or merged. Same type: no-op.
+   * flagged by the validator) rather than dropped or merged. A tested step becomes
+   * `needs-test`. Same type: no-op.
    */
   replaceStep(id: string, nodeType: string): void;
   /**
@@ -115,7 +121,10 @@ export interface EditorActions {
    * branches come from config (switch cases), branches are kept in sync.
    */
   setConfig(id: string, key: string, value: ValueExpr | undefined): void;
-  /** Switches the trigger type, resetting its config to the new type's defaults. */
+  /**
+   * Switches the trigger type, resetting its config to the new type's defaults. A tested trigger
+   * becomes `needs-test`.
+   */
   setTrigger(type: string): void;
   /** Like {@link EditorActions.setConfig}, for the trigger's config. */
   setTriggerConfig(key: string, value: ValueExpr | undefined): void;
@@ -128,8 +137,13 @@ export interface EditorActions {
    * @returns The pasted step's ID, or `null` when the clipboard is empty.
    */
   paste(loc: StepLocation, opts?: InsertOptions): string | null;
-  /** Stores a step's (or the trigger's) sample output and marks it tested. Not in history. */
-  setSample(id: string, output: unknown): void;
+  /**
+   * Stores a step's (or the trigger's) sample output and marks it tested. The sample is recorded
+   * for `producedBy`, the node (or trigger) type that produced it, which defaults to the current
+   * type; pass the type a test started with, so a type changed mid-test marks it `needs-test`.
+   * Not in history.
+   */
+  setSample(id: string, output: unknown, producedBy?: string): void;
   /**
    * Loads samples and test state for the current workflow from `localStorage`, pruned to steps
    * that exist. The store does this itself when created in a browser; when created where there is
@@ -173,6 +187,7 @@ export type EditorStore = StoreApi<EditorState & EditorActions>;
 interface LocalData {
   samples: Record<string, unknown>;
   testState: Record<string, TestState>;
+  sampleTypes: Record<string, string>;
 }
 
 const storageKey = (workflowId: string) => `flowkit:samples:${workflowId}`;
@@ -185,10 +200,50 @@ function storage(): Storage | undefined {
   }
 }
 
-/** Samples and test state of `doc` from storage, keeping only the trigger and existing steps. */
+/**
+ * Samples and test state of `doc` from storage, keeping only the trigger and existing steps. A
+ * step tested as another node type than it has now needs a new test.
+ */
 function loadLocal(doc: WorkflowDoc): LocalData {
   const data = readLocal(doc.id);
-  return { samples: pruneTo(doc, data.samples), testState: pruneTo(doc, data.testState) };
+  const sampleTypes = pruneTo(doc, data.sampleTypes);
+  return {
+    samples: pruneTo(doc, data.samples),
+    testState: reconcile(doc, pruneTo(doc, data.testState), sampleTypes),
+    sampleTypes,
+  };
+}
+
+/**
+ * `testState` with every tested step (or trigger) whose sample came from another type than it has
+ * now marked `needs-test`; the same object when nothing changes. The store's `testState` is the
+ * one source of truth for canvas and panel, so this runs after every doc change, undo and redo.
+ */
+function reconcile(
+  doc: WorkflowDoc,
+  testState: Record<string, TestState>,
+  sampleTypes: Record<string, string>,
+): Record<string, TestState> {
+  let types: Map<string, string> | undefined;
+  let next = testState;
+  for (const [id, type] of Object.entries(sampleTypes)) {
+    if (testState[id] !== "tested") continue;
+    types ??= currentTypes(doc);
+    const now = types.get(id);
+    if (now === undefined || now === type) continue;
+    if (next === testState) next = { ...testState };
+    next[id] = "needs-test";
+  }
+  return next;
+}
+
+/** Node type per step ID, and the trigger type under {@link TRIGGER_KEY}. */
+function currentTypes(doc: WorkflowDoc): Map<string, string> {
+  const types = new Map<string, string>([[TRIGGER_KEY, doc.trigger.type]]);
+  walkSteps(doc, (step) => {
+    if (!types.has(step.id)) types.set(step.id, step.type);
+  });
+  return types;
 }
 
 /** `record` without keys that are neither {@link TRIGGER_KEY} nor a step of `doc`. */
@@ -202,22 +257,27 @@ function pruneTo<T>(doc: WorkflowDoc, record: Record<string, T>): Record<string,
 }
 
 function readLocal(workflowId: string): LocalData {
-  const empty: LocalData = { samples: {}, testState: {} };
+  const empty: LocalData = { samples: {}, testState: {}, sampleTypes: {} };
   try {
     const raw = storage()?.getItem(storageKey(workflowId));
     if (!raw) return empty;
     const parsed: unknown = JSON.parse(raw);
     if (parsed === null || typeof parsed !== "object") return empty;
-    const { samples, testState } = parsed as Partial<LocalData>;
+    const { samples, testState, sampleTypes } = parsed as Partial<LocalData>;
     const states: Record<string, TestState> = {};
     if (testState && typeof testState === "object") {
       for (const [id, s] of Object.entries(testState)) {
         if (s === "tested" || s === "needs-test") states[id] = s;
       }
     }
+    const types: Record<string, string> = {};
+    if (sampleTypes && typeof sampleTypes === "object") {
+      for (const [id, t] of Object.entries(sampleTypes)) if (typeof t === "string") types[id] = t;
+    }
     return {
       samples: samples && typeof samples === "object" ? { ...samples } : {},
       testState: states,
+      sampleTypes: types,
     };
   } catch {
     return empty;
@@ -261,7 +321,9 @@ export function createEditorStore(init: {
   let history: History<WorkflowDoc> = emptyHistory();
   let savedDoc = init.doc;
   const local: LocalData =
-    typeof window === "undefined" ? { samples: {}, testState: {} } : loadLocal(init.doc);
+    typeof window === "undefined"
+      ? { samples: {}, testState: {}, sampleTypes: {} }
+      : loadLocal(init.doc);
 
   const nodeManifest = (type: string): NodeManifest => {
     const m = manifest.nodes.find((n) => n.type === type);
@@ -288,13 +350,31 @@ export function createEditorStore(init: {
       if (next === prev) return;
       history = recordEdit(history, prev, coalesceKey, Date.now());
       set({ ...derived(next), ...patch });
+      syncTestState();
+    };
+
+    /** Re-derives test state against the current doc (see {@link reconcile}), persisting it. */
+    const syncTestState = (): void => {
+      const { doc, testState, sampleTypes } = get();
+      const next = reconcile(doc, testState, sampleTypes);
+      if (next !== testState) set(setLocal({ testState: next }));
     };
 
     /** Updates samples/test state and persists them. */
     const setLocal = (patch: Partial<LocalData>): Partial<EditorState> => {
-      const { samples, testState, doc } = get();
-      const data = { samples: patch.samples ?? samples, testState: patch.testState ?? testState };
-      if (data.samples !== samples || data.testState !== testState) saveLocal(doc.id, data);
+      const { samples, testState, sampleTypes, doc } = get();
+      const data = {
+        samples: patch.samples ?? samples,
+        testState: patch.testState ?? testState,
+        sampleTypes: patch.sampleTypes ?? sampleTypes,
+      };
+      if (
+        data.samples !== samples ||
+        data.testState !== testState ||
+        data.sampleTypes !== sampleTypes
+      ) {
+        saveLocal(doc.id, data);
+      }
       return data;
     };
 
@@ -311,14 +391,19 @@ export function createEditorStore(init: {
       const keep =
         selection === null || selection === TRIGGER_KEY || findStep(result.value, selection);
       set({ ...derived(result.value), ...(keep ? {} : { selection: null }) });
+      syncTestState();
     };
 
     /** Commits `next`, which adds `step`: resets local data left over under its IDs, selects it. */
     const commitNew = (next: WorkflowDoc, step: Step, opts: InsertOptions | undefined): string => {
       const ids = subtreeIds(step);
-      const { samples, testState } = get();
+      const { samples, testState, sampleTypes } = get();
       commit(next, {
-        ...setLocal({ samples: without(samples, ids), testState: without(testState, ids) }),
+        ...setLocal({
+          samples: without(samples, ids),
+          testState: without(testState, ids),
+          sampleTypes: without(sampleTypes, ids),
+        }),
         ...(opts?.select === false ? {} : { selection: step.id }),
       });
       return step.id;
@@ -331,6 +416,7 @@ export function createEditorStore(init: {
       selection: null,
       samples: local.samples,
       testState: local.testState,
+      sampleTypes: local.sampleTypes,
       savedVersion: null,
       publishedVersion: null,
       clipboard: null,
@@ -344,7 +430,7 @@ export function createEditorStore(init: {
         const m = nodeManifest(nodeType);
         const found = findStep(get().doc, id);
         if (found?.step.type === nodeType) return;
-        commit(replaceStepType(get().doc, id, m));
+        commit(replaceStepType(get().doc, id, m), needsTest(id));
       },
 
       removeStep(id) {
@@ -404,7 +490,10 @@ export function createEditorStore(init: {
         if (!t) throw new Error(`Unknown trigger type "${type}"`);
         const { doc } = get();
         if (doc.trigger.type === type) return;
-        commit({ ...doc, trigger: { type, config: defaultConfig(t.config) } });
+        commit(
+          { ...doc, trigger: { type, config: defaultConfig(t.config) } },
+          needsTest(TRIGGER_KEY),
+        );
       },
 
       setTriggerConfig(key, value) {
@@ -436,12 +525,19 @@ export function createEditorStore(init: {
         return commitNew(coreInsertStep(doc, loc, copy), copy, opts);
       },
 
-      setSample(id, output) {
-        const { samples, testState } = get();
+      setSample(id, output, producedBy) {
+        const { samples, testState, sampleTypes, doc } = get();
+        const now = id === TRIGGER_KEY ? doc.trigger.type : findStep(doc, id)?.step.type;
+        const type = producedBy ?? now;
         set(
           setLocal({
             samples: { ...samples, [id]: output },
-            testState: { ...testState, [id]: "tested" },
+            testState: {
+              ...testState,
+              [id]:
+                type !== undefined && now !== undefined && type !== now ? "needs-test" : "tested",
+            },
+            ...(type !== undefined ? { sampleTypes: { ...sampleTypes, [id]: type } } : {}),
           }),
         );
       },
@@ -475,13 +571,17 @@ export function createEditorStore(init: {
       },
 
       replaceDoc(doc) {
-        const { doc: prev, samples, testState } = get();
+        const { doc: prev, samples, testState, sampleTypes } = get();
         history = emptyHistory();
         savedDoc = doc;
         const local =
           doc.id !== prev.id
             ? loadLocal(doc)
-            : { samples: pruneTo(doc, samples), testState: pruneTo(doc, testState) };
+            : {
+                samples: pruneTo(doc, samples),
+                testState: reconcile(doc, pruneTo(doc, testState), sampleTypes),
+                sampleTypes: pruneTo(doc, sampleTypes),
+              };
         set({ ...derived(doc), ...local, selection: null });
       },
     };
