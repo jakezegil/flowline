@@ -52,7 +52,7 @@ export async function testNode<N extends NodeDefinition<any, any>>(
     stepPath: "test",
     attempt: 1,
     idempotencyKey: "test-idempotency-key",
-    services: {},
+    services: {} as FlowkitServices,
     signal: new AbortController().signal,
     clock,
     scope: { trigger: undefined, steps: {}, run: { id: "test-run" } },
