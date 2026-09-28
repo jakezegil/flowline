@@ -122,6 +122,32 @@ describe("useRun", () => {
     expect(unsubscribe).toHaveBeenCalled();
   });
 
+  test("reopens the stream when it ended on a terminal event but the run runs again", async () => {
+    // The client's stream ends by itself after the run's latest event is terminal. A quick retry
+    // means no fetch ever shows the run finished, so only the delivered event tells.
+    const { client, unsubscribe } = fakeClient();
+    let deliver: ((e: RunEvent) => void) | undefined;
+    vi.mocked(client.subscribeRun).mockImplementation((_id, onEvent) => {
+      deliver = onEvent;
+      return unsubscribe;
+    });
+    const { result } = renderHook(() => useRun("r1"), {
+      wrapper: ({ children }) => (
+        <FlowkitClientContext.Provider value={client}>{children}</FlowkitClientContext.Provider>
+      ),
+    });
+    await waitFor(() => expect(result.current.detail).toBeDefined());
+    expect(client.subscribeRun).toHaveBeenCalledTimes(1);
+    vi.useFakeTimers();
+    act(() => deliver?.({ type: "run.failed", seq: 4 } as RunEvent));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(client.getRun).toHaveBeenCalledTimes(2);
+    expect(client.subscribeRun).toHaveBeenCalledTimes(2);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
   test("keeps the last detail and reports errors of a failed refresh", async () => {
     const { client } = fakeClient();
     const { result } = renderHook(() => useRun("r1"), {

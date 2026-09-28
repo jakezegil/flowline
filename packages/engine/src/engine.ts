@@ -6,15 +6,30 @@
 import {
   createRegistry,
   type FlowkitServices,
+  type Issue,
   type Logger,
   type Registry,
+  type RunDetail,
+  type RunEvent,
   type RunEventType,
+  type RunOrigin,
+  type SubflowInfo,
+  type TestStepRequest,
+  type TestStepResponse,
   type TransformRuntime,
+  type WorkflowDoc,
+  type WorkflowVersion,
 } from "@flowkit/core";
 import { builtinPlugin } from "@flowkit/nodes-builtin";
+import { EngineConflictError, EngineNotFoundError } from "./errors";
 import { cancelPatch, createExecutor, TERMINAL } from "./executor";
+import { createHandler } from "./handler";
 import { entryAt } from "./interpreter";
+import { createRunBus } from "./sse";
 import type { NewRunEvent, Run, RunPatch, StorageAdapter } from "./storage";
+import { createTriggers } from "./triggers";
+import { startWorker, type Worker, type WorkerOptions } from "./worker";
+import { createWorkflows } from "./workflows";
 
 /** Options of {@link createEngine}. */
 export interface EngineOptions {
@@ -152,6 +167,115 @@ export interface Engine {
    * longer waits on it.
    */
   retryRun(tenantId: string, runId: string): Promise<string>;
+
+  /**
+   * The HTTP API (see `@flowkit/core`'s `api-types` for the routes) under `basePath`. Mount it on
+   * any `fetch`-style server, e.g. `app.all("/flowkit/*", (c) => engine.handler(c.req.raw))`.
+   * Editor routes require `authorize` (without it every request acts as tenant `"default"`, with a
+   * logged warning); webhooks and callback resumes are authenticated by slug/signature and token.
+   */
+  handler(req: Request): Promise<Response>;
+  /**
+   * Poll for runnable runs in the background: `concurrency` independent loops call
+   * {@link Engine.runOnce}, sleeping `pollMs` (with jitter) when idle; the first loop also calls
+   * {@link Engine.tickSchedules} every `scheduleEveryMs`. `stop()` awaits in-flight work.
+   */
+  startWorker(opts?: WorkerOptions): Worker;
+  /**
+   * Start a run of every published workflow of the tenant whose `event` trigger listens to `event`
+   * (a plugin trigger's `event`, or `config.event` of `core.event`) and whose `filter` accepts the
+   * payload. The payload is validated against each trigger's payload schema first: if it is
+   * invalid for any of them, a {@link FlowkitValidationError} is thrown and no run is created.
+   * With a dedupe key (`opts.dedupeKey`, else the trigger's `dedupeKey()`), at most one run per
+   * workflow and key is ever started. Resolves the IDs of the runs this call started.
+   */
+  emit(
+    event: string,
+    payload: unknown,
+    opts: { tenantId: string; dedupeKey?: string },
+  ): Promise<string[]>;
+  /**
+   * Start a run of the workflow's published version with `input` (default `{}`) as the trigger
+   * payload, validated against the trigger's declared fields or payload schema (a
+   * {@link FlowkitValidationError} when invalid). `startedBy` defaults to `{ kind: "manual" }`. With
+   * `dedupeKey`, repeated calls start one run and all resolve its ID.
+   *
+   * @throws Error if the workflow has no published version in the tenant.
+   */
+  start(opts: {
+    tenantId: string;
+    workflowId: string;
+    input?: unknown;
+    dedupeKey?: string;
+    startedBy?: RunOrigin;
+  }): Promise<string>;
+  /**
+   * Start the due run of every published schedule workflow (all tenants): the latest cron fire
+   * time at or before now, in the trigger's time zone, unless it is before the workflow was
+   * published. Each fire time starts at most one run, even with many engines ticking concurrently.
+   * No catch-up: after downtime only the latest missed fire runs. Resolves the number of runs
+   * started.
+   */
+  tickSchedules(): Promise<number>;
+  /**
+   * Save `doc` as the workflow's next version and audit it (`saved`). A webhook-triggered doc
+   * without a slug (`trigger.config.slug`) keeps the previous version's slug, or gets a new random
+   * one: its URL is `<basePath>/hooks/<tenantId>/<workflowId>/<slug>`.
+   *
+   * @throws {@link FlowkitValidationError} if `doc` is not a structurally valid document.
+   */
+  saveWorkflow(tenantId: string, doc: WorkflowDoc, actor: string): Promise<WorkflowVersion>;
+  /**
+   * Publish a saved version (after validating it) and audit it (`published`).
+   *
+   * @throws {@link FlowkitValidationError} with the issues if the version has errors.
+   * @throws Error if the version does not exist.
+   */
+  publish(tenantId: string, workflowId: string, version: number, actor: string): Promise<void>;
+  /** Validate `doc` against the registry and the tenant's published sub-flows. */
+  validate(tenantId: string, doc: WorkflowDoc): Promise<Issue[]>;
+  /** The tenant's published workflows callable as sub-flows, by ID. */
+  listSubflows(tenantId: string): Promise<SubflowInfo[]>;
+  /**
+   * A run with its events and pinned doc, as shown in the run viewer: without lease or callback
+   * state, and with `sensitive` step input/output values masked. `null` if not found.
+   */
+  getRunDetail(tenantId: string, runId: string): Promise<RunDetail | null>;
+  /**
+   * Run one step against sample data, without creating a run or journaling anything: config is
+   * resolved against `samples` (by step ID) and `triggerSample`, and control-flow signals
+   * (suspend, including callbacks, stop, sub-flow) are reported instead of executed.
+   *
+   * `secret` input and output fields are masked, as in the journal. `sensitive` fields are shown:
+   * the response goes only to an editor of the tenant and is not stored.
+   */
+  testStep(tenantId: string, req: TestStepRequest): Promise<TestStepResponse>;
+  /**
+   * Listen to a run's events as this engine commits them (other processes' commits are not
+   * seen; the HTTP stream also polls storage for those). Events arrive in `seq` order, each once;
+   * the first commit after subscribing also delivers the run's earlier events. Returns the
+   * unsubscribe function.
+   */
+  subscribe(runId: string, fn: (e: RunEvent) => void): () => void;
+}
+
+/** @internal What the engine's modules (triggers, workflows, handler) share. */
+export interface EngineCore {
+  /** Engine options, with the effective registry. */
+  opts: EngineOptions;
+  registry: Registry;
+  storage: StorageAdapter;
+  clock: () => number;
+  logger?: Logger;
+  /** A run event (redacted with `opts.redact`). */
+  event(
+    run: Pick<Run, "id" | "tenantId">,
+    type: RunEventType,
+    stepPath: string | undefined,
+    data?: unknown,
+  ): NewRunEvent;
+  /** Report persisted events to `onEvent` and the run bus. */
+  publish(events: NewRunEvent[]): void;
 }
 
 /** The host registry with the built-in `core` plugin in front, unless disabled or already there. */
@@ -172,20 +296,31 @@ function withBuiltins({ registry, builtins = true }: EngineOptions): Registry {
  * ```
  */
 export function createEngine(options: EngineOptions): Engine {
-  const opts: EngineOptions = { ...options, registry: withBuiltins(options) };
+  const bus = createRunBus(options.storage, options.logger);
+  const opts: EngineOptions = {
+    ...options,
+    registry: withBuiltins(options),
+    // Every persisted event feeds the run bus, then the host's listener.
+    onEvent: (e) => {
+      bus.notify(e);
+      options.onEvent?.(e);
+    },
+  };
   const executor = createExecutor(opts);
   const defaultWorkerId = `worker-${globalThis.crypto.randomUUID().slice(0, 8)}`;
 
-  const runOnce = async (workerId: string = defaultWorkerId): Promise<boolean> => {
+  /** Claim and advance one run; `stop` (a stopping worker) aborts its in-flight `afterCommit`. */
+  const claimOnce = async (workerId: string, stop?: AbortSignal): Promise<boolean> => {
     const lease = await opts.storage.claimRun({
       workerId,
       leaseMs: executor.leaseMs,
       now: executor.clock(),
     });
     if (!lease) return false;
-    await executor.executeClaim(lease, workerId);
+    await executor.executeClaim(lease, workerId, stop);
     return true;
   };
+  const runOnce = (workerId: string = defaultWorkerId) => claimOnce(workerId);
 
   const storage = opts.storage;
   const clock = executor.clock;
@@ -230,7 +365,19 @@ export function createEngine(options: EngineOptions): Engine {
     return "resumed" as const;
   };
 
-  return {
+  const core: EngineCore = {
+    opts,
+    registry: opts.registry,
+    storage,
+    clock,
+    ...(opts.logger ? { logger: opts.logger } : {}),
+    event: runEvent,
+    publish: executor.publish,
+  };
+  const triggers = createTriggers(core);
+  const workflows = createWorkflows(core);
+
+  const engine: Omit<Engine, "handler"> = {
     registry: opts.registry,
     storage,
     runOnce,
@@ -283,7 +430,7 @@ export function createEngine(options: EngineOptions): Engine {
 
     async retryRun(tenantId, runId) {
       const run = await storage.getRun(tenantId, runId);
-      if (!run) throw new Error(`Run "${runId}" not found`);
+      if (!run) throw new EngineNotFoundError(`Run "${runId}" not found`);
       const failedPath = run.error?.stepPath;
       const patch: RunPatch = {
         status: "queued",
@@ -296,7 +443,7 @@ export function createEngine(options: EngineOptions): Engine {
         cancelRequestedAt: null,
       };
       if (run.status === "failed" && run.parent && !(await parentWaitsOn(run))) {
-        throw new Error(
+        throw new EngineConflictError(
           `Run "${runId}" is a sub-flow whose parent run "${run.parent.runId}" no longer waits on it; retry the parent instead`,
         );
       }
@@ -314,9 +461,32 @@ export function createEngine(options: EngineOptions): Engine {
           events,
           clock(),
         ));
-      if (!ok) throw new Error(`Run "${runId}" is not failed`);
+      if (!ok) throw new EngineConflictError(`Run "${runId}" is not failed`);
       executor.publish(events);
       return runId;
     },
+
+    startWorker: (workerOpts) =>
+      startWorker(
+        {
+          runOnce: claimOnce,
+          tickSchedules: () => triggers.tickSchedules(),
+          defaultWorkerId,
+          ...(opts.logger ? { logger: opts.logger } : {}),
+        },
+        workerOpts,
+      ),
+    emit: triggers.emit,
+    start: triggers.start,
+    tickSchedules: triggers.tickSchedules,
+    saveWorkflow: workflows.saveWorkflow,
+    publish: workflows.publish,
+    validate: workflows.validate,
+    listSubflows: workflows.listSubflows,
+    getRunDetail: workflows.getRunDetail,
+    testStep: workflows.testStep,
+    subscribe: bus.subscribe,
   };
+  const handler = createHandler({ core, engine, triggers });
+  return { ...engine, handler };
 }

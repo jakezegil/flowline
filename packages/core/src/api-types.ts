@@ -13,15 +13,29 @@
  * - `POST /workflows/:id/run` body {@link RunWorkflowRequest} → {@link RunStartedResponse}
  * - `GET  /runs?workflowId&status&limit` → {@link RunSummary}[]
  * - `GET  /runs/:id` → {@link RunDetail}
- * - `POST /runs/:id/retry` → {@link RunStartedResponse}
- * - `POST /runs/:id/cancel` → 2xx
- * - `POST /runs/:id/resume` body = callback body → 2xx (410 when no longer waiting)
+ * - `POST /runs/:id/retry` → {@link RunStartedResponse} (409 when the run is not failed)
+ * - `POST /runs/:id/cancel` → 200 cancelled, 202 cancellation requested, 409 `{ error: "finished" }`
+ * - `POST /runs/:id/resume` body = callback body → 202 (410 `{ error: "gone" }` when not waiting)
  * - `GET  /runs/:id/stream?after=<seq>` → `text/event-stream` of `event: run`, `id: <seq>`,
- *   `data: <RunEvent JSON>` frames
+ *   `data: <RunEvent JSON>` frames; ends once the run's latest event is
+ *   `run.completed|failed|cancelled|stopped` (a retried run's earlier `run.failed` does not end it)
  * - `GET  /secrets` → `string[]` (secret names only)
  * - `GET  /subflows` → {@link SubflowInfo}[]
  *
- * Error responses are JSON {@link ApiErrorBody}.
+ * Public routes (no `authorize`):
+ * - `POST /hooks/:tenantId/:workflowId/:slug` body = JSON → 202 {@link RunStartedResponse}
+ *   (200 `{ runId, deduped: true }` for a repeated dedupe header or trigger `dedupeKey`; 200
+ *   `{ skipped: true }` when the trigger's `filter` returns `false`; 404 for an unknown slug, 401
+ *   for a bad `X-Flowkit-Signature`, 400 `{ issues }` for a body not matching the declared
+ *   fields). The signature has no timestamp, so a captured delivery can be replayed: set a
+ *   dedupe header (e.g. the sender's delivery id) alongside a signing secret.
+ * - `POST /resume/:token` body = callback body → 202 (410 `{ error: "gone" }`)
+ *
+ * Editor requests other than `GET` must send `Content-Type: application/json`, bodyless ones
+ * (cancel, retry) too; anything else, including no `Content-Type`, is refused with 415 (so a
+ * cross-site form or no-cors fetch cannot reach them).
+ * Validation failures of run input are 400 `{ error, issues }`. Error responses are JSON
+ * {@link ApiErrorBody}.
  *
  * @module
  */

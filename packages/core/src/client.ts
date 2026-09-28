@@ -61,8 +61,10 @@ export interface FlowkitClient {
   /**
    * Stream a run's events from `GET /runs/:id/stream`. Uses `fetch` (so `headers()` auth works),
    * reconnects with `?after=<lastSeq>` and exponential backoff (500ms doubling to 10s), delivers
-   * each `seq` at most once and in order, and stops after `run.completed`, `run.failed` or
-   * `run.cancelled`, or on a non-retryable 4xx response. Falls back to polling `getRun` every 2s
+   * each `seq` at most once and in order, and stops once the run's latest event is
+   * `run.completed`, `run.failed`, `run.cancelled` or `run.stopped` (the server closes the stream
+   * right after it; a retried run's earlier `run.failed` does not stop it), or on a
+   * non-retryable 4xx response. Falls back to polling `getRun` every 2s
    * when the runtime cannot stream response bodies.
    *
    * @returns A function that unsubscribes and closes the stream.
@@ -107,6 +109,7 @@ const TERMINAL_EVENTS: ReadonlySet<string> = new Set([
   "run.completed",
   "run.failed",
   "run.cancelled",
+  "run.stopped",
 ]);
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
 const BACKOFF_INITIAL_MS = 500;
@@ -229,10 +232,9 @@ export function createClient(opts: ClientOptions): FlowkitClient {
       ...(await extraHeaders()),
     };
     const init: RequestInit = { method, headers };
-    if (body !== undefined && body.value !== undefined) {
-      headers["content-type"] = "application/json";
-      init.body = JSON.stringify(body.value);
-    }
+    // Declared on every mutation, bodyless ones too: the handler refuses anything else (CSRF).
+    if (method !== "GET") headers["content-type"] = "application/json";
+    if (body !== undefined && body.value !== undefined) init.body = JSON.stringify(body.value);
     if (signal) init.signal = signal;
     const res = await doFetch(base + path, init);
     const parsed = await readBody(res);
@@ -280,10 +282,18 @@ export function createClient(opts: ClientOptions): FlowkitClient {
     const { signal } = ac;
     let lastSeq: number | undefined;
 
-    /** Delivers `e` unless already seen; returns whether it ends the subscription. */
-    function deliver(e: RunEvent): boolean {
-      if (lastSeq !== undefined && e.seq <= lastSeq) return false;
+    /**
+     * Whether the last delivered event is terminal. A terminal event ends the subscription only
+     * when nothing follows it: a retried run continues after its old `run.failed`, so the stream
+     * is read on until the server closes it.
+     */
+    let atTerminal = false;
+
+    /** Delivers `e` unless already seen. */
+    function deliver(e: RunEvent): void {
+      if (lastSeq !== undefined && e.seq <= lastSeq) return;
       lastSeq = e.seq;
+      atTerminal = TERMINAL_EVENTS.has(e.type);
       try {
         onEvent(e);
       } catch (err) {
@@ -292,7 +302,6 @@ export function createClient(opts: ClientOptions): FlowkitClient {
           throw err;
         });
       }
-      return TERMINAL_EVENTS.has(e.type);
     }
 
     async function poll(): Promise<void> {
@@ -300,7 +309,10 @@ export function createClient(opts: ClientOptions): FlowkitClient {
         try {
           const detail = await request<RunDetail>("GET", `/runs/${enc(id)}`, undefined, signal);
           const events = [...detail.events].sort((a, b) => a.seq - b.seq);
-          for (const e of events) if (deliver(e)) return;
+          for (const e of events) deliver(e);
+          // A snapshot is the whole log: done when its latest event is terminal.
+          const last = events[events.length - 1];
+          if (last && TERMINAL_EVENTS.has(last.type)) return;
           if (detail.run.status !== undefined && TERMINAL_STATUSES.has(detail.run.status)) return;
         } catch (err) {
           if (err instanceof FlowkitHttpError && !isRetryableStatus(err.status)) return;
@@ -309,7 +321,10 @@ export function createClient(opts: ClientOptions): FlowkitClient {
       }
     }
 
-    /** Reads one stream to its end; returns whether a terminal event was received. */
+    /**
+     * Reads one stream to its end; returns whether it ended right after a terminal event (the
+     * server closes the stream once the run's latest event is terminal).
+     */
     async function readStream(body: ReadableStream<Uint8Array>, onMessage: () => void) {
       const reader = body.getReader();
       const decoder = new TextDecoder();
@@ -317,7 +332,7 @@ export function createClient(opts: ClientOptions): FlowkitClient {
       try {
         for (;;) {
           const { done, value } = await reader.read();
-          if (done) return false;
+          if (done) return atTerminal;
           for (const msg of parser.push(decoder.decode(value, { stream: true }))) {
             if (msg.event !== "run") continue;
             let e: RunEvent;
@@ -327,7 +342,7 @@ export function createClient(opts: ClientOptions): FlowkitClient {
               continue;
             }
             onMessage();
-            if (deliver(e)) return true;
+            deliver(e);
           }
         }
       } finally {

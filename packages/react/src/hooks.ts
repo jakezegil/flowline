@@ -210,11 +210,19 @@ export function useIssues(): {
 const RUN_REFETCH_DEBOUNCE_MS = 150;
 
 const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
+/** Events after which the client's run stream may end by itself. */
+const TERMINAL_RUN_EVENTS: ReadonlySet<string> = new Set([
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "run.stopped",
+]);
 
 /**
  * Loads a run with `client.getRun` and keeps it fresh: refetches (debounced 150ms) whenever
  * `client.subscribeRun` delivers an event, until the stream ends or a fetch shows the run
- * finished (completed, failed or cancelled). `loading` is true until the
+ * finished (completed, failed or cancelled). A later fetch (e.g. `refresh()` after a retry,
+ * which reuses the run id) that shows the run running again subscribes again. `loading` is true until the
  * first response for this `runId`; a failed refetch sets `error` and keeps the last `detail`.
  * Requires a {@link FlowkitClientContext} (provided by `<FlowkitProvider>`).
  */
@@ -235,15 +243,33 @@ export function useRun(runId: string): {
     let active = true;
     let latest = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let unsubscribe = () => {};
+    let unsubscribe: (() => void) | undefined;
+    /** The stream's last event was terminal, so the client may have ended it by itself. */
+    let mayHaveEnded = false;
+    const listen = () => {
+      // A quick retry can show the run running again before any fetch showed it finished.
+      if (mayHaveEnded) stopListening();
+      unsubscribe ??= client.subscribeRun(runId, (e) => {
+        mayHaveEnded = TERMINAL_RUN_EVENTS.has(e.type);
+        clearTimeout(timer);
+        timer = setTimeout(load, RUN_REFETCH_DEBOUNCE_MS);
+      });
+    };
+    const stopListening = () => {
+      unsubscribe?.();
+      unsubscribe = undefined;
+      mayHaveEnded = false;
+    };
     const load = () => {
       const request = ++latest;
       client.getRun(runId).then(
         (detail) => {
           if (!active || request !== latest) return;
           setState({ runId, detail });
-          // A finished run doesn't change anymore: stop listening.
-          if (TERMINAL_RUN_STATUSES.has(detail.run.status)) unsubscribe();
+          // A finished run doesn't change until it is retried (same run id): stop listening,
+          // and listen again once a refresh shows it running.
+          if (TERMINAL_RUN_STATUSES.has(detail.run.status)) stopListening();
+          else listen();
         },
         (err: unknown) => {
           if (!active || request !== latest) return;
@@ -254,14 +280,11 @@ export function useRun(runId: string): {
     };
     loadRef.current = load;
     load();
-    unsubscribe = client.subscribeRun(runId, () => {
-      clearTimeout(timer);
-      timer = setTimeout(load, RUN_REFETCH_DEBOUNCE_MS);
-    });
+    listen();
     return () => {
       active = false;
       clearTimeout(timer);
-      unsubscribe();
+      stopListening();
     };
   }, [client, runId]);
 

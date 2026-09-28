@@ -180,7 +180,8 @@ describe("createClient requests", () => {
       expect(calls[0]!.method).toBe(tc.method);
       expect(calls[0]!.url).toBe(`https://api.test/flowkit${tc.path}`);
       expect(calls[0]!.body).toEqual(tc.body);
-      if (tc.body !== undefined) expect(calls[0]!.headers["content-type"]).toBe("application/json");
+      // Every non-GET request declares JSON, bodyless ones too: the server refuses others (CSRF).
+      if (tc.method !== "GET") expect(calls[0]!.headers["content-type"]).toBe("application/json");
       if ("expected" in tc) expect(result).toEqual(tc.expected);
     });
   }
@@ -295,6 +296,48 @@ describe("subscribeRun", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.headers.authorization).toBe("Bearer t");
     expect(calls[0]!.headers.accept).toBe("text/event-stream");
+  });
+
+  test("keeps reading past a terminal event the run was retried past", async () => {
+    const events = [
+      event(1, "run.started"),
+      event(2, "run.failed"),
+      event(3, "run.resumed"),
+      event(4, "run.completed"),
+    ];
+    const { fetch, calls } = stubFetch(() => sseResponse(events.map(frame)));
+    const client = createClient({ baseUrl: "https://api.test", fetch });
+    const received: RunEvent[] = [];
+    client.subscribeRun("r1", (e) => received.push(e));
+    await vi.waitFor(() => expect(received).toEqual(events));
+    await new Promise((r) => setTimeout(r, 700));
+    expect(calls).toHaveLength(1);
+  });
+
+  test("reconnects when the stream ends right after a non-terminal event", async () => {
+    const e1 = event(1, "run.started");
+    const e2 = event(2, "run.completed");
+    let n = 0;
+    const { fetch, calls } = stubFetch(() => sseResponse(n++ === 0 ? [frame(e1)] : [frame(e2)]));
+    const client = createClient({ baseUrl: "https://api.test", fetch });
+    const received: RunEvent[] = [];
+    client.subscribeRun("r1", (e) => received.push(e));
+    await vi.waitFor(() => expect(received).toEqual([e1, e2]), { timeout: 3_000 });
+    expect(calls[1]?.url).toBe("https://api.test/runs/r1/stream?after=1");
+  });
+
+  test("treats run.stopped as terminal and does not reconnect", async () => {
+    const e1 = event(1, "run.started");
+    const e2 = event(2, "run.stopped");
+    // The server closes the stream after the terminal event.
+    const { fetch, calls } = stubFetch(() => sseResponse([frame(e1), frame(e2)]));
+    const client = createClient({ baseUrl: "https://api.test", fetch });
+    const received: RunEvent[] = [];
+    client.subscribeRun("r1", (e) => received.push(e));
+    await vi.waitFor(() => expect(received).toEqual([e1, e2]));
+    // Past the first reconnect backoff (500 ms).
+    await new Promise((r) => setTimeout(r, 700));
+    expect(calls).toHaveLength(1);
   });
 
   test("handles CRLF split exactly between CR and LF, and ignores non-run events", async () => {
