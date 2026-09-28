@@ -115,50 +115,55 @@ export function EditorHeader({
   const cb = useRef(callbacks);
   cb.current = callbacks;
 
-  /** Saves the current doc. Returns the new version, or `null` if the save failed. */
-  const save = async (quiet = false): Promise<number | null> => {
+  /**
+   * Saves the current doc. Returns the new version, or `null` if the save failed. `inPublish`
+   * saves as the first half of Publish: silently, leaving the "publish" busy state in place.
+   */
+  const save = async (inPublish = false): Promise<number | null> => {
     const doc = store.getState().doc;
-    setBusy("save");
+    if (!inPublish) setBusy("save");
     try {
       const v = await client.saveWorkflow(doc);
       store.getState().markSaved(v.version, doc);
       cb.current.onSaved?.(v.version);
-      if (!quiet) toast({ message: labels.saved(v.version), tone: "success" });
+      if (!inPublish) toast({ message: labels.saved(v.version), tone: "success" });
       return v.version;
     } catch (err) {
       toast({ message: labels.saveFailed(errorText(err)), tone: "danger" });
       return null;
     } finally {
-      setBusy(null);
+      if (!inPublish) setBusy(null);
     }
   };
 
+  /** Selects the first step of `issues` that is in the doc, else of the client-side issues. */
   const showFirstIssue = (issues: Issue[]) => {
-    const { doc, select } = store.getState();
-    const first = issueTargets(doc, issues)[0];
+    const { doc, select, issues: local } = store.getState();
+    const first = issueTargets(doc, issues)[0] ?? issueTargets(doc, local)[0];
     if (first) select(first.key);
   };
 
   const publish = async () => {
     if (busyRef.current || errors > 0) return;
     const state = store.getState();
-    let version = state.savedVersion;
-    if (state.dirty || version === null) version = await save(true);
-    if (version === null) return;
+    // One busy state across save + publish, so the buttons don't re-enable in between.
     setBusy("publish");
     try {
+      let version = state.savedVersion;
+      if (state.dirty || version === null) version = await save(true);
+      if (version === null) return;
       await client.publish(state.doc.id, version);
       store.getState().markPublished(version);
       cb.current.onPublish?.(version);
       toast({ message: labels.published(version), tone: "success" });
     } catch (err) {
       if (httpStatus(err) === 422) {
-        const body = (err as { body?: { issues?: unknown[] } }).body;
-        const count = Array.isArray(body?.issues) ? body.issues.length : 0;
+        const body = (err as { body?: { issues?: unknown } }).body;
+        const server = Array.isArray(body?.issues) ? (body.issues as Issue[]) : [];
         toast({
-          message: labels.publishRejected(count),
+          message: labels.publishRejected(server.length),
           tone: "danger",
-          action: { label: labels.showIssues, run: () => showFirstIssue(store.getState().issues) },
+          action: { label: labels.showIssues, run: () => showFirstIssue(server) },
         });
       } else {
         toast({ message: labels.publishFailed(errorText(err)), tone: "danger" });

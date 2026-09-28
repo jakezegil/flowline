@@ -43,10 +43,15 @@ function useRunList(workflowId: string | undefined, status: RunStatus | undefine
     };
     loadRef.current = load;
     load();
-    const timer = pollMs > 0 ? setInterval(load, pollMs) : undefined;
+    // Polls skip while the page is hidden; coming back reloads at once.
+    const hidden = () => typeof document !== "undefined" && document.hidden;
+    const timer = pollMs > 0 ? setInterval(() => !hidden() && load(), pollMs) : undefined;
+    const onVisible = () => !hidden() && load();
+    if (pollMs > 0) document.addEventListener("visibilitychange", onVisible);
     return () => {
       active = false;
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [client, workflowId, status, pollMs, key]);
   const retry = useCallback(() => {

@@ -28,6 +28,8 @@
 
     /* Glyphs on the solid status colors (badge check, ×, !). Not a theme token; override in CSS. */
     --fk-on-status: #ffffff;
+    /* Text on a solid danger button (Cancel run's confirm). Dark mode flips it like accent-fg. */
+    --fk-danger-fg: #ffffff;
 
     --fk-shadow-rgb: 17 17 26;
     --fk-shadow-strength: 1;
@@ -42,7 +44,8 @@
 
   .fk-root[data-fk-theme="dark"] {
     --fk-accent: #8587f5;
-    --fk-accent-fg: #ffffff;
+    --fk-accent-fg: #0e0e11;
+    --fk-danger-fg: #0e0e11;
     --fk-bg: #121215;
     --fk-canvas-bg: #0e0e11;
     --fk-surface: #19191d;
@@ -61,7 +64,8 @@
   @media (prefers-color-scheme: dark) {
     .fk-root[data-fk-theme="system"] {
       --fk-accent: #8587f5;
-      --fk-accent-fg: #ffffff;
+      --fk-accent-fg: #0e0e11;
+      --fk-danger-fg: #0e0e11;
       --fk-bg: #121215;
       --fk-canvas-bg: #0e0e11;
       --fk-surface: #19191d;
@@ -85,6 +89,7 @@
     --fk-border-strong: color-mix(in srgb, var(--fk-text) 16%, var(--fk-surface));
     --fk-accent-soft: color-mix(in srgb, var(--fk-accent) 12%, var(--fk-surface));
     --fk-accent-text: color-mix(in srgb, var(--fk-accent) 82%, var(--fk-text));
+    --fk-danger-text: color-mix(in srgb, var(--fk-danger) 85%, var(--fk-text));
     --fk-ring: color-mix(in srgb, var(--fk-accent) 28%, transparent);
     --fk-edge: color-mix(in srgb, var(--fk-text) 24%, var(--fk-canvas-bg));
     --fk-dot: color-mix(in srgb, var(--fk-text) 13%, var(--fk-canvas-bg));
@@ -194,9 +199,15 @@
     border-style: dashed;
     border-color: color-mix(in srgb, var(--fk-danger) 55%, var(--fk-border));
   }
-  .fk-card[data-run="skipped"],
-  .fk-card[data-run="pending"] {
+  .fk-card[data-run="skipped"] {
     opacity: 0.5;
+  }
+  /* Not run yet: still on the path, so it stays legible; the dashed outline says "later". */
+  .fk-card[data-run="pending"] {
+    opacity: 0.8;
+    border-style: dashed;
+    border-color: var(--fk-border-strong);
+    box-shadow: none;
   }
   .fk-card[data-run="failed"] {
     border-color: color-mix(in srgb, var(--fk-danger) 60%, var(--fk-border));
@@ -482,6 +493,7 @@
   }
   .fk-iter button {
     display: grid;
+    position: relative;
     place-items: center;
     width: 18px;
     height: 18px;
@@ -490,6 +502,12 @@
     border: 0;
     border-radius: 4px;
     cursor: pointer;
+  }
+  /* A 26px hit area around the 18px glyph (24px+ at the run view's zoom of 1). */
+  .fk-iter button::after {
+    position: absolute;
+    inset: -4px;
+    content: "";
   }
   .fk-iter button:hover:not(:disabled) {
     background: var(--fk-subtle-strong);
@@ -706,7 +724,8 @@
     height: 0;
   }
   .fk-picker,
-  .fk-menu {
+  .fk-menu,
+  .fk-confirm {
     z-index: 50;
     font-family: var(--fk-font);
     color: var(--fk-text);
@@ -727,6 +746,29 @@
       opacity: 0;
       transform: scale(0.97);
     }
+  }
+
+  /* A small confirm for a destructive command (Cancel run). */
+  .fk-confirm {
+    width: min(280px, calc(100vw - 24px));
+    padding: 12px;
+    border-radius: 10px;
+  }
+  .fk-confirm__title {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .fk-confirm__body {
+    margin: 4px 0 12px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--fk-text-muted);
+  }
+  .fk-confirm__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
   }
 
   .fk-picker {
@@ -1069,6 +1111,24 @@
   }
   .fk-btn--primary:active {
     background: color-mix(in srgb, var(--fk-accent) 80%, var(--fk-text));
+  }
+  /* Secondary button for a destructive command: neutral chrome, danger text. */
+  .fk-btn--danger {
+    color: var(--fk-danger-text);
+  }
+  .fk-btn--danger:hover {
+    background: color-mix(in srgb, var(--fk-danger) 7%, var(--fk-surface));
+    border-color: color-mix(in srgb, var(--fk-danger) 40%, var(--fk-border));
+  }
+  /* The solid confirm of a destructive command. */
+  .fk-btn--danger-solid {
+    color: var(--fk-danger-fg);
+    background: color-mix(in srgb, var(--fk-danger) 88%, var(--fk-text));
+    border-color: transparent;
+  }
+  .fk-btn--danger-solid:hover {
+    background: color-mix(in srgb, var(--fk-danger) 78%, var(--fk-text));
+    border-color: transparent;
   }
   .fk-btn--run svg {
     color: var(--fk-success);
@@ -1623,18 +1683,18 @@
     font-size: 12px;
     color: var(--fk-text-muted);
   }
-  .fk-run-meta > div {
+  .fk-run-meta > span {
     display: flex;
     min-width: 0;
   }
-  .fk-run-meta > div + div::before {
+  .fk-run-meta > span + span::before {
     content: "";
     width: 1px;
     height: 12px;
     margin: auto 10px;
     background: var(--fk-border-strong);
   }
-  .fk-run-meta dd {
+  .fk-run-meta > span > span {
     margin: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2233,6 +2293,7 @@
   /* dimmed (untaken branch) cards */
   .fk-card[data-dimmed] {
     opacity: 0.35;
+    border-style: solid;
   }
 
   /* ---------------------------------------------------------------- narrow containers */
@@ -2283,11 +2344,18 @@
       flex-basis: 100%;
       white-space: normal;
     }
+    /* The inspector sheet already shows this step's status; don't spend canvas height on it. */
+    .fk-banner[data-redundant] {
+      display: none;
+    }
   }
   @container fk-app (max-width: 480px) {
+    /* The toolbar gets its own full row: undo/redo on the left, the commands on the right. */
     .fk-header__actions {
-      flex: 1 1 auto;
-      justify-content: flex-end;
+      flex: 1 1 100%;
+    }
+    .fk-header__actions > .fk-segment {
+      margin-right: auto;
     }
     .fk-header--run .fk-header__actions .fk-btn {
       flex: 1 1 auto;

@@ -1,7 +1,18 @@
 import type { Manifest, RunDetail } from "@flowkit/core";
+import * as Popover from "@radix-ui/react-popover";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { CircleAlert, Hourglass, LoaderCircle, RotateCcw } from "lucide-react";
-import { type JSX, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type JSX,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { PortalContainerContext, type RunOverlay } from "../canvas/canvas-context";
 import { stepDisplayName } from "../canvas/step-card";
 import { WorkflowCanvas } from "../canvas/workflow-canvas";
@@ -15,12 +26,16 @@ import { type ResolvedRun, resolveRun } from "./run-overlay";
 import { displayState, isTerminal, RunStateChip } from "./run-status";
 import { StepInspector } from "./step-inspector";
 
-/** Loads the manifest once per client. */
-function useManifest(): { manifest?: Manifest; error?: string } {
+/** Loads the manifest once per client; `retry` loads it again after a failure. */
+function useManifest(): { manifest?: Manifest; error?: string; retry(): void } {
   const { client } = useFlowkit();
   const [state, setState] = useState<{ manifest?: Manifest; error?: string }>({});
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` re-runs the load.
   useEffect(() => {
     let active = true;
+    setState((s) => (s.error ? {} : s));
     client.getManifest().then(
       (manifest) => active && setState({ manifest }),
       (err: unknown) => active && setState({ error: errorText(err) }),
@@ -28,8 +43,8 @@ function useManifest(): { manifest?: Manifest; error?: string } {
     return () => {
       active = false;
     };
-  }, [client]);
-  return state;
+  }, [client, attempt]);
+  return { ...state, retry };
 }
 
 /** The callback-waiting step of a run, if the run is waiting on one. */
@@ -55,6 +70,9 @@ function ResumeDialog({
   const [text, setText] = useState("{}");
   const [invalid, setInvalid] = useState(false);
   const [busy, setBusy] = useState(false);
+  const id = useId();
+  const bodyId = `${id}-body`;
+  const errId = `${id}-err`;
   const submit = async () => {
     let body: unknown;
     try {
@@ -89,21 +107,21 @@ function ResumeDialog({
       }
     >
       <div className="fk-field">
-        <label className="fk-field__label" htmlFor="fk-resume-body">
+        <label className="fk-field__label" htmlFor={bodyId}>
           {labels.callbackBody}
         </label>
         <textarea
-          id="fk-resume-body"
+          id={bodyId}
           className="fk-input fk-input--mono"
           rows={6}
           spellCheck={false}
           value={text}
           aria-invalid={invalid || undefined}
-          aria-describedby={invalid ? "fk-resume-err" : undefined}
+          aria-describedby={invalid ? errId : undefined}
           onChange={(e) => setText(e.target.value)}
         />
         {invalid && (
-          <div id="fk-resume-err" className="fk-field__error">
+          <div id={errId} className="fk-field__error">
             {labels.invalidJson}
           </div>
         )}
@@ -149,12 +167,13 @@ function RunBody({
     [resolved],
   );
 
-  // Open the step that needs attention (failed, or waiting) once per run.
+  // Open the step that needs attention (failed, or waiting) once per run: as soon as there is
+  // one, even if the run only fails after it was opened, unless the user picked a step already.
   const focused = useRef<string | null>(null);
   useEffect(() => {
-    if (focused.current === runId) return;
+    if (focused.current === runId || !resolved.focusStepId) return;
     focused.current = runId;
-    if (resolved.focusStepId) store.getState().select(resolved.focusStepId);
+    if (store.getState().selection === null) store.getState().select(resolved.focusStepId);
   }, [runId, resolved.focusStepId, store]);
 
   const [busy, setBusy] = useState<"retry" | "cancel" | null>(null);
@@ -225,6 +244,7 @@ function RunBody({
   const pending = waitingPath ? detail.run.journal[waitingPath] : undefined;
   const expiresAt = pending?.status === "suspended" ? pending.pending?.expiresAt : undefined;
 
+  const selection = useStoreSelection(store);
   const duration = (terminal ? run.updatedAt : now) - run.createdAt;
   const canCancel = !terminal && !cancelling;
 
@@ -238,37 +258,26 @@ function RunBody({
             <span className="fk-version">{labels.version(run.version)}</span>
           </h1>
         </div>
-        <dl className="fk-run-meta">
-          <div>
-            <dt className="fk-sr-only">{labels.started("")}</dt>
-            <dd title={labels.dateTime(run.createdAt)}>
+        <p className="fk-run-meta">
+          <span>
+            <span title={labels.dateTime(run.createdAt)}>
               {labels.started(labels.relativeTime(run.createdAt - now))}
-            </dd>
-          </div>
-          <div>
-            <dd className="fk-tabular">{labels.duration(Math.max(0, duration))}</dd>
-          </div>
-          <div>
-            <dd>{labels.origin(run.startedBy)}</dd>
-          </div>
-        </dl>
+            </span>
+          </span>
+          <span>
+            <span className="fk-tabular">{labels.duration(Math.max(0, duration))}</span>
+          </span>
+          <span>
+            <span>{labels.origin(run.startedBy)}</span>
+          </span>
+        </p>
         <div className="fk-header__actions">
-          {canCancel && (
-            <button
-              type="button"
-              className="fk-btn"
-              aria-disabled={busy !== null || undefined}
-              onClick={() => busy === null && void cancel()}
-            >
-              {busy === "cancel" && <LoaderCircle size={14} className="fk-spin" aria-hidden />}
-              {labels.cancelRun}
-            </button>
-          )}
           {waitingPath && !cancelling && (
             <button type="button" className="fk-btn" onClick={() => setResumeOpen(true)}>
               {labels.resume}
             </button>
           )}
+          {canCancel && <CancelButton busy={busy} onConfirm={() => void cancel()} />}
           {run.status === "failed" && (
             <button
               type="button"
@@ -303,6 +312,8 @@ function RunBody({
       )}
       {waitingStep && !cancelling && (
         <Banner
+          // On narrow screens the inspector already says this while it shows the waiting step.
+          redundant={selection === waitingStep}
           tone="warning"
           icon={<Hourglass size={16} aria-hidden />}
           title={nameOf(waitingStep)}
@@ -341,13 +352,80 @@ function loopOf(resolved: ResolvedRun, stepId: string): string | undefined {
   return m?.[1];
 }
 
+/** The selection of `store` (RunBody renders above its own EditorContext provider). */
+function useStoreSelection(store: EditorStore): string | null {
+  const [selection, setSelection] = useState(store.getState().selection);
+  useEffect(() => {
+    setSelection(store.getState().selection);
+    return store.subscribe((s) => setSelection(s.selection));
+  }, [store]);
+  return selection;
+}
+
+/** Cancel run, behind a small confirm: cancelling a live run can't be undone. */
+function CancelButton({ busy, onConfirm }: { busy: string | null; onConfirm(): void }) {
+  const { labels } = useFlowkitAppearance();
+  const container = useContext(PortalContainerContext);
+  const [open, setOpen] = useState(false);
+  const titleId = useId();
+  return (
+    <Popover.Root open={open} onOpenChange={(next) => setOpen(next && busy === null)}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className="fk-btn fk-btn--danger"
+          aria-disabled={busy !== null || undefined}
+        >
+          {busy === "cancel" && <LoaderCircle size={14} className="fk-spin" aria-hidden />}
+          {labels.cancelRun}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal container={container}>
+        <Popover.Content
+          className="fk-confirm"
+          side="bottom"
+          align="end"
+          sideOffset={6}
+          collisionPadding={12}
+          aria-labelledby={titleId}
+        >
+          <p id={titleId} className="fk-confirm__title">
+            {labels.cancelRunConfirm}
+          </p>
+          <p className="fk-confirm__body">{labels.cancelRunConfirmBody}</p>
+          <div className="fk-confirm__actions">
+            <Popover.Close asChild>
+              <button type="button" className="fk-btn fk-btn--sm">
+                {labels.keepRunning}
+              </button>
+            </Popover.Close>
+            <button
+              type="button"
+              className="fk-btn fk-btn--sm fk-btn--danger-solid"
+              onClick={() => {
+                setOpen(false);
+                onConfirm();
+              }}
+            >
+              {labels.cancelRun}
+            </button>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
 function Banner({
   tone,
   icon,
   title,
   detail,
   action,
+  redundant,
 }: {
+  /** Hidden on narrow screens, where the inspector repeats it. */
+  redundant?: boolean;
   tone: "danger" | "warning";
   icon: ReactNode;
   title: string;
@@ -355,7 +433,12 @@ function Banner({
   action?: { label: string; run(): void };
 }) {
   return (
-    <div className="fk-banner" data-tone={tone} role={tone === "danger" ? "alert" : "status"}>
+    <div
+      className="fk-banner"
+      data-tone={tone}
+      data-redundant={redundant || undefined}
+      role={tone === "danger" ? "alert" : "status"}
+    >
       <span className="fk-banner__icon">{icon}</span>
       <div className="fk-banner__text">
         <span className="fk-banner__title">{title}</span>
@@ -449,7 +532,7 @@ export function RunViewer(props: {
   const { runId, onRetried, className } = props;
   const { theme, labels } = useFlowkitAppearance();
   const { detail, error, refresh } = useRun(runId);
-  const { manifest, error: manifestError } = useManifest();
+  const { manifest, error: manifestError, retry: retryManifest } = useManifest();
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
   const style = useMemo(() => themeStyle(theme.tokens), [theme.tokens]);
 
@@ -470,7 +553,14 @@ export function RunViewer(props: {
       <div className="fk-state" role="alert">
         <p className="fk-state__title">{labels.loadRunFailed}</p>
         <p className="fk-state__detail">{manifestError ?? errorText(error)}</p>
-        <button type="button" className="fk-btn" onClick={refresh}>
+        <button
+          type="button"
+          className="fk-btn"
+          onClick={() => {
+            if (manifestError) retryManifest();
+            if (error) refresh();
+          }}
+        >
           {labels.tryAgain}
         </button>
       </div>

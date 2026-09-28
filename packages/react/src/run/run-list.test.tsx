@@ -84,6 +84,31 @@ describe("RunList", () => {
     expect(client.listRuns).toHaveBeenCalledTimes(2);
   });
 
+  it("pauses polling while the page is hidden and reloads when it's shown", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const client = mockClient({ listRuns: vi.fn(async () => [row("r1", "running")]) });
+    render(
+      <FlowkitProvider client={client}>
+        <RunList onSelect={() => {}} pollMs={1000} />
+      </FlowkitProvider>,
+    );
+    await waitFor(() => expect(client.listRuns).toHaveBeenCalledTimes(1));
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect(client.listRuns).toHaveBeenCalledTimes(1);
+      hidden.mockReturnValue(false);
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect(client.listRuns).toHaveBeenCalledTimes(2);
+    } finally {
+      hidden.mockRestore();
+    }
+  });
+
   it("shows a retryable error", async () => {
     const listRuns = vi
       .fn()

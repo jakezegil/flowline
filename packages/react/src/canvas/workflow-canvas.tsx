@@ -326,8 +326,12 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
   const paneH = useFlowStore((s) => s.height);
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
+  /**
+   * Pans the selected card on screen if it isn't. `focus` (a selection made before the first
+   * fit, e.g. a run opening on its failed step) centers it at a readable zoom of at least 1.
+   */
   const revealSelection = useCallback(
-    (duration: number) => {
+    (duration: number, focus = false) => {
       const l = layoutRef.current;
       const sel = selectionRef.current;
       const { width: W, height: H, transform } = flowStore.getState();
@@ -335,11 +339,13 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
       const id = sel === TRIGGER_KEY ? "trigger" : `step:${sel}`;
       const node = l.nodes.find((n) => n.id === id);
       if (!node) return;
-      const [tx, ty, zoom] = transform;
+      const [tx, ty, current] = transform;
+      const zoom = focus ? Math.max(current, 1) : current;
       const x = node.x * zoom + tx;
       const y = node.y * zoom + ty;
       const m = PAN_MARGIN;
-      if (x >= m && y >= m && x + node.w * zoom <= W - m && y + node.h * zoom <= H - m) return;
+      const inView = x >= m && y >= m && x + node.w * zoom <= W - m && y + node.h * zoom <= H - m;
+      if (zoom === current && inView) return;
       rf.setCenter(node.x + node.w / 2, node.y + node.h / 2, { zoom, duration });
     },
     [rf, flowStore, layoutRef],
@@ -381,8 +387,9 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
       multiSelectionKeyCode={null}
       onInit={() => {
         fitTop();
-        // A selection made before the first fit (e.g. a run opening on its failed step).
-        revealSelection(0);
+        // A selection made before the first fit (e.g. a run opening on its failed step): show it
+        // up close.
+        revealSelection(0, true);
       }}
       onNodeClick={(_, node) => {
         const key =

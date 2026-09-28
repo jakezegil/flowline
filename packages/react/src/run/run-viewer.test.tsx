@@ -115,13 +115,51 @@ describe("RunViewer", () => {
   test("Cancel shows Cancelling… until the run is terminal", async () => {
     const t = setup(waitingRun());
     t.client.cancelRun.mockResolvedValue(undefined);
+    // Cancelling asks first; "Keep running" backs out.
     fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
+    const confirm = await screen.findByRole("dialog", { name: "Cancel this run?" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Keep running" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Cancel this run?" })).toBeNull(),
+    );
+    expect(t.client.cancelRun).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run" }));
+    const again = await screen.findByRole("dialog", { name: "Cancel this run?" });
+    fireEvent.click(within(again).getByRole("button", { name: "Cancel run" }));
     await screen.findByText("Cancelling…");
+    expect(t.client.cancelRun).toHaveBeenCalledWith("r1");
     t.setRun(runDetail("cancelled", waitingRun().run.journal));
     act(() => t.emit({ ...waitingRun().events[0], seq: 99, type: "run.cancelled" } as RunEvent));
     await waitFor(() => expect(screen.queryByText("Cancelling…")).toBeNull(), { timeout: 2000 });
     expect(screen.getAllByText("Cancelled").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Cancel run" })).toBeNull();
+  });
+
+  test("a run that fails while open selects its failed step", async () => {
+    const t = setup(runDetail("running", {}, []));
+    await waitFor(() => expect(card("load")).toBeTruthy());
+    expect(screen.queryByRole("complementary", { name: "Step details" })).toBeNull();
+    t.setRun(failedLoopRun());
+    act(() => t.emit({ ...failedLoopRun().events[0], seq: 99, type: "run.failed" } as RunEvent));
+    const panel = await screen.findByRole(
+      "complementary",
+      { name: "Step details" },
+      { timeout: 2000 },
+    );
+    expect(within(panel).getAllByText("Mailbox full").length).toBeGreaterThan(0);
+  });
+
+  test("Try again after a manifest failure reloads it", async () => {
+    const t = setup(failedLoopRun());
+    cleanup();
+    t.client.getManifest.mockRejectedValueOnce(new Error("offline"));
+    render(
+      <FlowkitProvider client={t.client}>
+        <RunViewer runId="r1" />
+      </FlowkitProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(card("load")).toBeTruthy());
   });
 
   test("a stopped run reads as stopped", async () => {

@@ -106,6 +106,31 @@ async function appShots() {
     await shot(page, "run-resume-dialog-light");
     await page.close();
   }
+  // Cancel run's confirm, and the primary CTA's hover in dark mode.
+  for (const [theme, size, viewport] of [
+    ["light", "wide", wide],
+    ["dark", "wide", wide],
+    ["light", "narrow", narrow],
+  ]) {
+    const page = await open(`page=run&run=waiting&theme=${theme}`, viewport, theme);
+    await page.click("button:has-text('Cancel run')");
+    await page.waitForSelector(".fk-confirm");
+    await page.waitForTimeout(250);
+    await shot(page, `run-cancel-confirm-${theme}-${size}`);
+    await page.close();
+  }
+  {
+    const page = await open("page=run&run=failed&theme=dark", wide, "dark");
+    await page.hover("button:has-text('Retry from failed step')");
+    await page.waitForTimeout(250);
+    await shot(page, "run-retry-hover-dark");
+    await page.close();
+    const editor = await open("page=editor&wf=onboarding&theme=dark", wide, "dark");
+    await editor.hover(".fk-btn--primary");
+    await editor.waitForTimeout(250);
+    await shot(editor, "editor-publish-hover-dark");
+    await editor.close();
+  }
   {
     const page = await open("page=run&run=loop&theme=dark", narrow, "dark");
     await page.click(".fk-panel .fk-icon-btn[aria-label='Close panel']");

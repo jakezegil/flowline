@@ -148,7 +148,7 @@ export interface FlowkitLabels {
   issueCount(n: number): string;
   /** Issues pill accessible description. */
   showNextIssue: string;
-  /** Issues pill tooltip while cycling: "Issue 2 of 5". */
+  /** Issues pill tooltip while cycling through the steps with issues: "Step 2 of 3 with issues". */
   issuePosition(i: number, n: number): string;
   save: string;
   saving: string;
@@ -203,6 +203,11 @@ export interface FlowkitLabels {
   retryStarted: string;
   retryFailed(message: string): string;
   cancelRun: string;
+  /** Title of the confirm that Cancel run opens. */
+  cancelRunConfirm: string;
+  cancelRunConfirmBody: string;
+  /** Backs out of cancelling a run. */
+  keepRunning: string;
   cancelFailed(message: string): string;
   resume: string;
   resumeTitle: string;
@@ -390,7 +395,7 @@ export const defaultLabels: FlowkitLabels = {
   statusLive: (v) => `v${v} is live`,
   issueCount: (n) => (n === 1 ? "1 issue" : `${n} issues`),
   showNextIssue: "Select the next step with an issue",
-  issuePosition: (i, n) => `Issue ${i} of ${n}`,
+  issuePosition: (i, n) => `Step ${i} of ${n} with issues`,
   save: "Save",
   saving: "Saving…",
   saved: (v) => `Saved as v${v}`,
@@ -456,6 +461,9 @@ export const defaultLabels: FlowkitLabels = {
   retryStarted: "Retry started",
   retryFailed: (m) => `Couldn't retry. ${m}`,
   cancelRun: "Cancel run",
+  cancelRunConfirm: "Cancel this run?",
+  cancelRunConfirmBody: "Steps that already finished stay done. Nothing after them runs.",
+  keepRunning: "Keep running",
   cancelFailed: (m) => `Couldn't cancel. ${m}`,
   resume: "Resume…",
   resumeTitle: "Resume run",

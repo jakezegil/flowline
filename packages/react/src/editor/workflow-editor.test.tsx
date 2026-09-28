@@ -154,6 +154,34 @@ describe("WorkflowEditor", () => {
     expect(client.saveWorkflow).not.toHaveBeenCalled();
   });
 
+  test("Show on a server rejection selects the step the server flagged", async () => {
+    const { client } = setup(fixtureDoc());
+    await screen.findByText("Draft · v3");
+    const issue = { code: "x", message: "Server says no", severity: "error", stepId: "email" };
+    client.publish.mockRejectedValue(httpError(422, { error: "Invalid", issues: [issue] }));
+    fireEvent.click(button("Publish"));
+    await screen.findByText("Publishing was blocked by 1 issue");
+    fireEvent.click(button("Show"));
+    await waitFor(() => expect(selectedId()).toBe("step:email"));
+  });
+
+  test("Publish stays busy while it saves first", async () => {
+    const { client } = setup(fixtureDoc());
+    const name = await screen.findByRole("textbox", { name: "Workflow name" });
+    fireEvent.change(name, { target: { value: "Renamed" } });
+    fireEvent.blur(name);
+    let finishSave: (v: unknown) => void = () => {};
+    client.saveWorkflow.mockImplementation(() => new Promise((r) => (finishSave = r)));
+    client.publish.mockResolvedValue(undefined);
+    fireEvent.click(button("Publish"));
+    await screen.findByText("Publishing…");
+    expect(screen.queryByText("Saving…")).toBeNull();
+    await act(async () => {
+      finishSave({ ...detail(fixtureDoc(), 4).latest });
+    });
+    await screen.findByText("Published v4", { selector: ".fk-status" });
+  });
+
   test("Run asks for the manual trigger's fields and starts a run", async () => {
     const doc: WorkflowDoc = {
       ...fixtureDoc(),
