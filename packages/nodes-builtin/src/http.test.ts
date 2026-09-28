@@ -1,7 +1,16 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { createRegistry, definePlugin, type NodeContext, UI_META_KEY } from "@flowkit/core";
+import {
+  createRegistry,
+  definePlugin,
+  defineTrigger,
+  FatalError,
+  type NodeContext,
+  UI_META_KEY,
+  validateWorkflow,
+} from "@flowkit/core";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { httpRequest } from "./http";
 
 interface Seen {
@@ -44,12 +53,26 @@ beforeEach(() => {
   };
 });
 
+const SECRETS: Record<string, string> = {
+  token: "tok-s3cr3t",
+  login: "ada:pässword",
+  apiKey: "key-s3cr3t",
+  broken: "bad\nvalue",
+};
+
 /** A context whose `http.fetch` is plain `fetch` (the equivalent of `allowPrivateNetworks`). */
 function ctx(overrides: Partial<NodeContext> = {}): NodeContext {
   return {
     idempotencyKey: "idem-123",
     signal: new AbortController().signal,
     http: { fetch: (url: string, init?: RequestInit) => fetch(url, init) },
+    secrets: {
+      async get(name: string) {
+        const value = SECRETS[name];
+        if (value === undefined) throw new FatalError(`Secret "${name}" is not configured`);
+        return value;
+      },
+    },
     ...overrides,
   } as NodeContext;
 }
@@ -191,6 +214,110 @@ describe("core.httpRequest", () => {
   it("rejects a body on GET", async () => {
     const err = await rejection(run({ method: "GET", url: base, bodyType: "json", body: {} }));
     expect(err.name).toBe("FatalError");
+  });
+
+  describe("auth", () => {
+    it("sends a bearer token from a secret, overriding headers", async () => {
+      const out = await run({
+        method: "GET",
+        url: base,
+        headers: { Authorization: "Bearer from-headers" },
+        auth: { type: "bearer", secret: "token" },
+      });
+      expect(seen[0]?.headers.authorization).toBe("Bearer tok-s3cr3t");
+      expect(JSON.stringify(out)).not.toContain("tok-s3cr3t");
+    });
+
+    it("sends basic auth as base64 of the user:password secret", async () => {
+      await run({ method: "GET", url: base, auth: { type: "basic", secret: "login" } });
+      const header = seen[0]?.headers.authorization ?? "";
+      expect(header.startsWith("Basic ")).toBe(true);
+      expect(Buffer.from(header.slice(6), "base64").toString("utf8")).toBe("ada:pässword");
+    });
+
+    it("sends a custom header, overriding a same-named one from headers", async () => {
+      await run({
+        method: "GET",
+        url: base,
+        headers: { "x-api-key": "from-headers" },
+        auth: { type: "header", secret: "apiKey", headerName: "X-Api-Key" },
+      });
+      expect(seen[0]?.headers["x-api-key"]).toBe("key-s3cr3t");
+    });
+
+    it("fails fatally when the secret is not configured, without sending", async () => {
+      const err = await rejection(
+        run({ method: "GET", url: base, auth: { type: "bearer", secret: "missing" } }),
+      );
+      expect(err.name).toBe("FatalError");
+      expect(err.message).toContain('"missing"');
+      expect(seen).toEqual([]);
+    });
+
+    it("never puts the secret value in an error", async () => {
+      const err = await rejection(
+        run({ method: "GET", url: base, auth: { type: "bearer", secret: "broken" } }),
+      );
+      expect(err.name).toBe("FatalError");
+      expect(err.message).not.toContain("bad");
+      expect(seen).toEqual([]);
+    });
+
+    it("requires secret and headerName in the schema", () => {
+      const parse = (auth: unknown) =>
+        httpRequest.input.safeParse({ method: "GET", url: base, auth }).success;
+      expect(parse({ type: "none" })).toBe(true);
+      expect(parse({ type: "bearer" })).toBe(false);
+      expect(parse({ type: "basic", secret: "" })).toBe(false);
+      expect(parse({ type: "header", secret: "apiKey" })).toBe(false);
+      expect(parse({ type: "header", secret: "apiKey", headerName: "bad name" })).toBe(false);
+      expect(parse({ type: "header", secret: "apiKey", headerName: "X-Key" })).toBe(true);
+      expect(httpRequest.input.parse({ method: "GET", url: base }).auth).toEqual({ type: "none" });
+    });
+
+    it("re-checks auth at runtime when the input was not validated", async () => {
+      const input = httpRequest.input.parse({ method: "GET", url: base });
+      const unchecked = { ...input, auth: { type: "header", secret: "apiKey" } } as never;
+      const err = await rejection(
+        Promise.resolve(httpRequest.run({ input: unchecked, ctx: ctx() })),
+      );
+      expect(err.name).toBe("FatalError");
+      expect(seen).toEqual([]);
+    });
+
+    it("lets the validator report missing auth fields", () => {
+      const manifest = createRegistry([
+        definePlugin({
+          id: "core",
+          name: "Core",
+          nodes: [httpRequest],
+          triggers: [
+            defineTrigger({ type: "core.manual", name: "M", kind: "manual", config: z.object({}) }),
+          ],
+        }),
+      ]).manifest();
+      const doc = (auth: unknown) => ({
+        id: "wf",
+        name: "W",
+        trigger: { type: "core.manual", config: {} },
+        steps: [
+          { id: "call", type: "core.httpRequest", config: { method: "GET", url: base, auth } },
+        ],
+      });
+      const issuesFor = (auth: unknown) =>
+        validateWorkflow(doc(auth) as never, manifest).filter((i) => i.stepId === "call");
+      expect(issuesFor({ type: "bearer", secret: "token" })).toEqual([]);
+      expect(issuesFor({ type: "bearer" })).not.toEqual([]);
+      expect(issuesFor({ type: "header", secret: "apiKey" })).not.toEqual([]);
+    });
+
+    it("marks auth.secret as a secret name in the manifest", () => {
+      const manifest = createRegistry([
+        definePlugin({ id: "core", name: "Core", nodes: [httpRequest] }),
+      ]).manifest();
+      const node = manifest.nodes.find((n) => n.type === "core.httpRequest");
+      expect(JSON.stringify(node?.input)).toContain('"secret":true');
+    });
   });
 
   it("marks headers as sensitive in the manifest", () => {

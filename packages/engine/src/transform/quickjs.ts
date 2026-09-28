@@ -24,6 +24,13 @@ export interface QuickjsRuntimeOptions {
 const MAX_STACK_BYTES = 256 * 1024;
 const FILENAME = "transform.js";
 const INPUT_GLOBAL = "__flowkitInput";
+/**
+ * Smallest memory limit applied. Below it QuickJS cannot even allocate its out-of-memory error
+ * and throws `null`, which would be indistinguishable from user code throwing `null`.
+ */
+const MIN_MEMORY_BYTES = 64 * 1024;
+/** Maximum size of a transform's JSON result, in UTF-8 bytes. */
+const MAX_RESULT_BYTES = 1024 * 1024;
 
 let sharedModule: Promise<QuickJSWASMModule> | undefined;
 const defaultModule = () => {
@@ -52,6 +59,20 @@ function describeError(dumped: unknown): string {
   return `${head}${message}${line ? ` (line ${line})` : ""}`;
 }
 
+/** Keys dropped from transform results, so they cannot smuggle prototype-pollution payloads. */
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function safeReviver(key: string, value: unknown): unknown {
+  return UNSAFE_KEYS.has(key) ? undefined : value;
+}
+
+function outOfMemory(memoryBytes: number): FatalError {
+  return new FatalError(`Transform ran out of memory (limit ${memoryBytes} bytes)`);
+}
+
+/** Thrown inside {@link evaluate} when the VM ran out of memory outside user code. */
+class VmOutOfMemory extends Error {}
+
 /** Runs `code` in a fresh runtime and context, disposing both (and every handle) afterwards. */
 function evaluate(
   module: Pick<QuickJSWASMModule, "newRuntime">,
@@ -62,7 +83,6 @@ function evaluate(
 ): unknown {
   const runtime = module.newRuntime();
   try {
-    runtime.setMemoryLimit(memoryBytes);
     runtime.setMaxStackSize(MAX_STACK_BYTES);
     const deadline = Date.now() + timeoutMs;
     let timedOut = false;
@@ -70,31 +90,51 @@ function evaluate(
       if (Date.now() > deadline) timedOut = true;
       return timedOut;
     });
+    // The context is created before the limit applies: QuickJS cannot recover from failing to
+    // build its own intrinsics.
     const vm = runtime.newContext();
     try {
+      runtime.setMemoryLimit(memoryBytes);
       const input = vm.newString(inputJson);
-      vm.setProp(vm.global, INPUT_GLOBAL, input);
-      input.dispose();
+      try {
+        vm.setProp(vm.global, INPUT_GLOBAL, input);
+      } catch {
+        throw new VmOutOfMemory();
+      } finally {
+        input.dispose();
+      }
       const result = vm.evalCode(wrap(code), FILENAME);
       if (result.error) {
-        const dumped = vm.dump(result.error);
-        result.error.dispose();
+        let dumped: unknown;
+        try {
+          dumped = vm.dump(result.error);
+        } finally {
+          result.error.dispose();
+        }
         if (timedOut) throw new FatalError(`Transform timed out after ${timeoutMs}ms`);
         const message = describeError(dumped);
-        if (/out of memory/i.test(message)) {
-          throw new FatalError(`Transform ran out of memory (limit ${memoryBytes} bytes)`);
-        }
+        if (/out of memory/i.test(message)) throw outOfMemory(memoryBytes);
         throw new FatalError(message);
       }
-      const out = vm.typeof(result.value) === "string" ? vm.getString(result.value) : undefined;
-      result.value.dispose();
-      if (out === undefined) return undefined;
+      let out: string | undefined;
       try {
-        return JSON.parse(out) as unknown;
+        out = vm.typeof(result.value) === "string" ? vm.getString(result.value) : undefined;
+      } finally {
+        result.value.dispose();
+      }
+      if (out === undefined) return undefined;
+      // Each UTF-16 code unit encodes to at most 3 UTF-8 bytes; count exactly only when close.
+      if (out.length * 3 > MAX_RESULT_BYTES && utf8Length(out) > MAX_RESULT_BYTES) {
+        throw new FatalError("Transform result too large (max 1 MB)");
+      }
+      try {
+        return JSON.parse(out, safeReviver) as unknown;
       } catch {
         throw new FatalError("Transform result is not valid JSON");
       }
     } finally {
+      // Freeing may allocate (finalizers, GC bookkeeping); never fail it on the user's limit.
+      runtime.setMemoryLimit(-1);
       vm.dispose();
     }
   } finally {
@@ -102,16 +142,23 @@ function evaluate(
   }
 }
 
+function utf8Length(s: string): number {
+  return new TextEncoder().encode(s).byteLength;
+}
+
 /**
  * Create a QuickJS-backed {@link TransformRuntime}. Every call gets a fresh runtime and context,
- * disposed afterwards, with the call's memory limit and a deadline enforced by an interrupt
+ * disposed afterwards, with the call's memory limit (at least 64 KB) and a deadline enforced by an interrupt
  * handler. The code runs as the body of a function (so it `return`s its result) with the scope
  * available as `input` and destructured as `trigger`, `steps` and `loop`; the scope goes in and
  * the result comes out as JSON. There is no `fetch`, `require`, `process`, timers or other host
  * API. Evaluation is synchronous: a call blocks the event loop for up to its time limit.
  *
- * Every failure (thrown error, syntax error, timeout, memory or stack exhaustion, unserializable
- * result) rejects with a `FatalError` carrying the JavaScript error message and line.
+ * Every failure rejects with a `FatalError`: user errors (thrown, syntax, reference) carry the
+ * JavaScript message and line; timeouts, memory and stack exhaustion, results over 1 MB of JSON
+ * and unserializable results have fixed messages; anything else is "Transform failed (internal
+ * error)" with the original error as `cause`. Result keys `__proto__`, `constructor` and
+ * `prototype` are dropped.
  *
  * @example
  * ```ts
@@ -123,7 +170,10 @@ export function quickjsRuntime(opts: QuickjsRuntimeOptions = {}): TransformRunti
   return {
     async run(code, scope, limits) {
       const timeoutMs = limits?.timeoutMs ?? opts.defaultTimeoutMs ?? 1000;
-      const memoryBytes = limits?.memoryBytes ?? opts.defaultMemoryBytes ?? 64 * 1024 * 1024;
+      const memoryBytes = Math.max(
+        limits?.memoryBytes ?? opts.defaultMemoryBytes ?? 64 * 1024 * 1024,
+        MIN_MEMORY_BYTES,
+      );
       let inputJson: string;
       try {
         inputJson = JSON.stringify(scope ?? null);
@@ -135,12 +185,11 @@ export function quickjsRuntime(opts: QuickjsRuntimeOptions = {}): TransformRunti
         return evaluate(module, code, inputJson, timeoutMs, memoryBytes);
       } catch (err) {
         if (err instanceof FatalError) throw err;
+        if (err instanceof VmOutOfMemory) throw outOfMemory(memoryBytes);
         // A host-level failure (WASM trap, host stack overflow) may leave the module unusable:
-        // start the next call from a fresh one.
+        // start the next call from a fresh one. Its details stay in `cause`, for logs only.
         if (!opts.module) sharedModule = undefined;
-        throw new FatalError(`Transform failed: ${(err as Error)?.message ?? String(err)}`, {
-          cause: err,
-        });
+        throw new FatalError("Transform failed (internal error)", { cause: err });
       }
     },
   };

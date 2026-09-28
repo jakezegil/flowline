@@ -12,6 +12,7 @@
  */
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP, type LookupFunction } from "node:net";
+import type { Logger } from "@flowkit/core";
 import { isPrivateAddress } from "@flowkit/nodes-builtin/ssrf";
 import { Agent, fetch as undiciFetch } from "undici";
 import { FatalError, RetryableError } from "./errors";
@@ -41,17 +42,32 @@ export interface GuardedFetchOptions extends HttpPolicy {
   resolve?: Resolver;
   /** Address classifier. Default: `isPrivateAddress`. */
   isPrivate?: (ip: string) => boolean;
+  /** Receives diagnostics that must not reach users, such as the resolved address of a blocked host. */
+  logger?: Logger;
 }
 
-/** A `fetch` subset: string URL and standard `RequestInit`. */
-export type GuardedFetch = (url: string, init?: RequestInit) => Promise<Response>;
+/** `RequestInit` plus an overall time budget that bounds connect, header and body timeouts. */
+export type GuardedFetchInit = RequestInit & { timeoutMs?: number };
+
+/** A `fetch` subset: string URL and {@link GuardedFetchInit}. */
+export type GuardedFetch = (url: string, init?: GuardedFetchInit) => Promise<Response>;
 
 /** Default {@link HttpPolicy.maxResponseBytes}: 10 MB. */
 export const DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
-const CREDENTIAL_HEADERS = ["authorization", "cookie", "proxy-authorization"];
+/** Request headers kept when a redirect changes origin (`content-type` only while the body is). */
+const CROSS_ORIGIN_SAFE_HEADERS = new Set([
+  "accept",
+  "accept-language",
+  "content-language",
+  "content-type",
+  "user-agent",
+  "idempotency-key",
+]);
+const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+const DEFAULT_TIMEOUT_MS = 300_000;
 
 const systemResolver: Resolver = async (hostname) => dnsLookup(hostname, { all: true });
 
@@ -71,6 +87,7 @@ async function checkTarget(
   url: URL,
   opts: GuardedFetchOptions,
   allowHosts: Set<string> | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<ResolvedAddress[]> {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new FatalError(`unsupported URL scheme "${url.protocol}"`, { code: "SSRF_BLOCKED" });
@@ -94,15 +111,45 @@ async function checkTarget(
   if (!allowPrivate && (host === "localhost" || host.endsWith(".localhost"))) throw blocked(host);
   let addresses: ResolvedAddress[];
   try {
-    addresses = await (opts.resolve ?? systemResolver)(host);
+    addresses = await abortable((opts.resolve ?? systemResolver)(host), signal);
   } catch (err) {
+    if (signal?.aborted) throw signal.reason;
     throw new RetryableError(`could not resolve host "${host}"`, { cause: err });
   }
   if (addresses.length === 0) throw new RetryableError(`could not resolve host "${host}"`);
   if (!allowPrivate) {
-    for (const a of addresses) if (isPrivate(a.address)) throw blocked(`${host} (${a.address})`);
+    const bad = addresses.find((a) => isPrivate(a.address));
+    if (bad) {
+      opts.logger?.warn("ctx.http.fetch blocked a private network address", {
+        host,
+        address: bad.address,
+      });
+      throw blocked(host);
+    }
   }
   return addresses;
+}
+
+/** Rejects with the signal's reason as soon as it aborts, whether or not `p` has settled. */
+function abortable<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return p;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    p.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+/** Keeps only the headers that may follow a request to another origin. */
+function crossOriginHeaders(headers: Headers, keepBody: boolean): Headers {
+  const out = new Headers();
+  headers.forEach((value, key) => {
+    if (!CROSS_ORIGIN_SAFE_HEADERS.has(key)) return;
+    if (key === "content-type" && !keepBody) return;
+    out.set(key, value);
+  });
+  return out;
 }
 
 /** A `lookup` that answers every query with the pre-checked addresses. */
@@ -160,7 +207,9 @@ function tooLarge(max: number): FatalError {
 /**
  * @internal Create the SSRF-guarded fetch for a policy. Redirects are followed manually (up to 5),
  * each hop re-checked; a 303 (or a 301/302 after POST) continues as GET without a body, and
- * credential headers are dropped when a redirect changes origin. The response body is read fully
+ * when a redirect changes origin only safelisted headers (Accept, Accept-Language,
+ * Content-Language, Content-Type while the body is kept, User-Agent, Idempotency-Key) follow it.
+ * `init.timeoutMs` bounds the connect, header and body timeouts. The response body is read fully
  * (up to `maxResponseBytes`) before the returned `Response` resolves.
  */
 export function createGuardedFetch(opts: GuardedFetchOptions = {}): GuardedFetch {
@@ -176,18 +225,25 @@ export function createGuardedFetch(opts: GuardedFetchOptions = {}): GuardedFetch
     }
     let method = (init.method ?? "GET").toUpperCase();
     let body = init.body ?? undefined;
-    const headers = new Headers(init.headers);
+    let headers = new Headers(init.headers);
+    const signal = init.signal ?? undefined;
+    const timeoutMs = init.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const connectTimeout = Math.min(DEFAULT_CONNECT_TIMEOUT_MS, timeoutMs);
 
     for (let hop = 0; ; hop++) {
-      const addresses = await checkTarget(url, opts, allowHosts);
-      const dispatcher = new Agent({ connect: { lookup: pinnedLookup(addresses) } });
+      const addresses = await checkTarget(url, opts, allowHosts, signal);
+      const dispatcher = new Agent({
+        connect: { lookup: pinnedLookup(addresses), timeout: connectTimeout },
+        headersTimeout: timeoutMs,
+        bodyTimeout: timeoutMs,
+      });
       try {
         const res = await undiciFetch(url, {
           method,
           headers: toRecord(headers),
           body: body as never,
           redirect: "manual",
-          signal: init.signal ?? null,
+          signal: signal ?? null,
           dispatcher,
         });
         const location = res.headers.get("location");
@@ -211,7 +267,7 @@ export function createGuardedFetch(opts: GuardedFetchOptions = {}): GuardedFetch
           } else if (body instanceof ReadableStream) {
             throw new FatalError("cannot replay a streamed request body on redirect");
           }
-          if (next.origin !== url.origin) for (const h of CREDENTIAL_HEADERS) headers.delete(h);
+          if (next.origin !== url.origin) headers = crossOriginHeaders(headers, body !== undefined);
           url = next;
           continue;
         }

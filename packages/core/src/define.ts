@@ -116,8 +116,11 @@ export interface NodeContext {
     steps: Record<string, unknown>;
     loop?: { item: unknown; index: number };
   }>;
-  /** SSRF-guarded fetch. */
-  http: { fetch(url: string, init?: RequestInit): Promise<Response> };
+  /**
+   * SSRF-guarded fetch. `init.timeoutMs` bounds the connect, response-header and body timeouts;
+   * `init.signal` defaults to {@link NodeContext.signal}.
+   */
+  http: { fetch(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<Response> };
 }
 
 /**

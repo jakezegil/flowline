@@ -5,6 +5,7 @@ import {
   defineNode,
   definePlugin,
   defineTrigger,
+  type NodeDefinition,
   type WorkflowDoc,
 } from "@flowkit/core";
 import { isPrivateAddress } from "@flowkit/nodes-builtin/ssrf";
@@ -20,11 +21,13 @@ type Handler = (req: IncomingMessage, res: ServerResponse) => void;
 let server: Server;
 let port: number;
 let hits: string[];
+let received: IncomingMessage["headers"][];
 let handler: Handler;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
     hits.push(`${req.method} ${req.headers.host} ${req.url}`);
+    received.push(req.headers);
     handler(req, res);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -37,6 +40,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   hits = [];
+  received = [];
   handler = (_req, res) => {
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify({ ok: true }));
@@ -113,8 +117,42 @@ describe("ctx.http.fetch SSRF guard", () => {
 
   it("blocks a hostname that resolves to loopback", async () => {
     const { resolve } = tableResolver({ "evil.test": ["93.184.216.34", "127.0.0.1"] });
-    const err = await fatal(ctxWith({ resolve }).http.fetch("http://evil.test/"));
-    expect(err.message).toContain("blocked private network address");
+    const logged: unknown[] = [];
+    const logger = {
+      debug() {},
+      info() {},
+      error() {},
+      warn: (message: string, data?: unknown) => logged.push({ message, data }),
+    };
+    const err = await fatal(ctxWith({ resolve, logger }).http.fetch("http://evil.test/"));
+    expect(err.message).toBe("blocked private network address: evil.test");
+    expect(err.message).not.toContain("127.0.0.1");
+    expect(logged).toEqual([
+      {
+        message: expect.stringContaining("blocked"),
+        data: { host: "evil.test", address: "127.0.0.1" },
+      },
+    ]);
+  });
+
+  it("aborts a hanging DNS lookup with the request signal", async () => {
+    const resolve: Resolver = () => new Promise(() => {});
+    const started = Date.now();
+    const err = await ctxWith({ resolve })
+      .http.fetch("http://slow.test/", { signal: AbortSignal.timeout(50) })
+      .catch((e: Error) => e);
+    expect((err as Error).name).toBe("TimeoutError");
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it("bounds the wait for response headers by timeoutMs", async () => {
+    handler = () => {};
+    const started = Date.now();
+    const err = await ctxWith({ allowPrivateNetworks: true })
+      .http.fetch(`http://127.0.0.1:${port}/`, { timeoutMs: 200 })
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 
   it.each([
@@ -252,6 +290,89 @@ describe("redirects", () => {
     expect(await res.json()).toEqual({ at: "/b", method: "GET" });
   });
 
+  const sent = {
+    Authorization: "Bearer tok",
+    "X-Auth-Token": "custom-auth",
+    "X-Api-Key": "key-123",
+    Cookie: "sid=1",
+    Accept: "application/json",
+    "Accept-Language": "en",
+    "User-Agent": "flowkit-test",
+    "Idempotency-Key": "idem-1",
+  };
+
+  it("strips all but safelisted headers on a cross-origin redirect", async () => {
+    const { resolve: r2 } = tableResolver({
+      "public.test": ["127.0.0.1"],
+      "other.test": ["127.0.0.1"],
+    });
+    handler = (req, res) => {
+      if (req.url === "/start") {
+        res.writeHead(302, { location: `http://other.test:${port}/land` });
+        res.end();
+        return;
+      }
+      res.end("ok");
+    };
+    await ctxWith({ resolve: r2, isPrivate: loopbackIsPublic }).http.fetch(
+      `http://public.test:${port}/start`,
+      { headers: sent },
+    );
+    expect(hits).toEqual([`GET public.test:${port} /start`, `GET other.test:${port} /land`]);
+    const landed = received[1] ?? {};
+    for (const h of ["authorization", "x-auth-token", "x-api-key", "cookie"]) {
+      expect(landed[h]).toBeUndefined();
+    }
+    expect(landed).toMatchObject({
+      accept: "application/json",
+      "accept-language": "en",
+      "user-agent": "flowkit-test",
+      "idempotency-key": "idem-1",
+    });
+  });
+
+  it("keeps headers on a same-origin redirect", async () => {
+    handler = (req, res) => {
+      if (req.url === "/start") {
+        res.writeHead(302, { location: "/land" });
+        res.end();
+        return;
+      }
+      res.end("ok");
+    };
+    await ctx().http.fetch(`http://public.test:${port}/start`, { headers: sent });
+    expect(received[1]).toMatchObject({
+      authorization: "Bearer tok",
+      "x-auth-token": "custom-auth",
+      "x-api-key": "key-123",
+      cookie: "sid=1",
+    });
+  });
+
+  it("preserves method and body on 307", async () => {
+    handler = (req, res) => {
+      if (req.url === "/a") {
+        res.writeHead(307, { location: "/b" });
+        res.end();
+        return;
+      }
+      let body = "";
+      req.on("data", (c: Buffer) => {
+        body += c.toString();
+      });
+      req.on("end", () => {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ method: req.method, body, type: req.headers["content-type"] }));
+      });
+    };
+    const res = await ctx().http.fetch(`http://public.test:${port}/a`, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: "payload",
+    });
+    expect(await res.json()).toEqual({ method: "POST", body: "payload", type: "text/plain" });
+  });
+
   it("gives up after 5 redirects", async () => {
     handler = (req, res) => {
       const n = Number(req.url?.slice(1) ?? 0);
@@ -381,5 +502,82 @@ describe("engine wiring", () => {
     const run = await runStep("t.code", { code: "return { doubled: trigger.n * 2 };" });
     expect(run?.status).toBe("completed");
     expect(run?.journal.s).toMatchObject({ status: "done", output: { doubled: 42 } });
+  });
+});
+
+describe("core.httpRequest auth end to end", () => {
+  it("sends the secret on the wire but keeps it out of output, journal and events", async () => {
+    // Imported by path until builtinPlugin (Task 9) registers core.httpRequest in the engine.
+    const path = new URL("../../nodes-builtin/src/http.ts", import.meta.url).href;
+    const { httpRequest } = (await import(/* @vite-ignore */ path)) as {
+      httpRequest: NodeDefinition;
+    };
+    const registry = createRegistry([
+      definePlugin({
+        id: "core",
+        name: "Core",
+        nodes: [httpRequest],
+        triggers: [
+          defineTrigger({ type: "core.manual", name: "M", kind: "manual", config: z.object({}) }),
+        ],
+      }),
+    ]);
+    const storage = createMemoryStorage();
+    const doc: WorkflowDoc = {
+      id: "wf",
+      name: "Workflow",
+      trigger: { type: "core.manual", config: {} },
+      steps: [
+        {
+          id: "call",
+          type: "core.httpRequest",
+          config: {
+            method: "GET",
+            url: `http://127.0.0.1:${port}/`,
+            headers: { "X-Trace": "trace-1" },
+            auth: { type: "bearer", secret: "apiToken" },
+          },
+        },
+      ],
+    };
+    const v = await storage.saveWorkflowVersion("t1", doc, "user", 1);
+    await storage.publishVersion("t1", doc.id, v.version, 1);
+    await storage.createRun(
+      {
+        id: "run-1",
+        tenantId: "t1",
+        workflowId: doc.id,
+        version: v.version,
+        status: "queued",
+        trigger: {},
+        journal: {},
+        attempt: 1,
+        startedBy: { kind: "manual" },
+      },
+      [{ runId: "run-1", tenantId: "t1", type: "run.started", at: 1 }],
+      1,
+    );
+    const emitted: unknown[] = [];
+    await createEngine({
+      registry,
+      storage,
+      builtins: false,
+      http: { allowPrivateNetworks: true },
+      secrets: { get: async (_t, name) => (name === "apiToken" ? "tok-s3cr3t" : undefined) },
+      onEvent: (e) => emitted.push(e),
+    }).drain();
+
+    expect(received[0]?.authorization).toBe("Bearer tok-s3cr3t");
+    const run = await storage.getRun("t1", "run-1");
+    expect(run?.status).toBe("completed");
+    expect(run?.journal.call).toMatchObject({ status: "done", output: { status: 200 } });
+    const events = await storage.listEvents("t1", "run-1");
+    expect(emitted.length).toBeGreaterThan(0);
+    for (const blob of [run, events, emitted]) {
+      expect(JSON.stringify(blob)).not.toContain("tok-s3cr3t");
+    }
+    // Sensitive headers are masked in events (the journal keeps them for downstream references).
+    expect(JSON.stringify(events)).not.toContain("trace-1");
+    expect(JSON.stringify(emitted)).not.toContain("trace-1");
   });
 });

@@ -184,7 +184,10 @@ export function createExecutor(opts: EngineOptions): Executor {
   const stepsPerClaim = opts.stepsPerClaim ?? DEFAULT_STEPS_PER_CLAIM;
   const services = opts.services ?? {};
   const hooks = opts.__testHooks;
-  const http = createGuardedFetch(opts.http);
+  const http = createGuardedFetch({
+    ...opts.http,
+    ...(opts.logger ? { logger: opts.logger } : {}),
+  });
   const versions = new Map<string, WorkflowVersion>();
   let manifests: Map<string, NodeManifest> | undefined;
 

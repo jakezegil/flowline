@@ -113,6 +113,45 @@ describe("quickjsRuntime", () => {
     expect(err.message).toMatch(/circular/i);
   });
 
+  it("rejects results over 1 MB of JSON", async () => {
+    const err = await failure(rt.run("return { s: 'x'.repeat(1024 * 1024) };", scope, limits));
+    expect(err.message).toBe("Transform result too large (max 1 MB)");
+    expect(await rt.run("return { s: 'x'.repeat(1000 * 1000) };", scope, limits)).toMatchObject({
+      s: expect.any(String),
+    });
+  });
+
+  it("drops __proto__, constructor and prototype keys from results", async () => {
+    const out = (await rt.run(
+      `return {
+         a: 1,
+         ["__proto__"]: { polluted: true },
+         constructor: { polluted: true },
+         nested: { prototype: 2, ok: 3, list: [{ ["__proto__"]: { polluted: true }, v: 1 }] },
+       };`,
+      scope,
+      limits,
+    )) as Record<string, unknown>;
+    expect(out).toEqual({ a: 1, nested: { ok: 3, list: [{ v: 1 }] } });
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(Object.hasOwn(out, "__proto__")).toBe(false);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("hides host-level failures behind a fixed message, keeping the cause", async () => {
+    const boom = new Error("wasm exploded at 0xdeadbeef");
+    const broken = quickjsRuntime({
+      module: async () => ({
+        newRuntime: () => {
+          throw boom;
+        },
+      }),
+    });
+    const err = await failure(broken.run("return {};", scope, limits));
+    expect(err.message).toBe("Transform failed (internal error)");
+    expect(err.cause).toBe(boom);
+  });
+
   it("does not leak handles over many sequential runs", async () => {
     // The debug build aborts on disposing a runtime that still owns objects, and its leak
     // sanitizer reports any un-freed allocation.
@@ -135,6 +174,31 @@ describe("quickjsRuntime", () => {
     expect([...module.runtimes].filter((r) => r.alive)).toEqual([]);
     expect([...module.contexts].filter((c) => c.alive)).toEqual([]);
     expect(module.getFFI().QTS_RecoverableLeakCheck()).toBe(0);
+  }, 60_000);
+
+  it("disposes everything when a tiny memory limit fails the run", async () => {
+    const module = new TestQuickJSWASMModule(await newQuickJSWASMModule(DEBUG_SYNC));
+    const tracked = quickjsRuntime({ module: async () => module });
+    const bigScope = { trigger: {}, steps: { a: "y".repeat(100_000) } };
+    for (const memoryBytes of [1, 1024, 16 * 1024, 64 * 1024]) {
+      for (let i = 0; i < 10; i++) {
+        const err = await failure(
+          tracked.run("return { n: steps.a.length };", bigScope, { timeoutMs: 1000, memoryBytes }),
+        );
+        expect(err.message).toContain("out of memory");
+        const inside = await failure(
+          tracked.run("const a = []; for (;;) a.push({ i: a.length });", scope, {
+            timeoutMs: 5000,
+            memoryBytes,
+          }),
+        );
+        expect(inside.message).toContain("out of memory");
+      }
+    }
+    expect([...module.runtimes].filter((r) => r.alive)).toEqual([]);
+    expect([...module.contexts].filter((c) => c.alive)).toEqual([]);
+    expect(module.getFFI().QTS_RecoverableLeakCheck()).toBe(0);
+    expect(await tracked.run("return { ok: 1 };", scope, limits)).toEqual({ ok: 1 });
   }, 60_000);
 
   it("keeps working without growing its heap after repeated out-of-memory failures", async () => {

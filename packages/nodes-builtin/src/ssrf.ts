@@ -18,8 +18,12 @@ const PRIVATE_V4: readonly Cidr4[] = [
   [v4(169, 254, 0, 0), 16], // link-local (cloud metadata)
   [v4(172, 16, 0, 0), 12], // private
   [v4(192, 0, 0, 0), 24], // IETF protocol assignments
+  [v4(192, 0, 2, 0), 24], // documentation (TEST-NET-1)
+  [v4(192, 88, 99, 0), 24], // deprecated 6to4 relay anycast
   [v4(192, 168, 0, 0), 16], // private
   [v4(198, 18, 0, 0), 15], // benchmarking
+  [v4(198, 51, 100, 0), 24], // documentation (TEST-NET-2)
+  [v4(203, 0, 113, 0), 24], // documentation (TEST-NET-3)
   [v4(224, 0, 0, 0), 4], // multicast
   [v4(240, 0, 0, 0), 4], // reserved, broadcast
 ];
@@ -96,6 +100,14 @@ function isPrivateV6(g: number[]): boolean {
   if (g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) {
     return isPrivateV4(embeddedV4(g6, g7));
   }
+  // ::ffff:0:0/96 IPv4-translated (SIIT).
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0xffff && g5 === 0) return true;
+  // 64:ff9b:1::/48 local-use NAT64.
+  if (g0 === 0x64 && g1 === 0xff9b && g2 === 1) return true;
+  // 100::/64 discard-only.
+  if (g0 === 0x100 && g1 === 0 && g2 === 0 && g3 === 0) return true;
+  // 2001::/32 Teredo, 2001:db8::/32 documentation.
+  if (g0 === 0x2001 && (g1 === 0 || g1 === 0xdb8)) return true;
   // 2002::/16 6to4 with an embedded IPv4.
   if (g0 === 0x2002) return isPrivateV4(embeddedV4(g1, g2));
   if ((g0 & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
@@ -112,8 +124,10 @@ function isPrivateV4(n: number): boolean {
 /**
  * Whether `ip` is an address `ctx.http.fetch` must not connect to by default: loopback
  * (127/8, ::1), private (10/8, 172.16/12, 192.168/16, fc00::/7), link-local (169.254/16,
- * fe80::/10), "this network" (0/8, ::), carrier-grade NAT (100.64/10), multicast, reserved ranges,
- * and IPv6 forms embedding such an IPv4 address (`::ffff:127.0.0.1`, NAT64, 6to4).
+ * fe80::/10), "this network" (0/8, ::), carrier-grade NAT (100.64/10), multicast, documentation
+ * (192.0.2/24, 198.51.100/24, 203.0.113/24, 2001:db8::/32), Teredo (2001::/32), discard
+ * (100::/64), IPv4-translated (::ffff:0:0/96), local-use NAT64 (64:ff9b:1::/48), other reserved
+ * ranges, and IPv6 forms embedding such an IPv4 address (`::ffff:127.0.0.1`, NAT64, 6to4).
  *
  * Accepts dotted-quad IPv4 and IPv6 (optionally in brackets, with a zone ID). Fails closed:
  * anything that is not a valid IP address returns `true`.
