@@ -460,7 +460,10 @@ export function createEditorStore(init: {
         if (!t) throw new Error(`Unknown trigger type "${type}"`);
         const { doc } = get();
         if (doc.trigger.type === type) return;
-        commit({ ...doc, trigger: { type, config: defaultConfig(t.config) } }, needsTest(TRIGGER_KEY));
+        commit(
+          { ...doc, trigger: { type, config: defaultConfig(t.config) } },
+          needsTest(TRIGGER_KEY),
+        );
       },
 
       setTriggerConfig(key, value) {

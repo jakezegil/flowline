@@ -31,6 +31,14 @@ export {
 } from "./layout/constants";
 export { type LayoutEdge, type LayoutNode, layoutTree } from "./layout/layout-tree";
 export {
+  CodeEditor,
+  ConfigPanel,
+  DataPicker,
+  RefTextInput,
+  SchemaForm,
+  TestStep,
+} from "./panel";
+export {
   type FieldWidget,
   type FieldWidgetProps,
   FlowkitProvider,

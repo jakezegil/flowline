@@ -183,9 +183,127 @@ export interface FlowkitLabels {
   publishFailed(message: string): string;
   showIssues: string;
   closePanel: string;
-  /** Right-panel placeholder until a configuration panel is plugged in. */
-  panelPlaceholder: string;
   stepSettings: string;
+
+  // Config panel
+  /** Tab with the step's settings form. */
+  configureTab: string;
+  /** Tab where a step is tested (or the trigger's sample data is set). */
+  testTab: string;
+  /** Accessible name of the step name in the panel header, which renames it on click. */
+  renameStep: string;
+  /** The step's ID in the panel header, as used in references. */
+  stepIdCaption(id: string): string;
+  /** Shown instead of the form when the step's type isn't in the manifest. */
+  unknownNodeHelp: string;
+  /** Shown when a node has no config fields. */
+  nothingToConfigure: string;
+  /** Banner of a disabled step. */
+  disabledBanner: string;
+  enableStep: string;
+  triggerType: string;
+  webhookUrl: string;
+  webhookUrlHint: string;
+  /** Instead of the webhook URL until the workflow has been saved. */
+  webhookSaveFirst: string;
+  copyUrl: string;
+  /** Explains an event trigger. */
+  eventTriggerHint(event: string): string;
+  /** Screen-reader text of the required-field marker. */
+  requiredField: string;
+  /** Ref-mode toggle of number, boolean, choice and list fields. */
+  useReference: string;
+  useLiteral: string;
+  editAsJson: string;
+  editAsText: string;
+  addItem: string;
+  remove: string;
+  moveUp: string;
+  moveDown: string;
+  /** Heading of an item in a list of objects: "Case 2". */
+  itemTitle(label: string, n: number): string;
+  addEntry: string;
+  mapKey: string;
+  mapValue: string;
+  duplicateKey: string;
+  chooseOption: string;
+  noneOption: string;
+  /** Choice of how rules combine. */
+  rulesCombinator: Record<"and" | "or", string>;
+  /** The chip between two rules. */
+  rulesJoin: Record<"and" | "or", string>;
+  rulesMatch: string;
+  addRule: string;
+  addGroup: string;
+  removeRule: string;
+  removeGroup: string;
+  /** Name of a nested rule group: "Group 2". */
+  ruleGroup: string;
+  /** Placeholder of the value of an "is one of" rule. */
+  ruleListPlaceholder: string;
+  ruleLeft: string;
+  ruleOperator: string;
+  ruleRight: string;
+  matchCase: string;
+  /** Operator names of the rule builder. */
+  ruleOps: Record<string, string>;
+  /** Operator names when the value is a date. */
+  ruleOpsDate: Record<string, string>;
+  emptyRules: string;
+  addCase: string;
+  caseLabel: string;
+  caseValue: string;
+  /** The path ID under a switch case. */
+  caseId(id: string): string;
+  emptyCases: string;
+  addField: string;
+  fieldName: string;
+  fieldType: string;
+  fieldRequired: string;
+  fieldDescription: string;
+  fieldTypes: Record<"string" | "number" | "boolean" | "object" | "array" | "date", string>;
+  invalidFieldName: string;
+  duplicateField: string;
+  emptyFields: string;
+  loading: string;
+  loadFailed(message: string): string;
+  chooseSubflow: string;
+  noSubflows: string;
+  subflowFirst: string;
+  subflowNoInput: string;
+  chooseSecret: string;
+  noSecrets: string;
+  /** A selected secret the server doesn't list. */
+  secretMissing(name: string): string;
+
+  // Step test
+  testStep: string;
+  testing: string;
+  testAgain: string;
+  testIntro: string;
+  testInput: string;
+  testOutput: string;
+  testError: string;
+  /** Heading of a stored sample from an earlier test. */
+  testSample: string;
+  testDuration(ms: number): string;
+  testBranch(branch: string): string;
+  testSignal: Record<"suspend" | "stop" | "subflow", string>;
+  testFailed(message: string): string;
+  upstreamUntested: string;
+  /** Names of the untested steps a test depends on. */
+  upstreamList(names: string[]): string;
+  addTriggerSample: string;
+  notTested: string;
+  needsRetest: string;
+  sampleTypeChanged: string;
+  triggerSample: string;
+  manualSample: string;
+  triggerSampleHint: string;
+  fillFromFields: string;
+  saveSample: string;
+  clearSample: string;
+  sampleSaved: string;
 
   // Run viewer
   loadingRun: string;
@@ -426,8 +544,138 @@ export const defaultLabels: FlowkitLabels = {
   publishFailed: (m) => `Couldn't publish. ${m}`,
   showIssues: "Show",
   closePanel: "Close panel",
-  panelPlaceholder: "Settings for this step appear here.",
   stepSettings: "Step settings",
+
+  configureTab: "Configure",
+  testTab: "Test",
+  renameStep: "Rename step",
+  stepIdCaption: (id) => `ID ${id}`,
+  unknownNodeHelp: "This step's type isn't available here, so it can't be configured.",
+  nothingToConfigure: "This step has nothing to configure.",
+  disabledBanner: "This step is disabled. Runs skip it.",
+  enableStep: "Enable",
+  triggerType: "Trigger type",
+  webhookUrl: "Webhook URL",
+  webhookUrlHint: "POST a JSON body to this URL to start a run of the published version.",
+  webhookSaveFirst: "Save the workflow to generate its URL.",
+  copyUrl: "Copy URL",
+  eventTriggerHint: (event) => `Runs every time the ${event} event happens.`,
+  requiredField: "(required)",
+  useReference: "Use data from earlier steps",
+  useLiteral: "Enter a value instead",
+  editAsJson: "Edit as JSON",
+  editAsText: "Edit as text",
+  addItem: "Add item",
+  remove: "Remove",
+  moveUp: "Move up",
+  moveDown: "Move down",
+  itemTitle: (label, n) => `${label} ${n}`,
+  addEntry: "Add entry",
+  mapKey: "Key",
+  mapValue: "Value",
+  duplicateKey: "This key is used twice",
+  chooseOption: "Choose…",
+  noneOption: "None",
+  rulesCombinator: { and: "All rules", or: "Any rule" },
+  rulesJoin: { and: "and", or: "or" },
+  rulesMatch: "Match",
+  addRule: "Add rule",
+  addGroup: "Add group",
+  removeRule: "Remove rule",
+  removeGroup: "Remove group",
+  ruleGroup: "Group",
+  ruleListPlaceholder: "gold, silver, bronze",
+  ruleLeft: "Value",
+  ruleOperator: "Operator",
+  ruleRight: "Compare with",
+  matchCase: "Match case",
+  ruleOps: {
+    eq: "equals",
+    neq: "does not equal",
+    gt: "is greater than",
+    gte: "is at least",
+    lt: "is less than",
+    lte: "is at most",
+    contains: "contains",
+    notContains: "does not contain",
+    startsWith: "starts with",
+    endsWith: "ends with",
+    in: "is one of",
+    isEmpty: "is empty",
+    isNotEmpty: "is not empty",
+    isTrue: "is true",
+    isFalse: "is false",
+  },
+  ruleOpsDate: {
+    eq: "is",
+    neq: "is not",
+    gt: "is after",
+    gte: "is on or after",
+    lt: "is before",
+    lte: "is on or before",
+  },
+  emptyRules: "No rules yet. Without rules, the Else path always runs.",
+  addCase: "Add case",
+  caseLabel: "Case name",
+  caseValue: "Matches",
+  caseId: (id) => `Path ID ${id}`,
+  emptyCases: "No cases yet. Every value takes the Default path.",
+  addField: "Add field",
+  fieldName: "Field name",
+  fieldType: "Type",
+  fieldRequired: "Required",
+  fieldDescription: "Description (optional)",
+  fieldTypes: {
+    string: "Text",
+    number: "Number",
+    boolean: "True / false",
+    object: "Object",
+    array: "List",
+    date: "Date",
+  },
+  invalidFieldName: "Use letters, digits and _, not starting with a digit",
+  duplicateField: "Another field has this name",
+  emptyFields: "No fields yet.",
+  loading: "Loading…",
+  loadFailed: (m) => `Couldn't load. ${m}`,
+  chooseSubflow: "Choose a workflow",
+  noSubflows: "No workflows can be called yet. Publish a workflow with a sub-flow trigger first.",
+  subflowFirst: "Choose a workflow to set its input.",
+  subflowNoInput: "This workflow takes no input.",
+  chooseSecret: "Choose a secret",
+  noSecrets: "No secrets are configured.",
+  secretMissing: (name) => `${name} (not found)`,
+
+  testStep: "Test step",
+  testing: "Testing…",
+  testAgain: "Test again",
+  testIntro: "Runs only this step, using the sample data of the trigger and earlier steps.",
+  testInput: "Input",
+  testOutput: "Output",
+  testError: "Error",
+  testSample: "Output of the last test",
+  testDuration: (ms) => `Took ${formatDuration(ms)}`,
+  testBranch: (branch) => `Takes the ${branch} path`,
+  testSignal: {
+    suspend: "Would pause the run here",
+    stop: "Would stop the run here",
+    subflow: "Would call a workflow",
+  },
+  testFailed: (m) => `The test couldn't run. ${m}`,
+  upstreamUntested: "Upstream steps haven't been tested; references will be empty.",
+  upstreamList: (names) => `Test first: ${names.join(", ")}.`,
+  addTriggerSample: "Add trigger sample",
+  notTested: "Not tested yet",
+  needsRetest: "Needs re-test",
+  sampleTypeChanged: "The step's type changed since its last test.",
+  triggerSample: "Sample data",
+  manualSample: "Sample input",
+  triggerSampleHint:
+    "Stands in for the trigger's data when you pick fields and test steps. It stays in this browser.",
+  fillFromFields: "Fill from fields",
+  saveSample: "Save sample",
+  clearSample: "Clear",
+  sampleSaved: "Sample saved",
 
   loadingRun: "Loading run…",
   loadRunFailed: "Couldn't load this run.",
@@ -548,7 +796,7 @@ function relativeTime(deltaMs: number): string {
   return rtf.format(Math.round(deltaMs / size), unit);
 }
 
-/** `defaultLabels` with `overrides` applied (run statuses merge key by key). */
+/** `defaultLabels` with `overrides` applied (record-valued labels merge key by key). */
 export function resolveLabels(overrides: Partial<FlowkitLabels> | undefined): FlowkitLabels {
   if (!overrides) return defaultLabels;
   return {
@@ -557,5 +805,11 @@ export function resolveLabels(overrides: Partial<FlowkitLabels> | undefined): Fl
     runStatus: { ...defaultLabels.runStatus, ...overrides.runStatus },
     runState: { ...defaultLabels.runState, ...overrides.runState },
     eventType: { ...defaultLabels.eventType, ...overrides.eventType },
+    rulesCombinator: { ...defaultLabels.rulesCombinator, ...overrides.rulesCombinator },
+    rulesJoin: { ...defaultLabels.rulesJoin, ...overrides.rulesJoin },
+    ruleOps: { ...defaultLabels.ruleOps, ...overrides.ruleOps },
+    ruleOpsDate: { ...defaultLabels.ruleOpsDate, ...overrides.ruleOpsDate },
+    fieldTypes: { ...defaultLabels.fieldTypes, ...overrides.fieldTypes },
+    testSignal: { ...defaultLabels.testSignal, ...overrides.testSignal },
   };
 }

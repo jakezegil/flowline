@@ -57,8 +57,7 @@ export function RefTextInput(props: {
     placeholder: props.placeholder,
     readOnly: props.readOnly,
     "data-invalid-ref": invalid ? "" : undefined,
-    onChange: (e: { target: { value: string } }) =>
-      props.onChange(fromText(e.target.value, props)),
+    onChange: (e: { target: { value: string } }) => props.onChange(fromText(e.target.value, props)),
   };
   return props.multiline ? <textarea rows={3} {...common} /> : <input type="text" {...common} />;
 }

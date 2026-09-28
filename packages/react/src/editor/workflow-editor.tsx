@@ -1,14 +1,14 @@
 import type { Manifest, ValidationContext, WorkflowDoc } from "@flowkit/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { TriangleAlert, X } from "lucide-react";
 import { type JSX, type ReactNode, useEffect, useMemo, useState } from "react";
 import { PortalContainerContext } from "../canvas/canvas-context";
 import { WorkflowCanvas } from "../canvas/workflow-canvas";
-import { EditorContext, useEditorStore, useStep } from "../hooks";
+import { EditorContext, useEditorStore } from "../hooks";
 import type { FlowkitLabels } from "../labels";
+import { ConfigPanel } from "../panel/config-panel";
 import { useFlowkit, useFlowkitAppearance } from "../provider";
 import { defaultConfig } from "../store/commands";
-import { createEditorStore, type EditorStore, TRIGGER_KEY } from "../store/editor-store";
+import { createEditorStore, type EditorStore } from "../store/editor-store";
 import { themeStyle } from "../theme";
 import { errorText, httpStatus } from "../ui/primitives";
 import { ToasterProvider } from "../ui/toaster";
@@ -91,50 +91,6 @@ function useUnsavedGuard(store: EditorStore) {
   }, [dirty, store]);
 }
 
-/** Placeholder of the side panel until a configuration panel is plugged in. */
-function PanelPlaceholder({ selection }: { selection: string }) {
-  const { labels } = useFlowkitAppearance();
-  const select = useEditorStore((s) => s.select);
-  const info = useStep(selection);
-  const trigger = useEditorStore((s) =>
-    selection === TRIGGER_KEY
-      ? s.manifest.triggers.find((t) => t.type === s.doc.trigger.type)
-      : undefined,
-  );
-  const title =
-    selection === TRIGGER_KEY
-      ? (trigger?.name ?? labels.triggerTag)
-      : (info?.step.name ?? info?.manifest?.name ?? selection);
-  return (
-    <div className="fk-panel__inner">
-      <div className="fk-panel__head">
-        <div className="fk-panel__title">{title}</div>
-        <button
-          type="button"
-          className="fk-icon-btn"
-          aria-label={labels.closePanel}
-          onClick={() => select(null)}
-        >
-          <X size={16} aria-hidden />
-        </button>
-      </div>
-      <div className="fk-panel__body">
-        {info && info.issues.length > 0 && (
-          <ul className="fk-issue-list">
-            {info.issues.map((i) => (
-              <li key={`${i.code}:${i.field ?? ""}:${i.message}`} data-severity={i.severity}>
-                <TriangleAlert size={13} aria-hidden />
-                <span>{i.message}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="fk-panel__empty">{labels.panelPlaceholder}</p>
-      </div>
-    </div>
-  );
-}
-
 function EditorBody({
   store,
   renderPanel,
@@ -147,12 +103,24 @@ function EditorBody({
   useUnsavedGuard(store);
   return (
     <div className="fk-editor__body">
-      <div className="fk-editor__canvas">
+      <div
+        className="fk-editor__canvas"
+        onKeyDownCapture={(e) => {
+          // Enter on a canvas node opens its panel: move focus there so the keyboard follows.
+          if (e.key !== "Enter" || e.metaKey || e.ctrlKey || e.altKey) return;
+          const target = e.target as HTMLElement;
+          if (!target.classList?.contains("react-flow__node")) return;
+          const body = e.currentTarget.parentElement;
+          requestAnimationFrame(() =>
+            body?.querySelector<HTMLElement>(".fk-panel [data-autofocus]")?.focus(),
+          );
+        }}
+      >
         <WorkflowCanvas store={store} />
       </div>
       {selection !== null && (
         <aside className="fk-panel" aria-label={labels.stepSettings}>
-          {renderPanel ? renderPanel(store) : <PanelPlaceholder selection={selection} />}
+          {renderPanel ? renderPanel(store) : <ConfigPanel store={store} />}
         </aside>
       )}
     </div>
@@ -190,7 +158,7 @@ export function WorkflowEditor(props: {
   headerLeft?: ReactNode;
   /**
    * Renders the side panel of the selected step (shown only while something is selected). By
-   * default a placeholder with the step's name and issues.
+   * default {@link ConfigPanel}: the generated config form and the step test.
    */
   renderPanel?: (store: EditorStore) => ReactNode;
   className?: string;
