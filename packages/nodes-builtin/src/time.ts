@@ -42,7 +42,8 @@ function durationMs(text: string): number {
   return ms;
 }
 
-const duration = () =>
+/** @internal Config schema of a duration text field such as `"2d"`, at most {@link MAX_DURATION_MS}. */
+export const durationSchema = () =>
   z
     .string()
     .regex(DURATION, DURATION_MESSAGE)
@@ -62,7 +63,7 @@ export const delayNode = defineNode({
   input: ui(
     z
       .object({
-        duration: ui(duration(), { label: "Wait for", placeholder: "2d" })
+        duration: ui(durationSchema(), { label: "Wait for", placeholder: "2d" })
           .describe("How long to wait, e.g. 30s, 5m, 2h or 3d.")
           .optional(),
         until: ui(z.iso.datetime({ offset: true }), {
@@ -183,7 +184,7 @@ export const waitForCallbackNode = defineNode({
   keywords: ["webhook", "callback", "resume", "external"],
   summary: "Wait for a callback",
   input: z.object({
-    timeout: ui(duration(), { label: "Time out after", placeholder: "7d" })
+    timeout: ui(durationSchema(), { label: "Time out after", placeholder: "7d" })
       .describe("Take the Timed out path if no callback arrives in time, e.g. 2h or 7d.")
       .default("7d"),
     notify: ui(

@@ -29,7 +29,7 @@
  *
  * Public routes (no `authorize`):
  * - `POST /hooks/:tenantId/:workflowId/:slug` body = JSON → 202 {@link RunStartedResponse}
- *   (200 `{ runId, deduped: true }` for a repeated dedupe header or trigger `dedupeKey`; 200
+ *   (200 `{ runId, deduped: true }` for a repeated dedupe header or trigger `dedupe.key` within its window; 200
  *   `{ skipped: true }` when the trigger's `filter` returns `false`; 404 for an unknown slug, 401
  *   for a bad `X-Flowline-Signature`, 400 `{ issues }` for a body not matching the declared
  *   fields). The signature has no timestamp, so a captured delivery can be replayed: set a
@@ -46,7 +46,7 @@
  *
  * @module
  */
-import type { JSONSchema, Step, WorkflowDoc } from "./types";
+import type { DurationInput, JSONSchema, Step, WorkflowDoc } from "./types";
 
 /** One row of `GET /workflows`. */
 export interface WorkflowSummary {
@@ -301,6 +301,12 @@ export interface PublishRequest {
 export interface RunWorkflowRequest {
   /** Trigger payload for the run. */
   input?: unknown;
+  /**
+   * Repeated requests with the same `key` within `window` (whole ms or a duration such as
+   * `"30m"`; default the engine's `dedupe.defaultWindow`, 7 days unless configured) start one
+   * run and all answer its `runId`. An invalid window is a 400.
+   */
+  dedupe?: { key?: string; window?: DurationInput };
 }
 
 /** Response of routes that start a run (`/workflows/:id/run`, `/runs/:id/retry`). */

@@ -442,4 +442,13 @@ describe("triggers", () => {
     expect(webhookTrigger.config.parse({})).toEqual({ fields: [] });
     expect(manualTrigger.config.parse({})).toEqual({ fields: [] });
   });
+
+  it("core.webhook dedupeWindow accepts a duration up to 365d", () => {
+    for (const dedupeWindow of ["30s", "10m", "2h", "365d"]) {
+      expect(webhookTrigger.config.safeParse({ dedupeWindow }).success).toBe(true);
+    }
+    for (const dedupeWindow of ["0s", "-1s", "1.5h", "nope", "", "366d"]) {
+      expect(webhookTrigger.config.safeParse({ dedupeWindow }).success, dedupeWindow).toBe(false);
+    }
+  });
 });

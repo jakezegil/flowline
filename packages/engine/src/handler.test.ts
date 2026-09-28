@@ -472,6 +472,42 @@ describe("runs", () => {
     expect((await call("POST", "/workflows/none/run", { body: {} })).status).toBe(404);
   });
 
+  it("dedupes POST /workflows/:id/run by `dedupe.key` and validates `dedupe`", async () => {
+    await deploy(manualDoc("wf"));
+    const body = { input: { name: "Ada" }, dedupe: { key: "x" } };
+    const first = await call("POST", "/workflows/wf/run", { body });
+    const second = await call("POST", "/workflows/wf/run", { body });
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(202);
+    const { runId } = await json<{ runId: string }>(first);
+    expect(runId).toMatch(/^run_[0-9a-f]{32}$/);
+    expect(await json(second)).toEqual({ runId });
+    expect(await storage.listRuns("a", {})).toHaveLength(1);
+
+    // The window applies: after it, the same key starts a new run.
+    const windowed = { input: { name: "Ada" }, dedupe: { key: "y", window: "1m" } };
+    const a = await json<{ runId: string }>(call("POST", "/workflows/wf/run", { body: windowed }));
+    now += 60_000;
+    const b = await json<{ runId: string }>(call("POST", "/workflows/wf/run", { body: windowed }));
+    expect(b.runId).not.toBe(a.runId);
+
+    for (const dedupe of [
+      "x",
+      [],
+      { key: 5 },
+      { window: true },
+      { window: 0 },
+      { window: "-1s" },
+      { window: "nope" },
+    ]) {
+      const res = await call("POST", "/workflows/wf/run", {
+        body: { input: { name: "Ada" }, dedupe },
+      });
+      expect(res.status, JSON.stringify(dedupe)).toBe(400);
+    }
+    expect(await storage.listRuns("a", {})).toHaveLength(3);
+  });
+
   it("lists runs with filters", async () => {
     await deploy(manualDoc("wf"));
     await deploy(manualDoc("wf2"));
@@ -851,15 +887,41 @@ describe("webhooks", () => {
     expect(await storage.listRuns("a", {})).toHaveLength(2);
   });
 
-  it("applies a plugin webhook trigger's filter and dedupeKey", async () => {
+  it("suppresses a repeated dedupe header only within `dedupeWindow`", async () => {
+    const slug = await hook({ dedupeHeader: "X-Request-Id", dedupeWindow: "10m" });
+    const body = JSON.stringify({ email: "a@b.c" });
+    const first = await json<{ runId: string }>(
+      post(`/hooks/a/hook/${slug}`, body, { "x-request-id": "req-1" }),
+    );
+    now += 10 * 60_000 - 1;
+    const dup = await post(`/hooks/a/hook/${slug}`, body, { "x-request-id": "req-1" });
+    expect(await dup.json()).toEqual({ runId: first.runId, deduped: true });
+    now += 1;
+    const fresh = await post(`/hooks/a/hook/${slug}`, body, { "x-request-id": "req-1" });
+    expect(fresh.status).toBe(202);
+    expect((await json<{ runId: string }>(fresh)).runId).not.toBe(first.runId);
+  });
+
+  it("rejects a malformed dedupeWindow when publishing", async () => {
+    // The 365d cap is a Zod refinement the manifest's JSON Schema can't carry (as for
+    // core.delay); nodes-builtin pins it on the config schema.
+    for (const dedupeWindow of ["0s", "-1s", "nope"]) {
+      const v = await engine.saveWorkflow("a", webhookDoc("hook", { dedupeWindow }), "u");
+      await expect(engine.publish("a", "hook", v.version, "u")).rejects.toMatchObject({
+        issues: [expect.objectContaining({ field: "trigger.dedupeWindow" })],
+      });
+    }
+  });
+
+  it("applies a plugin webhook trigger's filter and dedupe key; the dedupe header wins", async () => {
     const invoiceHook = defineTrigger({
       type: "p.invoice",
       name: "Invoice",
       kind: "webhook",
-      config: z.object({}),
+      config: z.object({ dedupeHeader: z.string().optional() }),
       payload: z.object({ body: z.object({ type: z.string(), id: z.string() }) }),
       filter: ({ payload }) => payload.body.type === "invoice.paid",
-      dedupeKey: ({ payload }) => payload.body.id,
+      dedupe: { key: ({ payload }) => payload.body.id },
     });
     const e = makeEngine({
       registry: createRegistry([
@@ -897,6 +959,30 @@ describe("webhooks", () => {
     expect(again.status).toBe(200);
     expect(await again.json()).toEqual({ runId, deduped: true });
     expect(await storage.listRuns("a", {})).toHaveLength(1);
+
+    // With `dedupeHeader` configured, the header's value is the key, not the trigger's.
+    const headerDoc: WorkflowDoc = {
+      ...doc,
+      id: "inv2",
+      trigger: { type: "p.invoice", config: { dedupeHeader: "X-Delivery" } },
+    };
+    const hv = await e.saveWorkflow("a", headerDoc, "u");
+    await e.publish("a", "inv2", hv.version, "u");
+    const headerSlug = (hv.doc.trigger.config as { slug: string }).slug;
+    const deliver = (id: string, delivery: string) =>
+      e.handler(
+        new Request(`http://localhost/flowline/hooks/a/inv2/${headerSlug}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-delivery": delivery },
+          body: JSON.stringify({ type: "invoice.paid", id }),
+        }),
+      );
+    // Same trigger key, different header values: two runs.
+    expect((await deliver("in_9", "d1")).status).toBe(202);
+    expect((await deliver("in_9", "d2")).status).toBe(202);
+    // Different trigger keys, same header value: deduped.
+    expect((await deliver("in_10", "d2")).status).toBe(200);
+    expect(await storage.listRuns("a", { workflowId: "inv2" })).toHaveLength(2);
   });
 
   it("stores lowercased headers without credentials", async () => {

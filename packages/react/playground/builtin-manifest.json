@@ -931,6 +931,15 @@
               "placeholder": "X-Request-Id"
             },
             "description": "Requests repeating this header's value start no new run."
+          },
+          "dedupeWindow": {
+            "type": "string",
+            "pattern": "^([1-9][0-9]*)([smhd])$",
+            "x-flowline": {
+              "label": "Deduplication window",
+              "placeholder": "7d"
+            },
+            "description": "How long a repeated header value starts no new run. Leave empty for the default (7 days unless your app changes it)."
           }
         }
       },

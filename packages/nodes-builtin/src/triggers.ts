@@ -6,6 +6,7 @@
  */
 import { defineTrigger, fields, secret, ui } from "@flowlinejs/core";
 import { z } from "zod";
+import { durationSchema } from "./time";
 
 /** Five (or six, with seconds) space-separated cron fields. Full parsing happens when scheduling. */
 const CRON = /^\s*\S+(\s+\S+){4,5}\s*$/;
@@ -63,6 +64,11 @@ export const webhookTrigger = defineTrigger({
       .optional(),
     dedupeHeader: ui(z.string(), { label: "Deduplication header", placeholder: "X-Request-Id" })
       .describe("Requests repeating this header's value start no new run.")
+      .optional(),
+    dedupeWindow: ui(durationSchema(), { label: "Deduplication window", placeholder: "7d" })
+      .describe(
+        "How long a repeated header value starts no new run. Leave empty for the default (7 days unless your app changes it).",
+      )
       .optional(),
   }),
   dynamicPayload: { kind: "webhook", configPath: "fields" },

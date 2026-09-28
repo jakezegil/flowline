@@ -109,7 +109,7 @@ describe("showIf in trigger config", () => {
     }),
     payload: z.object({ id: z.string(), stage: z.string() }),
     filter: ({ config, payload }) => config.stage === undefined || payload.stage === config.stage,
-    dedupeKey: ({ config }) => config.key,
+    dedupe: { key: ({ config }) => config.key },
   });
   const echo = defineNode({
     type: "t.echo",
@@ -136,7 +136,7 @@ describe("showIf in trigger config", () => {
     return { emit, runs: () => storage.listRuns("t1", {}) };
   };
 
-  it("filter and dedupeKey never see hidden fields", async () => {
+  it("filter and dedupe.key never see hidden fields", async () => {
     // stage and key are hidden (only: false): no filtering, no dedupe key.
     const hidden = await setup({ only: false, stage: "won", key: "fixed" });
     expect((await hidden.emit("lost")).started).toHaveLength(1);
