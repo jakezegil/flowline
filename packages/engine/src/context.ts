@@ -13,6 +13,8 @@ import type {
   TransformRuntime,
 } from "@flowkit/core";
 import { FatalError } from "./errors";
+import { createGuardedFetch, type GuardedFetch } from "./http";
+import { quickjsRuntime } from "./transform/quickjs";
 
 /** @internal Everything needed to build one handler invocation's context. */
 export interface ContextArgs {
@@ -30,9 +32,27 @@ export interface ContextArgs {
   resume?: ResumeInfo;
   scope: ResolveScope;
   secrets?: { get(tenantId: string, name: string): Promise<string | undefined> };
+  /** Sandbox behind `ctx.transform`. Default: a shared {@link quickjsRuntime}. */
   transform?: TransformRuntime;
+  /** SSRF-guarded fetch behind `ctx.http.fetch`. Default: the default network policy. */
+  http?: GuardedFetch;
   /** Issues a callback for this invocation (`ctx.callback`); unsupported when omitted. */
   callback?: (opts: { timeoutMs: number }) => Promise<CallbackHandle>;
+}
+
+let sharedHttp: GuardedFetch | undefined;
+let sharedTransform: TransformRuntime | undefined;
+
+/** The guarded fetch with the default network policy, created on first use. */
+function defaultHttp(): GuardedFetch {
+  sharedHttp ??= createGuardedFetch();
+  return sharedHttp;
+}
+
+/** The default QuickJS transform runtime, created on first use. */
+function defaultTransform(): TransformRuntime {
+  sharedTransform ??= quickjsRuntime();
+  return sharedTransform;
 }
 
 const noopLogger: Logger = { debug() {}, info() {}, warn() {}, error() {} };
@@ -92,15 +112,12 @@ export function createNodeContext(a: ContextArgs): NodeContext {
       if (!a.callback) throw new FatalError("ctx.callback() is not available here");
       return a.callback(opts);
     },
-    transform: a.transform ?? {
-      async run() {
-        throw new FatalError("No transform runtime is configured");
-      },
-    },
+    transform: a.transform ?? defaultTransform(),
     scope,
     http: {
-      async fetch() {
-        throw new FatalError("ctx.http is not supported yet");
+      fetch(url, init) {
+        const guarded = a.http ?? defaultHttp();
+        return guarded(url, { ...init, signal: init?.signal ?? a.signal });
       },
     },
   };

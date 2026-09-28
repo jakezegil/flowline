@@ -27,6 +27,7 @@ import type { z } from "zod";
 import { createNodeContext, newCallbackToken, sha256Hex } from "./context";
 import type { EngineOptions } from "./engine";
 import { FatalError, RetryableError } from "./errors";
+import { createGuardedFetch } from "./http";
 import { buildScope, childSteps, entryAt, type NextAction, nextAction } from "./interpreter";
 import { redactBySchema } from "./redact";
 import type { Lease, NewRunEvent, Run, RunPatch } from "./storage";
@@ -183,6 +184,7 @@ export function createExecutor(opts: EngineOptions): Executor {
   const stepsPerClaim = opts.stepsPerClaim ?? DEFAULT_STEPS_PER_CLAIM;
   const services = opts.services ?? {};
   const hooks = opts.__testHooks;
+  const http = createGuardedFetch(opts.http);
   const versions = new Map<string, WorkflowVersion>();
   let manifests: Map<string, NodeManifest> | undefined;
 
@@ -506,6 +508,7 @@ export function createExecutor(opts: EngineOptions): Executor {
           scope: ctxArgs.scope,
           ...(opts.secrets ? { secrets: opts.secrets } : {}),
           ...(opts.transform ? { transform: opts.transform } : {}),
+          http,
           callback,
         });
         const handler = Promise.resolve().then(() => node.run({ input, ctx }));

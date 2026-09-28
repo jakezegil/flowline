@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./ssrf": {
+      "types": "./src/ssrf.ts",
+      "default": "./src/ssrf.ts"
     }
   },
   "publishConfig": {
@@ -14,6 +18,10 @@
       ".": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
+      },
+      "./ssrf": {
+        "types": "./dist/ssrf.d.ts",
+        "default": "./dist/ssrf.js"
       }
     }
   },
@@ -23,5 +31,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsup"
+  },
+  "dependencies": {
+    "@flowkit/core": "workspace:*",
+    "zod": "^4"
   }
 }
