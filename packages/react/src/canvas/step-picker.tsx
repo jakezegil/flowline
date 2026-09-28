@@ -68,6 +68,61 @@ export function pickerGroups(
   return [...groups].map(([heading, list]) => ({ ...(heading ? { heading } : {}), nodes: list }));
 }
 
+/** Lower-case words of a text, split at spaces, punctuation and camelCase (`crm.sendEmail`). */
+function wordsOf(text: string): string[] {
+  return text
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+/**
+ * How well a node matches a picker search: higher is better, `0` for no match. Every query word
+ * must start a word of the node's name, keywords, category, plugin name or type (or, from three
+ * letters, occur inside the name). The name counts most: an exact name wins, then a name that
+ * starts with the query, then one containing it as words; keywords and the category come next,
+ * the plugin and type last. Descriptions aren't searched (their many words match almost anything).
+ */
+export function stepMatchScore(node: NodeManifest, query: string, pluginName = ""): number {
+  const q = query.trim().toLowerCase().replace(/\s+/g, " ");
+  if (q === "") return 1;
+  const name = node.name.toLowerCase();
+  const nameWords = wordsOf(node.name);
+  const keywordWords = [...(node.keywords ?? []), node.category ?? ""].flatMap(wordsOf);
+  const otherWords = [...wordsOf(pluginName), ...wordsOf(node.type)];
+  let score = 0;
+  for (const t of wordsOf(q)) {
+    if (nameWords.includes(t)) score += 30;
+    else if (nameWords.some((w) => w.startsWith(t))) score += 20;
+    else if (t.length >= 3 && name.includes(t)) score += 10;
+    else if (keywordWords.some((w) => w.startsWith(t))) score += 8;
+    else if (otherWords.some((w) => w.startsWith(t))) score += 3;
+    else return 0;
+  }
+  if (score === 0) return 0;
+  if (name === q) score += 1000;
+  else if (name.startsWith(q)) score += 500;
+  else if (` ${name}`.includes(` ${q}`)) score += 200;
+  if (node.category?.toLowerCase().startsWith(q)) score += 40;
+  if ((node.keywords ?? []).some((k) => k.toLowerCase().startsWith(q))) score += 40;
+  return score;
+}
+
+/** The nodes of `groups` matching `query`, best first (ties keep their order). */
+export function rankSteps(
+  groups: PickerGroup[],
+  query: string,
+  pluginName: (plugin: string) => string = () => "",
+): NodeManifest[] {
+  return groups
+    .flatMap((g) => g.nodes)
+    .map((node, i) => ({ node, i, score: stepMatchScore(node, query, pluginName(node.plugin)) }))
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .map((r) => r.node);
+}
+
 /** A zero-size rectangle at the top center of `el` (fallback anchor when there's no target). */
 function topCenterOf(el: HTMLElement | null): DOMRect {
   const r = el?.getBoundingClientRect();
@@ -145,6 +200,13 @@ export function StepPicker() {
     () => new Map(manifest.plugins.map((p) => [p.id, p.name])),
     [manifest],
   );
+  // Searching lists the matches best first, across the tab's sections.
+  const searching = query.trim() !== "";
+  const shown = useMemo<PickerGroup[]>(
+    () =>
+      searching ? [{ nodes: rankSteps(groups, query, (id) => pluginName.get(id) ?? "") }] : groups,
+    [searching, groups, query, pluginName],
+  );
 
   const pick = (type: string) => {
     if (!request) return;
@@ -207,11 +269,12 @@ export function StepPicker() {
             restoreFocus();
           }}
         >
-          <Command label={title} loop>
+          <Command label={title} loop shouldFilter={false}>
             <div className="fk-picker__search">
               <Search size={14} aria-hidden />
               <Command.Input
                 autoFocus
+                aria-label={labels.searchSteps}
                 value={query}
                 onValueChange={setQuery}
                 onKeyDown={onInputKey}
@@ -249,7 +312,7 @@ export function StepPicker() {
                 <Command.Empty className="fk-picker__empty">
                   {labels.noMatches(query)}
                 </Command.Empty>
-                {groups.map((g) => (
+                {shown.map((g) => (
                   <Command.Group
                     key={g.heading ?? ""}
                     heading={g.heading}
@@ -261,12 +324,6 @@ export function StepPicker() {
                         <Command.Item
                           key={n.type}
                           value={n.type}
-                          keywords={[
-                            n.name,
-                            n.description ?? "",
-                            n.category ?? "",
-                            pluginName.get(n.plugin) ?? "",
-                          ]}
                           onSelect={() => pick(n.type)}
                           className="fk-picker__item"
                         >

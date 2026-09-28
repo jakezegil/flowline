@@ -69,4 +69,34 @@ describe("renderSummary", () => {
       { kind: "text", text: " Hi" },
     ]);
   });
+
+  test("M10: optional sections show only while their field is set and shown; choices by label", () => {
+    const assign: JSONSchema = {
+      type: "object",
+      properties: {
+        strategy: { type: "string", enum: ["roundRobin", "team"], default: "roundRobin" },
+        team: {
+          type: "string",
+          enum: ["smb", "enterprise"],
+          "x-flowkit": {
+            enumLabels: { smb: "SMB", enterprise: "Enterprise" },
+            showIf: { field: "strategy", equals: "team" },
+          },
+        },
+      },
+    };
+    const summary = "{{strategy}}{{#team}} · {{team}}{{/team}}";
+    const text = (config: Step["config"]) =>
+      renderSummary(summary, step(config), noNames, assign)
+        .parts.map((p) => ("text" in p ? p.text : p.kind === "ref" ? p.label : p.label))
+        .join("");
+    expect(text({})).toBe("Round robin");
+    expect(text({ strategy: "team", team: "smb" })).toBe("Team · SMB");
+    expect(text({ strategy: "team" })).toBe("Team");
+    // A team left over from before switching back to round robin is hidden, so not shown.
+    expect(text({ strategy: "roundRobin", team: "enterprise" })).toBe("Round robin");
+    expect(text({ strategy: "team", team: { $ref: "trigger.team" } })).toBe(
+      "Team · Trigger › team",
+    );
+  });
 });

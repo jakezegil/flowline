@@ -1,5 +1,5 @@
 import { type Issue, type WorkflowDoc, walkSteps } from "@flowkit/core";
-import { TriangleAlert } from "lucide-react";
+import { Plus, TriangleAlert } from "lucide-react";
 import { type JSX, useMemo, useState } from "react";
 import { useEditorStore, useIssues } from "../hooks";
 import { useFlowkitAppearance } from "../provider";
@@ -28,9 +28,14 @@ export function issueTargets(doc: WorkflowDoc, issues: Issue[]): { key: string; 
   return out;
 }
 
+/** How long the "+" under the trigger pulses after "Add a first step". */
+const PULSE_MS = 1600;
+
 /**
  * "2 issues": red with errors, amber with only warnings, hidden when the workflow is clean. Each
  * click selects the next step with an issue (in tree order, wrapping), which the canvas pans to.
+ * A workflow with no steps (and nothing else wrong) reads "Add a first step" instead: a click
+ * points out the "+" under the trigger and opens the step picker there.
  */
 export function IssuesPill(): JSX.Element | null {
   const { labels } = useFlowkitAppearance();
@@ -41,6 +46,31 @@ export function IssuesPill(): JSX.Element | null {
   const targets = useMemo(() => issueTargets(doc, issues), [doc, issues]);
   const [cycling, setCycling] = useState(false);
   if (issues.length === 0) return null;
+
+  if (issues.length === 1 && issues[0]?.code === "doc.empty") {
+    const issue = issues[0];
+    return (
+      <Hint content={issue.message}>
+        <button
+          type="button"
+          className="fk-issues"
+          data-tone={errors > 0 ? "danger" : "warning"}
+          onClick={(e) => {
+            const plus = e.currentTarget
+              .closest(".fk-editor")
+              ?.querySelector<HTMLElement>('.fk-add[data-insert-at="//0"]');
+            if (!plus) return;
+            plus.dataset.pulse = "";
+            setTimeout(() => delete plus.dataset.pulse, PULSE_MS);
+            plus.click();
+          }}
+        >
+          <Plus size={13} strokeWidth={2.25} aria-hidden />
+          <span>{labels.addFirstStep}</span>
+        </button>
+      </Hint>
+    );
+  }
 
   const at = targets.findIndex((t) => t.key === selection);
   const current = cycling && at !== -1 ? targets[at] : undefined;

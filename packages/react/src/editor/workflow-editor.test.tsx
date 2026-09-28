@@ -165,6 +165,82 @@ describe("WorkflowEditor", () => {
     await waitFor(() => expect(selectedId()).toBe("step:email"));
   });
 
+  test("M7: a server rejection's issues show on the pill, the step and its field", async () => {
+    const { client } = setup(fixtureDoc());
+    await screen.findByText("Draft · v3");
+    const before = screen.queryByRole("button", { name: /issue/ })?.textContent ?? "";
+    const issue = {
+      code: "config.invalid",
+      message: "Subject is too long for the mail server",
+      severity: "error",
+      stepId: "email",
+      field: "subject",
+    };
+    client.publish.mockRejectedValue(httpError(422, { error: "Invalid", issues: [issue] }));
+    fireEvent.click(button("Publish"));
+    await screen.findByText("Publishing was blocked by 1 issue");
+    const pill = await screen.findByRole("button", { name: /\d+ issues?/ });
+    expect(pill.textContent).not.toBe(before);
+    fireEvent.click(button("Show"));
+    const field = (await screen.findByRole("textbox", { name: "Subject" })).closest(
+      ".fk-f",
+    ) as HTMLElement;
+    expect(field.textContent).toContain("Subject is too long for the mail server");
+    // Publishing stays blocked until the flagged step changes.
+    expect(button("Publish").getAttribute("aria-disabled")).toBe("true");
+  });
+
+  test('M3: a new workflow\'s pill reads "Add a first step" and opens the picker at the "+"', async () => {
+    setup(null);
+    const pill = await screen.findByRole("button", { name: "Add a first step" });
+    const plus = screen.getByRole("button", { name: "Add first step" });
+    fireEvent.click(pill);
+    expect(plus.hasAttribute("data-pulse")).toBe(true);
+    expect(await screen.findByRole("dialog", { name: "Add step" })).toBeTruthy();
+    // Nothing selected: the trigger has no issue to show.
+    expect(screen.queryByRole("complementary", { name: "Step settings" })).toBeNull();
+  });
+
+  test("H2: onDirtyChange reports unsaved changes, for the host's router guard", async () => {
+    const onDirtyChange = vi.fn();
+    const client = mockClient({
+      getManifest: async () => manifest,
+      listSubflows: async () => [],
+      getWorkflow: async () => detail(fixtureDoc()),
+    });
+    const { unmount } = render(
+      <FlowkitProvider client={client}>
+        <WorkflowEditor workflowId="welcome" onDirtyChange={onDirtyChange} />
+      </FlowkitProvider>,
+    );
+    const name = await screen.findByRole("textbox", { name: "Workflow name" });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    fireEvent.change(name, { target: { value: "Changed" } });
+    fireEvent.blur(name);
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    client.saveWorkflow.mockImplementation(async (doc: WorkflowDoc) => detail(doc, 4).latest);
+    fireEvent.click(button("Save"));
+    await screen.findByText("Draft · v4");
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    fireEvent.change(name, { target: { value: "Again" } });
+    fireEvent.blur(name);
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    unmount();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  test("L18: a server that can't be reached is said in plain words", async () => {
+    const { client } = setup(fixtureDoc());
+    await screen.findByText("Draft · v3");
+    client.saveWorkflow.mockRejectedValue(new TypeError("Failed to fetch"));
+    fireEvent.click(button("Save"));
+    expect(
+      await screen.findByText(
+        "Couldn't save. The server can't be reached. Check your connection, then try again.",
+      ),
+    ).toBeTruthy();
+  });
+
   test("Publish stays busy while it saves first", async () => {
     const { client } = setup(fixtureDoc());
     const name = await screen.findByRole("textbox", { name: "Workflow name" });

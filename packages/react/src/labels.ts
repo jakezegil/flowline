@@ -123,8 +123,14 @@ export interface FlowkitLabels {
   codeEditorHint: string;
 
   // Edges and placeholders
-  /** The "+" buttons on connections. */
+  /** The "+" buttons on connections, where nothing more specific applies. */
   addStepHere: string;
+  /** A "+" after a step. */
+  addStepAfter(step: string): string;
+  /** The "+" under the trigger (`first`: the workflow has no steps yet). */
+  addStepAfterTrigger(first: boolean): string;
+  /** A "+" at the top of a branch, or an empty branch's placeholder. */
+  addStepInBranch(branch: string, block: string): string;
   /** An empty branch's placeholder (also the picker's name when adding). */
   addStep: string;
   /** An empty branch on a read-only canvas. */
@@ -194,6 +200,8 @@ export interface FlowkitLabels {
   statusLive(version: number): string;
   /** Issues pill text. */
   issueCount(n: number): string;
+  /** Issues pill of a workflow whose only issue is that it has no steps. */
+  addFirstStep: string;
   /** Issues pill accessible description. */
   showNextIssue: string;
   /** Issues pill tooltip while cycling through the steps with issues: "Step 2 of 3 with issues". */
@@ -202,6 +210,8 @@ export interface FlowkitLabels {
   saving: string;
   saved(version: number): string;
   saveFailed(message: string): string;
+  /** Why a request failed when it never reached the server (in place of "Failed to fetch"). */
+  serverUnreachable: string;
   run: string;
   /** Tooltip of Run when nothing is published yet. */
   runNeedsPublish: string;
@@ -485,13 +495,13 @@ function noValue(label: string): string {
   return `No ${acronym ? label : label.charAt(0).toLowerCase() + label.slice(1)}`;
 }
 
-const nav = "Use the arrow keys to move between steps and Enter to open one.";
+const nav = "Use the arrow keys to move between steps, and Enter or Space to open one.";
 
 /** The English defaults. */
 export const defaultLabels: FlowkitLabels = {
   canvas: "Workflow canvas",
   canvasHelpReadOnly: nav,
-  canvasHelp: `${nav} Press Delete to remove the selected step, and Escape to clear the selection.`,
+  canvasHelp: `${nav} Press Control+K (Command+K on a Mac) to add a step after this one, Shift with it to add one before, Delete to remove it, and Escape to clear the selection.`,
   edgeDescription: "Connection between steps.",
   controls: "Canvas controls",
   zoomIn: "Zoom in",
@@ -571,6 +581,9 @@ export const defaultLabels: FlowkitLabels = {
     "Type steps. or trigger. for suggestions. Press Escape, then Tab, to leave the editor.",
 
   addStepHere: "Add step here",
+  addStepAfter: (step) => `Add step after ${step}`,
+  addStepAfterTrigger: (first) => (first ? "Add first step" : "Add step after the trigger"),
+  addStepInBranch: (branch, block) => `Add step to ${branch} of ${block}`,
   addStep: "Add step",
   noSteps: "No steps",
   end: "End",
@@ -626,12 +639,14 @@ export const defaultLabels: FlowkitLabels = {
   statusPublished: (v) => `Published v${v}`,
   statusLive: (v) => `v${v} is live`,
   issueCount: (n) => (n === 1 ? "1 issue" : `${n} issues`),
+  addFirstStep: "Add a first step",
   showNextIssue: "Select the next step with an issue",
   issuePosition: (i, n) => `Step ${i} of ${n} with issues`,
   save: "Save",
   saving: "Saving…",
   saved: (v) => `Saved as v${v}`,
   saveFailed: (m) => `Couldn't save. ${m}`,
+  serverUnreachable: "The server can't be reached. Check your connection, then try again.",
   run: "Run",
   runNeedsPublish: "Publish the workflow to run it",
   runDialogTitle: "Run workflow",

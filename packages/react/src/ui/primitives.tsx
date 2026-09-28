@@ -126,6 +126,15 @@ export function errorText(err: unknown): string {
   return String(err);
 }
 
+/**
+ * Whether a failed request never reached the server (it's down, the network is offline, or the
+ * browser blocked it): `fetch` then rejects with a `TypeError` ("Failed to fetch", "Load
+ * failed", "NetworkError when attempting to fetch resource.").
+ */
+export function isNetworkError(err: unknown): boolean {
+  return err instanceof TypeError && httpStatus(err) === undefined;
+}
+
 /** The HTTP status of a failed client request, if it was one. */
 export function httpStatus(err: unknown): number | undefined {
   const status = (err as { status?: unknown } | null)?.status;

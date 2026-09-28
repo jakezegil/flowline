@@ -5,7 +5,14 @@
  * @module
  */
 
-import { findStep, type StepLocation } from "@flowkit/core";
+import {
+  branchesFor,
+  findStep,
+  type Manifest,
+  type StepLocation,
+  type WorkflowDoc,
+} from "@flowkit/core";
+import type { FlowkitLabels } from "../labels";
 import { type EditorStore, TRIGGER_KEY } from "../store/editor-store";
 import type { CanvasUiStore } from "./canvas-context";
 
@@ -41,6 +48,39 @@ export function locationAfter(store: EditorStore, selection: string | null): Ste
     : { parentId, branch, index: index + 1 };
 }
 
+/**
+ * The accessible name of a "+" (or empty-branch placeholder) inserting at `loc`: after the step
+ * before it, else at the top of its branch, else under the trigger.
+ */
+export function insertLabel(
+  doc: WorkflowDoc,
+  manifest: Manifest,
+  loc: StepLocation,
+  labels: FlowkitLabels,
+): string {
+  const nameOf = (id: string) => {
+    const step = findStep(doc, id)?.step;
+    if (!step) return id;
+    return step.name ?? manifest.nodes.find((n) => n.type === step.type)?.name ?? step.id;
+  };
+  if (loc.parentId === null) {
+    const before = doc.steps[loc.index - 1];
+    return before
+      ? labels.addStepAfter(nameOf(before.id))
+      : labels.addStepAfterTrigger(doc.steps.length === 0);
+  }
+  const parent = findStep(doc, loc.parentId)?.step;
+  if (!parent) return labels.addStepHere;
+  const before = parent.branches?.[loc.branch ?? ""]?.[loc.index - 1];
+  if (before) return labels.addStepAfter(nameOf(before.id));
+  const m = manifest.nodes.find((n) => n.type === parent.type);
+  const branch =
+    m?.branches.kind === "loop"
+      ? labels.eachItem
+      : ((m && branchesFor(m, parent).find((b) => b.id === loc.branch)?.label) ?? loc.branch ?? "");
+  return labels.addStepInBranch(branch, nameOf(parent.id));
+}
+
 /** The actions available on a step card. */
 export interface StepActions {
   rename(): void;
@@ -53,6 +93,11 @@ export interface StepActions {
   /** Pastes at the top of `branch` of this step (its loop body for loops). */
   pasteInside(branch: string): void;
   remove(): void;
+  /**
+   * Makes this step the target of its right-click menu: when a panel is open (another step is
+   * selected) it moves to this step, so the menu never acts on one step while showing another.
+   */
+  target(): void;
 }
 
 /**
@@ -82,7 +127,8 @@ export function stepActions(
   };
   return {
     rename: () => ui.getState().startRename(stepId),
-    duplicate: () => after(s().duplicateStep(stepId)),
+    // The copy takes the panel when one is open; with none open, it only takes focus.
+    duplicate: () => after(s().duplicateStep(stepId, { select: s().selection !== null })),
     copyReference() {
       const text = `{{steps.${stepId}}}`;
       const done = () => ui.getState().toast(ui.getState().labels.referenceCopied);
@@ -106,11 +152,18 @@ export function stepActions(
     pasteInside: (branch) => after(s().paste({ parentId: stepId, branch, index: 0 })),
     remove() {
       const next = neighbourOf(store, stepId);
+      const before = s().selection;
       s().removeStep(stepId);
-      s().select(next);
+      // The removal cleared a selection inside the deleted subtree: select the neighbour
+      // instead. A selection elsewhere (deleting from another card's menu) stays put, and with
+      // nothing selected no panel opens; focus goes to the neighbour either way.
+      if (before !== null && s().selection === null) s().select(next);
       focusNode(root(), next);
       const { labels } = ui.getState();
       ui.getState().toast(labels.stepDeleted, { label: labels.undo, run: () => s().undo() });
+    },
+    target() {
+      if (s().selection !== null) s().select(stepId);
     },
   };
 }

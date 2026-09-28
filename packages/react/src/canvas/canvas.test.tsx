@@ -55,6 +55,9 @@ function card(stepId: string): HTMLElement {
   return node;
 }
 
+/** The "+" buttons on edges, named by where they insert. */
+const PLUS = /^Add (first step$|step (after|to) )/;
+
 function root(): HTMLElement {
   return document.querySelector(".fk-root") as HTMLElement;
 }
@@ -107,9 +110,15 @@ describe("WorkflowCanvas", () => {
 
   test('clicking "+" opens the step picker and picking inserts the step there', async () => {
     render(<WorkflowCanvas store={store} />);
-    const plusButtons = screen.getAllByRole("button", { name: "Add step here" });
-    // trigger→load, load→email, email→end
-    expect(plusButtons).toHaveLength(3);
+    const plusButtons = screen.getAllByRole("button", { name: PLUS });
+    // trigger→load, load→email, email→end, each named by where it inserts (M4)
+    expect(plusButtons.map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Add step after the trigger",
+      "Add step after Load contact",
+      "Add step after Send email",
+    ]);
+    // Out of the tab order: they'd all come before the cards.
+    expect(plusButtons.map((b) => b.tabIndex)).toEqual([-1, -1, -1]);
     fireEvent.click(plusButtons[1] as HTMLElement);
     const picker = await screen.findByRole("dialog", { name: "Add step" });
     expect(within(picker).getByRole("tab", { name: "All" })).toBeTruthy();
@@ -127,7 +136,7 @@ describe("WorkflowCanvas", () => {
 
   test("the picker filters by search and Enter inserts the highlighted step", async () => {
     render(<WorkflowCanvas store={store} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Add step here" })[2] as HTMLElement);
+    fireEvent.click(screen.getAllByRole("button", { name: PLUS })[2] as HTMLElement);
     const picker = await screen.findByRole("dialog", { name: "Add step" });
     const input = within(picker).getByRole("combobox");
     fireEvent.change(input, { target: { value: "each" } });
@@ -139,8 +148,13 @@ describe("WorkflowCanvas", () => {
   test("an empty branch shows an Add step placeholder that inserts into it", async () => {
     store = createEditorStore({ doc: branchyDoc(), manifest });
     render(<WorkflowCanvas store={store} />);
-    const placeholders = screen.getAllByRole("button", { name: "Add step" });
-    expect(placeholders).toHaveLength(2); // cond.else, each.body
+    const placeholders = Array.from(document.querySelectorAll<HTMLElement>(".fk-placeholder"));
+    expect(placeholders.map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Add step to Else of Condition",
+      "Add step to Each item of For each",
+    ]);
+    // Placeholders stay in the tab order (they're cards of their own).
+    expect(placeholders[0]?.tabIndex).toBe(0);
     fireEvent.click(placeholders[0] as HTMLElement);
     fireEvent.click(within(await screen.findByRole("dialog")).getByText("Send email"));
     const cond = findStep(store.getState().doc, "cond")?.step;
@@ -190,6 +204,59 @@ describe("WorkflowCanvas", () => {
     act(() => store.getState().select("each"));
     fireEvent.keyDown(root(), { key: "Delete" });
     expect(store.getState().selection).toBe("cond");
+  });
+
+  test("M6: deleting another step from its menu keeps the panel's step; the store never selects a missing step", async () => {
+    store = createEditorStore({ doc: branchyDoc(), manifest });
+    render(<WorkflowCanvas store={store} />);
+    act(() => store.getState().select("load"));
+    fireEvent.contextMenu(card("each").querySelector(".fk-card") as HTMLElement);
+    // L19: right-clicking moves the open panel to the menu's step.
+    expect(store.getState().selection).toBe("each");
+    act(() => store.getState().select("load"));
+    fireEvent.keyDown(card("each"), { key: "Delete" });
+    expect(findStep(store.getState().doc, "each")).toBeUndefined();
+    expect(store.getState().selection).toBe("load");
+    act(() => store.getState().select("each"));
+    expect(store.getState().selection).toBeNull();
+    // Undoing an insert removes the step the insert selected: the selection goes with it.
+    const id = store.getState().insertStep({ parentId: null, index: 0 }, "crm.sendEmail");
+    expect(store.getState().selection).toBe(id);
+    act(() => store.getState().undo());
+    expect(store.getState().selection).toBeNull();
+  });
+
+  test("L19: right-click with no panel open doesn't open one", () => {
+    render(<WorkflowCanvas store={store} />);
+    fireEvent.contextMenu(card("email").querySelector(".fk-card") as HTMLElement);
+    expect(store.getState().selection).toBeNull();
+  });
+
+  test("M4: keys act on the focused card: Enter or Space opens it, arrows go on from it, ⌘D duplicates it with the panel closed", () => {
+    const onStepClick = vi.fn();
+    render(<WorkflowCanvas store={store} onStepClick={onStepClick} />);
+    const ids = () => store.getState().doc.steps.map((s) => s.id);
+    fireEvent.keyDown(card("email"), { key: "d", ctrlKey: true });
+    expect(ids()).toEqual(["load", "email", "sendEmail"]);
+    expect(store.getState().selection).toBeNull();
+    fireEvent.keyDown(card("load"), { key: "ArrowDown" });
+    expect(store.getState().selection).toBe("email");
+    act(() => store.getState().select(null));
+    fireEvent.keyDown(card("load"), { key: " " });
+    expect(store.getState().selection).toBe("load");
+    expect(onStepClick).toHaveBeenLastCalledWith("load");
+    act(() => store.getState().select(null));
+    fireEvent.keyDown(card("email"), { key: "Enter" });
+    expect(store.getState().selection).toBe("email");
+  });
+
+  test("M4: ⇧⌘K adds a step before the focused card", async () => {
+    store = createEditorStore({ doc: branchyDoc(), manifest });
+    render(<WorkflowCanvas store={store} />);
+    fireEvent.keyDown(card("email"), { key: "k", ctrlKey: true, shiftKey: true });
+    fireEvent.click(within(await screen.findByRole("dialog")).getByText("Switch"));
+    const cond = findStep(store.getState().doc, "cond")?.step;
+    expect(cond?.branches?.if?.map((s) => s.type)).toEqual(["logic.switch", "crm.sendEmail"]);
   });
 
   test("the kebab menu offers the same actions, including tree-aware paste", async () => {
@@ -303,7 +370,7 @@ describe("WorkflowCanvas", () => {
     const onStepClick = vi.fn();
     render(<WorkflowCanvas store={store} onStepClick={onStepClick} />);
     act(() => store.getState().select("load"));
-    (screen.getAllByRole("button", { name: "Add step here" })[1] as HTMLElement).focus();
+    (screen.getAllByRole("button", { name: PLUS })[1] as HTMLElement).focus();
     await user.keyboard("{Enter}");
     expect(await screen.findByRole("dialog", { name: "Add step" })).toBeTruthy();
     expect(onStepClick).not.toHaveBeenCalled();
@@ -347,7 +414,7 @@ describe("WorkflowCanvas", () => {
     const user = userEvent.setup();
     render(<WorkflowCanvas store={store} />);
     act(() => store.getState().select("load"));
-    const plus = screen.getAllByRole("button", { name: "Add step here" })[1] as HTMLElement;
+    const plus = screen.getAllByRole("button", { name: PLUS })[1] as HTMLElement;
     await user.click(plus);
     await screen.findByRole("dialog", { name: "Add step" });
     await user.keyboard("{Escape}");
@@ -372,7 +439,7 @@ describe("WorkflowCanvas", () => {
   test("readOnly hides add buttons, placeholders' actions and menus, and blocks edits", () => {
     store = createEditorStore({ doc: branchyDoc(), manifest });
     render(<WorkflowCanvas store={store} readOnly />);
-    expect(screen.queryAllByRole("button", { name: "Add step here" })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: PLUS })).toHaveLength(0);
     expect(screen.queryAllByRole("button", { name: "Add step" })).toHaveLength(0);
     expect(screen.getAllByText("No steps")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: /^Actions for/ })).toBeNull();
@@ -489,7 +556,8 @@ describe("WorkflowCanvas", () => {
       <FlowkitProvider
         client={{} as never}
         labels={{
-          addStepHere: "Schritt hier einfügen",
+          addStepAfter: (s: string) => `Schritt nach ${s} einfügen`,
+          addStepAfterTrigger: () => "Schritt hier einfügen",
           addStep: "Schritt hinzufügen",
           tabAll: "Alle",
           triggerTag: "Auslöser",
@@ -499,7 +567,7 @@ describe("WorkflowCanvas", () => {
       </FlowkitProvider>,
     );
     expect(screen.getByText("Auslöser")).toBeTruthy();
-    const plus = screen.getAllByRole("button", { name: "Schritt hier einfügen" });
+    const plus = screen.getAllByRole("button", { name: /^Schritt (hier|nach)/ });
     expect(plus).toHaveLength(3);
     fireEvent.click(plus[0] as HTMLElement);
     const picker = await screen.findByRole("dialog", { name: "Schritt hinzufügen" });
@@ -509,7 +577,7 @@ describe("WorkflowCanvas", () => {
 
   test("picker tabs use a roving tabindex and control the list's tabpanel", async () => {
     render(<WorkflowCanvas store={store} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Add step here" })[0] as HTMLElement);
+    fireEvent.click(screen.getAllByRole("button", { name: PLUS })[0] as HTMLElement);
     const picker = await screen.findByRole("dialog", { name: "Add step" });
     const [all, second] = within(picker).getAllByRole("tab") as [HTMLElement, HTMLElement];
     expect(all.textContent).toBe("All");

@@ -6,8 +6,10 @@ import {
   findStep,
   generateStepId,
   type Issue,
+  isGeneratedStepId,
   type Manifest,
   type NodeManifest,
+  renameStepId,
   type Step,
   type StepLocation,
   updateStep,
@@ -44,9 +46,15 @@ export interface EditorState {
   manifest: Manifest;
   /** Extra validation knowledge (callable sub-flows). */
   ctx: ValidationContext;
-  /** Validation issues of `doc`, recomputed on every change. */
+  /**
+   * Validation issues of `doc`, recomputed on every change, plus any the server reported (see
+   * {@link EditorActions.setServerIssues}) that still apply.
+   */
   issues: Issue[];
-  /** Selected step ID, {@link TRIGGER_KEY} for the trigger, or `null`. */
+  /**
+   * Selected step ID, {@link TRIGGER_KEY} for the trigger, or `null`. Always a step in `doc`: a
+   * change that removes the selected step (delete, undo, a new doc) clears it.
+   */
   selection: string | null;
   /**
    * Sample output per step ID ({@link TRIGGER_KEY} → trigger payload sample), used by the data
@@ -91,10 +99,11 @@ export interface EditorActions {
    */
   insertStep(loc: StepLocation, nodeType: string, opts?: InsertOptions): string;
   /**
-   * Changes a step's node type, keeping its ID. Config resets to the new type's defaults; child
-   * steps stay in their branches, and branches the new type doesn't declare are kept (and
-   * flagged by the validator) rather than dropped or merged. A tested step becomes
-   * `needs-test`. Same type: no-op.
+   * Changes a step's node type. Config resets to the new type's defaults; child steps stay in
+   * their branches, and branches the new type doesn't declare are kept (and flagged by the
+   * validator) rather than dropped or merged. A tested step becomes `needs-test`. Same type:
+   * no-op. An ID the editor generated from the old type (`httpRequest_2`) is regenerated from
+   * the new one, with references to it rewritten; an ID a person chose is kept.
    */
   replaceStep(id: string, nodeType: string): void;
   /**
@@ -104,7 +113,8 @@ export interface EditorActions {
   removeStep(id: string): void;
   /**
    * Duplicates a step (and subtree) right after itself with fresh IDs, rewriting references
-   * inside the copy. Selects the copy unless `opts.select` is `false`.
+   * inside the copy. The copy is named "<name> (copy)" ("(copy 2)", … when taken). Selects the
+   * copy unless `opts.select` is `false`.
    * @returns The copy's ID.
    */
   duplicateStep(id: string, opts?: InsertOptions): string;
@@ -135,8 +145,18 @@ export interface EditorActions {
    * {@link EditorActions.setConfig}; an unchanged value does nothing.
    */
   setOutput(key: string, value: ValueExpr | undefined): void;
-  /** Selects a step, the trigger ({@link TRIGGER_KEY}), or nothing. Not recorded in history. */
+  /**
+   * Selects a step, the trigger ({@link TRIGGER_KEY}), or nothing. An ID that isn't in the doc
+   * selects nothing. Not recorded in history.
+   */
   select(id: string | null): void;
+  /**
+   * Shows issues the server reported for the current doc (e.g. a publish rejected with 422)
+   * alongside the editor's own: on the issues pill, the steps and their fields. Each one lasts
+   * until what it's about changes: its step (or the trigger, or the output mapping), or for a
+   * workflow-level issue, anything. Duplicates of the editor's own issues are dropped.
+   */
+  setServerIssues(issues: Issue[]): void;
   /** Copies a step (with its subtree) to the editor clipboard. Unknown IDs are ignored. */
   copy(id: string): void;
   /**
@@ -338,14 +358,34 @@ export function createEditorStore(init: {
     return m;
   };
 
+  /** Issues the server reported, for the doc `serverBase` (see `setServerIssues`). */
+  let serverIssues: Issue[] = [];
+  let serverBase: WorkflowDoc | null = null;
+
   return createStore<EditorState & EditorActions>()((set, get) => {
-    const derived = (doc: WorkflowDoc) => ({
-      doc,
-      issues: validateWorkflow(doc, manifest, ctx),
-      dirty: doc !== savedDoc,
-      canUndo: history.past.length > 0,
-      canRedo: history.future.length > 0,
-    });
+    const derived = (doc: WorkflowDoc) => {
+      const own = validateWorkflow(doc, manifest, ctx);
+      if (serverBase !== null) {
+        const base = serverBase;
+        serverIssues = serverIssues.filter((i) => stillApplies(i, base, doc));
+      }
+      const key = (i: Issue) => `${i.stepId ?? ""}\u0000${i.field ?? ""}\u0000${i.message}`;
+      const seen = new Set(own.map(key));
+      const server = serverIssues.filter((i) => !seen.has(key(i)));
+      return {
+        doc,
+        issues: server.length > 0 ? [...own, ...server] : own,
+        dirty: doc !== savedDoc,
+        canUndo: history.past.length > 0,
+        canRedo: history.future.length > 0,
+      };
+    };
+
+    /** `selection` if it still names something in `doc`, else `null`. */
+    const validSelection = (doc: WorkflowDoc, selection: string | null): string | null =>
+      selection === null || selection === TRIGGER_KEY || findStep(doc, selection)
+        ? selection
+        : null;
 
     /** Applies a doc change as an undo step, plus any state patch. */
     const commit = (
@@ -356,7 +396,8 @@ export function createEditorStore(init: {
       const prev = get().doc;
       if (next === prev) return;
       history = recordEdit(history, prev, coalesceKey, Date.now());
-      set({ ...derived(next), ...patch });
+      const selection = "selection" in patch ? (patch.selection ?? null) : get().selection;
+      set({ ...derived(next), ...patch, selection: validSelection(next, selection) });
       syncTestState();
     };
 
@@ -394,10 +435,7 @@ export function createEditorStore(init: {
       const result = step(history, get().doc);
       if (!result) return;
       history = result.history;
-      const { selection } = get();
-      const keep =
-        selection === null || selection === TRIGGER_KEY || findStep(result.value, selection);
-      set({ ...derived(result.value), ...(keep ? {} : { selection: null }) });
+      set({ ...derived(result.value), selection: validSelection(result.value, get().selection) });
       syncTestState();
     };
 
@@ -437,7 +475,23 @@ export function createEditorStore(init: {
         const m = nodeManifest(nodeType);
         const found = findStep(get().doc, id);
         if (found?.step.type === nodeType) return;
-        commit(replaceStepType(get().doc, id, m), needsTest(id));
+        const replaced = replaceStepType(get().doc, id, m);
+        if (!found || !isGeneratedStepId(id, found.step.type) || isGeneratedStepId(id, nodeType)) {
+          commit(replaced, needsTest(id));
+          return;
+        }
+        // An ID generated from the old type would now misname the step (`httpRequest` for a
+        // Transform): regenerate it, and point references at the new ID.
+        const free = generateStepId(replaced, nodeType);
+        const { samples, testState, sampleTypes, selection } = get();
+        commit(renameStepId(replaced, id, free), {
+          ...setLocal({
+            samples: without(samples, [free]),
+            testState: without(testState, [free]),
+            sampleTypes: without(sampleTypes, [free]),
+          }),
+          ...(selection === id ? { selection: free } : {}),
+        });
       },
 
       removeStep(id) {
@@ -450,7 +504,15 @@ export function createEditorStore(init: {
 
       duplicateStep(id, opts) {
         const { doc, newId } = coreDuplicateStep(get().doc, id);
-        return commitNew(doc, findStep(doc, newId)?.step as Step, opts);
+        const copy = findStep(doc, newId)?.step as Step;
+        const base = copy.name ?? manifest.nodes.find((n) => n.type === copy.type)?.name ?? copy.id;
+        const taken = new Set<string>();
+        walkSteps(doc, (s) => {
+          if (s.name !== undefined) taken.add(s.name);
+        });
+        const name = copyName(base, taken);
+        const named = updateStep(doc, newId, (s) => ({ ...s, name }));
+        return commitNew(named, findStep(named, newId)?.step as Step, opts);
       },
 
       moveStep(id, to) {
@@ -529,7 +591,14 @@ export function createEditorStore(init: {
       },
 
       select(id) {
-        if (get().selection !== id) set({ selection: id });
+        const next = validSelection(get().doc, id);
+        if (get().selection !== next) set({ selection: next });
+      },
+
+      setServerIssues(issues) {
+        serverIssues = issues;
+        serverBase = get().doc;
+        set({ issues: derived(get().doc).issues });
       },
 
       copy(id) {
@@ -593,6 +662,8 @@ export function createEditorStore(init: {
         const { doc: prev, samples, testState, sampleTypes } = get();
         history = emptyHistory();
         savedDoc = doc;
+        serverIssues = [];
+        serverBase = null;
         const local =
           doc.id !== prev.id
             ? loadLocal(doc)
@@ -605,6 +676,31 @@ export function createEditorStore(init: {
       },
     };
   });
+}
+
+/** "<base> (copy)", or "(copy 2)", "(copy 3)", … when that name is taken. */
+function copyName(base: string, taken: ReadonlySet<string>): string {
+  const stem = base.replace(/ \(copy(?: \d+)?\)$/, "");
+  let name = `${stem} (copy)`;
+  for (let n = 2; taken.has(name); n++) name = `${stem} (copy ${n})`;
+  return name;
+}
+
+/**
+ * Whether a server issue reported for `base` still applies to `doc`: its step (or the trigger, or
+ * the output mapping) is unchanged; a workflow-level issue, only while nothing changed.
+ */
+function stillApplies(issue: Issue, base: WorkflowDoc, doc: WorkflowDoc): boolean {
+  if (doc === base) return true;
+  if (issue.stepId !== undefined) {
+    const before = findStep(base, issue.stepId)?.step;
+    return before !== undefined && findStep(doc, issue.stepId)?.step === before;
+  }
+  if (issue.field?.startsWith("trigger.") || issue.field === "trigger")
+    return doc.trigger === base.trigger;
+  if (issue.field?.startsWith("output.") || issue.field === "output")
+    return doc.output === base.output;
+  return false;
 }
 
 /** `prev` when updating step `id` produced an identical step, so no-op edits add no history. */

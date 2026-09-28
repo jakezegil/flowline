@@ -4,7 +4,7 @@ import { type JSX, type ReactNode, useEffect, useRef, useState } from "react";
 import { isMac } from "../canvas/keyboard";
 import { useEditorStore, useEditorStoreApi, useIssues, useShallow } from "../hooks";
 import { useFlowkit, useFlowkitAppearance } from "../provider";
-import { errorText, Hint, httpStatus } from "../ui/primitives";
+import { errorText, Hint, httpStatus, isNetworkError } from "../ui/primitives";
 import { useToast } from "../ui/toaster";
 import { IssuesPill, issueTargets } from "./issues-pill";
 import { manualFields, RunDialog } from "./run-dialog";
@@ -78,6 +78,17 @@ function StatusChip() {
   );
 }
 
+/** Whether a server-reported issue has what the editor needs to show it. */
+function isIssue(v: unknown): v is Issue {
+  const i = v as Partial<Issue> | null;
+  return (
+    typeof i === "object" &&
+    i !== null &&
+    typeof i.message === "string" &&
+    (i.severity === "error" || i.severity === "warning")
+  );
+}
+
 const shortcut = (key: string, shift = false) =>
   isMac() ? `${shift ? "⇧" : ""}⌘${key}` : `Ctrl+${shift ? "Shift+" : ""}${key}`;
 
@@ -96,6 +107,9 @@ export function EditorHeader({
   const { client } = useFlowkit();
   const store = useEditorStoreApi();
   const toast = useToast();
+  /** A failure's reason in the user's terms (no "Failed to fetch"). */
+  const reason = (err: unknown) =>
+    isNetworkError(err) ? labels.serverUnreachable : errorText(err);
   const { errors } = useIssues();
   const { canUndo, canRedo, dirty, saved, published, triggerKind, fields } = useEditorStore(
     useShallow((s) => ({
@@ -133,7 +147,7 @@ export function EditorHeader({
       if (!inPublish) toast({ message: labels.saved(v.version), tone: "success" });
       return v.version;
     } catch (err) {
-      toast({ message: labels.saveFailed(errorText(err)), tone: "danger" });
+      toast({ message: labels.saveFailed(reason(err)), tone: "danger" });
       return null;
     } finally {
       if (!inPublish) setBusy(null);
@@ -164,13 +178,15 @@ export function EditorHeader({
       if (httpStatus(err) === 422) {
         const body = (err as { body?: { issues?: unknown } }).body;
         const server = Array.isArray(body?.issues) ? (body.issues as Issue[]) : [];
+        // Shown where the editor's own issues are: the pill, the steps and their fields (M7).
+        store.getState().setServerIssues(server.filter(isIssue));
         toast({
           message: labels.publishRejected(server.length),
           tone: "danger",
           action: { label: labels.showIssues, run: () => showFirstIssue(server) },
         });
       } else {
-        toast({ message: labels.publishFailed(errorText(err)), tone: "danger" });
+        toast({ message: labels.publishFailed(reason(err)), tone: "danger" });
       }
     } finally {
       setBusy(null);
@@ -185,7 +201,7 @@ export function EditorHeader({
       cb.current.onRunStarted?.(runId);
       toast({ message: labels.runStarted, tone: "success" });
     } catch (err) {
-      toast({ message: labels.runFailed(errorText(err)), tone: "danger" });
+      toast({ message: labels.runFailed(reason(err)), tone: "danger" });
     } finally {
       setBusy(null);
     }

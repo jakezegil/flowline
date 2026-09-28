@@ -13,7 +13,7 @@ import { useFlowkit, useFlowkitAppearance } from "../provider";
 import { defaultConfig } from "../store/commands";
 import { createEditorStore, type EditorStore } from "../store/editor-store";
 import type { NotFoundAction } from "../ui/not-found";
-import { errorText, httpStatus } from "../ui/primitives";
+import { errorText, httpStatus, isNetworkError } from "../ui/primitives";
 
 /** A new workflow: a manual trigger (else the first trigger in the manifest) and no steps. */
 export function blankDoc(id: string, manifest: Manifest, labels: FlowkitLabels): WorkflowDoc {
@@ -84,7 +84,12 @@ export function useEditorLoad(
       return { status: "ready", store };
     })().then(
       (next) => active && setState(next),
-      (err: unknown) => active && setState({ status: "error", message: errorText(err) }),
+      (err: unknown) =>
+        active &&
+        setState({
+          status: "error",
+          message: isNetworkError(err) ? labels.serverUnreachable : errorText(err),
+        }),
     );
     return () => {
       active = false;

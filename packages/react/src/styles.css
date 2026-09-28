@@ -663,6 +663,20 @@
     outline: none;
     box-shadow: 0 0 0 3px var(--fk-ring);
   }
+  /* "Add a first step" points out the "+" under the trigger. */
+  .fk-add[data-pulse] {
+    color: var(--fk-accent-fg);
+    background: var(--fk-accent);
+    border-color: var(--fk-accent);
+    opacity: 1;
+    animation: fk-add-pulse 800ms var(--fk-ease) 2;
+  }
+  @keyframes fk-add-pulse {
+    50% {
+      box-shadow: 0 0 0 8px color-mix(in srgb, var(--fk-accent) 25%, transparent);
+      transform: scale(1.25);
+    }
+  }
 
   .fk-branch-label {
     display: inline-flex;
@@ -816,6 +830,16 @@
     background: transparent;
     border: 0;
     outline: none;
+  }
+  /* The search box shows focus as a line under the whole bar, not a ring around the bare input
+     (which sat off-center against the icon and clipped at the popover's corners). */
+  .fk-picker__search input:focus-visible,
+  .fk-dp__search input:focus-visible {
+    outline: none;
+  }
+  .fk-picker__search:has(input:focus-visible),
+  .fk-dp__search:has(input:focus-visible) {
+    box-shadow: inset 0 -2px 0 var(--fk-accent);
   }
   .fk-picker__search input::placeholder {
     color: var(--fk-text-muted);
@@ -1002,6 +1026,20 @@
     animation: fk-pop 140ms var(--fk-ease);
     transform-origin: var(--radix-popover-content-transform-origin);
   }
+  /* Docked beside the config panel, level with its field (never over the panel's fields). */
+  .fk-ref-popover[data-docked] {
+    width: min(340px, calc(100vw - 24px));
+  }
+  /* Inline under its field, where there's no room beside the panel: it pushes the next fields
+     down rather than covering them. */
+  .fk-ref-inline {
+    margin-top: 6px;
+    overflow: hidden;
+    background: var(--fk-surface);
+    border: 1px solid var(--fk-border);
+    border-radius: 10px;
+    box-shadow: var(--fk-shadow-sm, none);
+  }
 
   /* ---------------------------------------------------------------- data picker */
   .fk-dp {
@@ -1045,6 +1083,9 @@
   .fk-ref-popover .fk-dp__tree {
     max-height: min(320px, 45vh);
   }
+  .fk-ref-inline .fk-dp__tree {
+    max-height: min(260px, 40vh);
+  }
   .fk-dp__row {
     --fk-dp-indent: calc(var(--fk-dp-depth, 0) * 14px);
     position: relative;
@@ -1081,6 +1122,17 @@
   }
   .fk-dp__chevron[data-open] {
     transform: rotate(90deg);
+  }
+  .fk-dp__row:not([data-leaf]) > .fk-dp__chevron {
+    /* A bigger target: a click on the chevron opens the row, a click elsewhere inserts it. */
+    margin: -5px;
+    padding: 5px;
+    box-sizing: content-box;
+    border-radius: 4px;
+  }
+  .fk-dp__row:not([data-leaf]) > .fk-dp__chevron:hover {
+    color: var(--fk-text);
+    background: var(--fk-subtle-strong);
   }
   .fk-dp__icon {
     display: grid;
@@ -1824,6 +1876,11 @@
   /* toasts */
   .fk-toasts--app {
     bottom: 24px;
+  }
+  /* With a notice up in the editor's own region, the canvas's toasts (Step deleted · Undo) sit
+     above it rather than on top of it. */
+  .fk-editor:has(.fk-toasts--app .fk-toast) .fk-editor__canvas .fk-toasts {
+    bottom: 76px;
   }
   .fk-toast__icon {
     flex: none;
@@ -3847,6 +3904,9 @@
     .fk-add,
     .fk-dp__chevron {
       transition: none;
+    }
+    .fk-add[data-pulse] {
+      animation: none;
     }
     .fk-picker,
     .fk-ref-popover,
