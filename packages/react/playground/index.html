@@ -103,6 +103,64 @@
         background: rgb(0 0 0 / 0.06);
         border-radius: 4px;
       }
+      /* ?page=picker */
+      .pk {
+        min-height: 100%;
+        overflow: auto;
+      }
+      .pk-main {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 24px;
+        align-items: flex-start;
+        padding: 24px;
+      }
+      .pk-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        width: 400px;
+        max-width: 100%;
+        padding: 20px;
+        background: var(--fk-surface);
+        border: 1px solid var(--fk-border);
+        border-radius: 12px;
+        box-shadow: var(--fk-shadow-md);
+      }
+      .pk-title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .pk-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .pk-label {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        font-size: 12.5px;
+        font-weight: 550;
+      }
+      .pk-hint {
+        font-weight: 400;
+        color: var(--fk-text-muted);
+      }
+      .pk-value {
+        margin: 0;
+        overflow: hidden;
+        font: 10.5px/1.4 var(--fk-font-mono);
+        color: var(--fk-text-muted);
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .pk-picker {
+        overflow: hidden;
+        border: 1px solid var(--fk-border);
+        border-radius: 10px;
+      }
     </style>
   </head>
   <body>
