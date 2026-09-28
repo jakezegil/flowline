@@ -60,6 +60,7 @@ export {
   type TransformRuntime,
   type TriggerDefinition,
 } from "./define";
+export { FatalError, type FatalErrorOptions, RetryableError } from "./errors";
 export {
   branchesFor,
   checkFields,
