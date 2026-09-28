@@ -244,17 +244,11 @@ function PanelTabs({
   const { labels } = useFlowkitAppearance();
   const info = useStep(selection);
   const allIssues = useEditorStore((s) => s.issues);
-  const hasTriggerSample = useEditorStore((s) => s.samples[TRIGGER_KEY] !== undefined);
-  const sampleType = useEditorStore((s) => s.sampleTypes[selection]);
+  // The store's test state is the one source of truth, shared with the canvas cards.
+  const testState = useEditorStore((s) => s.testState[selection]);
   const issues = selection === TRIGGER_KEY ? triggerIssues(allIssues) : (info?.issues ?? []);
   const errors = issues.filter((i) => i.severity === "error").length;
   const count = issues.length;
-  let testState: string | undefined;
-  if (selection === TRIGGER_KEY) testState = hasTriggerSample ? "tested" : undefined;
-  else if (info) {
-    testState =
-      sampleType !== undefined && sampleType !== info.step.type ? "needs-test" : info.testState;
-  }
   const tabs: Tab[] = ["configure", "test"];
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End")

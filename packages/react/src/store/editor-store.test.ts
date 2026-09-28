@@ -330,6 +330,38 @@ describe("test state and samples", () => {
     expect(s().sampleTypes.__trigger).toBe(s().doc.trigger.type);
   });
 
+  test("undoing back to another type than the sample's marks needs-test", () => {
+    const store = storeFor();
+    const s = store.getState;
+    s().replaceStep("email", "crm.loadContact");
+    s().setSample("email", { id: "c1" });
+    expect(s().testState.email).toBe("tested");
+    s().undo();
+    expect(s().doc.steps.find((x) => x.id === "email")?.type).toBe("crm.sendEmail");
+    expect(s().testState.email).toBe("needs-test");
+    s().redo();
+    // Still needs a test: the undo may have been followed by edits the sample never saw.
+    expect(s().testState.email).toBe("needs-test");
+  });
+
+  test("a sample is recorded for the type its test ran as", () => {
+    const store = storeFor();
+    const s = store.getState;
+    s().setSample("email", { id: "c1" }, "crm.loadContact");
+    expect(s().sampleTypes.email).toBe("crm.loadContact");
+    expect(s().testState.email).toBe("needs-test");
+    s().setSample("email", { messageId: "m" }, "crm.sendEmail");
+    expect(s().testState.email).toBe("tested");
+  });
+
+  test("changing the trigger type marks its sample needs-test", () => {
+    const store = storeFor();
+    const s = store.getState;
+    s().setSample("__trigger", { contactId: "c9" });
+    s().setTrigger(manifest.triggers.find((t) => t.type !== s().doc.trigger.type)?.type ?? "");
+    expect(s().testState.__trigger).toBe("needs-test");
+  });
+
   test("a stored sample of another node type loads as needs-test", () => {
     localStorage.setItem(
       "flowkit:samples:welcome",

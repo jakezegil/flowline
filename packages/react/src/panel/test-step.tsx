@@ -29,7 +29,8 @@ import { TRIGGER_KEY } from "../store/editor-store";
 import { JsonTree } from "../ui/json-tree";
 import { errorText } from "../ui/primitives";
 
-type Result = { response: TestStepResponse } | { error: string };
+/** A test's outcome, and the node type it ran as (a result of another type isn't shown). */
+type Result = ({ response: TestStepResponse } | { error: string }) & { type: string };
 
 /** Step IDs (and `"trigger"`) that `config` references. */
 function referencedSources(config: Record<string, ValueExpr>): Set<string> {
@@ -64,9 +65,10 @@ function TestStatus({ stepId }: { stepId: string }): JSX.Element {
   const { labels } = useFlowkitAppearance();
   const info = useStep(stepId);
   const sampleType = useEditorStore((s) => s.sampleTypes[stepId]);
+  // The state comes from the store (shared with the canvas); the type only explains it.
+  const state = info?.testState;
   const typeChanged =
     sampleType !== undefined && info !== undefined && sampleType !== info.step.type;
-  const state = typeChanged ? "needs-test" : info?.testState;
   if (state === "tested") {
     return (
       <p className="fk-test__status" data-tone="success">
@@ -113,7 +115,7 @@ export function TestStep({ stepId }: { stepId: string }): JSX.Element | null {
   const samples = useEditorStore((s) => s.samples);
   const select = useEditorStore((s) => s.select);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<Result | null>(null);
+  const [lastResult, setResult] = useState<Result | null>(null);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -142,9 +144,13 @@ export function TestStep({ stepId }: { stepId: string }): JSX.Element | null {
 
   if (!info) return null;
   const { step } = info;
+  // After Replace step, the previous type's output no longer describes this step.
+  const result = lastResult?.type === step.type ? lastResult : null;
 
   const run = async () => {
     setBusy(true);
+    // The type the test ran as: the sample is recorded for it even if the type changes meanwhile.
+    const type = step.type;
     try {
       const { doc: current, samples: all } = store.getState();
       const { [TRIGGER_KEY]: triggerSample, ...stepSamples } = all;
@@ -154,10 +160,10 @@ export function TestStep({ stepId }: { stepId: string }): JSX.Element | null {
         samples: stepSamples,
         ...(triggerSample !== undefined ? { triggerSample } : {}),
       });
-      if (response.ok) store.getState().setSample(stepId, response.output);
-      if (alive.current) setResult({ response });
+      if (response.ok) store.getState().setSample(stepId, response.output, type);
+      if (alive.current) setResult({ response, type });
     } catch (err) {
-      if (alive.current) setResult({ error: labels.testFailed(errorText(err)) });
+      if (alive.current) setResult({ error: labels.testFailed(errorText(err)), type });
     } finally {
       if (alive.current) setBusy(false);
     }

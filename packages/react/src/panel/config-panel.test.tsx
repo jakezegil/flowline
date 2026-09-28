@@ -86,6 +86,33 @@ describe("ConfigPanel for a step", () => {
     expect(screen.queryByRole("tab")).toBeNull();
   });
 
+  test("closing returns focus to the step's canvas node", async () => {
+    const store = createEditorStore({ doc: fixtureDoc(), manifest });
+    store.getState().select("email");
+    render(
+      <FlowkitProvider client={mockClient()}>
+        <div className="fk-app">
+          <div className="react-flow__node" data-id="step:email" tabIndex={0}>
+            node
+          </div>
+          <ConfigPanel store={store} />
+        </div>
+      </FlowkitProvider>,
+    );
+    const to = screen.getByRole("textbox", { name: "To" });
+    to.focus();
+    fireEvent.keyDown(to, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement?.getAttribute("data-id")).toBe("step:email"));
+  });
+
+  test("an Esc a control inside the panel handled itself doesn't close it", () => {
+    const { store } = setup();
+    const to = screen.getByRole("textbox", { name: "To" });
+    to.addEventListener("keydown", (e) => e.preventDefault());
+    fireEvent.keyDown(to, { key: "Escape" });
+    expect(store.getState().selection).toBe("email");
+  });
+
   test("the close button and Esc call onClose when given", () => {
     const onClose = vi.fn();
     const { store } = setup({ onClose });
@@ -137,6 +164,16 @@ describe("ConfigPanel for the trigger", () => {
     fireEvent.change(type, { target: { value: "core.manual" } });
     expect(store.getState().doc.trigger.type).toBe("core.manual");
     expect(screen.getByRole("button", { name: "Add field" })).toBeTruthy();
+  });
+
+  test("the trigger's Test tab shows the store's test state, like the canvas", () => {
+    const { store, container } = setup({ select: TRIGGER_KEY, manifest: withBuiltinTriggers });
+    const dot = () => container.querySelector(".fk-tab__dot")?.getAttribute("data-state");
+    expect(dot()).toBeUndefined();
+    act(() => store.getState().setSample(TRIGGER_KEY, { contactId: "c1" }));
+    expect(dot()).toBe("tested");
+    act(() => store.getState().setTrigger("core.manual"));
+    expect(dot()).toBe("needs-test");
   });
 
   test("an event trigger names its event", () => {

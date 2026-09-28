@@ -138,10 +138,12 @@ export interface EditorActions {
    */
   paste(loc: StepLocation, opts?: InsertOptions): string | null;
   /**
-   * Stores a step's (or the trigger's) sample output, recorded for its current node (or
-   * trigger) type, and marks it tested. Not in history.
+   * Stores a step's (or the trigger's) sample output and marks it tested. The sample is recorded
+   * for `producedBy`, the node (or trigger) type that produced it, which defaults to the current
+   * type; pass the type a test started with, so a type changed mid-test marks it `needs-test`.
+   * Not in history.
    */
-  setSample(id: string, output: unknown): void;
+  setSample(id: string, output: unknown, producedBy?: string): void;
   /**
    * Loads samples and test state for the current workflow from `localStorage`, pruned to steps
    * that exist. The store does this itself when created in a browser; when created where there is
@@ -204,16 +206,35 @@ function storage(): Storage | undefined {
  */
 function loadLocal(doc: WorkflowDoc): LocalData {
   const data = readLocal(doc.id);
-  const types = currentTypes(doc);
-  const testState = pruneTo(doc, data.testState);
-  for (const [id, type] of Object.entries(data.sampleTypes)) {
-    if (testState[id] === "tested" && types.get(id) !== type) testState[id] = "needs-test";
-  }
+  const sampleTypes = pruneTo(doc, data.sampleTypes);
   return {
     samples: pruneTo(doc, data.samples),
-    testState,
-    sampleTypes: pruneTo(doc, data.sampleTypes),
+    testState: reconcile(doc, pruneTo(doc, data.testState), sampleTypes),
+    sampleTypes,
   };
+}
+
+/**
+ * `testState` with every tested step (or trigger) whose sample came from another type than it has
+ * now marked `needs-test`; the same object when nothing changes. The store's `testState` is the
+ * one source of truth for canvas and panel, so this runs after every doc change, undo and redo.
+ */
+function reconcile(
+  doc: WorkflowDoc,
+  testState: Record<string, TestState>,
+  sampleTypes: Record<string, string>,
+): Record<string, TestState> {
+  let types: Map<string, string> | undefined;
+  let next = testState;
+  for (const [id, type] of Object.entries(sampleTypes)) {
+    if (testState[id] !== "tested") continue;
+    types ??= currentTypes(doc);
+    const now = types.get(id);
+    if (now === undefined || now === type) continue;
+    if (next === testState) next = { ...testState };
+    next[id] = "needs-test";
+  }
+  return next;
 }
 
 /** Node type per step ID, and the trigger type under {@link TRIGGER_KEY}. */
@@ -329,6 +350,14 @@ export function createEditorStore(init: {
       if (next === prev) return;
       history = recordEdit(history, prev, coalesceKey, Date.now());
       set({ ...derived(next), ...patch });
+      syncTestState();
+    };
+
+    /** Re-derives test state against the current doc (see {@link reconcile}), persisting it. */
+    const syncTestState = (): void => {
+      const { doc, testState, sampleTypes } = get();
+      const next = reconcile(doc, testState, sampleTypes);
+      if (next !== testState) set(setLocal({ testState: next }));
     };
 
     /** Updates samples/test state and persists them. */
@@ -362,6 +391,7 @@ export function createEditorStore(init: {
       const keep =
         selection === null || selection === TRIGGER_KEY || findStep(result.value, selection);
       set({ ...derived(result.value), ...(keep ? {} : { selection: null }) });
+      syncTestState();
     };
 
     /** Commits `next`, which adds `step`: resets local data left over under its IDs, selects it. */
@@ -495,13 +525,18 @@ export function createEditorStore(init: {
         return commitNew(coreInsertStep(doc, loc, copy), copy, opts);
       },
 
-      setSample(id, output) {
+      setSample(id, output, producedBy) {
         const { samples, testState, sampleTypes, doc } = get();
-        const type = id === TRIGGER_KEY ? doc.trigger.type : findStep(doc, id)?.step.type;
+        const now = id === TRIGGER_KEY ? doc.trigger.type : findStep(doc, id)?.step.type;
+        const type = producedBy ?? now;
         set(
           setLocal({
             samples: { ...samples, [id]: output },
-            testState: { ...testState, [id]: "tested" },
+            testState: {
+              ...testState,
+              [id]:
+                type !== undefined && now !== undefined && type !== now ? "needs-test" : "tested",
+            },
             ...(type !== undefined ? { sampleTypes: { ...sampleTypes, [id]: type } } : {}),
           }),
         );
@@ -544,7 +579,7 @@ export function createEditorStore(init: {
             ? loadLocal(doc)
             : {
                 samples: pruneTo(doc, samples),
-                testState: pruneTo(doc, testState),
+                testState: reconcile(doc, pruneTo(doc, testState), sampleTypes),
                 sampleTypes: pruneTo(doc, sampleTypes),
               };
         set({ ...derived(doc), ...local, selection: null });

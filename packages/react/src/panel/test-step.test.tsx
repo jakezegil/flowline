@@ -1,5 +1,5 @@
 import type { WorkflowDoc } from "@flowkit/core";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { mockClient, setupDom } from "../../test/dom";
 import { docWith, manifest, step } from "../../test/fixtures";
@@ -113,5 +113,33 @@ describe("TestStep", () => {
     store.getState().replaceStep("x", "crm.sendEmail");
     expect(await screen.findByText("Needs re-test")).toBeTruthy();
     expect(screen.getByText("The step's type changed since its last test.")).toBeTruthy();
+  });
+
+  test("the previous type's output is hidden after the step's type changes", async () => {
+    const client = mockClient({
+      testStep: async () => ({ ok: true, output: { id: "c1" }, durationMs: 5 }),
+    });
+    const { store } = setup("load", client);
+    fireEvent.click(screen.getByRole("button", { name: "Test step" }));
+    await screen.findByRole("region", { name: "Output" });
+    act(() => store.getState().replaceStep("load", "crm.sendEmail"));
+    expect(screen.queryByRole("region", { name: "Output" })).toBeNull();
+    expect(screen.getByText("Needs re-test")).toBeTruthy();
+  });
+
+  test("a type change during a test records the sample for the type it ran as", async () => {
+    let finish: (v: { ok: true; output: unknown; durationMs: number }) => void = () => {};
+    const client = mockClient({
+      testStep: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const { store } = setup("load", client);
+    fireEvent.click(screen.getByRole("button", { name: "Test step" }));
+    act(() => store.getState().replaceStep("load", "crm.sendEmail"));
+    await act(async () => finish({ ok: true, output: { id: "c1" }, durationMs: 5 }));
+    expect(store.getState().sampleTypes.load).toBe("crm.loadContact");
+    expect(store.getState().testState.load).toBe("needs-test");
   });
 });

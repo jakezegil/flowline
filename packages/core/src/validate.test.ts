@@ -623,9 +623,10 @@ describe("validateWorkflow", () => {
     });
     const m = extend([authNode]);
     const issuesOf = (auth: unknown) =>
-      validateWorkflow(docWith([step("a", "x.auth", { auth } as Step["config"])]), m).map(
-        (i) => [i.code, i.field],
-      );
+      validateWorkflow(docWith([step("a", "x.auth", { auth } as Step["config"])]), m).map((i) => [
+        i.code,
+        i.field,
+      ]);
     expect(issuesOf({ type: "bearer" })).toEqual([["config.required", "auth.secret"]]);
     expect(issuesOf({ type: "header", secret: "S" })).toEqual([["config.required", "auth.name"]]);
     // No member matches the discriminator: the closest member still decides.
