@@ -1,4 +1,4 @@
-import type { Logger, RunDetail, RunSummary } from "@flowkit/core";
+import type { Logger, RunDetail, RunSummary, Step, WorkflowDoc } from "@flowkit/core";
 import type { StorageAdapter } from "@flowkit/engine";
 import { createMemoryStorage } from "@flowkit/storage-memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -99,6 +99,18 @@ describe("demo workflows", () => {
       expect(await crm.engine.validate(TENANT_ID, doc), doc.id).toEqual([]);
     }
   });
+
+  it("give every step a name, so the canvas tells the story", () => {
+    const unnamed: string[] = [];
+    const visit = (doc: WorkflowDoc, steps: Step[]) => {
+      for (const step of steps) {
+        if (!step.name) unnamed.push(`${doc.id}/${step.id}`);
+        for (const branch of Object.values(step.branches ?? {})) visit(doc, branch);
+      }
+    };
+    for (const doc of demoFlows) visit(doc, doc.steps);
+    expect(unnamed).toEqual([]);
+  });
 });
 
 describe("inbound lead routing", () => {
@@ -138,7 +150,12 @@ describe("inbound lead routing", () => {
     expect((await runDetail(runId)).run.status).toBe("completed");
     const outbox = await get<OutboxMessage[]>("/api/outbox");
     expect(outbox).toEqual([
-      expect.objectContaining({ to: "dev@acme.test", subject: "Enterprise lead approved" }),
+      expect.objectContaining({
+        to: "dev@acme.test",
+        subject: "Enterprise lead approved",
+        runId,
+        workflowId: "inbound-lead-routing",
+      }),
     ]);
     expect(outbox[0]?.body).toContain("Hank Scorpio from Globex");
 

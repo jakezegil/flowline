@@ -64,6 +64,9 @@ export const OutboxMessageSchema = z.object({
   body: z.string(),
   sentAt: z.iso.datetime(),
   idempotencyKey: z.string(),
+  /** The run and workflow whose step sent it. Test steps' run IDs start with `test_`. */
+  runId: z.string().optional(),
+  workflowId: z.string().optional(),
 });
 /** An email the CRM "sent" (recorded, never delivered). */
 export type OutboxMessage = z.infer<typeof OutboxMessageSchema>;
@@ -309,7 +312,14 @@ export interface CrmStore {
    * Record an email. A second call with the same `idempotencyKey` returns the first message
    * instead of sending again.
    */
-  sendEmail(msg: { to: string; subject: string; body: string; idempotencyKey: string }): {
+  sendEmail(msg: {
+    to: string;
+    subject: string;
+    body: string;
+    idempotencyKey: string;
+    runId?: string;
+    workflowId?: string;
+  }): {
     message: OutboxMessage;
     deduped: boolean;
   };
@@ -517,7 +527,7 @@ export function createCrmStore(opts: { clock?: () => number } = {}): CrmStore {
     },
 
     listOutbox: () => newestFirst(state.outbox).map((m) => ({ ...m })),
-    sendEmail({ to, subject, body, idempotencyKey }) {
+    sendEmail({ to, subject, body, idempotencyKey, runId, workflowId }) {
       const previous = state.outbox.find((m) => m.idempotencyKey === idempotencyKey);
       if (previous) return { message: { ...previous }, deduped: true };
       const message: OutboxMessage = {
@@ -527,6 +537,8 @@ export function createCrmStore(opts: { clock?: () => number } = {}): CrmStore {
         body,
         sentAt: iso(),
         idempotencyKey,
+        ...(runId ? { runId } : {}),
+        ...(workflowId ? { workflowId } : {}),
       };
       state.outbox.push(message);
       return { message: { ...message }, deduped: false };

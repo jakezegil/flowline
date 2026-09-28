@@ -36,6 +36,8 @@ export const sendEmail = defineNode({
     const { message, deduped } = ctx.services.crm.sendEmail({
       ...input,
       idempotencyKey: ctx.idempotencyKey,
+      runId: ctx.runId,
+      workflowId: ctx.workflowId,
     });
     return { messageId: message.id, deduped };
   },

@@ -481,7 +481,9 @@ as a dev dependency. See [Testing your plugin](docs/guides/writing-a-plugin.md#t
 - [`examples/headless`](examples/headless): a plugin, a workflow built in code and an in-memory
   engine. It prints the run's audit log. Run it with `pnpm --filter headless start`.
 - [`examples/mini-crm`](examples/mini-crm): a Vite and React app with a Hono server. It includes a
-  CRM plugin, sub-flows, webhook lead routing, a manager approval step and the run viewer.
+  CRM plugin, sub-flows, webhook lead routing, a manager approval step, the embedded editor and
+  the run viewer. Run it with `pnpm --filter @flowkit/example-mini-crm dev` and open
+  `http://localhost:5173`.
 
 ## Packages
 
