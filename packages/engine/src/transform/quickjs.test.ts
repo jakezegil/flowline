@@ -138,6 +138,77 @@ describe("quickjsRuntime", () => {
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 
+  it("reports a user-thrown 'out of memory' error as a user error", async () => {
+    const plain = await failure(rt.run("throw new Error('out of memory');", scope, limits));
+    expect(plain.message).toBe("Error: out of memory (line 1)");
+    const named = await failure(
+      rt.run(
+        "const e = new Error('out of memory'); e.name = 'InternalError'; throw e;",
+        scope,
+        limits,
+      ),
+    );
+    expect(named.message).toBe("InternalError: out of memory (line 1)");
+    const stack = await failure(rt.run("throw new RangeError('stack overflow');", scope, limits));
+    expect(stack.message).toBe("RangeError: stack overflow (line 1)");
+  });
+
+  it.each([
+    ["returning", "let o = {}; for (let i = 0; i < 10000; i++) o = { o }; return { o };"],
+    [
+      "stringifying",
+      "let o = {}; for (let i = 0; i < 10000; i++) o = { o }; JSON.stringify(o); return {};",
+    ],
+    ["joining", "let a = []; for (let i = 0; i < 10000; i++) a = [a]; a.join(); return {};"],
+    ["parsing", "JSON.parse('['.repeat(10000) + ']'.repeat(10000)); return {};"],
+  ])("reports a stack error for %s deeply nested data", async (_name, code) => {
+    const err = await failure(rt.run(code, scope, limits));
+    expect(err.message).toBe(
+      "Transform exceeded the stack limit (recursion or data nested too deeply)",
+    );
+    expect(await rt.run("return { ok: true };", scope, limits)).toEqual({ ok: true });
+  });
+
+  it("rejects results nested more deeply than the host can parse", async () => {
+    const err = await failure(
+      rt.run("let o = {}; for (let i = 0; i < 3000; i++) o = { o }; return { o };", scope, limits),
+    );
+    expect(err.message).toBe("Transform result is nested too deeply (max 1000 levels)");
+  });
+
+  it("rejects input nested too deeply before marshalling it", async () => {
+    let deep: unknown = {};
+    for (let i = 0; i < 5000; i++) deep = { o: deep };
+    const err = await failure(rt.run("return {};", { ...scope, trigger: deep }, limits));
+    expect(err.message).toBe("Transform input is nested too deeply (max 1000 levels)");
+    let ok: unknown = { s: "[[[{{{" };
+    for (let i = 0; i < 900; i++) ok = [ok];
+    expect(await rt.run("return { n: 1 };", { ...scope, trigger: ok }, limits)).toEqual({ n: 1 });
+  });
+
+  it("replaces a caller-supplied module after a host-level abort", async () => {
+    const modules: Awaited<ReturnType<typeof newQuickJSWASMModule>>[] = [];
+    const factory = async () => {
+      const m = await newQuickJSWASMModule(RELEASE_SYNC);
+      modules.push(m);
+      return m;
+    };
+    const own = quickjsRuntime({ module: factory });
+    expect(await own.run("return { a: 1 };", scope, limits)).toEqual({ a: 1 });
+    expect(await own.run("return { a: 2 };", scope, limits)).toEqual({ a: 2 });
+    expect(modules).toHaveLength(1);
+    const err = await failure(
+      own.run(
+        "let a = []; for (let i = 0; i < 10000; i++) a = [a]; String(a); return {};",
+        scope,
+        limits,
+      ),
+    );
+    expect(err.message).toMatch(/stack limit/);
+    expect(await own.run("return { a: 3 };", scope, limits)).toEqual({ a: 3 });
+    expect(modules).toHaveLength(2);
+  });
+
   it("hides host-level failures behind a fixed message, keeping the cause", async () => {
     const boom = new Error("wasm exploded at 0xdeadbeef");
     const broken = quickjsRuntime({

@@ -74,6 +74,7 @@ describe("core.transform", () => {
       | undefined;
     const code = input?.properties?.code;
     expect(code?.[UI_META_KEY]).toMatchObject({ widget: "code", multiline: true });
+    expect(code?.description).toContain("constructor");
     expect(node?.output).toEqual({ kind: "fields", configPath: "outputFields" });
   });
 });

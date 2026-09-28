@@ -51,11 +51,16 @@ function base64Utf8(text: string): string {
 }
 
 /**
- * Sets the authentication header, overriding any same-named header from `input.headers`. The
- * secret's value never appears in errors.
+ * Sets the authentication header, overriding any same-named header from `input.headers`, and
+ * returns its lower-case name (`undefined` without auth). The secret's value never appears in
+ * errors.
  */
-async function applyAuth(auth: Auth, headers: Headers, ctx: NodeContext): Promise<void> {
-  if (auth.type === "none") return;
+async function applyAuth(
+  auth: Auth,
+  headers: Headers,
+  ctx: NodeContext,
+): Promise<string | undefined> {
+  if (auth.type === "none") return undefined;
   // The schema requires these; re-check in case the handler is called with unvalidated input.
   if (typeof auth.secret !== "string" || auth.secret === "") {
     throw new FatalError(`Authentication "${auth.type}" needs a secret`);
@@ -71,6 +76,7 @@ async function applyAuth(auth: Auth, headers: Headers, ctx: NodeContext): Promis
   } catch {
     throw new FatalError(`Secret "${auth.secret}" is not a valid header value`);
   }
+  return auth.type === "header" ? auth.headerName.toLowerCase() : "authorization";
 }
 
 function isFatal(err: unknown): boolean {
@@ -122,7 +128,8 @@ function encodeBody(
  * Credentials belong in `auth`, which names a host secret (`bearer`, `basic` with a
  * `user:password` secret, or a custom `header`); its header overrides one of the same name in
  * `headers`, and the secret's value never reaches the step's config, output, errors or events.
- * `headers` is marked sensitive, so its values are masked in run events; request headers never
+ * The auth header is always stripped on a redirect to another origin, even when its name is one
+ * that is otherwise kept (such as `Accept`). `headers` is marked sensitive, so its values are masked in run events; request headers never
  * appear in the output.
  */
 export const httpRequest = defineNode({
@@ -176,7 +183,7 @@ export const httpRequest = defineNode({
     if (input.sendIdempotencyKey && !headers.has("idempotency-key")) {
       headers.set("idempotency-key", ctx.idempotencyKey);
     }
-    await applyAuth(input.auth, headers, ctx);
+    const authHeader = await applyAuth(input.auth, headers, ctx);
     const body = encodeBody(input.bodyType, input.body, headers);
 
     const timeout = AbortSignal.timeout(input.timeoutMs);
@@ -189,6 +196,8 @@ export const httpRequest = defineNode({
         ...(body === undefined ? {} : { body }),
         signal: AbortSignal.any([ctx.signal, timeout]),
         timeoutMs: input.timeoutMs,
+        // The auth header never follows a cross-origin redirect, whatever its name.
+        ...(authHeader === undefined ? {} : { credentialHeaders: [authHeader] }),
       });
       text = await res.text();
     } catch (err) {

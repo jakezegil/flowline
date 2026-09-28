@@ -48,6 +48,14 @@ describe("isPrivateAddress", () => {
     "100::ffff:ffff:ffff:ffff",
     "2001:db8::1",
     "[2001:db8::1]",
+    "3fff::1",
+    "3fff:fff:ffff::1",
+    "5f00::1",
+    "5f00:ffff::1",
+    "2001:10::1",
+    "2001:1f:ffff::1",
+    "2001:20::1",
+    "2001:2f:ffff::1",
   ])("%s is private", (ip) => {
     expect(isPrivateAddress(ip)).toBe(true);
   });
@@ -73,6 +81,11 @@ describe("isPrivateAddress", () => {
     "2001:470::1",
     "2001:db9::1",
     "100:0:0:1::1",
+    "3fff:1000::1",
+    "3ffe::1",
+    "5f01::1",
+    "2001:f::1",
+    "2001:30::1",
   ])("%s is public", (ip) => {
     expect(isPrivateAddress(ip)).toBe(false);
   });

@@ -46,8 +46,12 @@ export interface GuardedFetchOptions extends HttpPolicy {
   logger?: Logger;
 }
 
-/** `RequestInit` plus an overall time budget that bounds connect, header and body timeouts. */
-export type GuardedFetchInit = RequestInit & { timeoutMs?: number };
+/**
+ * `RequestInit` plus `timeoutMs`, an overall time budget that bounds connect, header and body
+ * timeouts, and `credentialHeaders`, header names (case-insensitive) that carry credentials and
+ * are therefore dropped on a cross-origin redirect even when safelisted.
+ */
+export type GuardedFetchInit = RequestInit & { timeoutMs?: number; credentialHeaders?: string[] };
 
 /** A `fetch` subset: string URL and {@link GuardedFetchInit}. */
 export type GuardedFetch = (url: string, init?: GuardedFetchInit) => Promise<Response>;
@@ -142,10 +146,14 @@ function abortable<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T
 }
 
 /** Keeps only the headers that may follow a request to another origin. */
-function crossOriginHeaders(headers: Headers, keepBody: boolean): Headers {
+function crossOriginHeaders(
+  headers: Headers,
+  keepBody: boolean,
+  credentials: ReadonlySet<string>,
+): Headers {
   const out = new Headers();
   headers.forEach((value, key) => {
-    if (!CROSS_ORIGIN_SAFE_HEADERS.has(key)) return;
+    if (!CROSS_ORIGIN_SAFE_HEADERS.has(key) || credentials.has(key)) return;
     if (key === "content-type" && !keepBody) return;
     out.set(key, value);
   });
@@ -208,7 +216,8 @@ function tooLarge(max: number): FatalError {
  * @internal Create the SSRF-guarded fetch for a policy. Redirects are followed manually (up to 5),
  * each hop re-checked; a 303 (or a 301/302 after POST) continues as GET without a body, and
  * when a redirect changes origin only safelisted headers (Accept, Accept-Language,
- * Content-Language, Content-Type while the body is kept, User-Agent, Idempotency-Key) follow it.
+ * Content-Language, Content-Type while the body is kept, User-Agent, Idempotency-Key) follow it,
+ * minus any named in `init.credentialHeaders`.
  * `init.timeoutMs` bounds the connect, header and body timeouts. The response body is read fully
  * (up to `maxResponseBytes`) before the returned `Response` resolves.
  */
@@ -229,6 +238,7 @@ export function createGuardedFetch(opts: GuardedFetchOptions = {}): GuardedFetch
     const signal = init.signal ?? undefined;
     const timeoutMs = init.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const connectTimeout = Math.min(DEFAULT_CONNECT_TIMEOUT_MS, timeoutMs);
+    const credentials = new Set((init.credentialHeaders ?? []).map((h) => h.toLowerCase()));
 
     for (let hop = 0; ; hop++) {
       const addresses = await checkTarget(url, opts, allowHosts, signal);
@@ -267,7 +277,9 @@ export function createGuardedFetch(opts: GuardedFetchOptions = {}): GuardedFetch
           } else if (body instanceof ReadableStream) {
             throw new FatalError("cannot replay a streamed request body on redirect");
           }
-          if (next.origin !== url.origin) headers = crossOriginHeaders(headers, body !== undefined);
+          if (next.origin !== url.origin) {
+            headers = crossOriginHeaders(headers, body !== undefined, credentials);
+          }
           url = next;
           continue;
         }

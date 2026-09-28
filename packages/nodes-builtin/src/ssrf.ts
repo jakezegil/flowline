@@ -108,6 +108,12 @@ function isPrivateV6(g: number[]): boolean {
   if (g0 === 0x100 && g1 === 0 && g2 === 0 && g3 === 0) return true;
   // 2001::/32 Teredo, 2001:db8::/32 documentation.
   if (g0 === 0x2001 && (g1 === 0 || g1 === 0xdb8)) return true;
+  // 2001:10::/28 ORCHID (deprecated), 2001:20::/28 ORCHIDv2.
+  if (g0 === 0x2001 && ((g1 & 0xfff0) === 0x10 || (g1 & 0xfff0) === 0x20)) return true;
+  // 3fff::/20 documentation.
+  if (g0 === 0x3fff && (g1 & 0xf000) === 0) return true;
+  // 5f00::/16 SRv6 SIDs.
+  if (g0 === 0x5f00) return true;
   // 2002::/16 6to4 with an embedded IPv4.
   if (g0 === 0x2002) return isPrivateV4(embeddedV4(g1, g2));
   if ((g0 & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
@@ -125,7 +131,8 @@ function isPrivateV4(n: number): boolean {
  * Whether `ip` is an address `ctx.http.fetch` must not connect to by default: loopback
  * (127/8, ::1), private (10/8, 172.16/12, 192.168/16, fc00::/7), link-local (169.254/16,
  * fe80::/10), "this network" (0/8, ::), carrier-grade NAT (100.64/10), multicast, documentation
- * (192.0.2/24, 198.51.100/24, 203.0.113/24, 2001:db8::/32), Teredo (2001::/32), discard
+ * (192.0.2/24, 198.51.100/24, 203.0.113/24, 2001:db8::/32, 3fff::/20), ORCHID
+ * (2001:10::/28, 2001:20::/28), SRv6 SIDs (5f00::/16), Teredo (2001::/32), discard
  * (100::/64), IPv4-translated (::ffff:0:0/96), local-use NAT64 (64:ff9b:1::/48), other reserved
  * ranges, and IPv6 forms embedding such an IPv4 address (`::ffff:127.0.0.1`, NAT64, 6to4).
  *

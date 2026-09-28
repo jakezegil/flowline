@@ -245,6 +245,25 @@ describe("core.httpRequest", () => {
       expect(seen[0]?.headers["x-api-key"]).toBe("key-s3cr3t");
     });
 
+    it.each([
+      [{ type: "none" }, []],
+      [{ type: "bearer", secret: "token" }, ["authorization"]],
+      [{ type: "basic", secret: "login" }, ["authorization"]],
+      [{ type: "header", secret: "apiKey", headerName: "Accept" }, ["accept"]],
+    ])("marks the %o auth header as a credential for redirects", async (auth, expected) => {
+      let init: (RequestInit & { credentialHeaders?: string[] }) | undefined;
+      const c = ctx({
+        http: {
+          fetch: (url: string, i?: RequestInit) => {
+            init = i;
+            return fetch(url, i);
+          },
+        },
+      });
+      await run({ method: "GET", url: base, auth }, c);
+      expect(init?.credentialHeaders ?? []).toEqual(expected);
+    });
+
     it("fails fatally when the secret is not configured, without sending", async () => {
       const err = await rejection(
         run({ method: "GET", url: base, auth: { type: "bearer", secret: "missing" } }),

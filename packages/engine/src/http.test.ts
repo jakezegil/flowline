@@ -331,6 +331,35 @@ describe("redirects", () => {
     });
   });
 
+  it("strips credentialHeaders on a cross-origin redirect, even safelisted ones", async () => {
+    const { resolve: r2 } = tableResolver({
+      "public.test": ["127.0.0.1"],
+      "other.test": ["127.0.0.1"],
+    });
+    handler = (req, res) => {
+      if (req.url === "/start") {
+        res.writeHead(302, { location: `http://other.test:${port}/land` });
+        res.end();
+        return;
+      }
+      res.end("ok");
+    };
+    await ctxWith({ resolve: r2, isPrivate: loopbackIsPublic }).http.fetch(
+      `http://public.test:${port}/start`,
+      {
+        headers: { Accept: "secret-accept", "Idempotency-Key": "secret-key", "User-Agent": "ua" },
+        credentialHeaders: ["accept", "IDEMPOTENCY-KEY"],
+      } as RequestInit,
+    );
+    expect(received[0]).toMatchObject({ accept: "secret-accept", "idempotency-key": "secret-key" });
+    const landed = received[1] ?? {};
+    // undici adds its default `accept: */*` when none is sent.
+    expect(landed.accept).toBe("*/*");
+    expect(landed["idempotency-key"]).toBeUndefined();
+    expect(JSON.stringify(landed)).not.toContain("secret-");
+    expect(landed["user-agent"]).toBe("ua");
+  });
+
   it("keeps headers on a same-origin redirect", async () => {
     handler = (req, res) => {
       if (req.url === "/start") {

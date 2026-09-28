@@ -118,9 +118,16 @@ export interface NodeContext {
   }>;
   /**
    * SSRF-guarded fetch. `init.timeoutMs` bounds the connect, response-header and body timeouts;
-   * `init.signal` defaults to {@link NodeContext.signal}.
+   * `init.signal` defaults to {@link NodeContext.signal}. `init.credentialHeaders` names headers
+   * (case-insensitive) that carry credentials: they never follow a redirect to another origin,
+   * even when they would otherwise be kept (such as `Accept` or `Idempotency-Key`).
    */
-  http: { fetch(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<Response> };
+  http: {
+    fetch(
+      url: string,
+      init?: RequestInit & { timeoutMs?: number; credentialHeaders?: string[] },
+    ): Promise<Response>;
+  };
 }
 
 /**
