@@ -244,7 +244,8 @@ export type TemplatePart = { text: string } | { ref: string };
 
 /**
  * Splits a template string into literal-text and ref parts. `{{ path }}` (optional surrounding
- * whitespace) interpolates `path`; `\{{` escapes a literal `{{`.
+ * whitespace) interpolates `path`; `\{{` escapes a literal `{{`. In a run of three or more `{`,
+ * only the last two open the reference, so `{{{x}}}` is a literal `{` then `x`.
  */
 export function parseTemplate(tpl: string): TemplatePart[] {
   const parts: TemplatePart[] = [];
@@ -256,6 +257,13 @@ export function parseTemplate(tpl: string): TemplatePart[] {
     if (tpl.charAt(i) === "\\" && tpl.charAt(i + 1) === "{" && tpl.charAt(i + 2) === "{") {
       buf += "{{";
       i += 3;
+      continue;
+    }
+    // In a run of three or more braces, only the last two open the reference: `{{{x}}}` is a
+    // literal `{` followed by `{{x}}` (e.g. JSON text `{` right before a reference).
+    if (tpl.charAt(i) === "{" && tpl.charAt(i + 1) === "{" && tpl.charAt(i + 2) === "{") {
+      buf += "{";
+      i++;
       continue;
     }
     if (tpl.charAt(i) === "{" && tpl.charAt(i + 1) === "{") {
