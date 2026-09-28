@@ -566,6 +566,26 @@ export function payloadSchemaFor(t: TriggerManifest, trigger: TriggerConfig): JS
   }
 }
 
+/** Config path of a sub-flow trigger's output field declarations (see `TriggerKind`). */
+const SUBFLOW_OUTPUT_PATH = "output";
+
+/**
+ * The output fields a sub-flow declares: the literal {@link FieldDecl} list at trigger config
+ * `"output"` when `t` is a `subflow` trigger, else `undefined`. The workflow's `output` mapping
+ * must provide these (the engine checks them when a sub-flow run finishes).
+ *
+ * @example
+ * subflowOutputFields(manifest.triggers.find((t) => t.type === doc.trigger.type), doc.trigger);
+ * // [{ name: "found", type: "boolean", required: true }]
+ */
+export function subflowOutputFields(
+  t: TriggerManifest | undefined,
+  trigger: TriggerConfig,
+): FieldDecl[] | undefined {
+  if (t?.kind !== "subflow") return undefined;
+  return fieldDeclsAt(trigger.config, SUBFLOW_OUTPUT_PATH);
+}
+
 /**
  * The branches a step declares, in display order: none, a static list, items of a config array
  * (`fromConfig`, entries without a string ID are skipped; label falls back to the ID) followed by

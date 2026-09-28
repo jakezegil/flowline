@@ -74,6 +74,7 @@ export {
   outputSchemaFor,
   payloadSchemaFor,
   schemaAtPath,
+  subflowOutputFields,
 } from "./json-schema";
 export {
   collectRefs,
@@ -118,6 +119,7 @@ export type {
   PluginManifest,
   RefExpr,
   ResumeSpec,
+  ShowIf,
   Step,
   TplExpr,
   TriggerConfig,
@@ -127,5 +129,5 @@ export type {
   ValueExpr,
   WorkflowDoc,
 } from "./types";
-export { fields, secret, sensitive, UI_META_KEY, ui } from "./ui";
+export { fields, isFieldShown, secret, sensitive, UI_META_KEY, ui } from "./ui";
 export { checkJson, hasErrors, type Issue, type IssueCode, validateWorkflow } from "./validate";

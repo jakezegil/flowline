@@ -6,11 +6,13 @@ import {
   configValueAt,
   derefSchema,
   describeType,
+  fieldsToJsonSchema,
   isAnySchema,
   isAssignable,
   type Kind,
   schemaTypes,
   schemaUnionMembers,
+  subflowOutputFields,
   valueKind,
 } from "./json-schema";
 import { isRef, isTpl, parseRefPath, parseTemplate, type RefPath } from "./refs";
@@ -24,7 +26,7 @@ import {
 } from "./scope";
 import { walkSteps } from "./tree";
 import type { JSONSchema, Manifest, NodeManifest, Step, UiMeta, WorkflowDoc } from "./types";
-import { UI_META_KEY } from "./ui";
+import { isFieldShown, UI_META_KEY } from "./ui";
 
 /** Machine-readable kind of a validation {@link Issue}. */
 export type IssueCode =
@@ -603,6 +605,8 @@ function checkObject(
   const required = new Set(Array.isArray(schema.required) ? (schema.required as string[]) : []);
   for (const [key, rawDeclared] of Object.entries(props)) {
     const declared = asSchema(rawDeclared);
+    // A field whose `showIf` doesn't hold doesn't apply: it isn't required or checked.
+    if (!isFieldShown(uiMeta(declared)?.showIf, obj, props)) continue;
     const override = overrides[key];
     const propSchema = override ?? declared;
     const propRoot = override ?? root;
@@ -781,7 +785,9 @@ function docInfo(doc: WorkflowDoc): DocInfo {
  * `$tpl`) parses, resolves to a visible step/field ({@link availableScope} rule) and has an
  * assignable type (mismatches are warnings); branch keys match declared branches; sub-flow
  * calls target a known (`ctx.subflows`), non-recursive workflow with a valid input mapping; the
- * doc's `output` mapping resolves in end-of-doc scope. Trigger config may hold only literals.
+ * doc's `output` mapping resolves in end-of-doc scope and, for a sub-flow, provides every required
+ * declared output field with an assignable value. Fields hidden by `x-flowkit.showIf` are
+ * skipped. Trigger config may hold only literals.
  *
  * Steps that are disabled (or inside a disabled block) are still validated, with every issue
  * downgraded to a warning; references to a disabled step are warned about.
@@ -850,7 +856,12 @@ export function validateWorkflow(
     return undefined;
   });
 
-  if (doc.output) {
+  const declared = subflowOutputFields(trigger, doc.trigger);
+  if (declared) {
+    // A sub-flow's mapping must provide its declared outputs, with assignable types.
+    const schema = fieldsToJsonSchema(declared);
+    checkObject({ ...base, visible: end }, doc.output ?? {}, schema, schema, "output");
+  } else if (doc.output) {
     const r: Reporter = { ...base, visible: end };
     for (const [key, value] of Object.entries(doc.output)) {
       const f: FieldCtx = { root: {}, path: `output.${key}`, label: key };

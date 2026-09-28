@@ -141,6 +141,37 @@ export interface UiMeta {
    * literal empty list.
    */
   warnIfEmpty?: string;
+  /**
+   * On an enum field: display text per option, keyed by the option's value as a string (e.g.
+   * `{ smb: "SMB" }`). Options without an entry keep the editor's default (lowercase words are
+   * humanized, `"roundRobin"` → `"Round robin"`; anything else shows as written).
+   */
+  enumLabels?: Record<string, string>;
+  /**
+   * Show the field only while a sibling field (a property of the same object) has certain values.
+   * Hidden fields keep their value but aren't rendered, and the validator skips them (no
+   * `config.required`, no value checks), since they don't apply. See {@link ShowIf}.
+   */
+  showIf?: ShowIf;
+}
+
+/**
+ * Condition of {@link UiMeta.showIf}, on the sibling property `field`. The sibling's value is its
+ * config value, else its schema `default`. With `equals`, the field shows while the sibling equals
+ * one of the values; with `notEquals`, while it equals none of them; with neither, while it is set
+ * (not `undefined`, `null`, `""` or `false`). A sibling holding a reference or template can't be
+ * known in advance, so the field shows.
+ *
+ * @example
+ * ui(z.unknown(), { label: "Body", showIf: { field: "bodyType", notEquals: "none" } })
+ */
+export interface ShowIf {
+  /** Sibling property name. */
+  field: string;
+  /** Show while the sibling equals this value (or one of these). */
+  equals?: Literal | Literal[];
+  /** Show while the sibling equals none of these. */
+  notEquals?: Literal | Literal[];
 }
 
 /** Serializable description of a node type, as consumed by the editor and validator. */
