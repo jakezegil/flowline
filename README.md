@@ -636,4 +636,16 @@ If you add a TypeScript block without an annotation, the check fails.
 
 The design spec is `docs/superpowers/specs/2026-09-27-flowkit-design.md`.
 
+### Releasing
+
+Releases go through [Changesets](https://github.com/changesets/changesets): run `pnpm changeset`
+to add one, and `.github/workflows/release.yml` opens or updates a "Version Packages" PR on every
+push to `main` with pending changesets, then publishes once that PR is merged (via
+`changesets/action`, gated on the repo's own `install`/`build`/`test`/`typecheck`/`lint` run).
+
+**Do not add the `NPM_TOKEN` secret to this repo until the `@flowline` rename (ruling 79) has
+merged and a publish has been explicitly approved.** Adding it earlier would let the release job
+publish the six packages under the pre-rename `@flowkit` scope as soon as a "Version Packages" PR
+lands on `main` — see the comment at the top of `.github/workflows/release.yml`.
+
 MIT licensed.

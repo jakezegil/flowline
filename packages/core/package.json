@@ -19,7 +19,7 @@
   "homepage": "https://github.com/jakezegil/flowkit/tree/main/packages/core#readme",
   "bugs": "https://github.com/jakezegil/flowkit/issues",
   "engines": {
-    "node": ">=20.3.0"
+    "node": ">=20.18.1"
   },
   "sideEffects": false,
   "exports": {

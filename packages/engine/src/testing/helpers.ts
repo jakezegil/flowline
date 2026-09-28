@@ -15,7 +15,6 @@ import {
   type RunEvent,
   type WorkflowDoc,
 } from "@flowkit/core";
-import { createMemoryStorage } from "@flowkit/storage-memory";
 import type { z } from "zod";
 import { createNodeContext } from "../context";
 import { createEngine, type EngineOptions } from "../engine";
@@ -116,7 +115,8 @@ export interface RunWorkflowInMemoryOptions {
  * outside call can resume (a callback without timeout). Resolves the run as `getRunDetail` shows it
  * (sensitive values masked) and its events.
  *
- * Requires `@flowkit/storage-memory`.
+ * Requires `@flowkit/storage-memory`, loaded lazily on first call so importing `testNode` alone
+ * never requires it.
  *
  * @example
  * ```ts
@@ -137,6 +137,7 @@ export async function runWorkflowInMemory(
   const base = opts.clock ?? Date.now;
   let skipped = 0;
   const clock = () => base() + skipped;
+  const { createMemoryStorage } = await import("@flowkit/storage-memory");
   const storage = createMemoryStorage();
   const secrets = opts.secrets;
   const engine = createEngine({

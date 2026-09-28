@@ -1,3 +1,7 @@
+# IMPORTANT: do not add the NPM_TOKEN secret to this repo until the @flowline rename (ruling 79)
+# has merged and a publish has been explicitly approved. Until then this job can open/update a
+# "Version Packages" PR, but its publish step has no credentials and will fail closed rather than
+# publish anything under the pre-rename @flowkit scope.
 name: Release
 
 on:
@@ -14,15 +18,17 @@ permissions:
 
 jobs:
   release:
+    # Guards workflow_dispatch: a manual run against any other ref must not version or publish.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
@@ -34,8 +40,18 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Test
+        run: pnpm test
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Lint
+        run: pnpm lint
+
       # Opens/updates a "Version Packages" PR when changesets are pending, or publishes to npm
-      # (via the repo's `release` script) once they've been merged to main.
+      # (via the repo's `release` script, which builds again itself) once they've been merged to
+      # main. Only runs past this point once install/build/test/typecheck/lint above are green.
       - name: Create release PR or publish to npm
         uses: changesets/action@v1
         with:
@@ -45,4 +61,5 @@ jobs:
           # `pnpm -r publish` call (npm provenance requires a public GitHub repo).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

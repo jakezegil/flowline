@@ -69,6 +69,18 @@ function engineDistIsFresh(): boolean {
   return statSync(dts).mtimeMs >= sources;
 }
 
+/**
+ * The content of every `.js` chunk `file` (relative to `dir`) imports via a relative specifier,
+ * one level deep — e.g. tsup splitting a shared chunk out of `testing/index.js`. `text` is
+ * `file`'s already-read content, so its own relative imports are resolved from `dir`.
+ */
+function jsChunksOf(dir: string, file: string, text: string): string[] {
+  const base = dirname(file);
+  return [...text.matchAll(/(?:from|^import)\s+['"](\.\.?\/[^'"]+)['"]/gm)].map((m) =>
+    readFileSync(join(dir, base, m[1] as string), "utf8"),
+  );
+}
+
 function pkg(name: string): PackageJson {
   return JSON.parse(readFileSync(join(REPO, "packages", name, "package.json"), "utf8"));
 }
@@ -324,16 +336,41 @@ describe("dependencies", () => {
 
   // `vitest` is an optional peer of @flowkit/engine; @flowkit/engine/testing must stay importable
   // without it. The storage conformance suite (which needs vitest) is its own entry point,
-  // @flowkit/engine/conformance, so it can't leak a static "vitest" import into testing/index.js.
+  // @flowkit/engine/conformance, so it can't leak a static "vitest" import into testing/index.js
+  // (directly, or via a shared chunk it imports).
   it.skipIf(!process.env.CI && !engineDistIsFresh())(
     "@flowkit/engine/testing's built output never imports vitest",
     () => {
       expect(engineDistIsFresh(), "packages/engine/dist is missing or stale: run pnpm build").toBe(
         true,
       );
-      const text = readFileSync(join(REPO, "packages/engine/dist/testing/index.js"), "utf8");
-      expect(text).not.toMatch(/from\s+["']vitest["']/);
-      expect(text).not.toMatch(/require\(\s*["']vitest["']\s*\)/);
+      const dir = join(REPO, "packages/engine/dist");
+      const text = readFileSync(join(dir, "testing/index.js"), "utf8");
+      const chunks = jsChunksOf(dir, "testing/index.js", text);
+      for (const source of [text, ...chunks]) {
+        expect(source).not.toMatch(/from\s+["']vitest["']/);
+        expect(source).not.toMatch(/require\(\s*["']vitest["']\s*\)/);
+      }
+    },
+  );
+
+  // `@flowkit/storage-memory` is an optional peer of @flowkit/engine; @flowkit/engine/testing
+  // must stay importable without it. `runWorkflowInMemory` loads it lazily (`await import(...)`),
+  // so it can't leak a static "@flowkit/storage-memory" import into testing/index.js either
+  // (directly, or via a shared chunk it imports).
+  it.skipIf(!process.env.CI && !engineDistIsFresh())(
+    "@flowkit/engine/testing's built output never statically imports @flowkit/storage-memory",
+    () => {
+      expect(engineDistIsFresh(), "packages/engine/dist is missing or stale: run pnpm build").toBe(
+        true,
+      );
+      const dir = join(REPO, "packages/engine/dist");
+      const text = readFileSync(join(dir, "testing/index.js"), "utf8");
+      const chunks = jsChunksOf(dir, "testing/index.js", text);
+      for (const source of [text, ...chunks]) {
+        expect(source).not.toMatch(/from\s+["']@flowkit\/storage-memory["']/);
+        expect(source).not.toMatch(/require\(\s*["']@flowkit\/storage-memory["']\s*\)/);
+      }
     },
   );
 });

@@ -12,9 +12,12 @@ pnpm add @flowkit/engine @flowkit/core zod@^4
 pnpm add @flowkit/storage-memory   # or @flowkit/storage-postgres
 ```
 
-`zod` 4 is a required peer dependency. Bring your own `StorageAdapter` — `@flowkit/storage-memory`
-(for tests and prototypes) or `@flowkit/storage-postgres` — as a peer; `vitest` is an optional peer
-used only by `@flowkit/engine/conformance`. `@flowkit/engine/testing` never imports `vitest`.
+`zod` 4 is a required peer dependency. Bring your own `StorageAdapter`: `@flowkit/storage-memory`
+(for tests and prototypes) is an optional peer, used by `runWorkflowInMemory`;
+`@flowkit/storage-postgres` (for production) is a regular dependency, not a peer, and you just
+install it directly. `vitest` is an optional peer used only by `@flowkit/engine/conformance`;
+`@flowkit/engine/testing` never imports `vitest`, and loads `@flowkit/storage-memory` lazily so
+`testNode` alone works without it installed either.
 
 ## Usage
 
