@@ -3,7 +3,16 @@
  *
  * @module
  */
-import { branch, defineNode, FatalError, suspend, ui } from "@flowkit/core";
+import {
+  branch,
+  type CallbackHandle,
+  defineNode,
+  FatalError,
+  type NodeContext,
+  RetryableError,
+  suspend,
+  ui,
+} from "@flowkit/core";
 import { z } from "zod";
 
 const UNIT_MS = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 } as const;
@@ -91,9 +100,52 @@ export const delayNode = defineNode({
   },
 });
 
+/** Time budget of the `notify` request, in ms. */
+const NOTIFY_TIMEOUT_MS = 10_000;
+
+/**
+ * POSTs `{ resumeUrl, expiresAt, runId }` to `url` through the SSRF-guarded `ctx.http`, keyed by
+ * `ctx.idempotencyKey`. A network error or non-2xx response throws a {@link RetryableError} (so
+ * the step's retry policy applies); errors from the network guard (such as a blocked address)
+ * stay fatal. Error messages never include the resume URL.
+ */
+async function sendNotify(url: string, callback: CallbackHandle, ctx: NodeContext): Promise<void> {
+  let res: Response;
+  try {
+    res = await ctx.http.fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": ctx.idempotencyKey },
+      body: JSON.stringify({
+        resumeUrl: callback.resumeUrl,
+        expiresAt: callback.expiresAt,
+        runId: ctx.runId,
+      }),
+      timeoutMs: NOTIFY_TIMEOUT_MS,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "FatalError") throw err;
+    const reason =
+      err instanceof Error
+        ? err.cause instanceof Error
+          ? err.cause.message
+          : err.message
+        : String(err);
+    throw new RetryableError(`Notify request failed: ${reason}`);
+  }
+  if (!res.ok) throw new RetryableError(`Notify request failed: HTTP ${res.status}`);
+}
+
 /**
  * Pauses the run until an external system calls the step's one-time resume URL (taking the
  * `resumed` branch with the request body) or the timeout passes (taking `timeout`).
+ *
+ * The resume URL holds a secret token, so it is never journaled or put into events. To hand it to
+ * another system, set `notify.url`: when the step suspends it POSTs `{ resumeUrl, expiresAt,
+ * runId }` as JSON there through `ctx.http` (SSRF-guarded), with `Idempotency-Key:
+ * ctx.idempotencyKey`. A failed POST is retried under the step's retry policy, and each attempt
+ * issues a fresh resume URL (the key stays the same, so a receiver deduplicating by key must keep
+ * the latest URL). Without `notify`, the run resumes through `engine.resumeRun` (the run API or
+ * UI) only.
  */
 export const waitForCallbackNode = defineNode({
   type: "core.waitForCallback",
@@ -107,6 +159,17 @@ export const waitForCallbackNode = defineNode({
     timeout: ui(duration(), { label: "Time out after", placeholder: "7d" })
       .describe("Take the Timed out path if no callback arrives in time, e.g. 2h or 7d.")
       .default("7d"),
+    notify: ui(
+      z.object({
+        url: ui(z.url({ protocol: /^https?$/ }), {
+          label: "URL",
+          placeholder: "https://hooks.example.com/approvals",
+        }).describe("Receives a POST with the resume URL, its expiry and the run ID."),
+      }),
+      { label: "Notify" },
+    )
+      .describe("Send the one-time resume URL to another system when the wait starts.")
+      .optional(),
   }),
   output: z.object({
     body: z.unknown().describe("The body the callback was called with."),
@@ -127,6 +190,7 @@ export const waitForCallbackNode = defineNode({
       return branch("timeout", { body: null, timedOut: true });
     }
     const callback = await ctx.callback({ timeoutMs: durationMs(input.timeout) });
+    if (input.notify) await sendNotify(input.notify.url, callback, ctx);
     return suspend({ callback });
   },
 });

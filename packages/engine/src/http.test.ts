@@ -5,7 +5,6 @@ import {
   defineNode,
   definePlugin,
   defineTrigger,
-  type NodeDefinition,
   type WorkflowDoc,
 } from "@flowkit/core";
 import { isPrivateAddress } from "@flowkit/nodes-builtin/ssrf";
@@ -536,21 +535,8 @@ describe("engine wiring", () => {
 
 describe("core.httpRequest auth end to end", () => {
   it("sends the secret on the wire but keeps it out of output, journal and events", async () => {
-    // Imported by path until builtinPlugin (Task 9) registers core.httpRequest in the engine.
-    const path = new URL("../../nodes-builtin/src/http.ts", import.meta.url).href;
-    const { httpRequest } = (await import(/* @vite-ignore */ path)) as {
-      httpRequest: NodeDefinition;
-    };
-    const registry = createRegistry([
-      definePlugin({
-        id: "core",
-        name: "Core",
-        nodes: [httpRequest],
-        triggers: [
-          defineTrigger({ type: "core.manual", name: "M", kind: "manual", config: z.object({}) }),
-        ],
-      }),
-    ]);
+    // core.httpRequest and core.manual come from the built-ins createEngine registers.
+    const registry = createRegistry([]);
     const storage = createMemoryStorage();
     const doc: WorkflowDoc = {
       id: "wf",
@@ -590,7 +576,6 @@ describe("core.httpRequest auth end to end", () => {
     await createEngine({
       registry,
       storage,
-      builtins: false,
       http: { allowPrivateNetworks: true },
       secrets: { get: async (_t, name) => (name === "apiToken" ? "tok-s3cr3t" : undefined) },
       onEvent: (e) => emitted.push(e),

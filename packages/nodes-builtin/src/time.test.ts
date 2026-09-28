@@ -1,4 +1,4 @@
-import { FatalError } from "@flowkit/core";
+import { FatalError, type NodeContext, RetryableError } from "@flowkit/core";
 import { describe, expect, it } from "vitest";
 import { fakeContext, NOW } from "../test/fake-context";
 import { delayNode, MAX_DURATION_MS, parseDuration, waitForCallbackNode } from "./time";
@@ -157,6 +157,90 @@ describe("core.waitForCallback", () => {
       kind: "branch",
       branch: "timeout",
       output: { body: null, timedOut: true },
+    });
+  });
+
+  describe("notify", () => {
+    type Call = { url: string; init: Parameters<NodeContext["http"]["fetch"]>[1] };
+    const notifying = (respond: () => Promise<Response>) => {
+      const calls: Call[] = [];
+      const ctx = fakeContext({
+        runId: "run-7",
+        idempotencyKey: "idem-1",
+        http: {
+          async fetch(url, init) {
+            calls.push({ url, init });
+            return respond();
+          },
+        },
+      });
+      return { calls, ctx };
+    };
+    const input = () =>
+      waitForCallbackNode.input.parse({
+        timeout: "1d",
+        notify: { url: "https://hooks.example/approvals" },
+      });
+
+    it("accepts only an http(s) URL", () => {
+      expect(waitForCallbackNode.input.safeParse({ notify: { url: "ftp://x/y" } }).success).toBe(
+        false,
+      );
+      expect(waitForCallbackNode.input.safeParse({ notify: { url: "nope" } }).success).toBe(false);
+      expect(waitForCallbackNode.input.parse({})).not.toHaveProperty("notify");
+    });
+
+    it("POSTs the resume URL, expiry and run ID once, with the idempotency key", async () => {
+      const { calls, ctx } = notifying(async () => new Response(null, { status: 204 }));
+      const result = await waitForCallbackNode.run({ input: input(), ctx });
+      expect(result).toMatchObject({ kind: "suspend", callback: { token: "tok" } });
+      expect(calls).toHaveLength(1);
+      const [call] = calls;
+      expect(call?.url).toBe("https://hooks.example/approvals");
+      expect(call?.init?.method).toBe("POST");
+      const headers = new Headers(call?.init?.headers);
+      expect(headers.get("content-type")).toBe("application/json");
+      expect(headers.get("idempotency-key")).toBe("idem-1");
+      expect(JSON.parse(String(call?.init?.body))).toEqual({
+        resumeUrl: "https://x/flowkit/resume/tok",
+        expiresAt: NOW + DAY,
+        runId: "run-7",
+      });
+    });
+
+    it.each([
+      ["a 5xx response", async () => new Response("down", { status: 503 })],
+      ["a 4xx response", async () => new Response("no", { status: 404 })],
+      [
+        "a network error",
+        async (): Promise<Response> => {
+          throw new TypeError("fetch failed", { cause: new Error("ECONNREFUSED") });
+        },
+      ],
+    ])("fails retryably on %s, without the token in the message", async (_, respond) => {
+      const { ctx } = notifying(respond);
+      const err = await Promise.resolve()
+        .then(() => waitForCallbackNode.run({ input: input(), ctx }))
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RetryableError);
+      expect((err as Error).message).toMatch(/^Notify request failed/);
+      expect((err as Error).message).not.toContain("tok");
+    });
+
+    it("keeps a fatal error from the network guard fatal", async () => {
+      const { ctx } = notifying(async () => {
+        throw new FatalError("blocked private network address");
+      });
+      await expect(waitForCallbackNode.run({ input: input(), ctx })).rejects.toThrow(FatalError);
+    });
+
+    it("doesn't notify again when resumed", async () => {
+      for (const resume of [{ kind: "callback", body: 1 }, { kind: "timeout" }] as const) {
+        const { calls, ctx } = notifying(async () => new Response(null, { status: 204 }));
+        ctx.resume = resume;
+        await waitForCallbackNode.run({ input: input(), ctx });
+        expect(calls).toEqual([]);
+      }
     });
   });
 });
