@@ -11,6 +11,7 @@ import {
   Position,
   ReactFlow,
   ReactFlowProvider,
+  useStore as useFlowStore,
   useReactFlow,
   useStoreApi,
 } from "@xyflow/react";
@@ -64,6 +65,8 @@ const FIT_MIN_ZOOM = 0.6;
  * (or the floor above), keeping the trigger readable and centered.
  */
 const FIT_MIN_ZOOM_FOR_WIDTH = 0.7;
+/** A selected card closer than this (px) to the pane's edge is panned back into view. */
+const PAN_MARGIN = 24;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 1.5;
 
@@ -198,6 +201,8 @@ function toFlowEdges(
       data.blockId = blockId;
       data.leftover = !!(m && step && !branchesFor(m, step).some((b) => b.id === le.branchId));
       data.label = m?.branches.kind === "loop" && !data.leftover ? eachItem : le.label;
+    } else if (le.kind === "join") {
+      data.blockId = le.target.slice("join:".length);
     }
     const edge: Edge<FlowEdgeData> = {
       id: le.id,
@@ -315,6 +320,41 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
     [rf, flowStore, layoutRef],
   );
 
+  // Keep the selection in view: when it changes (from outside too, e.g. an issues list) and when
+  // the canvas is resized (e.g. a side panel opening), pan the selected card back on screen.
+  const paneW = useFlowStore((s) => s.width);
+  const paneH = useFlowStore((s) => s.height);
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  /**
+   * Pans the selected card on screen if it isn't. `focus` (a selection made before the first
+   * fit, e.g. a run opening on its failed step) centers it at a readable zoom of at least 1.
+   */
+  const revealSelection = useCallback(
+    (duration: number, focus = false) => {
+      const l = layoutRef.current;
+      const sel = selectionRef.current;
+      const { width: W, height: H, transform } = flowStore.getState();
+      if (sel === null || !l || W === 0 || H === 0) return;
+      const id = sel === TRIGGER_KEY ? "trigger" : `step:${sel}`;
+      const node = l.nodes.find((n) => n.id === id);
+      if (!node) return;
+      const [tx, ty, current] = transform;
+      const zoom = focus ? Math.max(current, 1) : current;
+      const x = node.x * zoom + tx;
+      const y = node.y * zoom + ty;
+      const m = PAN_MARGIN;
+      const inView = x >= m && y >= m && x + node.w * zoom <= W - m && y + node.h * zoom <= H - m;
+      if (zoom === current && inView) return;
+      rf.setCenter(node.x + node.w / 2, node.y + node.h / 2, { zoom, duration });
+    },
+    [rf, flowStore, layoutRef],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on selection and pane size.
+  useEffect(() => {
+    revealSelection(250);
+  }, [selection, paneW, paneH, revealSelection]);
+
   // Refit when a different workflow is loaded.
   const docId = doc.id;
   const fitted = useRef<string | null>(null);
@@ -345,7 +385,12 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
       deleteKeyCode={null}
       selectionKeyCode={null}
       multiSelectionKeyCode={null}
-      onInit={() => fitTop()}
+      onInit={() => {
+        fitTop();
+        // A selection made before the first fit (e.g. a run opening on its failed step): show it
+        // up close.
+        revealSelection(0, true);
+      }}
       onNodeClick={(_, node) => {
         const key =
           node.type === "trigger"

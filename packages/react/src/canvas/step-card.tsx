@@ -237,7 +237,10 @@ function IterationStepper({ stepId, run }: { stepId: string; run: RunStepStatus 
   if (!iter || iter.count === 0) return null;
   const go = (index: number) => onChange?.(stepId, Math.max(0, Math.min(iter.count - 1, index)));
   const failed =
-    run.status === "failed" && (iter.failedIndex === undefined || iter.failedIndex === iter.index);
+    iter.failedIndices !== undefined
+      ? iter.failedIndices.includes(iter.index)
+      : run.status === "failed" &&
+        (iter.failedIndex === undefined || iter.failedIndex === iter.index);
   return (
     <div
       className="fk-iter nodrag nopan"
@@ -290,6 +293,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
   const run = useCanvasUi((s) => s.overlay?.stepStatus[stepId]);
   const labels = useLabels();
   const inRunMode = useCanvasUi((s) => s.overlay !== undefined);
+  const dimmed = useCanvasUi((s) => s.overlay?.dimmedSteps?.has(stepId) ?? false);
   const actions = useMemo(() => stepActions(store, ui, root, stepId), [store, ui, root, stepId]);
 
   const step = info?.step;
@@ -336,6 +340,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
       data-disabled={step.disabled || undefined}
       data-unknown={!manifest || undefined}
       data-run={run?.status}
+      data-dimmed={dimmed || undefined}
     >
       <div className="fk-card__icon" data-tone={control ? "control" : "action"} aria-hidden>
         <Icon size={18} />

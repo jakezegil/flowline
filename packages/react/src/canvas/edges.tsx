@@ -14,7 +14,7 @@ export interface FlowEdgeData extends Record<string, unknown> {
   leftover?: boolean;
   /** Branch edges: the label shown in the pill. */
   label?: string;
-  /** Branch edges: the step that branches here. */
+  /** Branch and join edges: the step that branches (or rejoins) here. */
   blockId?: string;
 }
 
@@ -69,22 +69,44 @@ function EdgePath({ d, className }: { d: string; className?: string }) {
   );
 }
 
-function useDimmed(id: string, blockId: string | undefined): boolean {
+/** The step ID behind a node ID (`step:x`, `join:x`), if any. */
+function stepOfNode(nodeId: string): string | undefined {
+  if (nodeId.startsWith("step:")) return nodeId.slice(5);
+  if (nodeId.startsWith("join:")) return nodeId.slice(5);
+  return undefined;
+}
+
+/**
+ * Whether an edge is on a path the run didn't take: it touches a dimmed step, or it is a branch
+ * or join edge of a block that took another branch (or finished without entering this one).
+ */
+function useDimmed(edge: LayoutEdge | undefined, blockId: string | undefined): boolean {
   return useCanvasUi((s) => {
     const o = s.overlay;
-    if (!o || blockId === undefined) return false;
+    if (!o || !edge) return false;
+    const dimmed = o.dimmedSteps;
+    if (dimmed) {
+      const a = stepOfNode(edge.source);
+      const b = stepOfNode(edge.target);
+      if ((a !== undefined && dimmed.has(a)) || (b !== undefined && dimmed.has(b))) return true;
+    }
+    if (blockId === undefined || o.takenEdges.has(edge.id)) return false;
     const status = o.stepStatus[blockId]?.status;
-    return (status === "done" || status === "failed") && !o.takenEdges.has(id);
+    if (status === "done" || status === "failed") return true;
+    const prefix = `step:${blockId}->`;
+    for (const taken of o.takenEdges) if (taken.startsWith(prefix)) return true;
+    return false;
   });
 }
 
 /** A straight edge between consecutive nodes of a column, with a "+" at its midpoint. */
 export const AddEdge = memo(function AddEdge({ data }: EdgeProps<FlowEdge>) {
+  const dimmed = useDimmed(data?.edge, undefined);
   if (!data) return null;
   const { geometry, edge } = data;
   return (
     <>
-      <EdgePath d={geometry.path} />
+      <EdgePath d={geometry.path} className={dimmed ? "fk-edge--dimmed" : undefined} />
       {geometry.plus && edge.kind === "add" && (
         <EdgeLabelRenderer>
           <AddButton p={geometry.plus} loc={edge.loc} />
@@ -95,8 +117,8 @@ export const AddEdge = memo(function AddEdge({ data }: EdgeProps<FlowEdge>) {
 });
 
 /** An edge from a block into one of its branch columns, with the branch's label pill and "+". */
-export const BranchEdge = memo(function BranchEdge({ id, data }: EdgeProps<FlowEdge>) {
-  const dimmed = useDimmed(id, data?.blockId);
+export const BranchEdge = memo(function BranchEdge({ data }: EdgeProps<FlowEdge>) {
+  const dimmed = useDimmed(data?.edge, data?.blockId);
   const labels = useLabels();
   if (data?.edge.kind !== "branch") return null;
   const { geometry, edge, leftover, label } = data;
@@ -123,8 +145,8 @@ export const BranchEdge = memo(function BranchEdge({ id, data }: EdgeProps<FlowE
 });
 
 /** An edge from the end of a branch column into the block's join; "+" appends to the branch. */
-export const JoinEdge = memo(function JoinEdge({ id, data }: EdgeProps<FlowEdge>) {
-  const dimmed = useDimmed(id, data?.blockId);
+export const JoinEdge = memo(function JoinEdge({ data }: EdgeProps<FlowEdge>) {
+  const dimmed = useDimmed(data?.edge, data?.blockId);
   if (data?.edge.kind !== "join") return null;
   const { geometry, edge } = data;
   return (
