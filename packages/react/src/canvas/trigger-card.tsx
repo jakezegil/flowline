@@ -1,9 +1,16 @@
-import type { Issue, TriggerManifest, WorkflowDoc } from "@flowkit/core";
+import {
+  hiddenFields,
+  type Issue,
+  type JSONSchema,
+  type TriggerManifest,
+  type WorkflowDoc,
+} from "@flowkit/core";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Zap } from "lucide-react";
 import { memo, useRef } from "react";
 import { sameIssues, useEditorStore, useShallow } from "../hooks";
 import type { FlowkitLabels } from "../labels";
+import { labelOf, metaOf, optionLabel } from "../panel/schema";
 import { useFlowkitAppearance } from "../provider";
 import { TRIGGER_KEY } from "../store/editor-store";
 import { useCanvasUi, useLabels } from "./canvas-context";
@@ -12,6 +19,41 @@ import { DraftBadge } from "./step-card";
 
 /** The trigger node. */
 export type TriggerNode = Node<Record<string, never>, "trigger">;
+
+/** Longest filter value shown on the trigger card. */
+const MAX_FILTER = 24;
+
+/**
+ * An event trigger's set, visible config values ("Stage: Won · Min amount: 5000"), so filters show
+ * on the card; references and objects are left to the panel.
+ */
+function triggerFilters(
+  t: TriggerManifest | undefined,
+  trigger: WorkflowDoc["trigger"],
+  labels: FlowkitLabels,
+): string[] {
+  const schema = t?.config as JSONSchema | undefined;
+  const props = (schema?.properties ?? {}) as Record<string, JSONSchema>;
+  // Only an event trigger's config filters which events start a run.
+  if (!schema || t?.kind !== "event") return [];
+  const hidden = hiddenFields(trigger.config, schema);
+  const out: string[] = [];
+  for (const [key, field] of Object.entries(props)) {
+    const value = trigger.config[key];
+    if (hidden.has(key) || value === undefined || value === null || value === "") continue;
+    const primitive = (v: unknown) => typeof v !== "object" || v === null;
+    if (Array.isArray(value) ? !value.every(primitive) || value.length === 0 : !primitive(value))
+      continue;
+    const meta = metaOf(field);
+    if (meta.secret || meta.sensitive) continue;
+    const text = Array.isArray(value)
+      ? value.map((v) => optionLabel(v, meta)).join(", ")
+      : optionLabel(value, meta);
+    const short = text.length > MAX_FILTER ? `${text.slice(0, MAX_FILTER - 1)}…` : text;
+    out.push(labels.triggerFilter(labelOf(field, key), short));
+  }
+  return out;
+}
 
 /** One line describing when a trigger fires. */
 function triggerCaption(
@@ -67,6 +109,10 @@ export const TriggerCard = memo(function TriggerCard({ selected }: NodeProps<Tri
   const inRunMode = useCanvasUi((s) => s.overlay !== undefined);
   const Icon = trigger?.icon ? resolveIcon(trigger.icon) : Zap;
   const name = trigger?.name ?? labels.triggerTag;
+  const caption = [
+    triggerCaption(trigger, docTrigger, labels),
+    ...triggerFilters(trigger, docTrigger, labels),
+  ].join(" · ");
   return (
     <>
       <NodeHandles />
@@ -84,7 +130,9 @@ export const TriggerCard = memo(function TriggerCard({ selected }: NodeProps<Tri
               {name}
             </span>
           </div>
-          <div className="fk-card__summary">{triggerCaption(trigger, docTrigger, labels)}</div>
+          <div className="fk-card__summary" title={caption}>
+            {caption}
+          </div>
         </div>
         <span className="fk-card__tag">{labels.triggerTag}</span>
         {!inRunMode && (

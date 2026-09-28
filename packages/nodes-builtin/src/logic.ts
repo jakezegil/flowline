@@ -19,7 +19,7 @@ export const conditionNode = defineNode({
   icon: "split",
   category: "Logic",
   keywords: ["if", "else", "condition", "branch", "filter"],
-  summary: "If conditions match",
+  summary: "If {{rules}}",
   input: z.object({
     rules: ui(ConditionRulesSchema, { label: "Conditions", widget: "rules" }).describe(
       'Text compares ignoring case unless Match case is on. Dates and times are UTC unless they include an offset. "Is one of" takes a list or comma-separated text.',

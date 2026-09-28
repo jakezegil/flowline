@@ -117,13 +117,16 @@ export function summaryStepRefs(summary: string | undefined, step: Step): string
       // Invalid refs are labelled verbatim.
     }
   };
-  for (const part of parseTemplate(template)) {
-    if (!("ref" in part)) continue;
-    const value = configValueAt(step.config, part.ref) as ValueExpr | undefined;
+  // References anywhere in the value (a rule group's comparisons hold them too).
+  const walk = (value: unknown): void => {
     if (isRef(value)) visit(value.$ref);
     else if (isTpl(value)) {
       for (const p of parseTemplate(value.$tpl)) if ("ref" in p) visit(p.ref);
-    }
+    } else if (Array.isArray(value)) value.forEach(walk);
+    else if (typeof value === "object" && value !== null) Object.values(value).forEach(walk);
+  };
+  for (const part of parseTemplate(template)) {
+    if ("ref" in part) walk(configValueAt(step.config, part.ref));
   }
   return [...ids];
 }
@@ -147,6 +150,56 @@ function humanize(key: string): string {
     .trim()
     .toLowerCase();
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** A rule group's comparisons, as the rules widget stores them. */
+interface RuleLike {
+  left?: unknown;
+  op?: unknown;
+  right?: unknown;
+  rules?: unknown;
+  combinator?: unknown;
+}
+
+const UNARY_OPS = new Set(["isEmpty", "isNotEmpty", "isTrue", "isFalse"]);
+
+/** The comparisons of a rule group, nested groups flattened in order. */
+function flatRules(group: RuleLike): RuleLike[] {
+  if (!Array.isArray(group.rules)) return [];
+  return (group.rules as RuleLike[]).flatMap((r) =>
+    typeof r === "object" && r !== null && Array.isArray(r.rules) ? flatRules(r) : [r],
+  );
+}
+
+/**
+ * The first comparison of a `"rules"` widget value, in words ("Trigger › stage equals won"),
+ * then "and 2 more" (or "or 2 more"); "no conditions" when there are none.
+ */
+function ruleParts(
+  group: RuleLike,
+  stepName: (id: string) => string | undefined,
+  labels: FlowkitLabels,
+): SummaryPart[] {
+  const rules = flatRules(group);
+  const [first] = rules;
+  if (!first) return [{ kind: "empty", label: labels.noConditions }];
+  const side = (v: unknown): SummaryPart[] =>
+    isRef(v) || isTpl(v)
+      ? valueParts(v as ValueExpr, "", undefined, stepName, labels)
+      : [{ kind: "text", text: literalText(v, labels) }];
+  const op = typeof first.op === "string" ? first.op : "eq";
+  const parts: SummaryPart[] = [
+    ...side(first.left),
+    { kind: "text", text: ` ${labels.ruleOps[op] ?? op}` },
+  ];
+  if (!UNARY_OPS.has(op)) parts.push({ kind: "text", text: " " }, ...side(first.right));
+  if (rules.length > 1) {
+    parts.push({
+      kind: "text",
+      text: ` ${labels.moreRules(rules.length - 1, group.combinator === "or")}`,
+    });
+  }
+  return parts;
 }
 
 /** Display text of a literal value (a choice of an enum field by its option label). */
@@ -195,7 +248,10 @@ function valueParts(
         : { kind: "ref", ref: p.ref, label: refLabel(p.ref, stepName, labels) },
     );
   }
-  return [{ kind: "text", text: literalText(value, labels, fieldSchema(schema, path)) }];
+  const field = fieldSchema(schema, path);
+  if (metaOf(field).widget === "rules" && typeof value === "object" && value !== null)
+    return ruleParts(value as RuleLike, stepName, labels);
+  return [{ kind: "text", text: literalText(value, labels, field) }];
 }
 
 /**

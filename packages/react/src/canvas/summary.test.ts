@@ -1,6 +1,6 @@
 import type { JSONSchema, Step } from "@flowkit/core";
 import { describe, expect, test } from "vitest";
-import { renderSummary } from "./summary";
+import { renderSummary, summaryStepRefs } from "./summary";
 
 const schema: JSONSchema = {
   type: "object",
@@ -98,5 +98,50 @@ describe("renderSummary", () => {
     expect(text({ strategy: "team", team: { $ref: "trigger.team" } })).toBe(
       "Team · Trigger › team",
     );
+  });
+  test("L13: a condition's rules read as its first comparison, then how many more", () => {
+    const cond: JSONSchema = {
+      type: "object",
+      properties: { rules: { type: "object", "x-flowkit": { widget: "rules" } } },
+    };
+    const text = (rules: unknown) =>
+      renderSummary(
+        "If {{rules}}",
+        step({ rules } as Step["config"]),
+        (id) => (id === "load" ? "Load contact" : undefined),
+        cond,
+      )
+        .parts.map((p) => ("text" in p ? p.text : p.label))
+        .join("");
+    expect(
+      text({
+        combinator: "and",
+        rules: [{ left: { $ref: "trigger.stage" }, op: "eq", right: "won" }],
+      }),
+    ).toBe("If Trigger › stage equals won");
+    expect(
+      text({
+        combinator: "or",
+        rules: [
+          { left: { $ref: "steps.load.vip" }, op: "isTrue" },
+          {
+            combinator: "and",
+            rules: [
+              { left: 1, op: "gt", right: 0 },
+              { left: 2, op: "lt", right: 3 },
+            ],
+          },
+        ],
+      }),
+    ).toBe("If Load contact › vip is true or 2 more");
+    expect(text({ combinator: "and", rules: [] })).toBe("If No conditions");
+    expect(
+      summaryStepRefs(
+        "If {{rules}}",
+        step({
+          rules: { combinator: "and", rules: [{ left: { $ref: "steps.load.vip" }, op: "isTrue" }] },
+        } as Step["config"]),
+      ),
+    ).toEqual(["load"]);
   });
 });

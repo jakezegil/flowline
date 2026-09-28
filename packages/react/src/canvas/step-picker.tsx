@@ -6,8 +6,9 @@ import { type KeyboardEvent, useContext, useEffect, useId, useMemo, useRef, useS
 import { useEditorStore, useEditorStoreApi } from "../hooks";
 import { defaultLabels, type FlowkitLabels } from "../labels";
 import { useFlowkitAppearance } from "../provider";
-import { focusNode } from "./actions";
+import { focusNode, nodeElement, nodeIdOf } from "./actions";
 import {
+  type PickerRequest,
   PortalContainerContext,
   RootElementContext,
   useCanvasUi,
@@ -161,8 +162,10 @@ export function StepPicker() {
   const picked = useRef(false);
   const interactedOutside = useRef(false);
   const lastAnchor = useRef<HTMLElement | null>(null);
+  const lastRequest = useRef<PickerRequest | undefined>(undefined);
   useEffect(() => {
     if (picker) {
+      lastRequest.current = picker.request;
       setTab("all");
       setQuery("");
       picked.current = false;
@@ -178,6 +181,21 @@ export function StepPicker() {
     const el = lastAnchor.current;
     if (el?.isConnected) {
       el.focus({ preventScroll: true });
+      return;
+    }
+    // The opener was re-rendered away: its replacement (the "+" at the same spot, or the card
+    // being replaced), else the selected card.
+    const req = lastRequest.current;
+    const again =
+      req?.mode === "insert"
+        ? root()?.querySelector<HTMLElement>(
+            `.fk-add[data-insert-at="${req.loc.parentId ?? ""}/${req.loc.branch ?? ""}/${req.loc.index}"]`,
+          )
+        : req?.mode === "replace"
+          ? nodeElement(root(), nodeIdOf(req.stepId))
+          : null;
+    if (again) {
+      again.focus({ preventScroll: true });
       return;
     }
     const selection = store.getState().selection;
@@ -269,7 +287,7 @@ export function StepPicker() {
             restoreFocus();
           }}
         >
-          <Command label={title} loop shouldFilter={false}>
+          <Command label={labels.searchSteps} loop shouldFilter={false}>
             <div className="fk-picker__search">
               <Search size={14} aria-hidden />
               <Command.Input

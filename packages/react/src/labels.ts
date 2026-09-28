@@ -40,6 +40,14 @@ export interface FlowkitLabels {
   // Step cards
   /** Subtitle of a step whose type isn't in the manifest. */
   unknownStep(type: string): string;
+  /** Card summary of a condition without rules. */
+  noConditions: string;
+  /** After a condition summary's first rule: the other rules, `or` when any may match. */
+  moreRules(n: number, or: boolean): string;
+  /** A trigger card's filters, after its caption: "Stage: Won". */
+  triggerFilter(label: string, value: string): string;
+  /** Subtitle of a card that can never run (an earlier step always ends the run). */
+  neverRuns: string;
   /** The chip on a disabled step. */
   disabled: string;
   /** Accessible name of a disabled step's card. */
@@ -226,6 +234,8 @@ export interface FlowkitLabels {
   required: string;
   /** Placeholder of a JSON field in the run dialog. */
   jsonPlaceholder: string;
+  /** Placeholder of a list field in the run dialog. */
+  jsonListPlaceholder: string;
   invalidJson: string;
   invalidNumber: string;
   invalidDate: string;
@@ -518,6 +528,10 @@ export const defaultLabels: FlowkitLabels = {
   triggerSubflow: "When called by another workflow",
 
   unknownStep: (type) => `Unknown step type ${type}`,
+  noConditions: "No conditions",
+  moreRules: (n, or) => `${or ? "or" : "and"} ${n} more`,
+  triggerFilter: (label, value) => `${label}: ${value}`,
+  neverRuns: "Never runs: an earlier step ends the run",
   disabled: "Disabled",
   disabledNode: (name) => `${name} (disabled)`,
   stepName: "Step name",
@@ -658,6 +672,7 @@ export const defaultLabels: FlowkitLabels = {
   cancel: "Cancel",
   required: "Required",
   jsonPlaceholder: "JSON, e.g. {}",
+  jsonListPlaceholder: 'A JSON list, e.g. ["gold", "silver"]',
   invalidJson: "Enter valid JSON",
   invalidNumber: "Enter a number",
   invalidDate: "Enter a date and time",

@@ -1,10 +1,12 @@
 import {
   availableScope,
   type Issue,
+  type Manifest,
   type NodeManifest,
   type RunDetail,
   type ScopeEntry,
   type Step,
+  unreachableSteps,
   type WorkflowDoc,
   walkSteps,
 } from "@flowkit/core";
@@ -88,6 +90,22 @@ export function stepIndex(doc: WorkflowDoc): Map<string, Step> {
     idx = built;
   }
   return idx;
+}
+
+const unreachableIndexes = new WeakMap<WorkflowDoc, Set<string>>();
+
+/**
+ * IDs of the steps of `doc` that can never run (after a Stop, or after a block whose every branch
+ * ends the run), built once per doc snapshot.
+ * @internal
+ */
+export function unreachableIds(doc: WorkflowDoc, manifest: Manifest): Set<string> {
+  let ids = unreachableIndexes.get(doc);
+  if (!ids) {
+    ids = new Set(unreachableSteps(doc, manifest).flatMap((g) => g.stepIds));
+    unreachableIndexes.set(doc, ids);
+  }
+  return ids;
 }
 
 const NO_ISSUES: Issue[] = [];

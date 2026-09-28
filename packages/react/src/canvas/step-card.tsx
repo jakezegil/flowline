@@ -15,7 +15,14 @@ import {
   X,
 } from "lucide-react";
 import { memo, type ReactNode, useContext, useEffect, useMemo, useRef } from "react";
-import { stepIndex, useEditorStore, useEditorStoreApi, useShallow, useStep } from "../hooks";
+import {
+  stepIndex,
+  unreachableIds,
+  useEditorStore,
+  useEditorStoreApi,
+  useShallow,
+  useStep,
+} from "../hooks";
 import type { FlowkitLabels } from "../labels";
 import { useFlowkitAppearance } from "../provider";
 import type { TestState } from "../store/editor-store";
@@ -172,7 +179,7 @@ export function SummaryLine({ parts }: { parts: SummaryPart[] }) {
         }
         if (p.kind === "ref") {
           return (
-            <span key={key} className="fk-pill" title={p.ref}>
+            <span key={key} className="fk-pill" title={p.label}>
               {p.label}
             </span>
           );
@@ -300,6 +307,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
   const labels = useLabels();
   const inRunMode = useCanvasUi((s) => s.overlay !== undefined);
   const dimmed = useCanvasUi((s) => s.overlay?.dimmedSteps?.has(stepId) ?? false);
+  const unreachable = useEditorStore((s) => unreachableIds(s.doc, s.manifest).has(stepId));
   const actions = useMemo(() => stepActions(store, ui, root, stepId), [store, ui, root, stepId]);
 
   const step = info?.step;
@@ -333,6 +341,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
 
   let subtitle: ReactNode;
   if (run) subtitle = runSubtitle(run, labels);
+  else if (unreachable) subtitle = labels.neverRuns;
   else if (!manifest) subtitle = labels.unknownStep(step.type);
   else if (parts?.blank && manifest.description) subtitle = manifest.description;
   else if (parts && parts.parts.length > 0) subtitle = <SummaryLine parts={parts.parts} />;
@@ -347,6 +356,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
       data-unknown={!manifest || undefined}
       data-run={run?.status}
       data-dimmed={dimmed || undefined}
+      data-unreachable={(unreachable && !inRunMode) || undefined}
     >
       <div className="fk-card__icon" data-tone={control ? "control" : "action"} aria-hidden>
         <Icon size={18} />

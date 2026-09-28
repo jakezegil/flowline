@@ -226,6 +226,66 @@ describe("WorkflowCanvas", () => {
     expect(store.getState().selection).toBeNull();
   });
 
+  test("M8: steps after a Stop are dimmed and say they never run", () => {
+    const email = manifest.nodes.find((n) => n.type === "crm.sendEmail");
+    const stop = {
+      ...(email as NonNullable<typeof email>),
+      type: "logic.stop",
+      name: "Stop",
+      endsRun: true,
+      summary: undefined,
+    };
+    const m = { ...manifest, nodes: [...manifest.nodes, stop] };
+    store = createEditorStore({
+      doc: docWith([
+        step("stop", "logic.stop", {}),
+        step("email", "crm.sendEmail", { subject: "Hi" }),
+      ]),
+      manifest: m,
+    });
+    render(<WorkflowCanvas store={store} />);
+    const after = card("email").querySelector(".fk-card") as HTMLElement;
+    expect(after.hasAttribute("data-unreachable")).toBe(true);
+    expect(after.textContent).toContain("Never runs: an earlier step ends the run");
+    expect(card("stop").querySelector(".fk-card")?.hasAttribute("data-unreachable")).toBe(false);
+    act(() => store.getState().removeStep("stop"));
+    expect(card("email").querySelector(".fk-card")?.hasAttribute("data-unreachable")).toBe(false);
+  });
+
+  test("L13: an event trigger's card shows its filters by label and option label", () => {
+    const [created, ...rest] = manifest.triggers;
+    const trigger = {
+      ...(created as NonNullable<typeof created>),
+      config: {
+        type: "object",
+        properties: {
+          stage: {
+            type: "string",
+            enum: ["won", "lost"],
+            "x-flowkit": { enumLabels: { won: "Won" } },
+          },
+          minAmount: { type: "number" },
+          apiKey: { type: "string", "x-flowkit": { secret: true } },
+        },
+      },
+    };
+    const doc = fixtureDoc();
+    store = createEditorStore({
+      doc: {
+        ...doc,
+        trigger: { ...doc.trigger, config: { stage: "won", minAmount: 5000, apiKey: "KEY" } },
+      },
+      manifest: { ...manifest, triggers: [trigger, ...rest] },
+    });
+    render(<WorkflowCanvas store={store} />);
+    const summary = document.querySelector(
+      `.react-flow__node[data-id="trigger"] .fk-card__summary`,
+    );
+    expect(summary?.textContent).toBe(
+      "When contact.created happens · Stage: Won · Min amount: 5000",
+    );
+  });
+
   test("L19: right-click with no panel open doesn't open one", () => {
     render(<WorkflowCanvas store={store} />);
     fireEvent.contextMenu(card("email").querySelector(".fk-card") as HTMLElement);
@@ -304,6 +364,8 @@ describe("WorkflowCanvas", () => {
     fireEvent.contextMenu(card("email").querySelector(".fk-card") as HTMLElement);
     fireEvent.click(within(await screen.findByRole("menu")).getByText("Replace…"));
     const picker = await screen.findByRole("dialog", { name: "Replace step" });
+    // L29: the search box is named for what it does, not after the dialog.
+    expect(within(picker).getByRole("combobox", { name: "Search steps" })).toBeTruthy();
     // The current type isn't offered.
     expect(within(picker).queryByText("Send email")).toBeNull();
     fireEvent.click(within(picker).getByText("Load contact"));
@@ -422,6 +484,17 @@ describe("WorkflowCanvas", () => {
     await waitFor(() => expect(document.activeElement).toBe(plus));
     await user.keyboard("{ArrowDown}");
     expect(store.getState().selection).toBe("email");
+  });
+
+  test("L20: Esc after ⌘K returns focus to the card it was pressed on", async () => {
+    const user = userEvent.setup();
+    render(<WorkflowCanvas store={store} />);
+    card("email").focus();
+    fireEvent.keyDown(card("email"), { key: "k", ctrlKey: true });
+    await screen.findByRole("dialog", { name: "Add step" });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(card("email")));
   });
 
   test("⌘K opens the picker to insert after the selected step", async () => {

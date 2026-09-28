@@ -67,7 +67,8 @@ export type LayoutNode =
  * - `branch`: from a block's card to the first node of one branch column, labelled; "+" inserts at
  *   the top of that branch.
  * - `join`: from the last node of a branch column into the block's join node; `loc` appends to the
- *   branch, and is absent when the branch is empty (its placeholder is the insertion point).
+ *   branch, and is absent when the branch is empty (its placeholder is the insertion point). A
+ *   branch ending in a step that ends the run (a Stop) has none.
  * - `loopReturn`: from a loop's join node back up to the loop card's side (routed through the
  *   {@link LOOP_GUTTER}).
  */
@@ -249,6 +250,9 @@ export function layoutTree(
       h: JOIN_SIZE,
     });
     for (const { col, lastId } of exits) {
+      // A branch that ends in a Stop never rejoins: no edge, and no "+" after the Stop.
+      const last = col.steps.at(-1);
+      if (last && !last.disabled && idx.get(last.type)?.endsRun) continue;
       if (col.steps.length === 0) {
         edge({ kind: "join", source: lastId, target: joinId });
       } else {

@@ -16,7 +16,7 @@
       "icon": "split",
       "category": "Logic",
       "keywords": ["if", "else", "condition", "branch", "filter"],
-      "summary": "If conditions match",
+      "summary": "If {{rules}}",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

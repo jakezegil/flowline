@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { FIT_MIN_ZOOM, FIT_PADDING, fitViewport, motionDuration, revealViewport } from "./fit";
+import {
+  FIT_MIN_ZOOM,
+  FIT_PADDING,
+  FIT_WHOLE_MIN_ZOOM,
+  fitViewport,
+  motionDuration,
+  revealViewport,
+} from "./fit";
 
 const pane = { width: 1200, height: 800 };
 
@@ -29,11 +36,17 @@ describe("fitViewport", () => {
     expect(v.zoom).toBeCloseTo(625 / 690, 5);
   });
 
-  test("`whole` (the Fit button) fits everything, down to minZoom", () => {
+  test("`whole` (the Fit button) fits everything, down to a legible zoom", () => {
     const big = { width: 1700, height: 1200 };
     expect(fitViewport(pane, big, { whole: true, minZoom: 0.25 }).zoom).toBeCloseTo(625 / 1200, 5);
+  });
+
+  test("M12: a workflow too big to fit legibly stops at FIT_WHOLE_MIN_ZOOM, anchored to the top", () => {
     const huge = { width: 20_000, height: 20_000 };
-    expect(fitViewport(pane, huge, { whole: true, minZoom: 0.25 }).zoom).toBe(0.25);
+    const fit = fitViewport(pane, huge, { whole: true, minZoom: 0.25 });
+    expect(fit.zoom).toBe(FIT_WHOLE_MIN_ZOOM);
+    expect(fit.y).toBe(FIT_PADDING);
+    expect(fitViewport(pane, huge, { whole: true, minZoom: 0.6 }).zoom).toBe(0.6);
   });
 
   test("small panes shrink the padding", () => {

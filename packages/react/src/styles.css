@@ -212,6 +212,10 @@
   .fk-card[data-disabled] {
     opacity: 0.5;
   }
+  .fk-card[data-unreachable] {
+    opacity: 0.55;
+    border-style: dashed;
+  }
   .fk-card[data-unknown] {
     border-style: dashed;
     border-color: color-mix(in srgb, var(--fk-danger) 55%, var(--fk-border));
@@ -411,9 +415,9 @@
     white-space: pre;
     text-overflow: ellipsis;
   }
-  /* Beside a pill, text keeps its width (up to 60% of the line) so the pill truncates first. */
+  /* Beside a pill, text gives way slowly (up to 60% of the line) so pills truncate first. */
   .fk-summary__text:not(:only-child) {
-    flex-shrink: 0;
+    flex-shrink: 0.1;
     max-width: 60%;
   }
   .fk-pill {
@@ -443,9 +447,10 @@
   .fk-summary__unset[data-kind="empty"] {
     font-style: italic;
   }
+  /* A pill keeps enough to be recognized ("Trigger › st…", not "T…"). */
   .fk-summary .fk-pill {
     flex: 0 1 auto;
-    min-width: 3em;
+    min-width: min(7em, 45%);
   }
 
   /* ---------------------------------------------------------------- status badges */
