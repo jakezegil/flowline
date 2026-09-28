@@ -978,20 +978,33 @@ describe("executor: lost workers and lease renewal", () => {
 
   it("renews the lease while a long handler runs so no other worker can claim the run", async () => {
     const shortLease = 60;
+    // Fake clock, so a slow machine cannot let the lease lapse between two renewal ticks. The
+    // handler waits (on a condition, not a delay) for an in-handler renewal to land.
+    let renewed = deferred();
+    const watched: StorageAdapter = {
+      ...storage,
+      renewLease: async (lease, ms, now) => {
+        const ok = await storage.renewLease(lease, ms, now);
+        renewed.resolve();
+        return ok;
+      },
+    };
     let claimedMeanwhile: unknown = "not tried";
     behaviours.a = async () => {
-      await new Promise((r) => setTimeout(r, 100));
+      clock.advance(shortLease - 10);
+      renewed = deferred();
+      await renewed.promise;
+      // Past the original lease (claim + 60): only the renewal keeps the run claimed.
+      clock.advance(20);
       claimedMeanwhile = await storage.claimRun({
         workerId: "other",
         leaseMs: shortLease,
-        now: Date.now(),
+        now: clock.now(),
       });
-      await new Promise((r) => setTimeout(r, 100));
       return { ok: true };
     };
     const id = await startRun(wf([step("a", "test.echo")]));
-    // Real clock: without renewal the lease (60ms) would have expired by the 100ms claim attempt.
-    await createEngine({ registry, storage, leaseMs: shortLease }).runOnce("w1");
+    await makeEngine({ storage: watched, leaseMs: shortLease }).runOnce("w1");
     expect(claimedMeanwhile).toBe(null);
     expect((await getRun(id)).status).toBe("completed");
     expect(calls.a).toBe(1);
@@ -999,10 +1012,40 @@ describe("executor: lost workers and lease renewal", () => {
 
   it("keeps the claim when lease renewal throws transiently", async () => {
     let failures = 0;
+    const recovered = deferred();
     const flaky: StorageAdapter = {
       ...storage,
       renewLease: async (lease, ms, now) => {
         if (failures < 2) {
+          failures++;
+          throw new Error("db hiccup");
+        }
+        const ok = await storage.renewLease(lease, ms, now);
+        recovered.resolve();
+        return ok;
+      },
+    };
+    const warnings: string[] = [];
+    const logger = { debug() {}, info() {}, warn: (m: string) => warnings.push(m), error() {} };
+    // Run until renewal has failed twice and then succeeded, however slowly the ticks arrive.
+    behaviours.a = async () => {
+      await recovered.promise;
+      return { ok: true };
+    };
+    const id = await startRun(wf([step("a", "test.echo")]));
+    await createEngine({ registry, storage: flaky, leaseMs: 40, logger }).runOnce("w1");
+    expect((await getRun(id)).status).toBe("completed");
+    expect(warnings).toEqual(["lease renewal failed", "lease renewal failed"]);
+  });
+
+  it("keeps the claim when the between-steps lease renewal throws transiently", async () => {
+    // Fake clock and a long lease: the in-handler renewal interval never fires, so the only
+    // renewal is the one due before step b (step a moved the clock past half the lease).
+    let failures = 0;
+    const flaky: StorageAdapter = {
+      ...storage,
+      renewLease: async (lease, ms, now) => {
+        if (failures < 1) {
           failures++;
           throw new Error("db hiccup");
         }
@@ -1011,14 +1054,36 @@ describe("executor: lost workers and lease renewal", () => {
     };
     const warnings: string[] = [];
     const logger = { debug() {}, info() {}, warn: (m: string) => warnings.push(m), error() {} };
-    behaviours.a = async () => {
-      await new Promise((r) => setTimeout(r, 150));
+    behaviours.a = () => {
+      clock.advance(leaseMs / 2 + 1);
       return { ok: true };
     };
-    const id = await startRun(wf([step("a", "test.echo")]));
-    await createEngine({ registry, storage: flaky, leaseMs: 40, logger }).runOnce("w1");
+    const id = await startRun(wf([step("a", "test.echo"), step("b", "test.echo")]));
+    await makeEngine({ storage: flaky, leaseMs, logger }).runOnce("w1");
     expect((await getRun(id)).status).toBe("completed");
-    expect(warnings).toEqual(["lease renewal failed", "lease renewal failed"]);
+    expect(calls).toEqual({ a: 1, b: 1 });
+    expect(warnings).toEqual(["lease renewal failed"]);
+  });
+
+  it("abandons the claim when between-steps renewals keep throwing", async () => {
+    const broken: StorageAdapter = {
+      ...storage,
+      renewLease: async () => {
+        throw new Error("db down");
+      },
+    };
+    behaviours.a = () => {
+      clock.advance(leaseMs / 2 + 1);
+      return { ok: true };
+    };
+    const steps = ["a", "b", "c", "d", "e"].map((s) => step(s, "test.echo"));
+    const id = await startRun(wf(steps));
+    await makeEngine({ storage: broken, leaseMs }).runOnce("w1");
+    // Renewal is due before b, c and d; the third consecutive error stops the claim before d.
+    expect(calls).toEqual({ a: 1, b: 1, c: 1 });
+    const run = await getRun(id);
+    expect(run.status).toBe("running");
+    expect(run.journal.d).toBeUndefined();
   });
 
   it("abandons the claim after three consecutive renewal errors", async () => {

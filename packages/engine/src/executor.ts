@@ -412,9 +412,33 @@ export function createExecutor(opts: EngineOptions): Executor {
         ? current
         : undefined;
 
+    // Consecutive `renewLease` rejections across this claim (between-steps and in-handler renewals
+    // alike); any settled renewal resets it.
+    let renewalErrors = 0;
+    /**
+     * Record a transient renewal error: the claim is kept (and renewal retried) until
+     * `MAX_RENEWAL_ERRORS` consecutive errors. Returns `false` once the claim must be abandoned.
+     */
+    const renewalFailed = (err: unknown): boolean => {
+      renewalErrors++;
+      opts.logger?.warn("lease renewal failed", {
+        runId: run.id,
+        attempt: renewalErrors,
+        error: errorMessage(err),
+      });
+      return renewalErrors < MAX_RENEWAL_ERRORS;
+    };
+
     const renewIfDue = async (): Promise<boolean> => {
       if (clock() < leaseUntil - leaseMs / 2) return true;
-      const ok = await storage.renewLease(lease, leaseMs, clock());
+      let ok: boolean;
+      try {
+        ok = await storage.renewLease(lease, leaseMs, clock());
+      } catch (err) {
+        // A transient storage error: keep going; the next step boundary or tick tries again.
+        return renewalFailed(err);
+      }
+      renewalErrors = 0;
       if (ok) leaseUntil = clock() + leaseMs;
       return ok;
     };
@@ -449,7 +473,6 @@ export function createExecutor(opts: EngineOptions): Executor {
       // The handler is not killed at the timeout: it may keep running while the retry starts, which
       // is why handlers must honour `ctx.signal` and pass `ctx.idempotencyKey` downstream.
       const timer = setTimeout(() => controller.abort(new RetryableError("timed out")), timeoutMs);
-      let renewalErrors = 0;
       const renewal = setInterval(() => {
         storage.renewLease(lease, leaseMs, clock()).then(
           async (ok) => {
@@ -470,13 +493,7 @@ export function createExecutor(opts: EngineOptions): Executor {
           },
           (err: unknown) => {
             // A transient storage error: keep the claim and try again on the next tick.
-            renewalErrors++;
-            opts.logger?.warn("lease renewal failed", {
-              runId: run.id,
-              attempt: renewalErrors,
-              error: errorMessage(err),
-            });
-            if (renewalErrors >= MAX_RENEWAL_ERRORS) {
+            if (!renewalFailed(err)) {
               controller.abort(new LeaseLostError("lease renewal failed repeatedly"));
             }
           },
