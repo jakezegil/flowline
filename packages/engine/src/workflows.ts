@@ -5,6 +5,7 @@
  * @module
  */
 import {
+  dropHiddenFields,
   type FlowkitServices,
   hasErrors,
   type Issue,
@@ -134,11 +135,14 @@ export function createWorkflows(core: EngineCore): Workflows {
     for (const v of await storage.listPublished({ tenantId })) {
       const t = triggers.get(v.doc.trigger.type);
       if (t?.kind !== "subflow") continue;
+      // Declarations hidden by showIf don't exist for callers.
+      const config = dropHiddenFields(v.doc.trigger.config, t.config);
+      const trigger = { ...v.doc.trigger, config: config as typeof v.doc.trigger.config };
       out.push({
         id: v.workflowId,
         name: v.doc.name,
-        input: payloadSchemaFor(t, v.doc.trigger),
-        output: subflowOutputSchema(t, v.doc.trigger) ?? {},
+        input: payloadSchemaFor(t, trigger),
+        output: subflowOutputSchema(t, trigger) ?? {},
       });
     }
     return out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -315,6 +319,8 @@ export function createWorkflows(core: EngineCore): Workflows {
       } catch (err) {
         return fail(`Step "${label}": ${errorMessage(err)}`);
       }
+      // Fields hidden by `showIf` (judged on the resolved values) never reach the handler.
+      resolved = dropHiddenFields(resolved, manifest.input) as Record<string, unknown>;
       const shownInput = (v: unknown) => redactBySchema(v, manifest.input, { mask: "secret" });
       const parsed = await node.input.safeParseAsync(resolved);
       if (!parsed.success) {

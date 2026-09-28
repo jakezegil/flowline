@@ -207,6 +207,16 @@ describe("parseTemplate", () => {
   test("pure text with no refs", () => {
     expect(parseTemplate("just text")).toEqual([{ text: "just text" }]);
   });
+
+  test("a { right before a reference is literal; \\{{ escapes a literal {{", () => {
+    expect(parseTemplate("{{{trigger.x}}}")).toEqual([
+      { text: "{" },
+      { ref: "trigger.x" },
+      { text: "}" },
+    ]);
+    expect(parseTemplate("\\{{{{trigger.x}}")).toEqual([{ text: "{{" }, { ref: "trigger.x" }]);
+    expect(parseTemplate("\\{{{")).toEqual([{ text: "{{{" }]);
+  });
 });
 
 describe("collectRefs", () => {

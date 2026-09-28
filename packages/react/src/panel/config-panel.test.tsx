@@ -2,11 +2,13 @@ import type { Manifest, WorkflowDoc } from "@flowkit/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import builtin from "../../playground/builtin-manifest.json";
+import { editorView, typeInto } from "../../test/codemirror-dom";
 import { mockClient, setupDom } from "../../test/dom";
 import { docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
 import { FlowkitProvider } from "../provider";
 import { createEditorStore, TRIGGER_KEY } from "../store/editor-store";
 import { ConfigPanel } from "./config-panel";
+import { sampleText } from "./trigger-config";
 
 beforeAll(setupDom);
 beforeEach(() => localStorage.clear());
@@ -233,5 +235,96 @@ describe("ConfigPanel for the trigger", () => {
     fireEvent.change(sample, { target: { value: '{"email":"x@y.z"}' } });
     fireEvent.click(screen.getByRole("button", { name: "Save sample" }));
     await waitFor(() => expect(store.getState().samples[TRIGGER_KEY]).toEqual({ email: "x@y.z" }));
+  });
+
+  test("Fill from fields gives each field a sample value that suits its name", () => {
+    const doc: WorkflowDoc = {
+      ...docWith([]),
+      trigger: {
+        type: "core.manual",
+        config: {
+          fields: [
+            { name: "firstName", type: "string" },
+            { name: "lastName", type: "string" },
+            { name: "contactId", type: "string" },
+            { name: "amount", type: "number" },
+          ],
+        },
+      },
+    };
+    setup({ doc, select: TRIGGER_KEY, manifest: withBuiltinTriggers });
+    fireEvent.click(screen.getByRole("tab", { name: /Test/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Fill from fields" }));
+    const sample = screen.getByRole("textbox", { name: "Sample input" }) as HTMLTextAreaElement;
+    expect(JSON.parse(sample.value)).toEqual({
+      firstName: "Ada",
+      lastName: "Lovelace",
+      contactId: "contact_123",
+      amount: 1200,
+    });
+  });
+
+  test("a sub-flow maps its declared outputs, with issues and undeclared keys shown", () => {
+    const doc: WorkflowDoc = {
+      ...fixtureDoc(),
+      trigger: {
+        type: "core.subflow",
+        config: {
+          fields: [{ name: "contactId", type: "string", required: true }],
+          output: [
+            { name: "email", type: "string", required: true, description: "Where to write" },
+            { name: "score", type: "number" },
+            { name: "vip", type: "boolean" },
+            { name: "contact", type: "object" },
+          ],
+        },
+      },
+      output: { stale: "x" },
+    };
+    const { store } = setup({ doc, select: TRIGGER_KEY, manifest: withBuiltinTriggers });
+    expect(screen.getByText("Output values")).toBeTruthy();
+    expect(screen.getByText('"email" is required')).toBeTruthy();
+    // An undeclared key is said once: the validator's issue replaces the help line.
+    expect(screen.getAllByText(/isn't a declared output field/)).toHaveLength(1);
+    expect(screen.queryByText(/Not a declared output field/)).toBeNull();
+    // Each output says its declared type.
+    const helps = Array.from(
+      document.querySelectorAll(".fk-output .fk-f__help"),
+      (p) => p.textContent,
+    );
+    expect(helps).toEqual(
+      expect.arrayContaining(["Text · Where to write", "Number", "True / false", "Object"]),
+    );
+
+    act(() => typeInto(editorView("email"), "a@b.c"));
+    expect(store.getState().doc.output).toEqual({ stale: "x", email: "a@b.c" });
+    expect(screen.queryByText('"email" is required')).toBeNull();
+
+    // Typed outputs take literals of their type (numbers, booleans), not only text.
+    fireEvent.change(screen.getByRole("textbox", { name: "score" }), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("switch", { name: "vip" }));
+    expect(store.getState().doc.output).toMatchObject({ score: 5, vip: true });
+    // Only the undeclared key is left.
+    expect(store.getState().issues.filter((i) => i.field?.startsWith("output."))).toMatchObject([
+      { code: "output.unknown", field: "output.stale" },
+    ]);
+    // Objects take a reference (or JSON), drawn from the end-of-workflow scope.
+    expect(editorView("contact")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove output stale" }));
+    expect(store.getState().doc.output).not.toHaveProperty("stale");
+    act(() => store.getState().undo());
+    expect(store.getState().doc.output).toHaveProperty("stale", "x");
+  });
+});
+
+describe("sampleText", () => {
+  test("an id suffix must be its own word", () => {
+    expect(sampleText("contactId")).toBe("contact_123");
+    expect(sampleText("contact_id")).toBe("contact_123");
+    expect(sampleText("dealID")).toBe("deal_123");
+    for (const key of ["paid", "valid", "guid", "android"]) {
+      expect(sampleText(key)).not.toMatch(/_123$/);
+    }
   });
 });

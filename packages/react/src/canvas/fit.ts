@@ -5,6 +5,18 @@
  * @module
  */
 
+/**
+ * `ms`, or `0` when the user prefers reduced motion: viewport moves the user didn't drag (reveal,
+ * fit, zoom buttons) then jump instead of animating.
+ */
+export function motionDuration(ms: number): number {
+  try {
+    return globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : ms;
+  } catch {
+    return ms;
+  }
+}
+
 /** Top padding (and side padding, space permitting) of the fit. */
 export const FIT_PADDING = 100;
 /**
@@ -34,4 +46,58 @@ export function fitViewport(
   const floor = opts.whole ? opts.minZoom : FIT_MIN_ZOOM;
   const zoom = Math.min(FIT_MAX_ZOOM, Math.max(floor, Math.min(byWidth, byHeight)));
   return { x: pane.width / 2, y: padTop, zoom };
+}
+
+/** A rectangle in canvas coordinates. */
+export interface CanvasRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * The smallest pan (zoom unchanged) that brings `focus` at least `margin` px inside the pane, and
+ * `context` too where it fits along that axis (a block's branch heads below it). Each axis moves
+ * independently, only as far as needed; `null` when nothing needs to move.
+ *
+ * @param transform xyflow's `[x, y, zoom]`.
+ */
+export function revealViewport(
+  pane: { width: number; height: number },
+  transform: readonly [number, number, number],
+  focus: CanvasRect,
+  context: readonly CanvasRect[],
+  margin: number,
+): { x: number; y: number; zoom: number } | null {
+  const [tx, ty, zoom] = transform;
+  const axis = (
+    t: number,
+    size: number,
+    pos: (r: CanvasRect) => number,
+    len: (r: CanvasRect) => number,
+  ): number => {
+    const lo = Math.min(pos(focus), ...context.map(pos));
+    const hi = Math.max(pos(focus) + len(focus), ...context.map((r) => pos(r) + len(r)));
+    // The whole group when it fits, else just the focused card.
+    const fits = (hi - lo) * zoom <= size - 2 * margin;
+    const from = (fits ? lo : pos(focus)) * zoom + t;
+    const to = (fits ? hi : pos(focus) + len(focus)) * zoom + t;
+    if (from < margin) return t + (margin - from);
+    if (to > size - margin) return t - Math.min(to - (size - margin), from - margin);
+    return t;
+  };
+  const x = axis(
+    tx,
+    pane.width,
+    (r) => r.x,
+    (r) => r.w,
+  );
+  const y = axis(
+    ty,
+    pane.height,
+    (r) => r.y,
+    (r) => r.h,
+  );
+  return x === tx && y === ty ? null : { x, y, zoom };
 }

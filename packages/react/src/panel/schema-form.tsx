@@ -6,6 +6,7 @@
  */
 import {
   availableScope,
+  hiddenFields,
   type Issue,
   type JSONSchema,
   type ScopeEntry,
@@ -191,11 +192,14 @@ export function ObjectFields({
   const required = requiredOf(s);
   const loose: JSX.Element[] = [];
   const groups = new Map<string, { els: JSX.Element[]; issues: boolean }>();
+  // Conditional fields (`showIf`) keep their value while hidden, so switching back restores it.
+  // The same lookup as the validator's, so the form and the issues agree.
+  const hidden = hiddenFields(value, s, env.root);
   for (const [key, raw] of propertiesOf(s)) {
     if (exclude?.includes(key)) continue;
     const prop = deref(env.root, raw);
     const meta = metaOf(unwrapNullable(env.root, prop));
-    if (meta.hidden) continue;
+    if (meta.hidden || hidden.has(key)) continue;
     const fieldPath = path === "" ? key : `${path}.${key}`;
     const el = (
       <Field

@@ -7,6 +7,7 @@ import {
   containsSecret,
   derefSchema,
   describeType,
+  discriminatedMember,
   isAnySchema,
   isAssignable,
   type Kind,
@@ -24,6 +25,7 @@ import {
   type ValidationContext,
   walkScope,
 } from "./scope";
+import { dropHiddenFields, hiddenFields } from "./show-if";
 import { walkSteps } from "./tree";
 import type {
   JSONSchema,
@@ -371,48 +373,6 @@ function isEmptyValue(value: unknown, root: JSONSchema, schema: JSONSchema): boo
   return value === null && !allowsNull(root, schema);
 }
 
-/** A property's constant value (`const`, or a one-value `enum`), if it has one. */
-function constOf(root: JSONSchema, prop: unknown): { value: unknown } | undefined {
-  if (typeof prop !== "object" || prop === null) return undefined;
-  const s = derefSchema(root, prop as JSONSchema);
-  if ("const" in s) return { value: s.const };
-  if (Array.isArray(s.enum) && s.enum.length === 1) return { value: s.enum[0] };
-  return undefined;
-}
-
-/**
- * For a union of objects told apart by a property holding a distinct constant in every member
- * (e.g. `type`), the member whose constant equals the value's; otherwise `undefined`.
- */
-function discriminatedMember(
-  root: JSONSchema,
-  members: readonly JSONSchema[],
-  value: unknown,
-): JSONSchema | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-  const obj = value as Record<string, unknown>;
-  const propsOf = (m: JSONSchema) =>
-    typeof m.properties === "object" && m.properties !== null
-      ? (m.properties as Record<string, unknown>)
-      : undefined;
-  // Members that can't hold an object (e.g. the `null` of a nullable union) take no part.
-  const objects = members
-    .map((m) => ({ m, props: propsOf(derefSchema(root, m)) }))
-    .filter((x): x is { m: JSONSchema; props: Record<string, unknown> } => x.props !== undefined);
-  const first = objects[0];
-  if (!first || objects.length < 2) return undefined;
-  for (const key of Object.keys(first.props)) {
-    if (!(key in obj)) continue;
-    const consts = objects.map((x) => constOf(root, x.props[key]));
-    if (consts.some((c) => c === undefined)) continue;
-    const values = consts.map((c) => JSON.stringify(c?.value));
-    if (new Set(values).size !== values.length) continue;
-    const i = values.indexOf(JSON.stringify(obj[key]));
-    return i >= 0 ? objects[i]?.m : undefined;
-  }
-  return undefined;
-}
-
 function errorCount(r: Reporter): number {
   return r.issues.filter((i) => i.severity === "error").length;
 }
@@ -644,7 +604,10 @@ function checkObject(
     unknown
   >;
   const required = new Set(Array.isArray(schema.required) ? (schema.required as string[]) : []);
+  // A field whose `showIf` doesn't hold doesn't apply: it isn't required or checked.
+  const hidden = hiddenFields(obj, schema, root);
   for (const [key, rawDeclared] of Object.entries(props)) {
+    if (hidden.has(key)) continue;
     const declared = asSchema(rawDeclared);
     const override = overrides[key];
     const propSchema = override ?? declared;
@@ -825,7 +788,8 @@ function docInfo(doc: WorkflowDoc): DocInfo {
  * assignable type (mismatches are warnings); branch keys match declared branches; sub-flow
  * calls target a known (`ctx.subflows`), non-recursive workflow with a valid input mapping; the
  * doc's `output` mapping resolves in end-of-doc scope and, for a sub-flow, maps exactly its
- * declared output fields. Trigger config may hold only literals.
+ * declared output fields. Fields hidden by `x-flowkit.showIf` are skipped. Trigger config
+ * may hold only literals.
  *
  * References into field-declared shapes (manual and sub-flow trigger inputs, a webhook body with
  * declared fields, a called sub-flow's output) must name a declared field. `secret()` fields are
@@ -900,7 +864,13 @@ export function validateWorkflow(
     return undefined;
   });
 
-  const declared = trigger ? subflowOutputSchema(trigger, doc.trigger) : undefined;
+  // Output declarations hidden by showIf don't count, as at run time.
+  const declared = trigger
+    ? subflowOutputSchema(trigger, {
+        ...doc.trigger,
+        config: dropHiddenFields(doc.trigger.config, trigger.config) as typeof doc.trigger.config,
+      })
+    : undefined;
   if (declared) {
     checkDeclaredOutput({ ...base, visible: end }, doc.output ?? {}, declared);
   } else if (doc.output) {

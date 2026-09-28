@@ -1,3 +1,5 @@
+// Declares the cascade-layer order first, so the app's resets sit below Flowkit's styles.
+import "./layers.css";
 import "@flowkit/react/styles.css";
 import "./styles.css";
 import { StrictMode } from "react";

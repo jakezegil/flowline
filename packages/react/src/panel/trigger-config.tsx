@@ -19,6 +19,7 @@ import { TRIGGER_KEY } from "../store/editor-store";
 import { IssueNotes } from "./fields/shell";
 import { deref, typesOf } from "./schema";
 import { SchemaForm } from "./schema-form";
+import { SubflowOutput, useHasOutputMapping } from "./subflow-output";
 
 /** The trigger's issues, with `field` relative to its config (`"trigger.x"` → `"x"`). */
 export function triggerIssues(issues: Issue[]): Issue[] {
@@ -182,6 +183,7 @@ export function TriggerConfigure(): JSX.Element {
   const issues = useMemo(() => triggerIssues(allIssues), [allIssues]);
   const loose = issues.filter((i) => i.field === undefined);
   const hasFields = m && Object.keys((m.config.properties ?? {}) as object).length > 0;
+  const showOutput = useHasOutputMapping();
   return (
     <div className="fk-cp__section">
       <TriggerTypeSelect triggers={triggers} />
@@ -203,8 +205,52 @@ export function TriggerConfigure(): JSX.Element {
           issues={issues}
         />
       )}
+      {showOutput && <SubflowOutput />}
     </div>
   );
+}
+
+/** Sample text per field-name pattern, first match wins (`first_name` and `firstName` alike). */
+const TEXT_SAMPLES: [RegExp, string][] = [
+  [/^(first|given|fore)name$/, "Ada"],
+  [/^(last|family|sur)name$|^surname$/, "Lovelace"],
+  [/^(middle)name$/, "Augusta"],
+  [/^user(name)?$|^login$|^handle$/, "ada"],
+  [/e?mail/, "ada@example.com"],
+  [/phone|mobile|^tel$/, "+44 20 7946 0000"],
+  [/company|organi[sz]ation|^org$|employer|account/, "Analytical Engines Ltd"],
+  [/(job)?title$|role|position/, "Mathematician"],
+  [/url|website|link|href/, "https://example.com"],
+  [/street|address/, "12 St James's Square"],
+  [/city|town/, "London"],
+  [/country/, "United Kingdom"],
+  [/zip|postcode|postal/, "SW1Y 4JH"],
+  [/currency/, "GBP"],
+  [/source|channel/, "web"],
+  [/message|body|note|comment|description|text/, "Hello from Ada"],
+  [/subject|summary|headline/, "Hello"],
+  [/name/, "Ada Lovelace"],
+];
+
+/** An ID suffix as its own word: `contactId`, `contactID`, `contact_id`. */
+const ID_SUFFIX = /(?<=[a-z0-9])I[dD]$|[_\s-][iI][dD]$/;
+
+/** A plausible string for a field named `key`, e.g. `lastName` → `"Lovelace"`. */
+export function sampleText(key: string): string {
+  const k = key.replace(/[\s_-]+/g, "").toLowerCase();
+  if (ID_SUFFIX.test(key) && k.length > 2) return `${k.slice(0, -2)}_123`;
+  if (k === "id") return "item_123";
+  for (const [re, text] of TEXT_SAMPLES) if (re.test(k)) return text;
+  return key ? `${key} text` : "text";
+}
+
+/** A plausible number for a field named `key`: amounts in the thousands, counts small. */
+function sampleNumber(key: string): number {
+  const k = key.toLowerCase();
+  if (/amount|price|value|total|revenue|budget|cost/.test(k)) return 1200;
+  if (k === "age") return 36;
+  if (/year/.test(k)) return 1843;
+  return 1;
 }
 
 /** Example value of a schema, for "Fill from fields". */
@@ -226,15 +272,14 @@ export function exampleOf(root: JSONSchema, schema: JSONSchema, key = "", depth 
       return [exampleOf(root, (s.items ?? {}) as JSONSchema, key, depth + 1)];
     case "number":
     case "integer":
-      return 1;
+      return sampleNumber(key);
     case "boolean":
       return true;
     case "string":
       if (s.format === "date-time") return new Date(Date.UTC(2026, 0, 31, 9)).toISOString();
-      if (/e-?mail/i.test(key)) return "ada@example.com";
-      if (/name/i.test(key)) return "Ada Lovelace";
-      if (/id$/i.test(key)) return `${key.replace(/id$/i, "") || "item"}_123`;
-      return key ? `${key} text` : "text";
+      if (s.format === "email") return "ada@example.com";
+      if (s.format === "uri") return "https://example.com";
+      return sampleText(key);
     default:
       return null;
   }

@@ -7,6 +7,7 @@
 import {
   checkFields,
   configValueAt,
+  dropHiddenFields,
   type FieldDecl,
   type Registry,
   type SubflowSignal,
@@ -21,6 +22,21 @@ const MAX_SUBFLOW_DEPTH = 8;
 /** Candidate child ids tried before giving up (see {@link subflowRunId}). */
 const MAX_CHILD_ID_ATTEMPTS = 1000;
 const FINISHED: ReadonlySet<Run["status"]> = new Set(["completed", "failed", "cancelled"]);
+
+/**
+ * @internal `doc`'s trigger config without the values of fields hidden by `showIf`, judged against
+ * the trigger's manifest config schema. Everything that hands trigger config to trigger code
+ * (config parsing, `filter`, `dedupeKey`, declared payload and output fields) reads it through
+ * here, so what the editor shows is what runs.
+ */
+export function visibleTriggerConfig(
+  registry: Registry,
+  doc: WorkflowDoc,
+): WorkflowDoc["trigger"]["config"] {
+  const config = doc.trigger.config ?? {};
+  const m = registry.manifest().triggers.find((t) => t.type === doc.trigger.type);
+  return m ? (dropHiddenFields(config, m.config) as typeof config) : config;
+}
 
 /** What {@link startSubflow} needs from the executor. */
 export interface SubflowEnv<T> {
@@ -75,7 +91,7 @@ export async function checkTriggerPayload(
   }
   const dynamic = trigger?.dynamicPayload;
   if (dynamic) {
-    const decls = configValueAt(doc.trigger.config, dynamic.configPath);
+    const decls = configValueAt(visibleTriggerConfig(registry, doc), dynamic.configPath);
     const fields = Array.isArray(decls) ? (decls as FieldDecl[]) : [];
     const checked = dynamic.kind === "webhook" ? (value as { body?: unknown } | null)?.body : value;
     const problem = checkFields(fields, checked);
@@ -99,7 +115,7 @@ export function subflowOutputProblem(
   output: unknown,
 ): string | undefined {
   if (registry.getTrigger(doc.trigger.type)?.kind !== "subflow") return undefined;
-  const decls = configValueAt(doc.trigger.config, "output");
+  const decls = configValueAt(visibleTriggerConfig(registry, doc), "output");
   if (!Array.isArray(decls)) return undefined;
   const problem = checkFields(decls as FieldDecl[], output ?? {});
   return problem === undefined ? undefined : `Sub-flow output: ${problem}`;

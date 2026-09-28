@@ -674,6 +674,26 @@ export function payloadSchemaFor(t: TriggerManifest, trigger: TriggerConfig): JS
   }
 }
 
+/** Config path of a sub-flow trigger's output field declarations (see `TriggerKind`). */
+const SUBFLOW_OUTPUT_PATH = "output";
+
+/**
+ * The output fields a sub-flow declares: the literal {@link FieldDecl} list at trigger config
+ * `"output"` when `t` is a `subflow` trigger, else `undefined`. The workflow's `output` mapping
+ * must provide these (the engine checks them when a sub-flow run finishes).
+ *
+ * @example
+ * subflowOutputFields(manifest.triggers.find((t) => t.type === doc.trigger.type), doc.trigger);
+ * // [{ name: "found", type: "boolean", required: true }]
+ */
+export function subflowOutputFields(
+  t: TriggerManifest | undefined,
+  trigger: TriggerConfig,
+): FieldDecl[] | undefined {
+  if (t?.kind !== "subflow") return undefined;
+  return fieldDeclsAt(trigger.config, SUBFLOW_OUTPUT_PATH);
+}
+
 /**
  * The declared output of a sub-flow: for a trigger of kind `subflow`, the closed schema of the
  * {@link FieldDecl} list at config path `"output"` (the contract of every sub-flow trigger).
@@ -717,6 +737,79 @@ export function branchesFor(m: NodeManifest, step: Step): { id: string; label: s
     default:
       return [];
   }
+}
+
+/** A property's constant value (`const`, or a one-value `enum`), if it has one. */
+function constOf(root: JSONSchema, prop: unknown): { value: unknown } | undefined {
+  if (typeof prop !== "object" || prop === null) return undefined;
+  const s = deref(root, prop as JSONSchema);
+  if ("const" in s) return { value: s.const };
+  if (Array.isArray(s.enum) && s.enum.length === 1) return { value: s.enum[0] };
+  return undefined;
+}
+
+/** The object members of a union with their properties; members that can't hold one drop out. */
+function objectMembers(
+  root: JSONSchema,
+  members: readonly JSONSchema[],
+): { m: JSONSchema; props: Record<string, unknown> }[] {
+  const out: { m: JSONSchema; props: Record<string, unknown> }[] = [];
+  for (const m of members) {
+    const props = deref(root, m).properties;
+    if (typeof props === "object" && props !== null) {
+      out.push({ m, props: props as Record<string, unknown> });
+    }
+  }
+  return out;
+}
+
+/** The constants of `key` in every member, when each has one and they are all distinct. */
+function distinctConsts(
+  root: JSONSchema,
+  objects: { props: Record<string, unknown> }[],
+  key: string,
+): string[] | undefined {
+  const consts = objects.map((x) => constOf(root, x.props[key]));
+  if (consts.some((c) => c === undefined)) return undefined;
+  const values = consts.map((c) => JSON.stringify(c?.value));
+  return new Set(values).size === values.length ? values : undefined;
+}
+
+/**
+ * @internal For a union of objects told apart by a property holding a distinct constant in every
+ * member (e.g. `type`), the member whose constant equals the value's; otherwise `undefined`.
+ * Shared by the validator and `dropHiddenFields`, so both pick the same variant.
+ */
+export function discriminatedMember(
+  root: JSONSchema,
+  members: readonly JSONSchema[],
+  value: unknown,
+): JSONSchema | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const obj = value as Record<string, unknown>;
+  // Members that can't hold an object (e.g. the `null` of a nullable union) take no part.
+  const objects = objectMembers(root, members);
+  const first = objects[0];
+  if (!first || objects.length < 2) return undefined;
+  for (const key of Object.keys(first.props)) {
+    if (!(key in obj)) continue;
+    const values = distinctConsts(root, objects, key);
+    if (!values) continue;
+    const i = values.indexOf(JSON.stringify(obj[key]));
+    return i >= 0 ? objects[i]?.m : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * @internal Whether some property tells the union's object members apart (a distinct constant in
+ * each), so {@link discriminatedMember} can pick a member for any value that sets it.
+ */
+export function isDiscriminatedUnion(root: JSONSchema, members: readonly JSONSchema[]): boolean {
+  const objects = objectMembers(root, members);
+  const first = objects[0];
+  if (!first || objects.length < 2) return false;
+  return Object.keys(first.props).some((key) => distinctConsts(root, objects, key) !== undefined);
 }
 
 /** @internal Shared with the validator: dereference against a root. */

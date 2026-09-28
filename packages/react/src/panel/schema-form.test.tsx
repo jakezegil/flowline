@@ -6,10 +6,11 @@ import {
   type ScopeEntry,
   type ValueExpr,
 } from "@flowkit/core";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type JSX, useState } from "react";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import builtin from "../../playground/builtin-manifest.json";
+import { editorView, typeInto } from "../../test/codemirror-dom";
 import { mockClient, setupDom } from "../../test/dom";
 import { fixtureDoc, manifest } from "../../test/fixtures";
 import { FlowkitProvider } from "../provider";
@@ -337,6 +338,68 @@ describe("SchemaForm references and JSON", () => {
     expect(latest.payload).toBeUndefined();
     fireEvent.click(toggle);
     expect(latest.payload).toEqual({ a: 1 });
+  });
+
+  test("references inside JSON show as pills, not raw $ref objects, and edits keep them", () => {
+    renderForm({
+      schema,
+      initial: {
+        payload: { to: { $ref: "steps.load.email" }, note: { $tpl: "Hi {{trigger.contactId}}" } },
+      },
+    });
+    const view = editorView("Payload");
+    const text = view.dom.textContent ?? "";
+    expect(text).not.toContain("$ref");
+    expect(text).not.toContain("$tpl");
+    expect(view.dom.querySelectorAll(".fk-ref-pill")).toHaveLength(2);
+    // Typing elsewhere keeps both references.
+    act(() => {
+      view.dispatch({ selection: { anchor: 1 } });
+      typeInto(view, '\n  "n": 1,');
+    });
+    expect(latest.payload).toEqual({
+      n: 1,
+      to: { $ref: "steps.load.email" },
+      note: { $tpl: "Hi {{trigger.contactId}}" },
+    });
+    // Invalid JSON is flagged and not written.
+    act(() => typeInto(view, "{"));
+    expect(screen.getByText(/valid JSON/i)).toBeTruthy();
+    expect(latest.payload).toMatchObject({ n: 1 });
+  });
+
+  test("enumLabels override option text; showIf hides a field until its condition holds", () => {
+    const s: JSONSchema = {
+      type: "object",
+      properties: {
+        strategy: { enum: ["roundRobin", "team"], default: "roundRobin" },
+        team: {
+          enum: ["smb", "enterprise"],
+          "x-flowkit": {
+            label: "Team",
+            enumLabels: { smb: "SMB" },
+            showIf: { field: "strategy", equals: "team" },
+          },
+        },
+      },
+    };
+    renderForm({ schema: s, initial: { team: "smb" } });
+    expect(screen.queryByText("Team", { selector: "label" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "Team" }));
+    const select = screen.getByRole("combobox", { name: "Team" }) as HTMLSelectElement;
+    expect(Array.from(select.options, (o) => o.text)).toContain("SMB");
+    expect(Array.from(select.options, (o) => o.text)).toContain("Enterprise");
+    // Hiding keeps the value.
+    fireEvent.click(screen.getByRole("radio", { name: "Round robin" }));
+    expect(screen.queryByRole("combobox", { name: "Team" })).toBeNull();
+    expect(latest.team).toBe("smb");
+  });
+
+  test("the HTTP body shows only for a body type other than None", () => {
+    renderForm({ schema: http, initial: { method: "POST", url: "https://x.test" } });
+    expect(screen.queryByText("Body", { selector: "label, legend" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "JSON" }));
+    expect(screen.getByText("Body", { selector: "label, legend" })).toBeTruthy();
   });
 });
 

@@ -154,6 +154,13 @@ describe("RefTextInput", () => {
     expect(partsToValue([{ text: "a {{b}}" }])).toBe("a {{b}}");
   });
 
+  test("a { typed right before a pill round-trips (no broken reference)", () => {
+    const parts = [{ text: "id={" }, { ref: "trigger.name" }, { text: "}" }];
+    const value = partsToValue(parts);
+    expect(value).toEqual({ $tpl: "id={{{trigger.name}}}" });
+    expect(valueToParts(value)).toEqual(parts);
+  });
+
   test("a single-line field keeps pasted text on one line", () => {
     const { onChange, view } = setup();
     act(() => {

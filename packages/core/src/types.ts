@@ -141,6 +141,47 @@ export interface UiMeta {
    * literal empty list.
    */
   warnIfEmpty?: string;
+  /**
+   * On an enum field: display text per option, keyed by the option's value as a string (e.g.
+   * `{ smb: "SMB" }`). Options without an entry keep the editor's default (lowercase words are
+   * humanized, `"roundRobin"` → `"Round robin"`; anything else shows as written).
+   */
+  enumLabels?: Record<string, string>;
+  /**
+   * Show the field only while a sibling field (a property of the same object) has certain values.
+   * See {@link ShowIf}.
+   *
+   * - The field must be optional in its schema (`.optional()` or `.default()`), and `field` must
+   *   name a sibling property; conditions must not form a cycle. The registry's manifest build
+   *   throws a `FlowkitDefinitionError` otherwise.
+   * - Editor: a hidden field isn't rendered, but its stored value is kept, so switching back
+   *   restores it.
+   * - Validator: a hidden field is skipped (no `config.required`, no value checks).
+   * - Engine: the values of hidden fields are dropped before the input is parsed and the handler
+   *   runs. Visibility is evaluated on the resolved config, so a sibling holding a reference is
+   *   judged by the value it resolved to. A handler never sees a hidden field.
+   */
+  showIf?: ShowIf;
+}
+
+/**
+ * Condition of {@link UiMeta.showIf}, on the sibling property `field`. The sibling's value is its
+ * config value, else its schema `default`. With `equals`, the field shows while the sibling equals
+ * one of the values; with `notEquals`, while it equals none of them; with neither, while it is set
+ * (not `undefined`, `null`, `""` or `false`). In the editor and validator, a sibling holding a
+ * reference or template can't be known in advance, so the field shows; the engine decides on the
+ * resolved value. A sibling that is itself hidden counts as unset (its default is not used).
+ *
+ * @example
+ * ui(z.unknown(), { label: "Body", showIf: { field: "bodyType", notEquals: "none" } })
+ */
+export interface ShowIf {
+  /** Sibling property name. */
+  field: string;
+  /** Show while the sibling equals this value (or one of these). */
+  equals?: Literal | Literal[];
+  /** Show while the sibling equals none of these. */
+  notEquals?: Literal | Literal[];
 }
 
 /** Serializable description of a node type, as consumed by the editor and validator. */

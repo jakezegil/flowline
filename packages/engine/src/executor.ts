@@ -8,6 +8,7 @@ import {
   branchesFor,
   type CallbackHandle,
   collectRefs,
+  dropHiddenFields,
   type FlowkitServices,
   isRef,
   isSignal,
@@ -733,6 +734,8 @@ export function createExecutor(opts: EngineOptions): Executor {
       } catch (err) {
         return fatal(`Step "${label}": ${errorMessage(err)}`);
       }
+      // Fields hidden by `showIf` (judged on the resolved values) never reach the handler.
+      resolved = dropHiddenFields(resolved, manifest.input) as Record<string, unknown>;
       const parsed = await node.input.safeParseAsync(resolved);
       if (!parsed.success) {
         return fatal(

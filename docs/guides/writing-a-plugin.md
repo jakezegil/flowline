@@ -248,14 +248,17 @@ helpers:
 | `widget` | Chooses a control: a built-in one or one you register. |
 | `multiline` | Makes a text input multi-line. |
 | `hidden` | Leaves the field out of the form. |
+| `enumLabels` | Display text for an enum's values, for example `{ smb: "SMB" }`. Values without an entry are humanized. |
+| `showIf` | Shows the field only when a sibling field matches: `{ field: "bodyType", notEquals: "none" }` or `{ field: "strategy", equals: "team" }`. With neither, the sibling just has to be set. The field must be optional (`.optional()` or `.default()`), and `field` must name a sibling; the registry rejects a required conditional field, an unknown sibling or a cycle. The editor keeps a hidden field's value, the validator neither requires nor checks it, and the engine drops it before the handler runs (judged on the resolved config). |
 | `refOnly` / `literalOnly` | Accepts only a reference, or only a literal. |
 | `oneOfRequired` | Goes on the object schema. Exactly one group of properties must be set, for example `[["duration"], ["until"]]`. |
 | `warnIfEmpty` | Goes on an array. The validator warns with this message if the list is empty. |
 
 Without a `widget`, a field gets a default control for its schema type. Strings get a text input
 that also accepts references (pills). Numbers and booleans get their own inputs, with a toggle to
-switch to a reference. Enums get a select. Arrays of objects get repeatable groups, and objects get
-fieldsets.
+switch to a reference. Enums get a select, with `enumLabels` for the option text. Untyped
+fields (`z.unknown()`) take text and pills, with a toggle to a JSON editor in which references
+also show as pills. Arrays of objects get repeatable groups, and objects get fieldsets.
 
 These widgets are built in:
 

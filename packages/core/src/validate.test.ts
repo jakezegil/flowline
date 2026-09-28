@@ -572,6 +572,63 @@ describe("validateWorkflow", () => {
     expect(issues.every((i) => i.stepId === undefined)).toBe(true);
   });
 
+  test("a sub-flow's output mapping must provide its declared outputs, with matching types", () => {
+    const sub = defineTrigger({
+      type: "x.sub",
+      name: "Sub",
+      kind: "subflow",
+      config: z.object({ output: z.array(z.unknown()).default([]) }),
+      payload: z.object({ email: z.string() }),
+    });
+    const m = extend([], [sub]);
+    const doc = docWith([step("load", "crm.loadContact", { contactId: "c1" })], {
+      type: "x.sub",
+      config: {
+        output: [
+          { name: "email", type: "string", required: true },
+          { name: "count", type: "number", required: true },
+          { name: "note", type: "string" },
+        ],
+      },
+    });
+    expect(validateWorkflow(doc, m)).toEqual([
+      issue({ code: "config.required", field: "output.email", message: '"email" is required' }),
+      issue({ code: "config.required", field: "output.count" }),
+    ]);
+    doc.output = { email: { $ref: "steps.load.email" }, count: { $ref: "steps.load.email" } };
+    expect(validateWorkflow(doc, m)).toEqual([
+      issue({ code: "ref.typeMismatch", field: "output.count", severity: "warning" }),
+    ]);
+    doc.output = { email: { $ref: "steps.load.nope" }, count: 2 };
+    expect(validateWorkflow(doc, m)).toEqual([
+      issue({ code: "ref.unresolved", field: "output.email" }),
+    ]);
+  });
+
+  test("fields hidden by showIf are neither required nor checked", () => {
+    const n = defineNode({
+      type: "x.body",
+      name: "Body",
+      input: z.object({
+        kind: z.enum(["none", "json"]).default("none"),
+        body: ui(z.string().min(1), { showIf: { field: "kind", notEquals: "none" } }).optional(),
+        // Shown while `body` is set, so hidden whenever `body` is hidden (a chain).
+        note: ui(z.string(), { showIf: { field: "body" } }).optional(),
+      }),
+      run: () => ({}),
+    });
+    const m = extend([n]);
+    const at = (config: Step["config"]) =>
+      validateWorkflow(docWith([step("b", "x.body", config)]), m);
+    expect(at({})).toEqual([]);
+    expect(at({ kind: "none", body: { $ref: "steps.ghost" }, note: 5 })).toEqual([]);
+    const fieldsOf = (issues: Issue[]) => issues.map((i) => i.field);
+    expect(fieldsOf(at({ kind: "json", body: 5 }))).toEqual(["body"]);
+    expect(fieldsOf(at({ kind: "json", body: "x", note: 5 }))).toEqual(["note"]);
+    // A reference in the sibling can't be known in advance: the field applies.
+    expect(fieldsOf(at({ kind: { $ref: "trigger.kind" }, body: 5 }))).toContain("body");
+  });
+
   test("disabled steps are validated with warnings; refs to them warn", () => {
     const doc = fixtureDoc();
     doc.steps[0]!.disabled = true;

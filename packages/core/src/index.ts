@@ -76,6 +76,7 @@ export {
   payloadSchemaFor,
   schemaAtPath,
   secretExprPath,
+  subflowOutputFields,
   subflowOutputSchema,
 } from "./json-schema";
 export {
@@ -95,6 +96,13 @@ export {
 } from "./refs";
 export { createRegistry, type Registry } from "./registry";
 export { availableScope, type ScopeEntry, type ValidationContext } from "./scope";
+export {
+  dropHiddenFields,
+  hiddenFields,
+  isFieldShown,
+  showIfOf,
+  showIfProblems,
+} from "./show-if";
 export {
   allStepIds,
   duplicateStep,
@@ -121,6 +129,7 @@ export type {
   PluginManifest,
   RefExpr,
   ResumeSpec,
+  ShowIf,
   Step,
   TplExpr,
   TriggerConfig,

@@ -612,7 +612,11 @@
           },
           "body": {
             "x-flowkit": {
-              "label": "Body"
+              "label": "Body",
+              "showIf": {
+                "field": "bodyType",
+                "notEquals": "none"
+              }
             }
           },
           "auth": {

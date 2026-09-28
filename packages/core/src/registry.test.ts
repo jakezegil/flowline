@@ -244,3 +244,104 @@ test("a node's resume declaration reaches the manifest with its body as JSON Sch
   // Nodes without one have no `resume` key.
   expect(createRegistry([crm]).manifest().nodes[0]).not.toHaveProperty("resume");
 });
+
+describe("showIf definitions", () => {
+  const build = (input: z.ZodObject) =>
+    createRegistry([
+      definePlugin({
+        id: "x",
+        name: "X",
+        nodes: [defineNode({ type: "x.n", name: "N", input, run: () => ({}) })],
+      }),
+    ]).manifest();
+
+  test("sound conditions pass, including nested objects and defaults", () => {
+    expect(() =>
+      build(
+        z.object({
+          kind: z.enum(["a", "b"]).default("a"),
+          body: ui(z.string(), { showIf: { field: "kind", equals: "b" } }).optional(),
+          opts: z.object({
+            on: z.boolean().optional(),
+            level: ui(z.number(), { showIf: { field: "on" } }).default(1),
+          }),
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  test("a required conditional field, an unknown sibling and a cycle are rejected", () => {
+    expect(() =>
+      build(z.object({ k: z.string(), body: ui(z.string(), { showIf: { field: "k" } }) })),
+    ).toThrow(/"body" has showIf but is required/);
+    expect(() =>
+      build(
+        z.object({
+          opts: z.object({ c: ui(z.string(), { showIf: { field: "typo" } }).optional() }),
+        }),
+      ),
+    ).toThrow(/Invalid showIf in input schema of "x.n": "opts.c" has showIf on "typo"/);
+    expect(() =>
+      build(
+        z.object({
+          d: ui(z.string(), { showIf: { field: "e" } }).optional(),
+          e: ui(z.string(), { showIf: { field: "d" } }).optional(),
+        }),
+      ),
+    ).toThrow(/cycle: d → e → d/);
+    expect(() =>
+      build(z.object({ d: ui(z.string(), { showIf: { field: "d" } }).optional() })),
+    ).toThrow(FlowkitDefinitionError);
+  });
+
+  test("a secret() field, or a webhook's signing secret, can't have showIf", () => {
+    const signed = z.boolean().optional();
+    expect(() =>
+      build(z.object({ signed, key: ui(secret(), { showIf: { field: "signed" } }).optional() })),
+    ).toThrow(/"key" has showIf but is or contains a secret\(\) field/);
+    // A hidden object would hide the secret inside it too.
+    expect(() =>
+      build(
+        z.object({
+          signed,
+          auth: ui(z.object({ key: secret() }), { showIf: { field: "signed" } }).optional(),
+        }),
+      ),
+    ).toThrow(FlowkitDefinitionError);
+    const hook = (secretField: z.ZodType) =>
+      createRegistry([
+        definePlugin({
+          id: "x",
+          name: "X",
+          triggers: [
+            defineTrigger({
+              type: "x.hook",
+              name: "Hook",
+              kind: "webhook",
+              config: z.object({ slug: z.string().optional(), signed, secret: secretField }),
+            }),
+          ],
+        }),
+      ]).manifest();
+    // Even a plain string: the engine checks signatures with config `secret`.
+    expect(() => hook(ui(z.string(), { showIf: { field: "signed" } }).optional())).toThrow(
+      /"secret" is the webhook signing secret and can't have showIf/,
+    );
+    expect(() => hook(z.string().optional())).not.toThrow();
+  });
+
+  test("showIf is allowed in a discriminated union's members, not in a plain union's", () => {
+    const member = (type: string) =>
+      z.object({
+        type: z.literal(type),
+        mode: z.enum(["a", "b"]).default("a"),
+        extra: ui(z.string(), { showIf: { field: "mode", equals: "b" } }).optional(),
+      });
+    expect(() =>
+      build(z.object({ auth: z.discriminatedUnion("type", [member("key"), member("basic")]) })),
+    ).not.toThrow();
+    expect(() => build(z.object({ auth: z.union([member("key"), z.string()]) }))).toThrow(
+      /"auth.extra" has showIf inside a union without a discriminator/,
+    );
+  });
+});

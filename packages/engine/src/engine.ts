@@ -342,6 +342,9 @@ function withBuiltins({ registry, builtins = true }: EngineOptions): Registry {
  * while a handler runs re-runs that step (use `ctx.idempotencyKey` towards external systems).
  * The built-in `core.*` nodes and triggers are available unless `builtins: false`.
  *
+ * @throws `FlowkitDefinitionError` when the registry's manifest can't be built (see
+ * `Registry.manifest`).
+ *
  * @example
  * ```ts
  * const engine = createEngine({ registry, storage: createMemoryStorage() });
@@ -359,6 +362,8 @@ export function createEngine(options: EngineOptions): Engine {
       options.onEvent?.(e);
     },
   };
+  // Build the manifest now, so definition errors (e.g. an invalid `showIf`) surface at startup.
+  opts.registry.manifest();
   const executor = createExecutor(opts);
   const defaultWorkerId = `worker-${globalThis.crypto.randomUUID().slice(0, 8)}`;
 
