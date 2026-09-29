@@ -24,8 +24,16 @@ function NameField() {
   const { labels } = useFlowlineAppearance();
   const name = useEditorStore((s) => s.doc.name);
   const rename = useEditorStore((s) => s.renameWorkflow);
+  const readOnly = useEditorStore((s) => s.readOnly);
+  const store = useEditorStoreApi();
+  const readOnlyNow = () => store.getState().readOnly;
   const [draft, setDraft] = useState<string | null>(null);
   const value = draft ?? name;
+  /** Commits the draft. A read-only store keeps its name (renaming would throw). */
+  const commit = () => {
+    if (draft !== null && !readOnlyNow()) rename(draft);
+    setDraft(null);
+  };
   return (
     <input
       className="fl-name"
@@ -34,17 +42,16 @@ function NameField() {
       placeholder={labels.untitledWorkflow}
       size={Math.max(8, Math.min(40, value.length + 1))}
       spellCheck={false}
-      onChange={(e) => setDraft(e.target.value)}
-      onFocus={(e) => e.currentTarget.select()}
-      onBlur={() => {
-        if (draft !== null) rename(draft);
-        setDraft(null);
+      readOnly={readOnly}
+      onChange={(e) => {
+        if (!readOnlyNow()) setDraft(e.target.value);
       }}
+      onFocus={(e) => e.currentTarget.select()}
+      onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          if (draft !== null) rename(draft);
-          setDraft(null);
+          commit();
           e.currentTarget.select();
         }
         if (e.key === "Escape") {
@@ -120,17 +127,19 @@ export function EditorHeader({
   const reason = (err: unknown) =>
     isNetworkError(err) ? labels.serverUnreachable : errorText(err);
   const { errors } = useIssues();
-  const { canUndo, canRedo, dirty, saved, published, triggerKind, fields } = useEditorStore(
-    useShallow((s) => ({
-      canUndo: s.canUndo,
-      canRedo: s.canRedo,
-      dirty: s.dirty,
-      saved: s.savedVersion,
-      published: s.publishedVersion,
-      triggerKind: s.manifest.triggers.find((t) => t.type === s.doc.trigger.type)?.kind,
-      fields: s.doc.trigger.config,
-    })),
-  );
+  const { canUndo, canRedo, readOnly, dirty, saved, published, triggerKind, fields } =
+    useEditorStore(
+      useShallow((s) => ({
+        readOnly: s.readOnly,
+        canUndo: s.canUndo,
+        canRedo: s.canRedo,
+        dirty: s.dirty,
+        saved: s.savedVersion,
+        published: s.publishedVersion,
+        triggerKind: s.manifest.triggers.find((t) => t.type === s.doc.trigger.type)?.kind,
+        fields: s.doc.trigger.config,
+      })),
+    );
   const [busy, setBusy] = useState<"save" | "publish" | "run" | null>(null);
   const [runOpen, setRunOpen] = useState(false);
   const busyRef = useRef(busy);
@@ -264,8 +273,8 @@ export function EditorHeader({
               type="button"
               className="fl-icon-btn"
               aria-label={labels.undo}
-              aria-disabled={!canUndo || undefined}
-              onClick={() => canUndo && store.getState().undo()}
+              aria-disabled={!canUndo || readOnly || undefined}
+              onClick={() => canUndo && !store.getState().readOnly && store.getState().undo()}
             >
               <Undo2 size={16} aria-hidden />
             </button>
@@ -275,8 +284,8 @@ export function EditorHeader({
               type="button"
               className="fl-icon-btn"
               aria-label={labels.redo}
-              aria-disabled={!canRedo || undefined}
-              onClick={() => canRedo && store.getState().redo()}
+              aria-disabled={!canRedo || readOnly || undefined}
+              onClick={() => canRedo && !store.getState().readOnly && store.getState().redo()}
             >
               <Redo2 size={16} aria-hidden />
             </button>

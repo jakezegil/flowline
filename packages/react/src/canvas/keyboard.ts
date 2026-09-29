@@ -64,6 +64,17 @@ export function focusedKey(target: EventTarget | null): string | undefined {
   return id?.startsWith("step:") ? id.slice(5) : undefined;
 }
 
+/**
+ * Whether an event comes from an annotation node (a sticky note, or a section's header on a
+ * read-only canvas): focusable, but not a card, so card shortcuts must not fall through to the
+ * selection from there.
+ */
+function onAnnotation(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  const id = target.closest(".react-flow__node")?.getAttribute("data-id") ?? "";
+  return id.startsWith("note:") || id.startsWith("sectionHeader:");
+}
+
 /** Selection keys (step IDs and {@link TRIGGER_KEY}) in pre-order, from the layout's node order. */
 export function treeOrder(nodes: LayoutNode[]): string[] {
   const out: string[] = [];
@@ -135,6 +146,9 @@ export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   const mod = isMac() ? e.metaKey : e.ctrlKey;
   // Plain keys on a focused control ("+", "…", Undo, tabs) belong to that control.
   if (!mod && ownsKey(e.target, e.key)) return false;
+  // On a note or section header only navigation keys apply (↑/↓ from the selection, Esc).
+  if (onAnnotation(e.target) && e.key !== "ArrowUp" && e.key !== "ArrowDown" && e.key !== "Escape")
+    return false;
   const { store, ui } = deps;
   const state = store.getState();
   const { readOnly } = state;

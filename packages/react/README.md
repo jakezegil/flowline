@@ -73,5 +73,19 @@ scope the rule to dark mode: `.fl-root[data-fl-theme="dark"] { … }`, plus
 `colorMode: "system"`. `theme.tokens` also applies in both modes, so pass mode-specific tokens
 from your own colour-mode state if you need them.
 
+Annotations have their own palette. Each of the six colours (`yellow`, `blue`, `green`, `pink`,
+`purple`, `gray`) has three tokens: `--fl-annot-<colour>-bg`, `-border` and `-text`, for example
+`--fl-annot-yellow-bg`. In `theme.tokens` they are `annotYellowBg`, `annotYellowBorder`,
+`annotYellowText` and so on (the `AnnotationToken` type). Section regions and sticky notes fill
+with `-bg`. Regions are outlined with `-border`, which is also the left accent of a coloured step
+card. A section's header text uses `-text`. The built-in values keep `-text` and `--fl-text` at
+WCAG AA contrast (4.5:1) on `-bg` in both colour modes, so keep that in mind when you override
+them. A colour outside the six draws as gray. The ring that flashes around steps an agent just
+changed is `--fl-changed`. It is derived from `--fl-accent`, so it follows your accent.
+
+```ts
+const theme = { tokens: { annotYellowBg: "#fff4c2", annotYellowText: "#5c4300" } };
+```
+
 When you do override a Flowline rule, an unlayered rule with any specificity wins. You don't need
 `!important`.

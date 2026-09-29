@@ -7,6 +7,15 @@
 
 import type { CSSProperties } from "react";
 
+/**
+ * The annotation palette's tokens: a background, border and text colour for each of the six
+ * annotation colours, e.g. `"annotYellowBg"` → `--fl-annot-yellow-bg`. Sections fill with `-bg`
+ * and outline with `-border`, sticky notes fill with `-bg`, a coloured step card's left accent
+ * is `-border`, and a section's header text is `-text`.
+ */
+export type AnnotationToken =
+  `annot${"Yellow" | "Blue" | "Green" | "Pink" | "Purple" | "Gray"}${"Bg" | "Border" | "Text"}`;
+
 /** Names of the themeable design tokens. Each maps to a `--fl-<kebab-name>` CSS variable. */
 export type ThemeToken =
   | "accent"
@@ -23,7 +32,8 @@ export type ThemeToken =
   | "success"
   | "radius"
   | "font"
-  | "fontMono";
+  | "fontMono"
+  | AnnotationToken;
 
 /** Color mode and token overrides for Flowline components. */
 export interface FlowlineTheme {
@@ -36,7 +46,10 @@ export interface FlowlineTheme {
   tokens?: Partial<Record<ThemeToken, string>>;
 }
 
-/** The CSS variable a token is stored in, e.g. `"textMuted"` → `"--fl-text-muted"`. */
+/**
+ * The CSS variable a token is stored in, e.g. `"textMuted"` → `"--fl-text-muted"` and
+ * `"annotPurpleBorder"` → `"--fl-annot-purple-border"`.
+ */
 export function tokenVar(token: ThemeToken): string {
   return `--fl-${token.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
 }

@@ -1,7 +1,8 @@
 /**
  * Dev playground: `pnpm --filter @flowlinejs/react playground`. URL params pick the state, so the
- * screenshot script can drive it: `?theme=light|dark|system&doc=nested|empty&mode=edit|readonly|run`
- * for the bare canvas, `?page=editor&wf=deal-won|onboarding|inbound-lead` for the editor, and
+ * screenshot script can drive it: `?theme=light|dark|system&doc=nested|empty|annotations&mode=edit|readonly|run`
+ * for the bare canvas (`?fixture=annotations` is the same as `doc=annotations`: sections, notes and
+ * coloured cards), `?page=editor&wf=deal-won|onboarding|inbound-lead` for the editor, and
  * `?page=run&run=running|waiting|failed|loop` for the run viewer beside the run list, and
  * `?page=picker` (or `/picker`) for the reference input, data picker and code editor.
  */
@@ -18,18 +19,18 @@ import {
   WorkflowEditor,
 } from "../src/index";
 import "../src/styles.css";
-import { emptyDoc, manifest, nestedDoc } from "./fixtures";
+import { annotatedDoc, emptyDoc, manifest, nestedDoc } from "./fixtures";
 import { mockClient, runIdOf } from "./mock-client";
 import { PickerPage } from "./picker-page";
 
 type Theme = "light" | "dark" | "system";
-type DocName = "nested" | "empty";
+type DocName = "nested" | "empty" | "annotations";
 type Mode = "edit" | "readonly" | "run";
 
 const params = new URLSearchParams(location.search);
 const initial = {
   theme: (params.get("theme") as Theme | null) ?? "system",
-  doc: (params.get("doc") as DocName | null) ?? "nested",
+  doc: ((params.get("fixture") ?? params.get("doc")) as DocName | null) ?? "nested",
   mode: (params.get("mode") as Mode | null) ?? "edit",
 };
 
@@ -83,7 +84,8 @@ function CanvasPage() {
   const [mode, setMode] = useState<Mode>(initial.mode);
   const [clicked, setClicked] = useState<string | null>(null);
   const store = useMemo(() => {
-    const doc = docName === "nested" ? nestedDoc() : emptyDoc();
+    const doc =
+      docName === "nested" ? nestedDoc() : docName === "annotations" ? annotatedDoc() : emptyDoc();
     const s = createEditorStore({ doc, manifest });
     if (docName === "nested") {
       s.getState().setSample("loadContact", { id: "c_1", name: "Ada", email: "ada@example.com" });
@@ -112,7 +114,7 @@ function CanvasPage() {
           <Select
             label="Workflow"
             value={docName}
-            options={["nested", "empty"]}
+            options={["nested", "empty", "annotations"]}
             onChange={(v) => {
               setDocName(v);
               setParam("doc", v);

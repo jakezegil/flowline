@@ -1,6 +1,7 @@
 import {
   type AnnotationColor,
   branchesFor,
+  branchList,
   findStep,
   isAnnotationColor,
   type Manifest,
@@ -239,7 +240,7 @@ export function layoutTree(
     for (const b of declared) {
       if (seen.has(b.id)) continue;
       seen.add(b.id);
-      cols.push({ id: b.id, label: b.label, steps: step.branches?.[b.id] ?? [] });
+      cols.push({ id: b.id, label: b.label, steps: branchList(step, b.id) ?? [] });
     }
     for (const [key, list] of Object.entries(step.branches ?? {})) {
       if (seen.has(key)) continue;
@@ -516,12 +517,13 @@ function sectionMarks(doc: WorkflowDoc): Map<Step[], ListMarks> {
   doc.sections.forEach((section, order) => {
     const run = sectionRun(doc, section);
     if (!run) return;
+    const parent = run.parentId === null ? undefined : findStep(doc, run.parentId)?.step;
     const list =
       run.parentId === null
         ? doc.steps
-        : run.branch === undefined
-          ? undefined
-          : findStep(doc, run.parentId)?.step.branches?.[run.branch];
+        : parent && run.branch !== undefined
+          ? branchList(parent, run.branch)
+          : undefined;
     if (!list || list[run.start]?.id !== section.first || list[run.end]?.id !== section.last) {
       return;
     }

@@ -36,7 +36,9 @@ import {
   useLabels,
 } from "./canvas-context";
 import { StepContextMenu, StepKebabMenu } from "./context-menu";
+import { useFlash } from "./flash";
 import { NodeHandles } from "./handles";
+import { drawColor } from "./section-node";
 import { renderSummary, type SummaryPart, summaryStepRefs, summaryText } from "./summary";
 
 /** Data of a step node. */
@@ -310,6 +312,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
   const dimmed = useCanvasUi((s) => s.overlay?.dimmedSteps?.has(stepId) ?? false);
   const unreachable = useEditorStore((s) => unreachableIds(s.doc, s.manifest).has(stepId));
   const actions = useMemo(() => stepActions(store, ui, root, stepId), [store, ui, root, stepId]);
+  const flash = useFlash(store, "step", stepId);
 
   const step = info?.step;
   const manifest = info?.manifest;
@@ -358,6 +361,9 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
       data-run={run?.status}
       data-dimmed={dimmed || undefined}
       data-unreachable={(unreachable && !inRunMode) || undefined}
+      data-color={step.color === undefined ? undefined : drawColor(step.color)}
+      data-flash={flash.flashing || undefined}
+      onAnimationEnd={flash.onAnimationEnd}
     >
       <div className="fl-card__icon" data-tone={control ? "control" : "action"} aria-hidden>
         <Icon size={18} />

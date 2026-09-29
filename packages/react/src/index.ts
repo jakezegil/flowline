@@ -82,5 +82,5 @@ export {
   type TestState,
   TRIGGER_KEY,
 } from "./store/editor-store";
-export type { FlowlineTheme, ThemeToken } from "./theme";
+export type { AnnotationToken, FlowlineTheme, ThemeToken } from "./theme";
 export type { NotFoundAction } from "./ui/not-found";

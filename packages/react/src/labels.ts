@@ -5,7 +5,7 @@
  * @module
  */
 
-import type { RunEventType, RunOrigin } from "@flowlinejs/core";
+import type { AnnotationColor, RunEventType, RunOrigin } from "@flowlinejs/core";
 import type { RunStepStatus } from "./canvas/canvas-context";
 
 /** The canvas's visible and accessible text. Functions build text that includes values. */
@@ -60,6 +60,20 @@ export interface FlowlineLabels {
   disabled: string;
   /** Accessible name of a disabled step's card. */
   disabledNode(name: string): string;
+
+  // Annotations: sections, sticky notes and step colours
+  /** The six annotation colours' names. */
+  colorNames: Record<AnnotationColor, string>;
+  /** A section's shown title when it has none. */
+  untitledSection: string;
+  /** Accessible name of a section's coloured region: "Section: Onboarding". */
+  sectionRegion(title: string): string;
+  /** Accessible name of a section's header chip: its title, then its note when it has one. */
+  sectionHeader(title: string, note?: string): string;
+  /** Accessible name of a sticky note: "Note: …". */
+  noteLabel(text: string): string;
+  /** Accessible name of a step card with a note: "<name>. Note: <first 120 chars>". */
+  stepWithNote(name: string, note: string): string;
   /** Accessible name of the inline rename field. */
   stepName: string;
   /** Invalid badge: the count and messages of a step's issues. */
@@ -633,6 +647,23 @@ export const defaultLabels: FlowlineLabels = {
   neverRuns: "Never runs: an earlier step ends the run",
   disabled: "Disabled",
   disabledNode: (name) => `${name} (disabled)`,
+
+  colorNames: {
+    yellow: "Yellow",
+    blue: "Blue",
+    green: "Green",
+    pink: "Pink",
+    purple: "Purple",
+    gray: "Gray",
+  },
+  untitledSection: "Untitled section",
+  sectionRegion: (title) => `Section: ${title.trim() || "Untitled section"}`,
+  sectionHeader: (title, note) => {
+    const name = title.trim() || "Untitled section";
+    return note ? `${name}. Note: ${note.slice(0, 120)}` : name;
+  },
+  noteLabel: (text) => `Note: ${text}`,
+  stepWithNote: (name, note) => `${name}. Note: ${note.slice(0, 120)}`,
   stepName: "Step name",
   issues: (messages) =>
     `${messages.length} ${messages.length === 1 ? "issue" : "issues"}: ${messages.join("; ")}`,
@@ -1104,6 +1135,7 @@ export function resolveLabels(overrides: Partial<FlowlineLabels> | undefined): F
     ...defaultLabels,
     ...overrides,
     runStatus: { ...defaultLabels.runStatus, ...overrides.runStatus },
+    colorNames: { ...defaultLabels.colorNames, ...overrides.colorNames },
     runState: { ...defaultLabels.runState, ...overrides.runState },
     eventType: { ...defaultLabels.eventType, ...overrides.eventType },
     rulesCombinator: { ...defaultLabels.rulesCombinator, ...overrides.rulesCombinator },
