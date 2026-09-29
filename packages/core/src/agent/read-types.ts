@@ -99,7 +99,7 @@ export interface Omission {
    *   they didn't fit `focus`'s budget
    * - `schema`: (`focus`) the compact input schema, when it didn't fit the budget
    *
-   * In `getSteps`/`findSteps`, `steps` is the steps that didn't fit the budget or the page.
+   * In `findSteps`, `steps` is the matches past the page.
    */
   what: "config" | "notes" | "branch" | "steps" | "sections" | "refs" | "schema";
   /**
@@ -217,16 +217,21 @@ export interface ReadResults {
   /** One step, with config, compact schema and refs. */
   focus: StepDetail;
   /**
-   * Steps by ID (unknown IDs in `missing`) or by selector. `next` pages on when more steps
-   * match; `full` returns every step of this page that had a string cut, uncut.
+   * Steps by ID (unknown IDs in `missing`) or by selector. `full` returns every step of this
+   * page that had a string cut, uncut.
    */
   getSteps: {
     steps: StepDetail[];
     missing: string[];
+    /**
+     * The call for the next page, when steps are left (past the budget, or past `limit`):
+     * `{ …args, after: <last> }` for `where`; `{ …args, ids: <rest> }` for `ids`, where `rest`
+     * is at most 400 chars of the IDs not returned.
+     */
     next?: FollowUp;
+    /** With `next`: how many steps are left (for `ids`, possibly more than `next` holds). */
+    remaining?: number;
     full?: FollowUp;
-    /** Requested steps that didn't fit the budget (`steps`), with the `getSteps` call for them. */
-    omitted?: Omission[];
   };
   /** How many steps a selector matches, with each one's outline line. */
   findSteps: {

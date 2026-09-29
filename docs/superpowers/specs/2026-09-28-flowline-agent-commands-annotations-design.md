@@ -350,7 +350,11 @@ The plan (`docs/superpowers/plans/2026-09-28-flowline-agent-commands-annotations
 - **Duplicate names** follow the editor's `(copy)`, `(copy 2)`… sequence, through core's `copyName`.
 - **Step-read budget.** `getSteps` and `focus` take an optional `budget`, in characters of the JSON result, with a default of 8000.
   - `getSteps` returns the leading steps that fit, and always at least one, even when that one is over budget.
-  - In the `ids` form, the rest come back through `omitted: [{ what: "steps", count, fetch: getSteps({ ...sameArgs, ids: rest }) }]`. In the `where` form, the rest come back through `next`, whose `after` is the last step returned.
+  - Both forms page the same way. When steps are left (past the budget or past `limit`), the result has `next`, the call for the next page with the same other arguments, and `remaining`, how many steps are left.
+    - `where` form: `next` is `{ ...args, after: <last step returned> }`.
+    - `ids` form: `next` is `{ ...args, ids: rest }`, where `rest` is the leading IDs not returned that fit in 400 chars of JSON and in 450 chars for the whole `next`. It always holds at least one ID. When `remaining` is more than `next` holds, the caller asks again for the rest of its list, since only the caller holds the whole list.
+  - The budget measures the page without `next`, so a page is at most `budget` plus a `next` of at most 450 chars. A 12-deep, 500-step doc with 4000-char notes pages through all its steps (`include: ["config"]`) in 53 calls in the `ids` form and 48 in the `where` form.
+  - Reading every note whole (`full: true`) is bounded below by the notes' total size divided by `budget`. The same doc's 2M chars of notes take 488 calls at 8000.
   - Each step shows at most 30 refs: the trigger and the 29 nearest. The step then carries `omitted: [{ what: "refs", stepId, count, fetch: availableRefs({ stepId }) }]`. `availableRefs` itself is not capped.
   - When a `focus` result is over budget, it first drops all refs (a `refs` omission) and then the schema (a `schema` omission, fetched with `describeNodeTypes({ types: [type] })`).
   - `findSteps` takes `after` and `limit` (default 100, at most 500). Further matches come back through a `steps` omission whose fetch is `findSteps({ ...sameArgs, after: last })`.

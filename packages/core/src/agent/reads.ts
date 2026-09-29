@@ -58,6 +58,30 @@ const FIND_MAX = 500;
 const BUDGET_DEFAULT = 8000;
 /** Most refs a step read lists per step. */
 const REFS_MAX = 30;
+/** Most characters of IDs (as a JSON array) a `getSteps` `next` carries. */
+const NEXT_IDS_MAX = 400;
+/**
+ * Most characters of a `getSteps` `next` in all, when it carries IDs. `next` is outside the page
+ * budget, so this bounds it instead.
+ */
+const NEXT_MAX = 450;
+
+/**
+ * The ids-form `next`: `args` with `ids` set to the leading `rest` that fit both
+ * {@link NEXT_IDS_MAX} and {@link NEXT_MAX} (at least one).
+ */
+function idsNext(args: ReadArgs["getSteps"], rest: string[]): FollowUp {
+  const make = (ids: string[]): FollowUp => ({ tool: "getSteps", args: { ...args, ids } });
+  const room = Math.min(NEXT_IDS_MAX, NEXT_MAX - (jsonSize(make([])) - 2));
+  let size = 2;
+  let n = 0;
+  for (const id of rest) {
+    size += JSON.stringify(id).length + (n > 0 ? 1 : 0);
+    if (n > 0 && size > room) break;
+    n++;
+  }
+  return make(rest.slice(0, n));
+}
 /** Notes are shown to this length in `findSteps` lines, as in the outline. */
 const LINE_NOTE_MAX = 120;
 
@@ -397,9 +421,12 @@ function startAfter(doc: WorkflowDoc, ids: string[], after: string, read: string
  * cut paths in `cut`, and `full` in the result is the call that returns every cut step uncut.
  *
  * `budget` (characters of the JSON result, default 8000): only the leading steps that fit are
- * returned, and always at least one. The rest are left out: for `ids`, as a `steps` omission
- * whose follow-up is `getSteps({ ids: <rest>, … })` with the same other arguments; for `where`,
- * `next` resumes after the last step returned.
+ * returned, and always at least one. Both forms page the same way: `remaining` is how many
+ * steps are left, and `next` is the call for the next page, with the same other arguments. For
+ * `where`, it resumes after the last step returned; for `ids`, it carries the IDs not returned,
+ * or when those take over 400 chars, the leading ones that fit in 400 (`remaining` then counts
+ * more than `next` holds, and the caller asks again for the rest). `next` is outside `budget`,
+ * so a page is at most `budget` plus that bounded cursor.
  *
  * Throws a `FlowlineTreeError` when `ids` isn't an array, neither `ids` nor `where` is given, the
  * selector is invalid (see `matchSteps`) or `after` isn't a step.
@@ -422,6 +449,8 @@ export function getSteps(
   const missing: string[] = [];
   /** The `where` form's page is followed by more matches. */
   let more = false;
+  /** The `where` form: how many steps match after `after`. */
+  let matched = 0;
 
   if (byIds) {
     if (!Array.isArray(args.ids)) {
@@ -435,6 +464,7 @@ export function getSteps(
     const size = pageSize(args.limit, PAGE_DEFAULT, PAGE_MAX);
     wanted.push(...ids.slice(0, size));
     more = ids.length > size;
+    matched = ids.length;
   }
 
   const ctx = readContext(doc, manifest, opts, include.has("refs") ? wanted : []);
@@ -455,40 +485,41 @@ export function getSteps(
     used += jsonSize(d) + 1;
   }
 
+  /** Page `k` steps: the page itself (measured against the budget) and its `next` cursor. */
   const assemble = (k: number): ReadResults["getSteps"] => {
     const steps = details.slice(0, k);
-    const rest = found.slice(k).map((f) => f.step.id);
-    const last = steps[steps.length - 1]?.id;
-    let next: FollowUp | undefined;
-    const omitted: Omission[] = [];
-    if (!byIds && last !== undefined && (more || rest.length > 0)) {
-      next = { tool: "getSteps", args: { ...args, after: last } };
-    } else if (byIds && rest.length > 0) {
-      omitted.push({
-        what: "steps",
-        count: rest.length,
-        fetch: { tool: "getSteps", args: { ...args, ids: rest } },
-      });
-    }
     const cutIds = [...new Set(steps.filter((s) => s.cut).map((s) => s.id))];
     return {
       steps,
       missing,
-      ...(next ? { next } : {}),
       ...(cutIds.length > 0
         ? { full: { tool: "getSteps", args: { ids: cutIds, include: includeList, full: true } } }
         : {}),
-      ...(omitted.length > 0 ? { omitted } : {}),
     };
   };
 
   let k = details.length;
-  let result = assemble(k);
-  while (k > 1 && jsonSize(result) > budget) {
+  let page = assemble(k);
+  while (k > 1 && jsonSize(page) > budget) {
     k--;
-    result = assemble(k);
+    page = assemble(k);
   }
-  return result;
+  // The cursor, outside the budget: the where form resumes after the last step returned; the ids
+  // form carries the leading IDs not returned that fit NEXT_IDS_MAX and NEXT_MAX.
+  const rest = found.slice(k).map((f) => f.step.id);
+  const last = page.steps[page.steps.length - 1]?.id;
+  if (!byIds && last !== undefined && (more || rest.length > 0)) {
+    const remaining = rest.length + (more ? matched - wanted.length : 0);
+    return { ...page, next: { tool: "getSteps", args: { ...args, after: last } }, remaining };
+  }
+  if (byIds && rest.length > 0) {
+    return {
+      ...page,
+      next: idsNext(args, rest),
+      remaining: rest.length,
+    };
+  }
+  return page;
 }
 
 /** Per-step issue counts, as the outline shows them (section issues left out). */

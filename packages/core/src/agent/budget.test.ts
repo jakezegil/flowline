@@ -6,6 +6,7 @@ import { resultSize } from "./format";
 import { outline, overview } from "./outline";
 import type { FollowUp, Omission, OutlineResult, ReadResults, StepDetail } from "./read-types";
 import { reads } from "./reads";
+import { matchSteps } from "./selectors";
 
 const m = crmLikeManifest();
 
@@ -299,10 +300,7 @@ function run(doc: WorkflowDoc, f: FollowUp): unknown {
   return reads[f.tool](doc, m, f.args as never);
 }
 
-/**
- * Runs a `getSteps` follow-up and every page after it (its `next`, or the `omitted` steps left
- * out by the size budget); the details of each page, in order.
- */
+/** Runs a `getSteps` follow-up and every `next` page after it; the details of each page, in order. */
 function pages(doc: WorkflowDoc, f: FollowUp): StepDetail[] {
   const out: StepDetail[] = [];
   let cur: FollowUp | undefined = f;
@@ -310,9 +308,9 @@ function pages(doc: WorkflowDoc, f: FollowUp): StepDetail[] {
     expect(cur.tool).toBe("getSteps");
     const r = run(doc, cur) as ReadResults["getSteps"];
     expect(r.missing).toEqual([]);
-    expect(JSON.stringify(r).length).toBeLessThanOrEqual(8000);
+    expect(JSON.stringify(r).length).toBeLessThanOrEqual(8000 + 450);
     out.push(...r.steps);
-    cur = r.next ?? r.omitted?.find((o) => o.what === "steps")?.fetch;
+    cur = r.next;
   }
   return out;
 }
@@ -334,21 +332,52 @@ describe("budget follow-ups return the omitted content", () => {
       const ids = allIds(doc);
       const seen = new Set<string>();
       const details: StepDetail[] = [];
+      /** What the step pages returned so far: `<id> config` and `<id> note`, uncut. */
+      const got = new Set<string>();
+      const byId = stepsById(doc);
+      const order = new Map([...ids].map((id, i) => [id, i]));
+      const covered = (f: FollowUp): boolean => {
+        if (f.tool !== "getSteps") return false;
+        const a = f.args;
+        let target: string[];
+        if ("ids" in a) target = a.ids;
+        else {
+          const from = a.after === undefined ? -1 : (order.get(a.after) ?? -1);
+          target = matchSteps(doc, m, a.where).filter((id) => (order.get(id) ?? -1) > from);
+        }
+        const parts: ("config" | "note")[] = [];
+        if ((a.include ?? ["config"]).includes("config")) parts.push("config");
+        if (a.full === true) parts.push("note");
+        return target.every(
+          (id) =>
+            seen.has(id) &&
+            parts.every((p) => byId.get(id)?.[p] === undefined || got.has(`${id} ${p}`)),
+        );
+      };
       const done = new Set<string>();
       const queue: FollowUp[] = [];
-      const push = (f: FollowUp | undefined) => {
+      /** Page-level `full` follow-ups, run once the queue is empty (most are covered by then). */
+      const later: FollowUp[] = [];
+      const push = (f: FollowUp | undefined, to: "back" | "front" | "later" = "back") => {
         if (!f) return;
         const key = JSON.stringify(f);
         if (done.has(key)) return;
         done.add(key);
-        queue.push(f);
+        if (to === "front") queue.unshift(f);
+        else if (to === "later") later.push(f);
+        else queue.push(f);
       };
       const first = overview(doc, m, {});
       expect(resultSize(first)).toBeLessThanOrEqual(4000);
       for (const o of first.omitted) push(o.fetch);
       expect(queue.length).toBeGreaterThan(0);
-      while (queue.length > 0) {
+      while (queue.length > 0 || later.length > 0) {
+        if (queue.length === 0) queue.push(...later.splice(0));
         const f = queue.shift() as FollowUp;
+        // Every follow-up is executed unless every step it would return came back already, with
+        // the parts it asks for (a nested subtree's chain re-paging what an outer chain
+        // returned). That keeps the test fast; it is decided on what the call would return.
+        if (covered(f)) continue;
         const result = run(doc, f);
         if (f.tool === "outline") {
           const r = result as OutlineResult;
@@ -358,13 +387,20 @@ describe("budget follow-ups return the omitted content", () => {
         } else if (f.tool === "getSteps") {
           const r = result as ReadResults["getSteps"];
           expect(r.missing).toEqual([]);
+          // At most the budget plus the capped cursor, unless one step alone is over.
+          if (r.steps.length > 1) expect(JSON.stringify(r).length).toBeLessThanOrEqual(8000 + 450);
           for (const s of r.steps) {
             seen.add(s.id);
             details.push(s);
+            for (const part of ["config", "note"] as const) {
+              if (s[part] !== undefined && !s.cut?.some((c) => c.startsWith(part))) {
+                got.add(`${s.id} ${part}`);
+              }
+            }
           }
-          push(r.next);
-          push(r.full);
-          for (const o of r.omitted ?? []) push(o.fetch);
+          // A chain is paged to its end before the next follow-up starts.
+          push(r.next, "front");
+          push(r.full, "later");
         }
       }
       expect(seen).toEqual(ids);
@@ -376,8 +412,6 @@ describe("budget follow-ups return the omitted content", () => {
       }
       expect(details.some((d) => d.config?.dealId === "y".repeat(20_000))).toBe(true);
     },
-    // Some hundreds of 1-step pages: 4000-char notes leave room for one step per 8000 budget.
-    30_000,
   );
 
   it("config, where form: pages return every step's config", () => {

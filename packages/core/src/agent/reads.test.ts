@@ -3,8 +3,15 @@ import { FlowlineTreeError, walkSteps } from "../tree";
 import type { Manifest, WorkflowDoc } from "../types";
 import { UI_META_KEY } from "../ui";
 import { validateWorkflow } from "../validate";
-import { flatDoc, richManifest, specExampleDoc } from "./fixtures";
-import type { FollowUp, ReadFn, ReadResults, ReadToolName, StepDetail } from "./read-types";
+import { deepDoc, flatDoc, richManifest, specExampleDoc } from "./fixtures";
+import type {
+  FollowUp,
+  ReadArgs,
+  ReadFn,
+  ReadResults,
+  ReadToolName,
+  StepDetail,
+} from "./read-types";
 import {
   availableRefs,
   describeNodeTypes,
@@ -188,13 +195,11 @@ describe("getSteps", () => {
     // Within the default budget, the 20k body doesn't fit next to the first step.
     const tight = getSteps(d, m, f.args);
     expect(tight.steps.map((x) => x.id)).toEqual(["deal"]);
-    expect(tight.omitted).toEqual([
-      {
-        what: "steps",
-        count: 1,
-        fetch: { tool: "getSteps", args: { ids: ["mail"], include: ["config"], full: true } },
-      },
-    ]);
+    expect(tight.next).toEqual({
+      tool: "getSteps",
+      args: { ids: ["mail"], include: ["config"], full: true },
+    });
+    expect(tight.remaining).toBe(1);
   });
 
   it("cuts nested config strings and names each path", () => {
@@ -592,6 +597,34 @@ describe("edge cases", () => {
   });
 });
 
+/**
+ * Pages a `getSteps` call to the end, as a caller would: follows `next`, and when `next` holds
+ * fewer IDs than `remaining`, asks again for the IDs not yet returned. Checks each page's size.
+ */
+function drain(
+  d: WorkflowDoc,
+  args: ReadArgs["getSteps"],
+): { details: StepDetail[]; calls: number } {
+  const details: StepDetail[] = [];
+  const wantIds = "ids" in args ? args.ids : undefined;
+  let cur: ReadArgs["getSteps"] | undefined = args;
+  let calls = 0;
+  while (cur) {
+    const r = getSteps(d, m, cur);
+    calls++;
+    const { next, remaining, ...page } = r;
+    expect(JSON.stringify(page).length).toBeLessThanOrEqual(page.steps.length > 1 ? 8000 : 1e6);
+    expect(JSON.stringify(next ?? {}).length).toBeLessThanOrEqual(450);
+    expect(r.steps.length).toBeGreaterThan(0);
+    details.push(...r.steps);
+    cur = (next as Extract<FollowUp, { tool: "getSteps" }> | undefined)?.args;
+    if (!cur && wantIds && details.length < wantIds.length) {
+      cur = { ...args, ids: wantIds.slice(details.length) };
+    }
+  }
+  return { details, calls };
+}
+
 /** Every step ID of a doc, in pre-order. */
 function preorderIds(d: WorkflowDoc): string[] {
   const ids: string[] = [];
@@ -600,37 +633,26 @@ function preorderIds(d: WorkflowDoc): string[] {
 }
 
 describe("step read budgets", () => {
-  it("getSteps with 200 ids and refs stays within budget; its omissions recover everything", () => {
+  it("getSteps with 200 ids and refs stays within budget; paging recovers everything", () => {
     const d = flatDoc(500);
     const ids = preorderIds(d).slice(300);
     const include: ("config" | "refs")[] = ["config", "refs"];
-    const got = new Map<string, StepDetail>();
-    const refsFollowUps = new Map<string, FollowUp>();
-    let f: FollowUp | undefined = { tool: "getSteps", args: { ids, include } };
-    let calls = 0;
-    while (f) {
-      const r = reads[f.tool](d, m, f.args as never) as ReadResults["getSteps"];
-      calls++;
-      expect(JSON.stringify(r).length).toBeLessThanOrEqual(8000);
-      expect(r.steps.length).toBeGreaterThan(0);
-      for (const s of r.steps) {
-        got.set(s.id, s);
-        expect(s.refs?.length).toBeLessThanOrEqual(30);
-        for (const o of s.omitted ?? []) {
-          expect(o).toMatchObject({ what: "refs", stepId: s.id });
-          refsFollowUps.set(s.id, o.fetch);
-        }
-      }
-      f = r.omitted?.find((o) => o.what === "steps")?.fetch;
-    }
+    const { details, calls } = drain(d, { ids, include });
     expect(calls).toBeGreaterThan(1);
-    expect([...got.keys()]).toEqual(ids);
-    for (const id of ids) {
-      const s = got.get(id) as StepDetail;
-      expect(s.config).toEqual(d.steps.find((x) => x.id === id)?.config);
-      const all = availableRefs(d, m, { stepId: id }).refs;
-      const follow = refsFollowUps.get(id) as FollowUp;
-      expect(follow).toEqual({ tool: "availableRefs", args: { stepId: id } });
+    expect(details.map((s) => s.id)).toEqual(ids);
+    const refsFollowUps = new Map<string, FollowUp>();
+    for (const s of details) {
+      expect(s.refs?.length).toBeLessThanOrEqual(30);
+      for (const o of s.omitted ?? []) {
+        expect(o).toMatchObject({ what: "refs", stepId: s.id });
+        refsFollowUps.set(s.id, o.fetch);
+      }
+    }
+    for (const s of details) {
+      expect(s.config).toEqual(d.steps.find((x) => x.id === s.id)?.config);
+      const all = availableRefs(d, m, { stepId: s.id }).refs;
+      const follow = refsFollowUps.get(s.id) as FollowUp;
+      expect(follow).toEqual({ tool: "availableRefs", args: { stepId: s.id } });
       const recovered = (
         reads[follow.tool](d, m, follow.args as never) as ReadResults["availableRefs"]
       ).refs;
@@ -641,14 +663,45 @@ describe("step read budgets", () => {
     }
   });
 
+  it("the ids form's next carries at most 400 chars of IDs, and is outside the budget", () => {
+    const d = flatDoc(500);
+    const ids = preorderIds(d);
+    const r = getSteps(d, m, { ids, include: ["config"] });
+    const { next, remaining, ...page } = r;
+    expect(JSON.stringify(page).length).toBeLessThanOrEqual(8000);
+    expect(JSON.stringify(r).length).toBeLessThanOrEqual(8000 + 450);
+    expect(JSON.stringify(next).length).toBeLessThanOrEqual(450);
+    const nextIds = (next as Extract<FollowUp, { tool: "getSteps" }>).args as { ids: string[] };
+    expect(JSON.stringify(nextIds.ids).length).toBeLessThanOrEqual(400);
+    // The IDs right after this page, in order; `remaining` counts all of the rest.
+    expect(nextIds.ids).toEqual(ids.slice(r.steps.length, r.steps.length + nextIds.ids.length));
+    expect(nextIds.ids.length).toBeGreaterThan(20);
+    expect(remaining).toBe(500 - r.steps.length);
+    expect(next).toEqual({ tool: "getSteps", args: { ids: nextIds.ids, include: ["config"] } });
+    // A short rest is carried whole.
+    const short = getSteps(d, m, { ids: ids.slice(0, 20), include: ["config"], budget: 1000 });
+    const shortNext = short.next as Extract<FollowUp, { tool: "getSteps" }>;
+    expect((shortNext.args as { ids: string[] }).ids).toEqual(ids.slice(short.steps.length, 20));
+    expect(short.remaining).toBe(20 - short.steps.length);
+  });
+
+  it("a 12-deep, 500-step heavy doc pages in a few dozen calls, in either form", () => {
+    const d = deepDoc(12, 500, { noteChars: 4000, configChars: 20_000 });
+    const ids = preorderIds(d);
+    const byIds = drain(d, { ids, include: ["config"] });
+    expect(byIds.details.map((s) => s.id)).toEqual(ids);
+    expect(byIds.calls).toBeLessThanOrEqual(60);
+    const byWhere = drain(d, { where: {}, include: ["config"] });
+    expect(byWhere.details.map((s) => s.id)).toEqual(ids);
+    expect(byWhere.calls).toBeLessThanOrEqual(60);
+  });
+
   it("at least one step comes back, even over budget", () => {
     const r = getSteps(doc(), m, { ids: ["mail", "deal"], full: true, budget: 100 });
     expect(r.steps.map((s) => s.id)).toEqual(["mail"]);
     expect(r.steps[0]?.config?.body).toBe(BODY);
-    expect(r.omitted?.[0]?.fetch).toEqual({
-      tool: "getSteps",
-      args: { ids: ["deal"], full: true, budget: 100 },
-    });
+    expect(r.next).toEqual({ tool: "getSteps", args: { ids: ["deal"], full: true, budget: 100 } });
+    expect(r.remaining).toBe(1);
   });
 
   it("the where form resumes with next after the last step that fit", () => {
@@ -660,7 +713,7 @@ describe("step read budgets", () => {
       tool: "getSteps",
       args: { where: {}, include: [], full: true, after: last },
     });
-    expect(r.omitted).toBeUndefined();
+    expect(r.remaining).toBe(60 - r.steps.length);
   });
 
   it("focus leaves out refs, then the schema, when over budget", () => {
