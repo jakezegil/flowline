@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vi
 import { httpError, mockClient, setupDom } from "../../test/dom";
 import { docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
 import { FlowlineProvider } from "../provider";
+import type { EditorStore } from "../store/editor-store";
 import { WorkflowEditor } from "./workflow-editor";
 
 beforeAll(setupDom);
@@ -393,5 +394,51 @@ describe("WorkflowEditor", () => {
     const dirty = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(dirty);
     expect(dirty.defaultPrevented).toBe(true);
+  });
+});
+
+describe("onStoreReady", () => {
+  test("fires on first load, after retry() and after a workflowId change; cleanup runs first", async () => {
+    let fail = true;
+    const docs: Record<string, WorkflowDoc> = {
+      welcome: fixtureDoc(),
+      other: docWith([step("load", "crm.loadContact", {})], "other"),
+    };
+    const client = mockClient({
+      getManifest: async () => manifest,
+      listSubflows: async () => [],
+      getWorkflow: async (id: string) => {
+        if (id === "other" && fail) {
+          fail = false;
+          throw new Error("boom");
+        }
+        return detail(docs[id] as WorkflowDoc);
+      },
+    });
+    const log: string[] = [];
+    const stores: EditorStore[] = [];
+    const onStoreReady = (store: EditorStore) => {
+      stores.push(store);
+      const n = stores.length;
+      log.push(`ready ${n} ${store.getState().doc.id}`);
+      return () => log.push(`cleanup ${n}`);
+    };
+    const ui = (workflowId: string) => (
+      <FlowlineProvider client={client}>
+        <div style={{ height: 800 }}>
+          <WorkflowEditor workflowId={workflowId} onStoreReady={onStoreReady} />
+        </div>
+      </FlowlineProvider>
+    );
+    const { rerender, unmount } = render(ui("welcome"));
+    await waitFor(() => expect(log).toEqual(["ready 1 welcome"]));
+    rerender(ui("other"));
+    await screen.findByRole("button", { name: "Try again" });
+    expect(log).toEqual(["ready 1 welcome", "cleanup 1"]);
+    fireEvent.click(button("Try again"));
+    await waitFor(() => expect(log).toEqual(["ready 1 welcome", "cleanup 1", "ready 2 other"]));
+    unmount();
+    expect(log.at(-1)).toBe("cleanup 2");
+    expect(stores[0]).not.toBe(stores[1]);
   });
 });

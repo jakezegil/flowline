@@ -7,6 +7,7 @@
 
 import {
   branchesFor,
+  branchList,
   findStep,
   type Manifest,
   type NodeManifest,
@@ -107,7 +108,7 @@ export function insertLabel(
   }
   const parent = steps.get(loc.parentId);
   if (!parent) return labels.addStepHere;
-  const before = parent.branches?.[loc.branch ?? ""]?.[loc.index - 1];
+  const before = branchList(parent, loc.branch ?? "")?.[loc.index - 1];
   if (before) return labels.addStepAfter(nameOf(before.id));
   const m = nodes.get(parent.type);
   const branch =
@@ -146,7 +147,7 @@ function neighbourOf(store: EditorStore, stepId: string): string {
   if (!found) return TRIGGER_KEY;
   const { parentId, branch, index } = found.location;
   const owner = found.ancestors[found.ancestors.length - 1]?.step;
-  const list = parentId === null ? doc.steps : (owner?.branches?.[branch ?? ""] ?? []);
+  const list = parentId === null ? doc.steps : ((owner && branchList(owner, branch ?? "")) ?? []);
   return list[index + 1]?.id ?? list[index - 1]?.id ?? parentId ?? TRIGGER_KEY;
 }
 

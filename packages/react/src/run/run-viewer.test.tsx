@@ -14,8 +14,14 @@ import {
   waitingRun,
 } from "../../test/run-fixtures";
 import { FlowlineProvider } from "../provider";
+import { createEditorStore, type EditorStore } from "../store/editor-store";
 import { RunList } from "./run-list";
 import { RunViewer } from "./run-viewer";
+
+vi.mock("../store/editor-store", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../store/editor-store")>();
+  return { ...mod, createEditorStore: vi.fn(mod.createEditorStore) };
+});
 
 beforeAll(setupDom);
 beforeEach(() => localStorage.clear());
@@ -65,6 +71,17 @@ const card = (id: string) =>
   document.querySelector<HTMLElement>(`.react-flow__node[data-id="step:${id}"] .fl-card`);
 
 describe("RunViewer", () => {
+  test("its store is read-only", async () => {
+    setup(failedLoopRun());
+    await waitFor(() => expect(card("load")?.dataset.run).toBe("done"));
+    const created = vi.mocked(createEditorStore).mock.results.at(-1)?.value as EditorStore;
+    expect(created.getState().readOnly).toBe(true);
+    expect(created.getState().apply([{ op: "removeStep", id: "load" }])).toMatchObject({
+      ok: false,
+      error: { code: "readOnly" },
+    });
+  });
+
   test("paints step statuses from the journal on a read-only canvas", async () => {
     setup(failedLoopRun());
     await waitFor(() => expect(card("load")?.dataset.run).toBe("done"));

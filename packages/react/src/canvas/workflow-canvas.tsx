@@ -17,6 +17,7 @@ import {
 } from "@xyflow/react";
 import { Maximize, Minus, Plus } from "lucide-react";
 import { type JSX, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useStore } from "zustand";
 import { EditorContext, stepIndex, useEditorStore } from "../hooks";
 import type { FlowlineLabels } from "../labels";
 import { LOOP_GUTTER } from "../layout/constants";
@@ -239,12 +240,12 @@ function Controls({ onFit }: { onFit(): void }) {
 interface FlowProps {
   layoutRef: RefObject<ReturnType<typeof layoutTree> | null>;
   rootRef: RefObject<HTMLDivElement | null>;
-  readOnly: boolean;
   colorMode: "light" | "dark" | "system";
   onStepClick?(id: string): void;
 }
 
-function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: FlowProps) {
+function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
+  const readOnly = useEditorStore((s) => s.readOnly);
   const doc = useEditorStore((s) => s.doc);
   const manifest = useEditorStore((s) => s.manifest);
   const selection = useEditorStore((s) => s.selection);
@@ -424,18 +425,24 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
  */
 export function WorkflowCanvas(props: {
   store: EditorStore;
-  /** Hides "+" buttons and menus and disables editing shortcuts. */
+  /**
+   * Hides "+" buttons and menus and disables editing shortcuts. Sets the store's `readOnly` flag
+   * while mounted (restoring the previous value on unmount), so every edit through the store,
+   * an agent bridge's included, is rejected too. A store that is already read-only renders
+   * read-only without it.
+   */
   readOnly?: boolean;
   /** Run state to paint on the cards (run viewer). */
   overlay?: RunOverlay;
   /** Called when a step (or `"__trigger"`) is clicked or opened with Enter. */
   onStepClick?(id: string): void;
 }): JSX.Element {
-  const { store, readOnly = false, overlay, onStepClick } = props;
+  const { store, readOnly: readOnlyProp = false, overlay, onStepClick } = props;
   const { theme, labels, onNotify } = useFlowlineAppearance();
   const [ui] = useState(() =>
-    createCanvasUiStore({ readOnly, overlay, labels, ...(onNotify ? { notify: onNotify } : {}) }),
+    createCanvasUiStore({ overlay, labels, ...(onNotify ? { notify: onNotify } : {}) }),
   );
+  const readOnly = useStore(store, (s) => s.readOnly);
   const rootRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<ReturnType<typeof layoutTree> | null>(null);
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
@@ -443,9 +450,14 @@ export function WorkflowCanvas(props: {
   const colorMode = theme.colorMode ?? "system";
 
   useEffect(() => {
-    ui.setState(
-      readOnly ? { readOnly, overlay, picker: null, renaming: null } : { readOnly, overlay },
-    );
+    if (!readOnlyProp) return;
+    const s = store.getState();
+    const prev = s.readOnly;
+    s.setReadOnly(true);
+    return () => store.getState().setReadOnly(prev);
+  }, [store, readOnlyProp]);
+  useEffect(() => {
+    ui.setState(readOnly ? { overlay, picker: null, renaming: null } : { overlay });
   }, [ui, readOnly, overlay]);
   useEffect(() => {
     if (ui.getState().labels !== labels) ui.setState({ labels });
@@ -489,7 +501,6 @@ export function WorkflowCanvas(props: {
                   <CanvasFlow
                     layoutRef={layoutRef}
                     rootRef={rootRef}
-                    readOnly={readOnly}
                     colorMode={colorMode}
                     {...(onStepClick ? { onStepClick } : {})}
                   />

@@ -107,7 +107,7 @@ function RunBody({
   // One store per pinned doc; refetches of the same run keep it (and the selection).
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the pinned version, not the refetched object.
   const store = useMemo<EditorStore>(
-    () => createEditorStore({ doc: detail.doc, manifest }),
+    () => createEditorStore({ doc: detail.doc, manifest, readOnly: true }),
     [docKey, manifest],
   );
   const [iteration, setIteration] = useState<Record<string, number>>({});

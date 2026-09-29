@@ -7,7 +7,7 @@
  * @module
  */
 
-import { findStep } from "@flowlinejs/core";
+import { branchList, findStep } from "@flowlinejs/core";
 import type { KeyboardEvent } from "react";
 import type { LayoutEdge, LayoutNode } from "../layout/layout-tree";
 import { type EditorStore, TRIGGER_KEY } from "../store/editor-store";
@@ -102,7 +102,7 @@ export function siblingColumnStep(
     i >= 0 && i < columns.length;
     i += dir
   ) {
-    const list = parent.branches?.[columns[i] as string] ?? [];
+    const list = branchList(parent, columns[i] as string) ?? [];
     if (list.length === 0) continue;
     let best = list[0]?.id as string;
     for (const s of list) {
@@ -137,7 +137,7 @@ export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   if (!mod && ownsKey(e.target, e.key)) return false;
   const { store, ui } = deps;
   const state = store.getState();
-  const { readOnly } = ui.getState();
+  const { readOnly } = state;
   // The card keys act on: the focused one (panel open or not), else the selected one.
   const active = deps.root()?.ownerDocument.activeElement ?? null;
   const selection =

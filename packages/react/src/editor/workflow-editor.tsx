@@ -169,6 +169,13 @@ export function WorkflowEditor(props: {
    * default {@link ConfigPanel}: the generated config form and the step test.
    */
   renderPanel?: (store: EditorStore) => ReactNode;
+  /**
+   * Called for every store the editor creates (first load, `workflowId` change, retry,
+   * starting a new workflow), e.g. to attach an agent bridge (`createAgentBridge(store)`). The
+   * cleanup it returns runs when that store is replaced or the editor unmounts.
+   */
+  // biome-ignore lint/suspicious/noConfusingVoidType: `void` so a callback with no cleanup (no return) fits.
+  onStoreReady?(store: EditorStore): void | (() => void);
   className?: string;
 }): JSX.Element {
   const { workflowId, initialDoc, className, headerLeft, renderPanel } = props;
@@ -178,6 +185,7 @@ export function WorkflowEditor(props: {
     initialDoc,
     props.create,
     props.network,
+    props.onStoreReady,
   );
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
   const style = useMemo(() => themeStyle(theme.tokens), [theme.tokens]);

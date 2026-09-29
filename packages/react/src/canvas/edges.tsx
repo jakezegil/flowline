@@ -34,7 +34,7 @@ function at(p: Point): CSSProperties {
 
 /** The "+" insertion button on an edge. Hidden in read-only mode. */
 function AddButton({ p, loc }: { p: Point; loc: StepLocation }) {
-  const readOnly = useCanvasUi((s) => s.readOnly);
+  const readOnly = useEditorStore((s) => s.readOnly);
   const openPicker = useCanvasUi((s) => s.openPicker);
   const labels = useLabels();
   const active = useCanvasUi(
