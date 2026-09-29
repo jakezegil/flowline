@@ -45,6 +45,11 @@ export function useToast(): (t: ToastInput) => void {
   return show;
 }
 
+/** Like {@link useToast}, but `null` outside a {@link ToasterProvider}. */
+export function useOptionalToast(): ((t: ToastInput) => void) | null {
+  return useContext(ToasterContext);
+}
+
 /**
  * Hands `notice` to the provider's `onNotify`, if any. `true` when the host took it (so Flowline
  * shows nothing); `false` when Flowline should show its own toast.

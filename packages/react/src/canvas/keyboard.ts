@@ -19,6 +19,7 @@ import {
   moveStepBy,
   nodeElement,
   nodeIdOf,
+  noteActions,
   rangeActions,
   rangeIds,
   stepActions,
@@ -84,6 +85,13 @@ function onAnnotation(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   const id = target.closest(".react-flow__node")?.getAttribute("data-id") ?? "";
   return id.startsWith("note:") || id.startsWith("sectionHeader:");
+}
+
+/** The step whose sticky note node an event comes from, if any. */
+function noteStepOf(target: EventTarget | null): string | undefined {
+  if (!(target instanceof Element)) return undefined;
+  const id = target.closest(".react-flow__node")?.getAttribute("data-id") ?? "";
+  return id.startsWith("note:") ? id.slice(5) : undefined;
 }
 
 /** Selection keys (step IDs and {@link TRIGGER_KEY}) in pre-order, from the layout's node order. */
@@ -167,6 +175,12 @@ export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   // doc-level undo/redo apply: keys that act on the selected card would act on a card that isn't
   // the one in focus.
   if (onAnnotation(e.target)) {
+    // Enter on a focused sticky note edits it, as a click does.
+    const note = noteStepOf(e.target);
+    if (note !== undefined && e.key === "Enter" && !mod && !deps.store.getState().readOnly) {
+      noteActions(deps.store, deps.ui, deps.root, note).edit();
+      return true;
+    }
     const k = e.key.toLowerCase();
     const undoRedo = mod && (k === "z" || (k === "y" && !isMac()));
     // ⇧/⌥ + arrows extend or move from the selection, so they don't apply either.
