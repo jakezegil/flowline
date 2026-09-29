@@ -474,6 +474,123 @@ export const requestApproval = defineNode({
   the trigger's `dedupe.window`, else `createEngine({ dedupe: { defaultWindow } })`, which is 7
   days by default. `POST /workflows/:id/run` accepts the same `dedupe` field.
 
+### Multi-event triggers
+
+A trigger normally listens to one event (`event: "deal.won"`). When one workflow should react to
+several related events — "any call ended" across two providers, or a booking cancellation reported
+two different ways — declare `events` plus `normalize` instead:
+
+```ts file=flowline/multi-event.ts
+// flowline/multi-event.ts
+import { defineTrigger } from "@flowlinejs/core";
+import { z } from "zod";
+
+export const dealClosed = defineTrigger({
+  type: "crm.dealClosed",
+  name: "Deal won or lost",
+  kind: "event",
+  icon: "flag",
+  events: ["deal.won", "deal.lost"], // mutually exclusive with `event`; requires `normalize`
+  config: z.object({}),
+  payload: z.object({ dealId: z.string(), outcome: z.enum(["won", "lost"]), amount: z.number() }),
+  // Runs before payload validation, with the delivered event name. Returning `undefined` skips
+  // the delivery, like a `filter` that returns false.
+  normalize: (event, raw) => {
+    const r = raw as { dealId: string; amount: number };
+    return { dealId: r.dealId, outcome: event === "deal.won" ? "won" : "lost", amount: r.amount };
+  },
+  // Both events share one dedupe namespace (`event:<workflowId>:<key>`), so a retried "won"
+  // event and a later "lost" event for the same deal still start at most one run each, and a
+  // duplicate of either is suppressed within the window.
+  dedupe: { key: ({ payload }) => payload.dealId, window: "1h" },
+});
+```
+
+`defineTrigger` throws `FlowlineDefinitionError` if `event` and `events` are both set, if `events`
+is empty or has duplicates, or if `events` is set without `normalize`. The run's `startedBy` keeps
+the **raw** delivered event name (`"deal.won"` or `"deal.lost"`), not a normalized label; put the
+source inside the payload in `normalize` if you want it there too. `core.event` (the built-in "App
+event" trigger) stays single-event — multi-event triggers are for your own plugin triggers.
+
+### Poll trigger kind
+
+Some automations aren't driven by an event at all: "a deal has been in this stage for 3 days" is a
+sweep over current state, not something that fires once. A `kind: "poll"` trigger's `poll` function
+is called on a schedule with a non-overlapping, bounded time interval and returns the items that
+became due in it; each item starts its own run.
+
+```ts file=flowline/poll-trigger.ts
+// flowline/poll-trigger.ts
+import { defineTrigger, ui } from "@flowlinejs/core";
+import { z } from "zod";
+import type { Deal } from "../db";
+
+const DAY = 86_400_000;
+
+export const dealStuckInStage = defineTrigger({
+  type: "crm.dealStuckInStage",
+  name: "Deal stuck in stage",
+  kind: "poll",
+  icon: "hourglass",
+  interval: "10m", // minimum time between polls; default 1m (EngineOptions.poll.defaultInterval)
+  maxInterval: "1h", // longest interval one poll() call covers; a backlog is caught up in chunks
+  config: z.object({
+    stage: ui(z.string(), { label: "Stage" }),
+    days: ui(z.number().int().min(1), { label: "Days in stage" }).default(3),
+  }),
+  payload: z.object({
+    deal: z.object({ id: z.string(), name: z.string(), stage: z.string() }),
+    days: z.number(),
+  }),
+  poll: async ({ config, since, until, ctx }) => ({
+    items: (await ctx.services.db.deals.inStage(config.stage))
+      .filter((d: Deal) => {
+        const due = Date.parse(d.stageEnteredAt) + config.days * DAY;
+        return due > since && due <= until; // crossed the threshold during this interval, once
+      })
+      .map((d: Deal) => ({
+        key: `${d.id}:${d.stageEnteredAt}`, // re-entering the stage is a new stint, a new key
+        payload: { deal: { id: d.id, name: d.name, stage: d.stage }, days: config.days },
+      })),
+  }),
+});
+```
+
+- `since`/`until` form a contiguous, gap-free sequence of half-open intervals: eligibility
+  (filtering to the current stage) and the threshold-crossing check (`due > since && due <= until`)
+  together mean a deal fires exactly once when it crosses, never retroactively, and never again for
+  the same stint.
+- Each item starts a run with dedupe key `poll:<workflowId>:<key>`, so a crash between launching
+  items and committing the poll's progress is safe: the retry's items dedupe against the ones that
+  already started.
+- `Engine.tickPolls()` drives every published `poll` trigger; `engine.startWorker()` calls it every
+  `pollEveryMs` (default 15s) on its first loop, alongside schedules. After downtime longer than
+  `maxInterval`, the backlog is caught up in successive `poll` calls (up to
+  `EngineOptions.poll.maxCallsPerTick`, default 10, per tick) rather than in one unbounded sweep.
+- A poll that throws leaves `since`/`cursor` unadvanced and reports `poll.failed` through
+  `onTriggerEvent`; the same interval is retried on the next poll.
+
+### Condition semantics
+
+`core.condition`, `core.switch` and the rule helpers (`eq`, `contains`, `in`, …) support two
+comparison modes, `compare: "loose" | "strict"` (see [Tree model](#tree-model) for how to set the
+default and add custom operators):
+
+- **Loose** (the default) parses numeric and boolean text, compares ISO date text by instant,
+  folds case unless `caseSensitive: true`, accepts comma-separated text for `in`, and stringifies a
+  non-string left operand for `contains`/`startsWith`/`endsWith` — so `12345 contains "23"` is
+  `true`, and `"5"` equals `5`.
+- **Strict** only matches values already of the same type: no parsing, no case folding
+  (`caseSensitive` is ignored), and `null` is never the same as a missing (`undefined`) value.
+  `contains`/`in`/`startsWith`/`endsWith` require both sides to already be the same type (a
+  strict `contains` on `12345` and `"23"` is `false`).
+
+The rules widget stores a right-hand literal typed to match the left operand under `compare:
+"strict"` — a number field stores `5`, not `"5"` — and flags a literal of another type with a
+`rule.literalType` warning instead of letting it silently never match. In code, build typed
+literals directly (`eq(ref("trigger.deal.amount"), 5)`) or wrap a group with `strictly(...)` /
+`loosely(...)` to set its `compare` explicitly.
+
 ### Calling a webhook
 
 A webhook workflow declares the body fields it expects, and optionally a signing secret and a
@@ -673,6 +790,13 @@ These are out of scope for v1, but the design leaves room for them:
 - An import/export UI
 - Internationalization beyond labels
 - References to steps inside a branch after it rejoins
+- Persisting `TriggerEvent`s (rejections, dedupe suppressions, poll outcomes) in storage — hosts
+  persist them from `onTriggerEvent` today
+- Pruning expired dedupe rows and orphaned poll states
+- An "at most one active run per key" dedupe mode
+- A poll-state route and a "last checked" panel in the editor
+- Multi-event support in `core.event` itself (today it's for plugin triggers)
+- Custom rule operators in switch cases
 
 ## Development
 

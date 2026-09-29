@@ -126,7 +126,17 @@ export type TriggerEvent =
       source: RunOrigin;
     }
   | { type: "poll.completed"; at: number; tenantId: string; workflowId: string; since: number; until: number; items: number; started: number; rejected: number }
-  | { type: "poll.failed"; at: number; tenantId: string; workflowId: string; since: number; until: number; message: string; nextAt: number };
+  | {
+      type: "poll.failed";
+      at: number;
+      tenantId: string;
+      workflowId: string;
+      since: number;
+      until: number;
+      message: string;
+      /** When the interval will be polled again. Absent when the poll lease was lost before the failure could be committed. */
+      nextAt?: number;
+    };
 
 interface EngineOptions {
   /** Called with every trigger-level outcome that has no run to attach to. Errors thrown here are logged and ignored. */
@@ -756,7 +766,7 @@ Adapter rules (isolation, tenancy, atomicity, times, lease tokens never returned
 | Rules widget | Compare select, hidden Match case under strict, typed literals, `in` tag list, custom operators, `rule.literalType` warning. |
 | Cases widget (switch) | Compare select; typed case values. |
 | Run list / viewer | `labels.origin` renders `{ kind: "poll" }` as "Polled (item {itemKey})". |
-| Labels | `triggerEvents`, `triggerEventsHint`, `triggerPoll`, `compare`, `compareStrict`, `compareLoose`, `compareStrictHint`, `compareLooseHint`, `literalTypeWarning(leftType)`, `originPoll`. |
+| Labels | `triggerEvents`, `triggerEventsHint`, `triggerPoll`, `compare`, `compareStrict`, `compareLoose`, `compareStrictHint`, `compareLooseHint`, `literalTypeWarning({ rightLabel, rightType, leftLabel, leftType })`, `originPoll`. |
 
 ## 11. Migration notes (breaking before 1.0)
 
@@ -773,6 +783,7 @@ Adapter rules (isolation, tenancy, atomicity, times, lease tokens never returned
 | `core.event` / plugin event triggers listen to one event | `events` available | Additive. |
 | `TriggerKind` | adds `"poll"` | Exhaustive `switch`es on kind (trigger card, labels) get a case. |
 | `RunOrigin` | adds `{ kind: "poll" }` | Same. |
+| Loose `contains`/`notContains` compared text `left` only | a non-string `left` (number or boolean) is stringified before the substring check, e.g. `12345 contains "23"` is now `true` | Hosts relying on non-string `left` never matching `contains` add an explicit type check before the condition. |
 
 README and `docs/guides/writing-a-plugin.md` are updated with the new `emit` result, `dedupe`, `events`/`normalize`, `createBuiltinPlugin` and `kind: "poll"`; the docs-check suite typechecks them.
 
