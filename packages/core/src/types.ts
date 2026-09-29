@@ -33,6 +33,32 @@ export interface Step {
   config: Record<string, ValueExpr>;
   /** Child step lists for branching and looping nodes, keyed by branch ID (forEach uses `"body"`). */
   branches?: Record<string, Step[]>;
+  /** Sticky note pinned to this step. Plain text, ≤ 4000 chars. Visual only. */
+  note?: string;
+  /** Accent colour for the step card. Visual only. */
+  color?: AnnotationColor;
+}
+
+/** Colour of a note, step accent or section. */
+export type AnnotationColor = "yellow" | "blue" | "green" | "pink" | "purple" | "gray";
+
+/**
+ * A coloured region around a contiguous run of steps in one step list. Visual only: the engine
+ * ignores it. Steps between `first` and `last` are members by contiguity.
+ */
+export interface Section {
+  /** Stable ID, unique among the doc's sections. Matches the step-ID pattern. */
+  id: string;
+  /** Heading shown on the region. */
+  title: string;
+  /** Region colour. */
+  color: AnnotationColor;
+  /** Note shown with the section. Plain text, ≤ 4000 chars. */
+  note?: string;
+  /** First step of the run. In the same step list as `last`, at or before it. */
+  first: string;
+  /** Last step of the run. */
+  last: string;
 }
 
 /** The trigger that starts a workflow, with its config. */
@@ -57,6 +83,8 @@ export interface WorkflowDoc {
   steps: Step[];
   /** For sub-flows: the output mapping evaluated at the end of a run. */
   output?: Record<string, ValueExpr>;
+  /** Coloured regions around runs of steps. Visual only: the engine ignores them. */
+  sections?: Section[];
 }
 
 /** The value kinds a user-declared field ({@link FieldDecl}) can have. */

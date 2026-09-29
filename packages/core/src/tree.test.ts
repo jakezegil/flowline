@@ -14,7 +14,7 @@ import {
   updateStep,
   walkSteps,
 } from "./tree";
-import type { Manifest, Step, WorkflowDoc } from "./types";
+import type { Manifest, Section, Step, WorkflowDoc } from "./types";
 
 function deepFreeze<T>(obj: T): T {
   if (obj !== null && typeof obj === "object" && !Object.isFrozen(obj)) {
@@ -553,5 +553,195 @@ describe("structural sharing", () => {
     expect(after("c")).toBe(before("c"));
     expect(after("right")).not.toBe(before("right"));
     expect(after("outer")).not.toBe(before("outer"));
+  });
+});
+
+describe("section upkeep in tree operations", () => {
+  const st = (id: string, extra: Partial<Step> = {}): Step => ({
+    id,
+    type: "t.x",
+    config: {},
+    ...extra,
+  });
+  const sec = (id: string, first: string, last: string): Section => ({
+    id,
+    title: id,
+    color: "blue",
+    first,
+    last,
+  });
+  function sdoc(ids: string[], sections: Section[]): WorkflowDoc {
+    return frozenClone({
+      id: "wf",
+      name: "W",
+      trigger: { type: "t.manual", config: {} },
+      steps: ids.map((id) => st(id)),
+      sections,
+    });
+  }
+  const ids = (d: WorkflowDoc) => d.steps.map((x) => x.id);
+  const top = (index: number) => ({ parentId: null, index });
+
+  describe("removal (s = b..c on [a,b,c,d])", () => {
+    const base = () => sdoc(["a", "b", "c", "d"], [sec("s", "b", "c")]);
+
+    test("remove b → c..c", () => {
+      expect(removeStep(base(), "b").sections).toEqual([sec("s", "c", "c")]);
+    });
+
+    test("remove c → b..b", () => {
+      expect(removeStep(base(), "c").sections).toEqual([sec("s", "b", "b")]);
+    });
+
+    test("remove b and c → the section is gone and sections is omitted", () => {
+      const out = removeStep(removeStep(base(), "b"), "c");
+      expect(out).not.toHaveProperty("sections");
+    });
+
+    test("remove a branching step whose branch holds a whole section", () => {
+      const other = sec("other", "a", "a");
+      const d = frozenClone({
+        id: "wf",
+        name: "W",
+        trigger: { type: "t.manual", config: {} },
+        steps: [st("a"), st("cond", { branches: { if: [st("x"), st("y")] } }), st("b")],
+        sections: [other, sec("inner", "x", "y")],
+      });
+      const out = removeStep(d, "cond");
+      expect(out.sections).toEqual([other]);
+      expect(out.sections?.[0]).toBe(d.sections?.[0]);
+    });
+  });
+
+  describe("moves (s = b..d on [a,b,c,d,e])", () => {
+    const base = () => sdoc(["a", "b", "c", "d", "e"], [sec("s", "b", "d")]);
+
+    test("move c above b keeps c as a member", () => {
+      const out = moveStep(base(), "c", top(1));
+      expect(ids(out)).toEqual(["a", "c", "b", "d", "e"]);
+      expect(out.sections).toEqual([sec("s", "c", "d")]);
+    });
+
+    test("move b above a → c..d", () => {
+      const out = moveStep(base(), "b", top(0));
+      expect(ids(out)).toEqual(["b", "a", "c", "d", "e"]);
+      expect(out.sections).toEqual([sec("s", "c", "d")]);
+    });
+
+    test("move d below e → b..c", () => {
+      const out = moveStep(base(), "d", top(4));
+      expect(ids(out)).toEqual(["a", "b", "c", "e", "d"]);
+      expect(out.sections).toEqual([sec("s", "b", "c")]);
+    });
+
+    test("move d above c → b..c with d still a member", () => {
+      const out = moveStep(base(), "d", top(2));
+      expect(ids(out)).toEqual(["a", "b", "d", "c", "e"]);
+      expect(out.sections).toEqual([sec("s", "b", "c")]);
+    });
+
+    test("move b to the end of the list → c..d", () => {
+      const out = moveStep(base(), "b", top(4));
+      expect(ids(out)).toEqual(["a", "c", "d", "e", "b"]);
+      expect(out.sections).toEqual([sec("s", "c", "d")]);
+    });
+
+    test("move e between b and c → e is a member by contiguity", () => {
+      const out = moveStep(base(), "e", top(2));
+      expect(ids(out)).toEqual(["a", "b", "e", "c", "d"]);
+      expect(out.sections).toEqual([sec("s", "b", "d")]);
+    });
+  });
+
+  describe("renames, duplicates and inserts (s = b..c on [a,b,c,d])", () => {
+    const base = () => sdoc(["a", "b", "c", "d"], [sec("s", "b", "c")]);
+
+    test('renameStepId(b, "bee") → bee..c', () => {
+      expect(renameStepId(base(), "b", "bee").sections).toEqual([sec("s", "bee", "c")]);
+    });
+
+    test("updateStep changing the ID substitutes it", () => {
+      const out = updateStep(base(), "c", (x) => ({ ...x, id: "see" }));
+      expect(out.sections).toEqual([sec("s", "b", "see")]);
+    });
+
+    test("duplicateStep(c) → b..<copy of c>", () => {
+      const { doc: out, newId } = duplicateStep(base(), "c");
+      expect(ids(out)).toEqual(["a", "b", "c", newId, "d"]);
+      expect(out.sections).toEqual([sec("s", "b", newId)]);
+    });
+
+    test("duplicateStep(a) leaves the section unchanged", () => {
+      const d = base();
+      const out = duplicateStep(d, "a").doc;
+      expect(out.sections).toBe(d.sections);
+    });
+
+    test("insertStep between b and c → a member", () => {
+      const out = insertStep(base(), top(2), st("n"));
+      expect(out.sections).toEqual([sec("s", "b", "c")]);
+      expect(ids(out).slice(1, 4)).toEqual(["b", "n", "c"]);
+    });
+
+    test("insertStep right before b or right after c → not a member", () => {
+      const before = insertStep(base(), top(1), st("n"));
+      expect(before.sections).toEqual([sec("s", "b", "c")]);
+      expect(ids(before).indexOf("n")).toBeLessThan(ids(before).indexOf("b"));
+      const after = insertStep(base(), top(3), st("n"));
+      expect(after.sections).toEqual([sec("s", "b", "c")]);
+      expect(ids(after).indexOf("n")).toBeGreaterThan(ids(after).indexOf("c"));
+    });
+  });
+
+  test("nesting: removing outer members outside the branch leaves the inner section", () => {
+    const inner = sec("inner", "x", "y");
+    const d = frozenClone({
+      id: "wf",
+      name: "W",
+      trigger: { type: "t.manual", config: {} },
+      steps: [
+        st("a"),
+        st("b"),
+        st("cond", { branches: { if: [st("x"), st("y")], else: [] } }),
+        st("c"),
+      ],
+      sections: [sec("outer", "b", "c"), inner],
+    });
+    const out = removeStep(removeStep(d, "b"), "c");
+    expect(out.sections).toEqual([sec("outer", "cond", "cond"), inner]);
+    expect(out.sections?.[1]).toBe(d.sections?.[1]);
+  });
+
+  test("identity: an edit that doesn't touch sections keeps the sections array", () => {
+    const d = sdoc(["a", "b", "c", "d"], [sec("s", "b", "c")]);
+    expect(removeStep(d, "d").sections).toBe(d.sections);
+    expect(moveStep(d, "a", top(3)).sections).toBe(d.sections);
+    expect(updateStep(d, "b", (x) => ({ ...x, name: "B" })).sections).toBe(d.sections);
+  });
+
+  test("renameStepId also rewrites the endpoints of a broken section", () => {
+    const d = sdoc(["a", "b"], [sec("s", "b", "missing")]);
+    expect(renameStepId(d, "b", "bee").sections).toEqual([sec("s", "bee", "missing")]);
+  });
+
+  test("notes and colours travel with the step", () => {
+    const d = frozenClone({
+      id: "wf",
+      name: "W",
+      trigger: { type: "t.manual", config: {} },
+      steps: [st("a", { note: "hi", color: "pink" }), st("b")],
+    });
+    const moved = moveStep(d, "a", top(1));
+    expect(moved.steps[1]).toMatchObject({ id: "a", note: "hi", color: "pink" });
+    const dup = duplicateStep(d, "a");
+    expect(findStep(dup.doc, dup.newId)?.step).toMatchObject({ note: "hi", color: "pink" });
+  });
+
+  test("FlowlineTreeError.name is a widened string", () => {
+    class Sub extends FlowlineTreeError {
+      override readonly name: string = "Sub";
+    }
+    expect(new Sub("x").name).toBe("Sub");
+    expect(new FlowlineTreeError("x").name).toBe("FlowlineTreeError");
   });
 });

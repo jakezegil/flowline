@@ -1,6 +1,16 @@
 /** Package version. */
 export const VERSION = "0.1.0";
 
+export {
+  ANNOTATION_COLORS,
+  isAnnotationColor,
+  NOTE_MAX_CHARS,
+  type SectionEffect,
+  sectionIdFor,
+  sectionOf,
+  sectionRun,
+  upkeepSections,
+} from "./annotations";
 export type {
   ApiErrorBody,
   JournalEntry,
@@ -136,6 +146,7 @@ export {
   walkSteps,
 } from "./tree";
 export type {
+  AnnotationColor,
   BranchSpec,
   DurationInput,
   FieldDecl,
@@ -150,6 +161,7 @@ export type {
   ResumeSpec,
   RuleOperatorMeta,
   RuleValueType,
+  Section,
   ShowIf,
   Step,
   TplExpr,

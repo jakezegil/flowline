@@ -1,3 +1,4 @@
+import { upkeepSections } from "./annotations";
 import { codeReadsStepOpaquely, rewriteCodeStepRefs } from "./code-refs";
 import { isValidStepId, RESERVED_STEP_IDS } from "./ids";
 import { formatRefPath, isRef, isTpl, parseRefPath, parseTemplate } from "./refs";
@@ -6,8 +7,11 @@ import { UI_META_KEY } from "./ui";
 
 /** Thrown when a tree operation targets a step, branch, or index that doesn't exist. */
 export class FlowlineTreeError extends Error {
-  /** Error name, for `instanceof`-free checks across package copies. */
-  override readonly name = "FlowlineTreeError";
+  /**
+   * Error name, for `instanceof`-free checks across package copies. A `string` so subclasses
+   * (such as `FlowlineCommandError`) can name themselves.
+   */
+  override readonly name: string = "FlowlineTreeError";
 }
 
 /** Where a step sits in the tree: which list it's in, and its position within it. */
@@ -164,31 +168,45 @@ export function insertStep(doc: WorkflowDoc, loc: StepLocation, step: Step): Wor
   return replaceList(doc, loc.parentId, loc.branch, newList);
 }
 
-/** Removes the step with `id`, immutably. Throws {@link FlowlineTreeError} if not found. */
-export function removeStep(doc: WorkflowDoc, id: string): WorkflowDoc {
+/** {@link removeStep} without section upkeep. */
+function removeRaw(doc: WorkflowDoc, id: string): { doc: WorkflowDoc; found: FoundStep } {
   const found = findStep(doc, id);
   if (!found) throw new FlowlineTreeError(`Step "${id}" not found`);
   const list = getList(doc, found.location.parentId, found.location.branch);
   if (!list) throw new FlowlineTreeError(`Step "${id}" not found`);
   const newList = list.filter((_, i) => i !== found.location.index);
-  return replaceList(doc, found.location.parentId, found.location.branch, newList);
+  return { doc: replaceList(doc, found.location.parentId, found.location.branch, newList), found };
+}
+
+/**
+ * Removes the step with `id`, immutably. A section whose `first` or `last` it was shrinks to the
+ * nearest remaining member; a section with no members left is removed (see
+ * {@link upkeepSections}). Throws {@link FlowlineTreeError} if not found.
+ */
+export function removeStep(doc: WorkflowDoc, id: string): WorkflowDoc {
+  return upkeepSections(doc, removeRaw(doc, id).doc);
 }
 
 /**
  * Moves the step with `id` to location `to`, immutably. `to.index` is interpreted against the
- * destination list *after* the step has been removed from its original location.
+ * destination list *after* the step has been removed from its original location. A member of a
+ * section stays in it while it lands within the section's span; moved out, the section shrinks
+ * (see {@link upkeepSections}).
  *
  * @throws {FlowlineTreeError} If `id` doesn't exist, or `to` names a parent within the moved
  *   step's own subtree (including the step itself).
  */
 export function moveStep(doc: WorkflowDoc, id: string, to: StepLocation): WorkflowDoc {
-  const found = findStep(doc, id);
-  if (!found) throw new FlowlineTreeError(`Step "${id}" not found`);
-  const removed = removeStep(doc, id);
-  return insertStep(removed, to, found.step);
+  const { doc: removed, found } = removeRaw(doc, id);
+  const next = insertStep(removed, to, found.step);
+  return upkeepSections(doc, next, { moved: new Set([id]) });
 }
 
-/** Replaces the step with `id` with `fn(step)`, immutably. Throws if `id` doesn't exist. */
+/**
+ * Replaces the step with `id` with `fn(step)`, immutably. If `fn` changes the ID, sections
+ * naming the old ID follow it (references elsewhere are not rewritten; see
+ * {@link renameStepId}). Throws if `id` doesn't exist.
+ */
 export function updateStep(doc: WorkflowDoc, id: string, fn: (s: Step) => Step): WorkflowDoc {
   const found = findStep(doc, id);
   if (!found) throw new FlowlineTreeError(`Step "${id}" not found`);
@@ -199,7 +217,30 @@ export function updateStep(doc: WorkflowDoc, id: string, fn: (s: Step) => Step):
   const list = getList(doc, found.location.parentId, found.location.branch);
   if (!list) throw new FlowlineTreeError(`Step "${id}" not found`);
   const newList = list.map((s, i) => (i === found.location.index ? newStep : s));
-  return replaceList(doc, found.location.parentId, found.location.branch, newList);
+  const next = replaceList(doc, found.location.parentId, found.location.branch, newList);
+  if (newStep.id === id) return upkeepSections(doc, next);
+  return renameSectionEndpoints(
+    upkeepSections(doc, next, { subst: new Map([[id, [newStep.id]]]) }),
+    id,
+    newStep.id,
+  );
+}
+
+/**
+ * `doc` with every section endpoint named `id` renamed to `newId`. Covers sections that
+ * {@link upkeepSections} leaves alone because they are broken, so they keep naming the step.
+ */
+function renameSectionEndpoints(doc: WorkflowDoc, id: string, newId: string): WorkflowDoc {
+  const sections = doc.sections;
+  if (!sections?.some((s) => s.first === id || s.last === id)) return doc;
+  return {
+    ...doc,
+    sections: sections.map((s) =>
+      s.first === id || s.last === id
+        ? { ...s, first: s.first === id ? newId : s.first, last: s.last === id ? newId : s.last }
+        : s,
+    ),
+  };
 }
 
 function sanitizeBase(nodeType: string): string {
@@ -386,11 +427,16 @@ export function renameStepId(
       for (const [k, v] of Object.entries(step.branches)) branches[k] = walk(v);
       return { ...renamed, branches };
     });
-  return {
+  const next: WorkflowDoc = {
     ...doc,
     steps: walk(doc.steps),
     ...(doc.output ? { output: rewriteRefs(doc.output, idMap) as Record<string, ValueExpr> } : {}),
   };
+  return renameSectionEndpoints(
+    upkeepSections(doc, next, { subst: new Map([[id, [newId]]]) }),
+    id,
+    newId,
+  );
 }
 
 /**
@@ -419,5 +465,7 @@ export function duplicateStep(doc: WorkflowDoc, id: string): { doc: WorkflowDoc;
     },
     copy,
   );
-  return { doc: newDoc, newId: idMap.get(id) as string };
+  const newId = idMap.get(id) as string;
+  // A copy of a member joins its section; a copy of `last` extends it.
+  return { doc: upkeepSections(doc, newDoc, { subst: new Map([[id, [id, newId]]]) }), newId };
 }

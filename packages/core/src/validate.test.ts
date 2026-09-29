@@ -5,7 +5,7 @@ import { defineNode, definePlugin, defineTrigger } from "./define";
 import { fieldsToJsonSchema } from "./json-schema";
 import { createRegistry } from "./registry";
 import { removeStep } from "./tree";
-import type { JSONSchema, Manifest, NodeManifest, Step, WorkflowDoc } from "./types";
+import type { JSONSchema, Manifest, NodeManifest, Section, Step, WorkflowDoc } from "./types";
 import { fields, secret, UI_META_KEY, ui } from "./ui";
 import { checkJson, hasErrors, type Issue, validateWorkflow } from "./validate";
 
@@ -1080,5 +1080,178 @@ describe("secret fields are literal-only", () => {
     ]);
     // Without the list nothing can be checked.
     expect(validateWorkflow(doc({ token: "sk_live_123" }), m)).toEqual([]);
+  });
+});
+
+describe("annotation issues", () => {
+  const ANNOTATION_CODES = new Set(["section.broken", "section.overlap", "note.tooLong"]);
+  const annotations = (d: WorkflowDoc) =>
+    validateWorkflow(d, manifest).filter((i) => ANNOTATION_CODES.has(i.code));
+  const sec = (id: string, first: string, last: string, extra: Partial<Section> = {}): Section => ({
+    id,
+    title: id.toUpperCase(),
+    color: "green",
+    first,
+    last,
+    ...extra,
+  });
+  /** load → cond{yes:[inYes], no:[inNo]} → email */
+  function annotated(sections: Section[], stepExtra: Partial<Step> = {}): WorkflowDoc {
+    const base = fixtureDoc();
+    return {
+      ...base,
+      steps: [
+        { ...(base.steps[0] as Step), ...stepExtra },
+        step(
+          "cond",
+          "test.ifElse",
+          { value: true },
+          {
+            branches: {
+              yes: [step("inYes", "crm.loadContact", { contactId: "c" })],
+              no: [step("inNo", "crm.loadContact", { contactId: "c" })],
+            },
+          },
+        ),
+        base.steps[1] as Step,
+      ],
+      sections,
+    };
+  }
+
+  test("a valid section, no sections and sections: [] add no issues", () => {
+    const valid = annotated([sec("s", "load", "email", { note: "ok" })], { note: "x" });
+    expect(validateWorkflow(valid, manifest)).toEqual([]);
+    expect(validateWorkflow(fixtureDoc(), manifest)).toEqual([]);
+    expect(validateWorkflow({ ...fixtureDoc(), sections: [] }, manifest)).toEqual([]);
+  });
+
+  test("a missing endpoint is section.broken", () => {
+    const d = annotated([sec("s", "load", "gone")]);
+    expect(annotations(d)).toEqual([
+      {
+        code: "section.broken",
+        severity: "warning",
+        message: 'Section “S” no longer covers a run of steps: step "gone" is missing',
+        sectionId: "s",
+        stepId: "load",
+      },
+    ]);
+    expect(hasErrors(validateWorkflow(d, manifest))).toBe(false);
+  });
+
+  test("a missing first step leaves stepId out", () => {
+    const issues = annotations(annotated([sec("s", "gone", "load")]));
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ code: "section.broken", sectionId: "s" });
+    expect(issues[0]).not.toHaveProperty("stepId");
+  });
+
+  test("endpoints in two lists are section.broken", () => {
+    const d = annotated([sec("s", "inYes", "inNo")]);
+    expect(annotations(d)).toEqual([
+      issue({
+        code: "section.broken",
+        severity: "warning",
+        message:
+          "Section “S” no longer covers a run of steps: its first and last steps are in different branches",
+        sectionId: "s",
+        stepId: "inYes",
+      }),
+    ]);
+    expect(hasErrors(validateWorkflow(d, manifest))).toBe(false);
+  });
+
+  test("a reversed section is section.broken", () => {
+    const d = annotated([sec("s", "email", "load")]);
+    expect(annotations(d)).toEqual([
+      issue({
+        code: "section.broken",
+        severity: "warning",
+        message: "Section “S” no longer covers a run of steps: its first step comes after its last",
+        sectionId: "s",
+        stepId: "email",
+      }),
+    ]);
+    expect(hasErrors(validateWorkflow(d, manifest))).toBe(false);
+  });
+
+  test("a colour outside the six is section.broken", () => {
+    const d = annotated([sec("s", "load", "load", { color: "red" as Section["color"] })]);
+    expect(annotations(d)).toEqual([
+      issue({
+        code: "section.broken",
+        severity: "warning",
+        message:
+          'Section “S” no longer covers a run of steps: its colour "red" isn\'t one of yellow, blue, green, pink, purple, gray',
+        sectionId: "s",
+        stepId: "load",
+      }),
+    ]);
+    expect(hasErrors(validateWorkflow(d, manifest))).toBe(false);
+  });
+
+  test("an invalid or duplicate section ID is section.broken", () => {
+    const invalid = annotations(annotated([sec("1bad", "load", "load")]));
+    expect(invalid).toEqual([
+      issue({
+        code: "section.broken",
+        severity: "warning",
+        message:
+          'Section “1BAD” no longer covers a run of steps: its ID "1bad" is invalid or used twice',
+        sectionId: "1bad",
+        stepId: "load",
+      }),
+    ]);
+    const dup = annotations(
+      annotated([sec("s", "load", "load"), sec("s", "email", "email", { title: "Later" })]),
+    );
+    expect(dup).toEqual([
+      issue({
+        code: "section.broken",
+        message:
+          'Section “Later” no longer covers a run of steps: its ID "s" is invalid or used twice',
+        sectionId: "s",
+        stepId: "email",
+      }),
+    ]);
+  });
+
+  test("overlapping sections are reported on the later one", () => {
+    const d = annotated([sec("a", "load", "cond"), sec("b", "cond", "email")]);
+    expect(annotations(d)).toEqual([
+      {
+        code: "section.overlap",
+        severity: "warning",
+        message: "Sections “A” and “B” overlap",
+        sectionId: "b",
+        stepId: "cond",
+      },
+    ]);
+    expect(hasErrors(validateWorkflow(d, manifest))).toBe(false);
+  });
+
+  test("a 4001-char note on a step or a section is note.tooLong", () => {
+    const long = "x".repeat(4001);
+    expect(annotations(annotated([], { note: long }))).toEqual([
+      {
+        code: "note.tooLong",
+        severity: "warning",
+        message: "This note is 4001 characters; notes can be 4000 at most",
+        stepId: "load",
+      },
+    ]);
+    const onSection = annotations(annotated([sec("s", "cond", "email", { note: long })]));
+    expect(onSection).toEqual([
+      issue({ code: "note.tooLong", severity: "warning", sectionId: "s", stepId: "cond" }),
+    ]);
+    expect(onSection[0]?.message).toBe("This note is 4001 characters; notes can be 4000 at most");
+    expect(annotations(annotated([], { note: "x".repeat(4000) }))).toEqual([]);
+    expect(hasErrors(validateWorkflow(annotated([], { note: long }), manifest))).toBe(false);
+  });
+
+  test("a step colour outside the six is not an issue", () => {
+    const d = annotated([], { color: "red" as Step["color"] });
+    expect(validateWorkflow(d, manifest)).toEqual([]);
   });
 });

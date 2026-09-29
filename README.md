@@ -316,6 +316,13 @@ await engine.publish("acme", doc.id, version, "user_1"); // throws FlowlineValid
 This uses only the quick start's `crm.loadContact` and built-in nodes, so it publishes against
 the engine from step 3. `examples/docs-check` publishes it on every `pnpm test`.
 
+A doc can also carry annotations, all optional and visual only: a step's `note` (plain text, up to
+4000 characters) and `color` (`yellow`, `blue`, `green`, `pink`, `purple` or `gray`), and
+`sections`, coloured regions that each cover a run of steps (`first` to `last`) in one step list.
+The engine ignores all three. The tree operations keep sections intact: deleting or moving a step
+shrinks its section, and a section left with no steps is removed. The validator reports broken or
+overlapping sections and over-long notes as warnings, never errors.
+
 Text comparisons in rules (`core.condition`) and in `core.switch` are case-insensitive by default,
 so `"VIP"` equals `"vip"`. They are also loose: `"5"` equals `5`. To match case, set
 `caseSensitive: true` on a rule, or on the whole switch in its config. The rule helpers take it as
