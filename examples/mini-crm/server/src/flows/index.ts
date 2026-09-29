@@ -5,10 +5,14 @@
  */
 import type { WorkflowDoc } from "@flowlinejs/core";
 import type { Engine } from "@flowlinejs/engine";
+import { anyCallEndedFlow } from "./any-call-ended";
+import { dealStuckFlow } from "./deal-stuck";
 import { dealWonFollowUpFlow } from "./deal-won";
 import { inboundLeadRoutingFlow } from "./lead-routing";
 import { createContactFlow, getContactFlow, getOrCreateContactFlow } from "./subflows";
 
+export { anyCallEndedFlow, MIN_CALL_SECONDS } from "./any-call-ended";
+export { DEAL_STUCK_WORKFLOW_ID, dealStuckFlow, STUCK_DEAL_MANAGER_ID } from "./deal-stuck";
 export { dealWonFollowUpFlow } from "./deal-won";
 export { inboundLeadRoutingFlow } from "./lead-routing";
 export { createContactFlow, getContactFlow, getOrCreateContactFlow } from "./subflows";
@@ -23,6 +27,8 @@ export const demoFlows: readonly WorkflowDoc[] = [
   getOrCreateContactFlow,
   inboundLeadRoutingFlow,
   dealWonFollowUpFlow,
+  anyCallEndedFlow,
+  dealStuckFlow,
 ];
 
 /**

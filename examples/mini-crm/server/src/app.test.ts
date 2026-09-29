@@ -3,7 +3,7 @@ import type { StorageAdapter } from "@flowlinejs/engine";
 import { createMemoryStorage } from "@flowlinejs/storage-memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMiniCrm, type MiniCrm, type MiniCrmOptions, TENANT_ID } from "./app";
-import type { Approval, Contact, OutboxMessage } from "./crm-store";
+import type { Approval, Call, Contact, Deal, OutboxMessage } from "./crm-store";
 import { demoFlows } from "./flows";
 
 let now: number;
@@ -32,6 +32,9 @@ function start(opts: MiniCrmOptions = {}): Promise<MiniCrm> {
     clock: () => now,
     publicUrl: "http://crm.test",
     logger,
+    advanceClock: (ms) => {
+      now += ms;
+    },
     ...opts,
   });
 }
@@ -544,5 +547,257 @@ describe("CRM API", () => {
       await get<{ id: string; publishedVersion: number | null }[]>("/flowline/workflows");
     expect(workflows.map((w) => w.id).sort()).toEqual(demoFlows.map((d) => d.id).sort());
     expect(workflows.every((w) => w.publishedVersion === 1)).toBe(true);
+  });
+
+  it("offers the host's isUnassigned operator and defaults conditions to strict", async () => {
+    const manifest = await get<{
+      nodes: { type: string; input: { properties: Record<string, unknown> } }[];
+    }>("/flowline/manifest");
+    const rules = manifest.nodes.find((n) => n.type === "core.condition")?.input.properties
+      .rules as { properties: { compare: { default: string } } };
+    expect(rules.properties.compare.default).toBe("strict");
+    expect(JSON.stringify(rules)).toContain('"isUnassigned"');
+  });
+});
+
+const DAY = 86_400_000;
+
+/** Move the demo clock forward through the API (which also sweeps the poll triggers). */
+async function advance(ms: number): Promise<void> {
+  const res = await call("POST", "/api/demo/advance", { ms });
+  expect(res.status).toBe(204);
+  await crm.engine.drain();
+}
+
+async function logCall(body: object): Promise<{ status: number; call: Call }> {
+  const res = await call("POST", "/api/calls", body);
+  return { status: res.status, call: (await res.json()) as Call };
+}
+
+/** Every run of `workflowId` with its trigger payload, oldest first. */
+async function triggersOf<T>(workflowId: string): Promise<{ run: RunSummary; trigger: T }[]> {
+  const runs = (await runsOf(workflowId)).reverse();
+  return Promise.all(
+    runs.map(async (run) => ({ run, trigger: (await runDetail(run.id)).run.trigger as T })),
+  );
+}
+
+type TriggerEventRow = { type: string; workflowId: string; key?: string };
+
+describe("any call ended", () => {
+  it("starts one run for an AI call and one for a VoIP call, and emails the owner", async () => {
+    const ai = await logCall({
+      contactId: "c_1",
+      kind: "ai",
+      durationSec: 95,
+      summary: "Asked about pricing",
+    });
+    expect(ai.status).toBe(201);
+    expect(ai.call).toMatchObject({ contactId: "c_1", kind: "ai", durationSec: 95 });
+    now += 1000; // Runs created in the same ms list in no particular order.
+    const voip = await logCall({ contactId: "c_2", kind: "voip", durationSec: 240 });
+    expect(voip.status).toBe(201);
+    await crm.engine.drain();
+
+    const runs = await triggersOf<{ call: { id: string; source: string; durationSec: number } }>(
+      "any-call-ended",
+    );
+    expect(runs.map((r) => r.run.startedBy)).toEqual([
+      { kind: "event", event: "ai_call.ended" },
+      { kind: "event", event: "voip_call.ended" },
+    ]);
+    // Both sources are normalized onto one payload shape.
+    expect(runs.map((r) => r.trigger.call)).toEqual([
+      expect.objectContaining({ id: ai.call.id, source: "ai", durationSec: 95 }),
+      expect.objectContaining({ id: voip.call.id, source: "voip", durationSec: 240 }),
+    ]);
+    expect(runs.every((r) => r.run.status === "completed")).toBe(true);
+    const outbox = await get<OutboxMessage[]>("/api/outbox");
+    expect(outbox.map((m) => m.to).sort()).toEqual(["dev@acme.test", "eli@acme.test"]);
+    expect(outbox.find((m) => m.to === "dev@acme.test")).toMatchObject({
+      subject: "Call with Grace Hopper ended",
+    });
+    expect(crm.crm.listCalls("c_1")).toEqual([ai.call]);
+  });
+
+  it("starts one run when the same call is delivered twice", async () => {
+    const call1 = { id: "call_redelivered", contactId: "c_1", kind: "ai", durationSec: 60 };
+    const first = await logCall(call1);
+    expect(first.status).toBe(201);
+    const again = await logCall(call1);
+    expect(again.status).toBe(200);
+    expect(again.call).toEqual(first.call);
+    await crm.engine.drain();
+
+    expect(await runsOf("any-call-ended")).toHaveLength(1);
+    const events = await get<TriggerEventRow[]>("/api/demo/trigger-events");
+    expect(events.filter((e) => e.type === "trigger.deduped")).toEqual([
+      expect.objectContaining({
+        workflowId: "any-call-ended",
+        key: "event:any-call-ended:call_redelivered",
+      }),
+    ]);
+  });
+
+  it("keeps the newest 100 trigger events", async () => {
+    const callA = { id: "call_a", contactId: "c_1", kind: "ai", durationSec: 60 };
+    const callB = { id: "call_b", contactId: "c_1", kind: "ai", durationSec: 60 };
+    await logCall(callA);
+    await logCall(callB);
+    await logCall(callA); // Deduped: the oldest event, soon pushed out.
+    for (let i = 0; i < 100; i++) await logCall(callB);
+    await logCall(callA); // Deduped: the newest event.
+    await crm.engine.drain();
+
+    const events = await get<TriggerEventRow[]>("/api/demo/trigger-events");
+    expect(events).toHaveLength(100);
+    const keys = events.map((e) => e.key);
+    expect(keys[0]).toBe("event:any-call-ended:call_a");
+    expect(keys.slice(1).every((k) => k === "event:any-call-ended:call_b")).toBe(true);
+  });
+
+  it("ignores calls shorter than the minimum length", async () => {
+    expect((await logCall({ contactId: "c_1", kind: "voip", durationSec: 10 })).status).toBe(201);
+    await crm.engine.drain();
+    expect(await runsOf("any-call-ended")).toEqual([]);
+  });
+
+  it("stops without email when the contact has no owner", async () => {
+    await logCall({ contactId: "c_9", kind: "ai", durationSec: 45 });
+    await crm.engine.drain();
+    const [run] = await runsOf("any-call-ended");
+    const detail = await runDetail(run?.id as string);
+    expect(detail.events.find((e) => e.type === "run.stopped")?.data).toMatchObject({
+      reason: "No owner",
+    });
+    expect(await get<OutboxMessage[]>("/api/outbox")).toEqual([]);
+  });
+
+  it("validates calls", async () => {
+    const post = async (body: object) => (await call("POST", "/api/calls", body)).status;
+    expect(await post({ contactId: "nope", kind: "ai", durationSec: 40 })).toBe(404);
+    expect(await post({ contactId: "c_1", kind: "fax", durationSec: 40 })).toBe(400);
+    expect(await post({ contactId: "c_1", kind: "ai", durationSec: -1 })).toBe(400);
+  });
+});
+
+describe("deal stuck in stage", () => {
+  type StuckTrigger = { deal: Deal; days: number };
+  const stuckDealIds = async () =>
+    (await triggersOf<StuckTrigger>("deal-stuck-in-stage")).map((r) => r.trigger.deal.id);
+
+  it("records when a deal entered its stage", async () => {
+    const seeded = await get<Deal[]>("/api/deals");
+    expect(seeded.every((d) => d.stageEnteredAt === new Date(now).toISOString())).toBe(true);
+    now += 5000;
+    const moved = await call("PATCH", "/api/deals/d_1", { stage: "won" });
+    expect(((await moved.json()) as { deal: Deal }).deal.stageEnteredAt).toBe(
+      new Date(now).toISOString(),
+    );
+    now += 5000;
+    const repriced = await call("PATCH", "/api/deals/d_1", { amount: 1 });
+    expect(((await repriced.json()) as { deal: Deal }).deal.stageEnteredAt).toBe(
+      new Date(now - 5000).toISOString(),
+    );
+  });
+
+  it("starts once per deal that crossed the threshold, never for one that moved on", async () => {
+    // d_1 and d_4 are seeded in proposal; d_4 moves on before its three days are up.
+    await call("PATCH", "/api/deals/d_4", { stage: "qualified" });
+    await advance(3 * DAY + 10_000);
+
+    const runs = await triggersOf<StuckTrigger>("deal-stuck-in-stage");
+    expect(runs.map((r) => r.trigger.deal.id)).toEqual(["d_1"]);
+    const { run, trigger } = runs[0] as (typeof runs)[number];
+    expect(run.startedBy).toMatchObject({
+      kind: "poll",
+      itemKey: `d_1:${trigger.deal.stageEnteredAt}`,
+    });
+    expect(run.status).toBe("waiting");
+    expect(await get<OutboxMessage[]>("/api/outbox")).toEqual([
+      expect.objectContaining({
+        to: "dev@acme.test",
+        subject: "Navy Labs expansion has been in proposal for 3 days",
+      }),
+    ]);
+
+    // Still stuck after the wait: the manager hears about it.
+    await advance(60_000);
+    expect((await runDetail(run.id)).run.status).toBe("completed");
+    expect((await get<OutboxMessage[]>("/api/outbox"))[0]).toMatchObject({
+      to: "ava@acme.test",
+      subject: "Escalation: Navy Labs expansion is stuck in proposal",
+    });
+
+    // The same stint never fires twice.
+    await advance(3 * DAY);
+    expect(await stuckDealIds()).toEqual(["d_1"]);
+
+    // Re-entering the stage is a new stint.
+    await call("PATCH", "/api/deals/d_4", { stage: "proposal" });
+    await advance(3 * DAY);
+    expect(await stuckDealIds()).toEqual(["d_1", "d_4"]);
+  });
+
+  it("cancels the waiting run when the deal's stage changes", async () => {
+    await advance(3 * DAY + 10_000);
+    const runs = await triggersOf<StuckTrigger>("deal-stuck-in-stage");
+    expect(runs.map((r) => r.trigger.deal.id).sort()).toEqual(["d_1", "d_4"]);
+    const d1 = runs.find((r) => r.trigger.deal.id === "d_1")?.run.id as string;
+    const d4 = runs.find((r) => r.trigger.deal.id === "d_4")?.run.id as string;
+    expect((await runDetail(d1)).run.status).toBe("waiting");
+
+    expect((await call("PATCH", "/api/deals/d_1", { stage: "won" })).status).toBe(200);
+    const detail = await runDetail(d1);
+    expect(detail.run.status).toBe("cancelled");
+    expect(detail.events.find((e) => e.type === "run.cancelled")?.data).toEqual({
+      by: "system",
+      reason: "Stage changed",
+    });
+    // Only that deal's run.
+    expect((await runDetail(d4)).run.status).toBe("waiting");
+  });
+
+  it("stops at the recheck when the deal moved on and the host did not cancel", async () => {
+    storage = createMemoryStorage();
+    crm = await start({ cancelStuckRunsOnStageChange: false });
+    await advance(3 * DAY + 10_000);
+    const runs = await triggersOf<StuckTrigger>("deal-stuck-in-stage");
+    const d1 = runs.find((r) => r.trigger.deal.id === "d_1")?.run.id as string;
+    await call("PATCH", "/api/deals/d_1", { stage: "won" });
+    expect((await runDetail(d1)).run.status).toBe("waiting");
+
+    await advance(60_000);
+    const detail = await runDetail(d1);
+    expect(detail.run.status).toBe("completed");
+    expect(detail.events.find((e) => e.type === "run.stopped")).toMatchObject({
+      stepPath: "still_stuck/else/moved_on_later",
+      data: { reason: "Deal moved on" },
+    });
+    // d_4 is still stuck and escalates; d_1 moved on and does not.
+    const escalations = (await get<OutboxMessage[]>("/api/outbox"))
+      .filter((m) => m.to === "ava@acme.test")
+      .map((m) => m.subject);
+    expect(escalations).toEqual(["Escalation: Kernel Co seats is stuck in proposal"]);
+  });
+
+  it("rewinds the clock through the API, and a reset leaves it alone", async () => {
+    const start0 = now;
+    crm = await start({
+      rewindClock: () => {
+        now = start0;
+      },
+    });
+    await advance(3 * DAY);
+    expect((await call("POST", "/api/demo/reset")).status).toBe(204);
+    expect(now).toBe(start0 + 3 * DAY);
+    expect((await call("POST", "/api/demo/rewind")).status).toBe(204);
+    expect(now).toBe(start0);
+  });
+
+  it("serves the clock routes only with a fake clock", async () => {
+    crm = await start({ advanceClock: undefined, rewindClock: () => {} });
+    expect((await call("POST", "/api/demo/advance", { ms: 1000 })).status).toBe(404);
+    expect((await call("POST", "/api/demo/rewind")).status).toBe(404);
   });
 });

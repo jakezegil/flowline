@@ -1,6 +1,7 @@
 /**
  * Starts the mini CRM server on port 8787 (or `PORT`) with a background worker. Storage is in
- * memory unless `DATABASE_URL` points at Postgres.
+ * memory unless `DATABASE_URL` points at Postgres. `MINI_CRM_FAKE_CLOCK=1` runs the CRM and the
+ * engine on a clock that `POST /api/demo/advance { ms }` moves forward (off by default).
  *
  * @module
  */
@@ -10,9 +11,11 @@ import { createPostgresStorage, migrate } from "@flowlinejs/storage-postgres";
 import { serve } from "@hono/node-server";
 import pg from "pg";
 import { createMiniCrm, TENANT_ID } from "./app";
+import { createFakeClock } from "./fake-clock";
 
 const port = Number(process.env.PORT ?? 8787);
 const publicUrl = process.env.PUBLIC_URL ?? `http://localhost:${port}`;
+const fakeClock = process.env.MINI_CRM_FAKE_CLOCK === "1" ? createFakeClock() : undefined;
 
 interface Storage {
   storage: StorageAdapter;
@@ -35,11 +38,24 @@ async function createStorage(): Promise<Storage> {
 
 async function main(): Promise<void> {
   const { storage, label, close } = await createStorage();
-  const { app, engine } = await createMiniCrm({ storage, publicUrl });
-  const worker = engine.startWorker({ concurrency: 2, pollMs: 250 });
+  const { app, engine } = await createMiniCrm({
+    storage,
+    publicUrl,
+    ...(fakeClock
+      ? { clock: fakeClock.now, advanceClock: fakeClock.advance, rewindClock: fakeClock.reset }
+      : {}),
+  });
+  // With the fake clock, sweep poll triggers every second: after an advance, the next sweep
+  // (the route runs one too) sees the new time without waiting the default 15 s.
+  const worker = engine.startWorker({
+    concurrency: 2,
+    pollMs: 250,
+    ...(fakeClock ? { pollEveryMs: 1000 } : {}),
+  });
 
   const server = serve({ fetch: app.fetch, port }, () => {
     console.info(`mini-crm server on ${publicUrl} (storage: ${label}, tenant: ${TENANT_ID})`);
+    if (fakeClock) console.info("  Fake clock:  POST /api/demo/advance { ms } moves time forward");
     console.info(`  CRM API:     ${publicUrl}/api/contacts`);
     console.info(`  Flowline API: ${publicUrl}/flowline/manifest`);
     console.info(`  Webhooks:    ${publicUrl}/api/demo`);

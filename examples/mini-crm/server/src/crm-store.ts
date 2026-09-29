@@ -1,10 +1,11 @@
 /**
- * The mini CRM's data: an in-memory store of contacts, deals, users, sent emails (the outbox) and
- * approval requests, seeded with demo data. It stands in for a real CRM's database.
+ * The mini CRM's data: an in-memory store of contacts, deals, users, logged calls, sent emails
+ * (the outbox) and approval requests, seeded with demo data. It stands in for a real CRM's
+ * database.
  *
- * The store knows nothing about Flowline. It reports changes (`contact.created`, `deal.updated`)
- * to the listener the app registers with {@link CrmStore.onEvent}, which turns them into
- * `engine.emit` calls.
+ * The store knows nothing about Flowline. It reports changes (`contact.created`, `deal.updated`,
+ * `ai_call.ended`, `voip_call.ended`) to the listener the app registers with
+ * {@link CrmStore.onEvent}, which turns them into `engine.emit` calls.
  *
  * @module
  */
@@ -41,6 +42,7 @@ export const DealSchema = z.object({
   stage: z.enum(DEAL_STAGES),
   contactId: z.string(),
   ownerId: z.string(),
+  stageEnteredAt: z.iso.datetime().describe("When the deal entered its current stage."),
 });
 /** A sales opportunity. */
 export type Deal = z.infer<typeof DealSchema>;
@@ -55,6 +57,39 @@ export const UserSchema = z.object({
 });
 /** A CRM user: a sales rep or a manager. */
 export type User = z.infer<typeof UserSchema>;
+
+/** How a call was made: by the AI agent, or over the phone system (VoIP). */
+export type CallKind = "ai" | "voip";
+
+/** A call with a contact that has ended. */
+export interface Call {
+  /** Call ID; the phone systems use it to deduplicate redeliveries. */
+  id: string;
+  /** The contact called. */
+  contactId: string;
+  /** Which system made the call. */
+  kind: CallKind;
+  /** Length in whole seconds. */
+  durationSec: number;
+  /** When it ended (ISO 8601). */
+  endedAt: string;
+  /** What was said, when the system provides a summary (the AI agent does). */
+  summary?: string;
+}
+
+/** Fields accepted when logging a call. */
+export interface NewCall {
+  /** Call ID. Logging an existing ID redelivers that call's event. Default: a new ID. */
+  id?: string;
+  /** The contact called. */
+  contactId: string;
+  /** Which system made the call. */
+  kind: CallKind;
+  /** Length in whole seconds. */
+  durationSec: number;
+  /** What was said. */
+  summary?: string;
+}
 
 /** Zod schema of an {@link OutboxMessage}. */
 export const OutboxMessageSchema = z.object({
@@ -122,10 +157,34 @@ export type ContactChanges = Partial<Omit<Contact, "id" | "createdAt">>;
 /** Fields that can be changed on a deal. */
 export type DealChanges = Partial<Pick<Deal, "stage" | "amount" | "ownerId" | "name">>;
 
-/** A change the CRM reports to its listener. `id` is unique per event (use it to deduplicate). */
+/**
+ * A change the CRM reports to its listener. `id` is unique per event (use it to deduplicate).
+ *
+ * The two call events come from two different systems and have different shapes, as they would
+ * in a real CRM: the AI agent reports `ai_call.ended` with seconds and a transcript summary, the
+ * phone system reports `voip_call.ended` with milliseconds.
+ */
 export type CrmEvent =
   | { id: string; type: "contact.created"; payload: { contact: Contact } }
-  | { id: string; type: "deal.updated"; payload: { deal: Deal; changes: string[] } };
+  | { id: string; type: "deal.updated"; payload: { deal: Deal; changes: string[] } }
+  | {
+      id: string;
+      type: "ai_call.ended";
+      payload: {
+        call: {
+          id: string;
+          contactId: string;
+          seconds: number;
+          endedAt: string;
+          transcriptSummary: string;
+        };
+      };
+    }
+  | {
+      id: string;
+      type: "voip_call.ended";
+      payload: { callId: string; contactId: string; durationMs: number; endedAt: string };
+    };
 
 /** Receives CRM events; the store awaits it, so a returned promise delays the mutation's result. */
 export type CrmListener = (event: CrmEvent) => void | Promise<void>;
@@ -147,6 +206,7 @@ interface State {
   contacts: Map<string, Contact>;
   deals: Map<string, Deal>;
   users: Map<string, User>;
+  calls: Map<string, Call>;
   outbox: OutboxMessage[];
   approvals: Map<string, Approval>;
   /** Idempotency key → contact ID, so a re-run `crm.createContact` step creates one contact. */
@@ -190,7 +250,7 @@ const SEED_CONTACTS: Omit<Contact, "createdAt">[] = [
   ownerId: ownerId ?? null,
 }));
 
-const SEED_DEALS: Deal[] = [
+const SEED_DEALS: Omit<Deal, "stageEnteredAt">[] = [
   {
     id: "d_1",
     name: "Navy Labs expansion",
@@ -261,7 +321,10 @@ const SEED_DEALS: Deal[] = [
 export interface CrmStore {
   /** Register the listener for CRM events (one; a later call replaces it). */
   onEvent(listener: CrmListener): void;
-  /** Restore the seed data: contacts, deals and users as seeded, empty outbox and approvals. */
+  /**
+   * Restore the seed data: contacts, deals and users as seeded (deals entering their stage now),
+   * no calls, empty outbox and approvals.
+   */
   reset(): void;
 
   /** All contacts, newest first. */
@@ -300,6 +363,16 @@ export interface CrmStore {
    * (nothing is reported when nothing changed).
    */
   updateDeal(id: string, changes: DealChanges): Promise<{ deal: Deal; changes: string[] }>;
+
+  /**
+   * Log a call that ended and report `ai_call.ended` or `voip_call.ended`. Logging an `id` that
+   * exists already returns that call unchanged and reports its event again, the way a phone
+   * system redelivers a webhook.
+   * @throws {@link CrmError} 404 for an unknown contact, 400 for an invalid duration.
+   */
+  logCall(input: NewCall): Promise<Call>;
+  /** Logged calls, oldest first; only the calls with `contactId` when it is given. */
+  listCalls(contactId?: string): Call[];
 
   /** All users. */
   listUsers(): User[];
@@ -353,7 +426,8 @@ export interface CrmStore {
 }
 
 /**
- * Create a CRM store seeded with 12 contacts, 8 deals and 5 users.
+ * Create a CRM store seeded with 12 contacts, 8 deals (each entering its stage when seeded) and 5
+ * users.
  *
  * @param opts.clock - Time source in epoch ms (default `Date.now`); share the engine's clock.
  */
@@ -367,8 +441,9 @@ export function createCrmStore(opts: { clock?: () => number } = {}): CrmStore {
     const at = iso();
     return {
       contacts: new Map(SEED_CONTACTS.map((c) => [c.id, { ...c, createdAt: at }])),
-      deals: new Map(SEED_DEALS.map((d) => [d.id, { ...d }])),
+      deals: new Map(SEED_DEALS.map((d) => [d.id, { ...d, stageEnteredAt: at }])),
       users: new Map(SEED_USERS.map((u) => [u.id, { ...u }])),
+      calls: new Map(),
       outbox: [],
       approvals: new Map(),
       createdByKey: new Map(),
@@ -513,12 +588,61 @@ export function createCrmStore(opts: { clock?: () => number } = {}): CrmStore {
       );
       const updated: Deal = { ...deal };
       for (const k of changed) Object.assign(updated, { [k]: changes[k] });
+      if (changed.includes("stage")) updated.stageEnteredAt = iso();
       state.deals.set(id, updated);
       if (changed.length > 0) {
         await report({ type: "deal.updated", payload: { deal: { ...updated }, changes: changed } });
       }
       return { deal: { ...updated }, changes: changed };
     },
+
+    async logCall({ id, contactId, kind, durationSec, summary }) {
+      const existing = id === undefined ? undefined : state.calls.get(id);
+      if (!existing) {
+        requireContact(contactId);
+        if (!(Number.isInteger(durationSec) && durationSec >= 0)) {
+          throw new CrmError("durationSec must be a whole number of seconds", 400);
+        }
+      }
+      const call: Call = existing ?? {
+        id: id ?? `call_${globalThis.crypto.randomUUID().slice(0, 8)}`,
+        contactId,
+        kind,
+        durationSec,
+        endedAt: iso(),
+        ...(summary !== undefined ? { summary } : {}),
+      };
+      state.calls.set(call.id, call);
+      await report(
+        call.kind === "ai"
+          ? {
+              type: "ai_call.ended",
+              payload: {
+                call: {
+                  id: call.id,
+                  contactId: call.contactId,
+                  seconds: call.durationSec,
+                  endedAt: call.endedAt,
+                  transcriptSummary: call.summary ?? "",
+                },
+              },
+            }
+          : {
+              type: "voip_call.ended",
+              payload: {
+                callId: call.id,
+                contactId: call.contactId,
+                durationMs: call.durationSec * 1000,
+                endedAt: call.endedAt,
+              },
+            },
+      );
+      return { ...call };
+    },
+    listCalls: (contactId) =>
+      [...state.calls.values()]
+        .filter((c) => contactId === undefined || c.contactId === contactId)
+        .map((c) => ({ ...c })),
 
     listUsers: () => [...state.users.values()].map((u) => ({ ...u })),
     getUser: (id) => {

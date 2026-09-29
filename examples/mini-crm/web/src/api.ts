@@ -8,15 +8,29 @@ import { createClient, type RunSummary } from "@flowlinejs/core/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   Approval,
+  Call,
+  CallKind,
   Contact,
   Deal,
   DealStage,
+  NewCall,
   NewContact,
   OutboxMessage,
   User,
 } from "../../server/src/crm-store";
 
-export type { Approval, Contact, Deal, DealStage, NewContact, OutboxMessage, User };
+export type {
+  Approval,
+  Call,
+  CallKind,
+  Contact,
+  Deal,
+  DealStage,
+  NewCall,
+  NewContact,
+  OutboxMessage,
+  User,
+};
 
 /** Deal pipeline stages, in order (mirrors the server's `DEAL_STAGES`). */
 export const DEAL_STAGES: readonly DealStage[] = ["lead", "qualified", "proposal", "won", "lost"];
@@ -98,6 +112,8 @@ export interface DemoInfo {
 export const api = {
   listContacts: () => request<Contact[]>("GET", "/api/contacts"),
   createContact: (c: NewContact) => request<Contact>("POST", "/api/contacts", c),
+  /** Log a call that ended; reports `ai_call.ended` or `voip_call.ended`. */
+  logCall: (c: NewCall) => request<Call>("POST", "/api/calls", c),
   listDeals: () => request<Deal[]>("GET", "/api/deals"),
   updateDeal: (id: string, changes: Partial<Pick<Deal, "stage" | "amount" | "ownerId" | "name">>) =>
     request<{ deal: Deal; changes: string[] }>(

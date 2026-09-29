@@ -1,13 +1,25 @@
 /**
  * Contacts: a searchable table and a "New contact" dialog. Creating a contact reports
- * `contact.created`, which starts any workflow listening for it; the toast says which.
+ * `contact.created`, which starts any workflow listening for it; the toast says which. Each row
+ * can also log a finished AI or VoIP call, which reports `ai_call.ended` or `voip_call.ended`.
  *
  * @module
  */
-import { Plus, Search, Sparkles, Users, X } from "lucide-react";
-import { type FormEvent, type JSX, useEffect, useMemo, useState } from "react";
+import type { RunSummary } from "@flowlinejs/core/client";
+import { Bot, Phone, Plus, Search, Sparkles, Users, X } from "lucide-react";
+import { type FormEvent, type JSX, type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
-import { ApiError, api, type Contact, invalidate, runsStartedBy, useQuery, useUsers } from "../api";
+import {
+  ApiError,
+  api,
+  type CallKind,
+  type Contact,
+  invalidate,
+  type NewCall,
+  runsStartedBy,
+  useQuery,
+  useUsers,
+} from "../api";
 import {
   Avatar,
   Badge,
@@ -70,6 +82,89 @@ export function WelcomeHint(): JSX.Element | null {
   );
 }
 
+/** Links to the runs a CRM change started, for a toast. */
+function startedRuns(runs: RunSummary[], none: string): ReactNode {
+  if (runs.length === 0) return none;
+  return (
+    <>
+      Started{" "}
+      {runs.map((r, i) => (
+        <span key={r.id}>
+          {i > 0 && ", "}
+          <Link to={`/runs/${r.id}`}>{r.workflowId}</Link>
+        </span>
+      ))}
+    </>
+  );
+}
+
+/** The sample call each button logs: what the AI agent or the phone system would report. */
+const SAMPLE_CALLS: Record<CallKind, { label: string; call: Omit<NewCall, "contactId"> }> = {
+  ai: {
+    label: "AI",
+    call: { kind: "ai", durationSec: 95, summary: "Asked about pricing for the team plan." },
+  },
+  voip: { label: "VoIP", call: { kind: "voip", durationSec: 240 } },
+};
+
+/**
+ * "Log AI call" and "Log VoIP call" for one contact: each posts a finished sample call, which the
+ * CRM reports as `ai_call.ended` or `voip_call.ended`; the toast links the runs it started.
+ */
+export function CallButtons(props: {
+  contact: Pick<Contact, "id" | "firstName" | "lastName">;
+}): JSX.Element {
+  const toast = useToast();
+  const [busy, setBusy] = useState<CallKind | null>(null);
+  const name = `${props.contact.firstName} ${props.contact.lastName}`;
+
+  async function log(kind: CallKind) {
+    const { label, call } = SAMPLE_CALLS[kind];
+    setBusy(kind);
+    const since = Date.now() - 2000;
+    try {
+      const logged = await api.logCall({ contactId: props.contact.id, ...call });
+      const runs = await runsStartedBy(
+        kind === "ai" ? "ai_call.ended" : "voip_call.ended",
+        since,
+        (t) => (t as { call?: { id?: string } } | null)?.call?.id === logged.id,
+      ).catch(() => []);
+      toast({
+        tone: "success",
+        title: `${label} call with ${name} logged`,
+        detail: startedRuns(runs, "No workflow started for this call."),
+      });
+    } catch (err) {
+      toast({
+        tone: "danger",
+        title: `Couldn't log the ${label} call`,
+        detail: err instanceof ApiError ? err.message : String(err),
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <span className="row-actions">
+      {(["ai", "voip"] as const).map((kind) => (
+        <button
+          key={kind}
+          type="button"
+          className="btn btn--sm"
+          aria-label={`Log ${SAMPLE_CALLS[kind].label} call with ${name}`}
+          title={`Log a finished ${SAMPLE_CALLS[kind].label} call with ${name}`}
+          disabled={busy !== null}
+          onClick={() => log(kind)}
+        >
+          {kind === "ai" ? <Bot size={13} aria-hidden /> : <Phone size={13} aria-hidden />}
+          {SAMPLE_CALLS[kind].label} call
+        </button>
+      ))}
+    </span>
+  );
+}
+
 function NewContactDialog(props: { open: boolean; onClose(): void }): JSX.Element {
   const { users } = useUsers();
   const toast = useToast();
@@ -107,20 +202,7 @@ function NewContactDialog(props: { open: boolean; onClose(): void }): JSX.Elemen
       toast({
         tone: "success",
         title: `${contact.firstName} ${contact.lastName} added`,
-        detail:
-          runs.length === 0 ? (
-            "No workflow listens for new contacts."
-          ) : (
-            <>
-              Started{" "}
-              {runs.map((r, i) => (
-                <span key={r.id}>
-                  {i > 0 && ", "}
-                  <Link to={`/runs/${r.id}`}>{r.workflowId}</Link>
-                </span>
-              ))}
-            </>
-          ),
+        detail: startedRuns(runs, "No workflow listens for new contacts."),
       });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
@@ -252,10 +334,11 @@ export function ContactsPage(): JSX.Element {
                 <th>Source</th>
                 <th>Owner</th>
                 <th className="num">Added</th>
+                <th className="num">Log a call</th>
               </tr>
             </thead>
             <tbody>
-              {!contacts.data && <SkeletonRows cols={5} />}
+              {!contacts.data && <SkeletonRows cols={6} />}
               {rows.map((c) => (
                 <tr key={c.id}>
                   <td>
@@ -276,6 +359,9 @@ export function ContactsPage(): JSX.Element {
                   </td>
                   <td className="num muted" title={fullTime(c.createdAt)}>
                     {timeAgo(c.createdAt, now)}
+                  </td>
+                  <td>
+                    <CallButtons contact={c} />
                   </td>
                 </tr>
               ))}
