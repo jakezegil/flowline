@@ -502,6 +502,8 @@ export interface TriggerDefinition<C extends z.ZodObject = z.ZodObject, P = unkn
    * (`poll:<workflowId>:<key>`, within the trigger's `dedupe.window`, else the engine default).
    * Called by `engine.tickPolls()` over contiguous, non-overlapping intervals of at most
    * `maxInterval`. Throwing (or the lease being lost) leaves the interval to be polled again.
+   * Polls of all workflows run one after another, and a slow `poll` delays the others: keep it
+   * bounded and honour `ctx.signal` (pass it to `fetch`), which aborts when the lease is lost.
    */
   poll?(args: PollArgs<z.infer<C>>): Promise<PollResult<P>> | PollResult<P>;
   /**

@@ -17,7 +17,8 @@ export interface WorkerOptions {
   scheduleEveryMs?: number;
   /**
    * How often the first loop calls `tickPolls`, in ms. Default `15_000`. A poll trigger's
-   * `interval` shorter than this effectively becomes this.
+   * `interval` shorter than this effectively becomes this. The tick polls workflows one after
+   * another on the first loop, so a slow `poll` delays that loop's run claims and `stop()`.
    */
   pollEveryMs?: number;
 }

@@ -21,6 +21,7 @@ import {
   type Issue,
   type PollContext,
   type RunOrigin,
+  type TriggerDefinition,
   type WorkflowVersion,
 } from "@flowlinejs/core";
 import { CronExpressionParser } from "cron-parser";
@@ -161,6 +162,9 @@ interface PollSettings {
   leaseMs: number;
 }
 
+/** When a version's workflow was last published, or `null`/`undefined` when unknown. */
+type PublishedAtLookup = (v: WorkflowVersion) => Promise<number | null | undefined>;
+
 /** Thrown into a poll whose lease was lost; its result is discarded. */
 class PollLeaseLostError extends Error {
   override readonly name = "PollLeaseLostError";
@@ -227,6 +231,38 @@ export function createTriggers(core: EngineCore): Triggers {
     throw new FlowlineDefinitionError(`EngineOptions.dedupe.defaultWindow: ${errorMessage(err)}`);
   }
   const polls = pollSettings(core.opts.poll);
+
+  /**
+   * A poll trigger's effective `interval` and `maxInterval` in ms, engine defaults applied (an
+   * undeclared `maxInterval` is never below the trigger's `interval`).
+   *
+   * @throws `FlowlineDefinitionError` if a duration is invalid or the effective `maxInterval` is
+   * shorter than the effective `interval` (e.g. `maxInterval: "30s"` with the default `"1m"`).
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: definitions of any config/payload types
+  const pollTiming = (def: TriggerDefinition<any, any>) => {
+    let intervalMs: number;
+    let maxIntervalMs: number;
+    try {
+      intervalMs = parseWindow(def.interval, polls.intervalMs, "Poll interval");
+      maxIntervalMs =
+        def.maxInterval === undefined
+          ? Math.max(polls.maxIntervalMs, intervalMs)
+          : parseWindow(def.maxInterval, 0, "Poll maxInterval");
+    } catch (err) {
+      throw new FlowlineDefinitionError(`Trigger "${def.type}": ${errorMessage(err)}`);
+    }
+    if (maxIntervalMs < intervalMs) {
+      throw new FlowlineDefinitionError(
+        `Trigger "${def.type}" has an effective maxInterval (${maxIntervalMs} ms) shorter than its effective interval (${intervalMs} ms, engine defaults applied)`,
+      );
+    }
+    return { intervalMs, maxIntervalMs };
+  };
+  // Check every registered poll trigger against the engine defaults now, at startup.
+  for (const plugin of registry.plugins) {
+    for (const def of plugin.triggers ?? []) if (def.kind === "poll") pollTiming(def);
+  }
 
   /**
    * Create a queued run of `v` with its `run.started` event (spec §4.2). With `dedupe`, a
@@ -377,6 +413,23 @@ export function createTriggers(core: EngineCore): Triggers {
     window === undefined ? undefined : parseWindow(window, defaultWindowMs);
 
   /**
+   * A lookup of when a version's workflow was last published (`null`/`undefined` when unknown),
+   * listing each tenant's workflows at most once. Make one per tick: it never refreshes.
+   */
+  const publishedAtCache = (): PublishedAtLookup => {
+    const byTenant = new Map<string, Map<string, number | null>>();
+    return async (v) => {
+      let byWorkflow = byTenant.get(v.tenantId);
+      if (!byWorkflow) {
+        const list = await storage.listWorkflows(v.tenantId);
+        byWorkflow = new Map(list.map((w) => [w.id, w.publishedAt]));
+        byTenant.set(v.tenantId, byWorkflow);
+      }
+      return byWorkflow.get(v.workflowId);
+    };
+  };
+
+  /**
    * Validate and launch the items of one poll call over `(since, until]`, in array order. An
    * item with an empty key, an invalid payload or a failed launch is rejected (`trigger.rejected`)
    * without affecting the others; a repeated key dedupes (`trigger.deduped`). Stops early once
@@ -447,24 +500,23 @@ export function createTriggers(core: EngineCore): Triggers {
    * committing its advance (keeping the lease between chunks), until caught up with the clock or
    * `maxCallsPerTick` calls were made. A throwing poll, an invalid result or a lost lease commits
    * `nextAt = now + interval` with `lastError`, without advancing `since`/`cursor`, and publishes
-   * `poll.failed`. `onStarted` is called for each run started.
+   * `poll.failed`. `onStarted` is called for each run started. A workflow with no publish time is
+   * skipped (as by `tickSchedules`); nothing is claimed.
    */
   const pollWorkflow = async (
     v: WorkflowVersion,
     workerId: string,
-    publishedAtOf: (v: WorkflowVersion) => Promise<number | null | undefined>,
+    publishedAtOf: PublishedAtLookup,
     onStarted: () => void,
   ): Promise<void> => {
     const t = triggerOf(v);
     if (!t || typeof t.def.poll !== "function") return;
     const poll = t.def.poll.bind(t.def);
     // Resolve everything that can throw before claiming, so a bad definition never holds a lease.
-    const intervalMs = parseWindow(t.def.interval, polls.intervalMs, "Poll interval");
-    const maxIntervalMs =
-      t.def.maxInterval === undefined
-        ? Math.max(polls.maxIntervalMs, intervalMs)
-        : parseWindow(t.def.maxInterval, 0, "Poll maxInterval");
+    const { intervalMs, maxIntervalMs } = pollTiming(t.def);
     const windowMs = parseWindow(t.def.dedupe?.window, defaultWindowMs);
+    const publishedAt = await publishedAtOf(v);
+    if (publishedAt === undefined || publishedAt === null) return;
     const { tenantId, workflowId } = v;
     const lease = await storage.claimPoll(tenantId, workflowId, {
       workerId,
@@ -475,16 +527,24 @@ export function createTriggers(core: EngineCore): Triggers {
 
     // One lease covers the whole chain; renewing it every `leaseMs / 2` keeps a slow poll (or a
     // long catch-up) exclusive. Losing it aborts `ctx.signal` and discards the call in flight.
+    // Each renewal is scheduled only once the previous one settled, so slow storage never piles
+    // renewals up.
     const controller = new AbortController();
     const lose = (reason: string) => controller.abort(new PollLeaseLostError(reason));
-    const renewal = setInterval(() => {
-      storage.renewPollLease(lease, polls.leaseMs, clock()).then(
-        (ok) => {
-          if (!ok) lose("poll lease lost");
-        },
-        (err: unknown) => lose(`poll lease renewal failed: ${errorMessage(err)}`),
-      );
-    }, polls.leaseMs / 2);
+    let finished = false;
+    let renewal: ReturnType<typeof setTimeout> | undefined;
+    const scheduleRenewal = () => {
+      renewal = setTimeout(() => {
+        storage.renewPollLease(lease, polls.leaseMs, clock()).then(
+          (ok) => {
+            if (!ok) lose("poll lease lost");
+            else if (!finished) scheduleRenewal();
+          },
+          (err: unknown) => lose(`poll lease renewal failed: ${errorMessage(err)}`),
+        );
+      }, polls.leaseMs / 2);
+    };
+    scheduleRenewal();
     const aborted = new Promise<never>((_, reject) => {
       controller.signal.addEventListener("abort", () => reject(controller.signal.reason), {
         once: true,
@@ -494,31 +554,22 @@ export function createTriggers(core: EngineCore): Triggers {
     aborted.catch(() => {});
 
     try {
-      let since = lease.state.since ?? (await publishedAtOf(v)) ?? clock();
+      let since = lease.state.since ?? publishedAt;
       let cursor: unknown = lease.state.cursor ?? null;
       for (let calls = 1; ; calls++) {
         const now = clock();
         // A clock behind `since` (a host bug): poll nothing and leave the state as it is, so the
-        // next interval starts exactly at `since` once the clock passes it.
+        // next interval starts exactly at `since` once the clock passes it. `since` is written
+        // too (never an advance: it is the stored value or the first publish time), pinning the
+        // first interval's start so a later republish can't move it forward.
         if (now <= since) {
-          await storage.commitPoll(lease, { nextAt: since + intervalMs }, now);
+          await storage.commitPoll(lease, { since, nextAt: since + intervalMs }, now);
           return;
         }
         const until = Math.min(now, since + maxIntervalMs);
         const interval = { since, until };
-        const fail = async (err: unknown) => {
-          const message = errorMessage(err);
-          const nextAt = now + intervalMs;
-          try {
-            // `false` when the lease was lost: the new holder owns the state now.
-            await storage.commitPoll(lease, { nextAt, lastError: message }, clock());
-          } catch (commitErr) {
-            core.logger?.warn("poll failure commit failed", {
-              tenantId,
-              workflowId,
-              error: errorMessage(commitErr),
-            });
-          }
+        /** Publish `poll.failed`; `nextAt` only when it was written (the lease was still ours). */
+        const reportFailed = (message: string, nextAt?: number) =>
           core.triggerEvent({
             type: "poll.failed",
             at: clock(),
@@ -526,8 +577,28 @@ export function createTriggers(core: EngineCore): Triggers {
             workflowId,
             ...interval,
             message,
-            nextAt,
+            ...(nextAt === undefined ? {} : { nextAt }),
           });
+        const fail = async (err: unknown) => {
+          const message = errorMessage(err);
+          const nextAt = now + intervalMs;
+          let written = false;
+          try {
+            // `since` pins the first interval's start (see above); `false` when the lease was
+            // lost: the new holder owns the state now.
+            written = await storage.commitPoll(
+              lease,
+              { since, nextAt, lastError: message },
+              clock(),
+            );
+          } catch (commitErr) {
+            core.logger?.warn("poll failure commit failed", {
+              tenantId,
+              workflowId,
+              error: errorMessage(commitErr),
+            });
+          }
+          reportFailed(message, written ? nextAt : undefined);
         };
 
         let result: { items: unknown[]; cursor?: unknown };
@@ -592,7 +663,9 @@ export function createTriggers(core: EngineCore): Triggers {
           return;
         }
         if (!committed) {
+          // The new holder polls this interval again; launched items dedupe.
           core.logger?.warn("poll lease lost before commit", { tenantId, workflowId });
+          reportFailed("poll lease lost");
           return;
         }
         core.triggerEvent({
@@ -609,7 +682,8 @@ export function createTriggers(core: EngineCore): Triggers {
         cursor = nextCursor;
       }
     } finally {
-      clearInterval(renewal);
+      finished = true;
+      clearTimeout(renewal);
     }
   };
 
@@ -740,7 +814,7 @@ export function createTriggers(core: EngineCore): Triggers {
       const due = (await storage.listPublished({})).filter(
         (v) => registry.getTrigger(v.doc.trigger.type)?.kind === "schedule",
       );
-      const publishedAt = new Map<string, Map<string, number | null>>();
+      const publishedAtOf = publishedAtCache();
       let started = 0;
       for (const v of due) {
         try {
@@ -752,13 +826,7 @@ export function createTriggers(core: EngineCore): Triggers {
           const fireAt = CronExpressionParser.parse(cron, { currentDate: new Date(now + 1), tz })
             .prev()
             .getTime();
-          let byWorkflow = publishedAt.get(v.tenantId);
-          if (!byWorkflow) {
-            const list = await storage.listWorkflows(v.tenantId);
-            byWorkflow = new Map(list.map((w) => [w.id, w.publishedAt]));
-            publishedAt.set(v.tenantId, byWorkflow);
-          }
-          const since = byWorkflow.get(v.workflowId);
+          const since = await publishedAtOf(v);
           if (since === undefined || since === null || fireAt < since) continue;
           const r = await launch(
             v,
@@ -782,17 +850,7 @@ export function createTriggers(core: EngineCore): Triggers {
       const polled = (await storage.listPublished({})).filter(
         (v) => registry.getTrigger(v.doc.trigger.type)?.kind === "poll",
       );
-      const publishedAt = new Map<string, Map<string, number | null>>();
-      /** When `v`'s workflow was published: where its first poll interval starts. */
-      const publishedAtOf = async (v: WorkflowVersion) => {
-        let byWorkflow = publishedAt.get(v.tenantId);
-        if (!byWorkflow) {
-          const list = await storage.listWorkflows(v.tenantId);
-          byWorkflow = new Map(list.map((w) => [w.id, w.publishedAt]));
-          publishedAt.set(v.tenantId, byWorkflow);
-        }
-        return byWorkflow.get(v.workflowId);
-      };
+      const publishedAtOf = publishedAtCache();
       let started = 0;
       for (const v of polled) {
         try {

@@ -374,6 +374,11 @@ export interface Engine {
    *
    * Delivery is at-least-once per item and exactly-once within the dedupe window. Each call is
    * reported as `poll.completed` through `onTriggerEvent`.
+   *
+   * Workflows are polled one after another, so a slow `poll` delays the rest of the tick (and,
+   * in a worker, the first loop's run claims and `stop()`). Nothing times a `poll` out: its lease
+   * is renewed while it runs. A `poll` should honour `ctx.signal` (pass it to `fetch`) and bound
+   * its own work.
    */
   tickPolls(): Promise<number>;
   /**
@@ -464,7 +469,9 @@ function withBuiltins({ registry, builtins = true }: EngineOptions): Registry {
  * The built-in `core.*` nodes and triggers are available unless `builtins: false`.
  *
  * @throws `FlowlineDefinitionError` when the registry's manifest can't be built (see
- * `Registry.manifest`), or `dedupe.defaultWindow` or a `poll` option is invalid.
+ * `Registry.manifest`), `dedupe.defaultWindow` or a `poll` option is invalid, or a registered poll
+ * trigger's effective `maxInterval` is shorter than its effective `interval` once the `poll`
+ * defaults are applied.
  *
  * @example
  * ```ts

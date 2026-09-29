@@ -131,6 +131,26 @@ describe("createEngine poll options", () => {
       createEngine({ registry, storage, poll: { maxCallsPerTick: 3, leaseMs: 1000 } }),
     ).not.toThrow();
   });
+
+  it("rejects a trigger whose effective maxInterval is below its effective interval", () => {
+    // Valid on its own (no interval declared), but shorter than the engine's default "1m".
+    const short = defineTrigger({
+      type: "s.short",
+      name: "Short",
+      kind: "poll",
+      maxInterval: "30s",
+      config: z.object({}),
+      poll: () => ({ items: [] }),
+    });
+    const withShort = createRegistry([definePlugin({ id: "s", name: "S", triggers: [short] })]);
+    expect(() => createEngine({ registry: withShort, storage })).toThrow(FlowlineDefinitionError);
+    expect(() => createEngine({ registry: withShort, storage })).toThrow(
+      /Trigger "s\.short".*effective maxInterval \(30000 ms\).*effective interval \(60000 ms/,
+    );
+    expect(() =>
+      createEngine({ registry: withShort, storage, poll: { defaultInterval: "10s" } }),
+    ).not.toThrow();
+  });
 });
 
 describe("tickPolls", () => {
@@ -297,7 +317,7 @@ describe("tickPolls", () => {
     expect(await engine.tickPolls()).toBe(0);
     const s = await state();
     expect(s).toMatchObject({
-      since: null,
+      since: T0, // pinned to the first publish time, not advanced
       cursor: null,
       nextAt: now + MIN,
       lastError: "rate limited",
@@ -320,7 +340,7 @@ describe("tickPolls", () => {
     now = T0 + 5 * MIN;
     pollImpl = () => ({ items: "nope" }) as never;
     await engine.tickPolls();
-    expect(await state()).toMatchObject({ since: null, lastError: expect.stringMatching(/items/) });
+    expect(await state()).toMatchObject({ since: T0, lastError: expect.stringMatching(/items/) });
     expect(ofType("poll.failed")).toHaveLength(1);
   });
 
@@ -439,6 +459,10 @@ describe("tickPolls", () => {
     expect(commits).toEqual([false]);
     expect(await storage.listRuns("t1", {})).toHaveLength(0);
     expect(await state()).toMatchObject({ since: null, leaseOwner: "thief" });
+    // The failure commit was stale: no nextAt was written, so none is reported.
+    const [failed] = ofType("poll.failed");
+    expect(failed).toMatchObject({ since: T0, until: now, message: "poll lease lost" });
+    expect(failed).not.toHaveProperty("nextAt");
     expect(ofType("poll.failed")).toHaveLength(1);
   });
 
@@ -450,7 +474,7 @@ describe("tickPolls", () => {
     await engine.tickPolls();
     expect(calls).toHaveLength(0);
     const s = await state();
-    expect(s).toMatchObject({ since: null, cursor: null, nextAt: T0 + MIN });
+    expect(s).toMatchObject({ since: T0, cursor: null, nextAt: T0 + MIN });
     expect(s?.lastError).toBeUndefined();
     expect(events).toEqual([]);
 
@@ -464,7 +488,142 @@ describe("tickPolls", () => {
     now = T0 - 10 * MIN;
     await engine.tickPolls();
     expect(calls).toHaveLength(0);
-    expect(await state()).toMatchObject({ since: null, nextAt: T0 + MIN });
+    expect(await state()).toMatchObject({ since: T0, nextAt: T0 + MIN });
+  });
+
+  it("keeps the first interval's start at the first publish time across a republish", async () => {
+    now = T0 + 5 * MIN;
+    pollImpl = () => {
+      throw new Error("upstream down");
+    };
+    await engine.tickPolls();
+    // Republished later (e.g. with a fix): publishedAt moves to T0 + 10m.
+    now = T0 + 10 * MIN;
+    await deploy();
+    now = T0 + 20 * MIN;
+    pollImpl = empty;
+    await engine.tickPolls();
+    expect(calls.at(-1)).toEqual({ since: T0, until: now, cursor: null });
+  });
+
+  it("reports poll.failed (without nextAt) when the final commit loses the lease", async () => {
+    const base = createMemoryStorage();
+    storage = {
+      ...base,
+      // The lease is taken over between launching the items and the success commit.
+      commitPoll: async (lease: PollLease, patch: PollPatch, at: number) => {
+        if (patch.lastError === null) {
+          await base.claimPoll(lease.state.tenantId, lease.state.workflowId, {
+            workerId: "thief",
+            leaseMs: MIN,
+            now: now + 2 * MIN,
+          });
+        }
+        return base.commitPoll(lease, patch, at);
+      },
+    };
+    engine = newEngine();
+    await deploy();
+    now = T0 + 5 * MIN;
+    pollImpl = () => ({ items: [item("a")] });
+    expect(await engine.tickPolls()).toBe(1);
+    const failed = ofType("poll.failed");
+    expect(failed).toMatchObject([{ since: T0, until: now, message: "poll lease lost" }]);
+    expect(failed[0]).not.toHaveProperty("nextAt");
+    expect(ofType("poll.completed")).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      "poll lease lost before commit",
+      expect.objectContaining({ workflowId: "wf" }),
+    );
+    expect(await state()).toMatchObject({ since: null, leaseOwner: "thief" });
+  });
+
+  it("skips a workflow with no publish time without claiming it", async () => {
+    const base = storage;
+    storage = {
+      ...base,
+      listWorkflows: async (tenantId: string) =>
+        (await base.listWorkflows(tenantId)).map((w) => ({ ...w, publishedAt: null })),
+    };
+    engine = newEngine();
+    now = T0 + 5 * MIN;
+    expect(await engine.tickPolls()).toBe(0);
+    expect(calls).toHaveLength(0);
+    expect(await storage.getPollState("t1", "wf")).toBeNull();
+  });
+
+  it("renews the lease every leaseMs / 2 while a poll runs", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const base = storage;
+      let renewals = 0;
+      storage = {
+        ...base,
+        renewPollLease: (lease: PollLease, leaseMs: number, at: number) => {
+          renewals++;
+          return base.renewPollLease(lease, leaseMs, at);
+        },
+      };
+      engine = newEngine({ poll: { leaseMs: 1_000 } });
+      now = T0 + 5 * MIN;
+      let started!: () => void;
+      const running = new Promise<void>((r) => {
+        started = r;
+      });
+      let finish!: () => void;
+      pollImpl = () =>
+        new Promise((resolve) => {
+          started();
+          finish = () => resolve({ items: [] });
+        });
+      const tick = engine.tickPolls();
+      await running;
+      await vi.advanceTimersByTimeAsync(499);
+      expect(renewals).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(renewals).toBe(1);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(renewals).toBe(2);
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(renewals).toBe(5);
+      finish();
+      await tick;
+      // No renewal is left scheduled once the tick is over.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(renewals).toBe(5);
+      expect((await state())?.since).toBe(now);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts ctx.signal and advances nothing when a renewal throws", async () => {
+    const base = storage;
+    storage = {
+      ...base,
+      renewPollLease: () => Promise.reject(new Error("connection reset")),
+    };
+    engine = newEngine({ poll: { leaseMs: 20 } });
+    now = T0 + 5 * MIN;
+    let signal: AbortSignal | undefined;
+    pollImpl = ({ ctx }) =>
+      new Promise((resolve) => {
+        signal = ctx.signal;
+        ctx.signal.addEventListener("abort", () => resolve({ items: [item("a")] }));
+      });
+    expect(await engine.tickPolls()).toBe(0);
+    expect(signal?.aborted).toBe(true);
+    expect(await storage.listRuns("t1", {})).toHaveLength(0);
+    // Only the failure is recorded: since/cursor are not advanced and the lease is released.
+    const s = await state();
+    expect(s).toMatchObject({
+      since: T0,
+      cursor: null,
+      lastError: expect.stringMatching(/renewal failed: connection reset/),
+    });
+    expect(s?.leaseOwner).toBeUndefined();
+    expect(ofType("poll.completed")).toEqual([]);
+    expect(ofType("poll.failed")).toMatchObject([{ nextAt: now + MIN }]);
   });
 
   it("ignores workflows whose trigger is not a poll trigger", async () => {
