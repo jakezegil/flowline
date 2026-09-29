@@ -110,6 +110,24 @@ describe("paste", () => {
   });
 });
 
+describe("config values", () => {
+  // PENDING: `.fails` until core `apply` records `trusted` on the handler context
+  // (`HandlerContext.trusted`, set from `opts.trusted` in apply.ts); single.ts already reads it.
+  // Once that lands this test passes, `.fails` turns it red, and `.fails` must be dropped.
+  test.fails("setConfig, setTriggerConfig and setOutput store a steps.$x placeholder as it is", () => {
+    const store = storeFor();
+    const tpl = { $tpl: "Price {{ steps.$price }}" };
+    const ref = { $ref: "steps.$1.x" };
+    store.getState().setConfig("email", "subject", tpl);
+    store.getState().setTriggerConfig("k", ref);
+    store.getState().setOutput("k", ref);
+    const { doc } = store.getState();
+    expect(findStep(doc, "email")?.step.config.subject).toEqual(tpl);
+    expect(doc.trigger.config.k).toEqual(ref);
+    expect(doc.output).toEqual({ k: ref });
+  });
+});
+
 describe("replaceStep", () => {
   test("keeps the step's note and colour (annotations are anchored to steps)", () => {
     const store = storeFor(
@@ -120,6 +138,18 @@ describe("replaceStep", () => {
     expect(replaced?.type).toBe("crm.sendEmail");
     expect(replaced?.note).toBe("Why");
     expect(replaced?.color).toBe("blue");
+  });
+
+  test("a step whose ID is an Object.prototype key still becomes needs-test", () => {
+    localStorage.setItem(
+      "flowline:samples:welcome",
+      JSON.stringify({ testState: { toString: "tested" } }),
+    );
+    const store = storeFor(docWith([step("toString", "crm.loadContact")]));
+    expect(store.getState().testState.toString).toBe("tested");
+    store.getState().replaceStep("toString", "crm.sendEmail");
+    expect(findStep(store.getState().doc, "toString")?.step.type).toBe("crm.sendEmail");
+    expect(store.getState().testState.toString).toBe("needs-test");
   });
 
   test("a regenerated ID carries the selection", () => {
@@ -133,16 +163,51 @@ describe("replaceStep", () => {
 
 describe("atFromLocation", () => {
   const doc = branchyDoc();
-  test("anchors after the previous sibling, else at the start or index 0 of a branch", () => {
+  test("anchors branch positions by index, top-level ones at the start or after a sibling", () => {
     expect(atFromLocation(doc, { parentId: null, index: 0 })).toEqual({ start: true });
     expect(atFromLocation(doc, { parentId: null, index: 3 })).toEqual({ after: "each" });
     expect(atFromLocation(doc, { parentId: "cond", branch: "if", index: 1 })).toEqual({
-      after: "email",
+      in: { stepId: "cond", branch: "if" },
+      index: 1,
     });
     expect(atFromLocation(doc, { parentId: "cond", branch: "else", index: 0 })).toEqual({
       in: { stepId: "cond", branch: "else" },
       index: 0,
     });
+  });
+
+  test("duplicate IDs: a branch insert lands in that branch, not next to an earlier twin", () => {
+    const dupDoc = docWith([
+      step("dup", "crm.loadContact"),
+      step(
+        "cond",
+        "logic.condition",
+        { value: true },
+        { branches: { if: [step("dup", "crm.loadContact"), step("x", "crm.loadContact")] } },
+      ),
+    ]);
+    const store = storeFor(dupDoc);
+    const id = store
+      .getState()
+      .insertStep({ parentId: "cond", branch: "if", index: 1 }, "crm.sendEmail");
+    expect(findStep(store.getState().doc, id)?.location).toEqual({
+      parentId: "cond",
+      branch: "if",
+      index: 1,
+    });
+    expect(store.getState().doc.steps).toHaveLength(2);
+  });
+
+  test("duplicate IDs: a top-level insert anchors before the next sibling when it must", () => {
+    const dupDoc = docWith([
+      step("cond", "logic.condition", { value: true }, { branches: { if: [step("dup", "a.b")] } }),
+      step("dup", "crm.loadContact"),
+      step("z", "crm.loadContact"),
+    ]);
+    expect(atFromLocation(dupDoc, { parentId: null, index: 2 })).toEqual({ before: "z" });
+    const store = storeFor(dupDoc);
+    const id = store.getState().insertStep({ parentId: null, index: 2 }, "crm.sendEmail");
+    expect(store.getState().doc.steps.map((s) => s.id)).toEqual(["cond", "dup", id, "z"]);
   });
 
   test("throws FlowlineTreeError for a missing parent, branch or an out-of-range index", () => {

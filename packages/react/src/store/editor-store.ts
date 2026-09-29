@@ -510,7 +510,7 @@ export function createEditorStore(init: {
       replaceStep(id, nodeType) {
         const r = run([{ op: "setType", id, type: nodeType }]);
         if (!r) return;
-        const free = r.renamed[id];
+        const free = Object.hasOwn(r.renamed, id) ? r.renamed[id] : undefined;
         // An ID generated from the old type was regenerated (references follow): the new ID
         // starts without local data, and the selection follows it.
         commitApplied(r, free === undefined ? needsTest(id) : resetLocal([free]));

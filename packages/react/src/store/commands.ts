@@ -26,8 +26,10 @@ import {
 export { createStep, defaultConfig, jsonEqual, replaceStepType, syncBranches };
 
 /**
- * The command anchor for a StepLocation: `after` the previous sibling, else `start` (top level)
- * or `in` the branch at index 0.
+ * The command anchor for a StepLocation. A branch position is `in` the branch at its index; a
+ * top-level one is `start` at index 0, else `after` the previous sibling. On a doc with duplicate
+ * step IDs, where that sibling's ID first names a step elsewhere, the top level anchors `before`
+ * the next sibling when that one resolves correctly.
  *
  * @throws {FlowlineTreeError} For a missing parent or branch, or an out-of-range index.
  */
@@ -47,10 +49,20 @@ export function atFromLocation(doc: WorkflowDoc, loc: StepLocation): At {
   if (!Number.isInteger(loc.index) || loc.index < 0 || loc.index > list.length) {
     throw new FlowlineTreeError(`Insert index ${loc.index} out of range [0, ${list.length}]`);
   }
-  const prev = list[loc.index - 1];
-  if (prev) return { after: prev.id };
-  if (loc.parentId === null) return { start: true };
-  return { in: { stepId: loc.parentId, branch: loc.branch as string }, index: 0 };
+  if (loc.parentId !== null) {
+    return { in: { stepId: loc.parentId, branch: loc.branch as string }, index: loc.index };
+  }
+  if (loc.index === 0) return { start: true };
+  const prev = list[loc.index - 1] as Step;
+  const next = list[loc.index];
+  const atTop = (id: string, index: number) => {
+    const found = findStep(doc, id)?.location;
+    return found?.parentId === null && found.index === index;
+  };
+  if (next && !atTop(prev.id, loc.index - 1) && atTop(next.id, loc.index)) {
+    return { before: next.id };
+  }
+  return { after: prev.id };
 }
 
 /** A step (with subtree) as a verbatim fragment, keeping IDs, config and branches exactly. */
