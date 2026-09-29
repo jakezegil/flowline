@@ -1096,7 +1096,7 @@ function relativeTime(deltaMs: number): string {
 /** `defaultLabels` with `overrides` applied (record-valued labels merge key by key). */
 export function resolveLabels(overrides: Partial<FlowlineLabels> | undefined): FlowlineLabels {
   if (!overrides) return defaultLabels;
-  return {
+  const merged: FlowlineLabels = {
     ...defaultLabels,
     ...overrides,
     runStatus: { ...defaultLabels.runStatus, ...overrides.runStatus },
@@ -1111,4 +1111,13 @@ export function resolveLabels(overrides: Partial<FlowlineLabels> | undefined): F
     fieldTypes: { ...defaultLabels.fieldTypes, ...overrides.fieldTypes },
     testSignal: { ...defaultLabels.testSignal, ...overrides.testSignal },
   };
+  // The default `origin` renders a poll run's origin through `originPoll`. A host that overrides
+  // `origin` itself always wins outright (for every kind); one that overrides only `originPoll`
+  // still needs it to reach `origin`'s output, so re-derive `origin`'s poll case from the merged
+  // `originPoll` in that case.
+  if (overrides.origin === undefined) {
+    const { originPoll } = merged;
+    merged.origin = (o) => (o.kind === "poll" ? originPoll(o.itemKey) : defaultLabels.origin(o));
+  }
+  return merged;
 }

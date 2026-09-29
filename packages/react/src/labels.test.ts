@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultLabels, formatDuration } from "./labels";
+import { defaultLabels, formatDuration, resolveLabels } from "./labels";
 
 describe("formatDuration", () => {
   it("scales from milliseconds to days", () => {
@@ -71,5 +71,23 @@ describe("origin", () => {
   it("renders a poll origin through originPoll", () => {
     const origin = { kind: "poll" as const, since: 0, until: 1, itemKey: "deal_123" };
     expect(defaultLabels.origin(origin)).toBe(defaultLabels.originPoll("deal_123"));
+  });
+});
+
+describe("resolveLabels: Ruling 102", () => {
+  const pollOrigin = { kind: "poll" as const, since: 0, until: 1, itemKey: "deal_123" };
+
+  it("an originPoll-only override reaches origin's poll rendering", () => {
+    const labels = resolveLabels({ originPoll: (k) => `X ${k}` });
+    expect(labels.origin(pollOrigin)).toBe("X deal_123");
+  });
+
+  it("an origin override wins outright, for every kind, even with originPoll overridden too", () => {
+    const labels = resolveLabels({
+      origin: () => "custom",
+      originPoll: (k) => `X ${k}`,
+    });
+    expect(labels.origin(pollOrigin)).toBe("custom");
+    expect(labels.origin({ kind: "manual" })).toBe("custom");
   });
 });
