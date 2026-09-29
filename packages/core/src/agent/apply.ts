@@ -17,6 +17,7 @@ import {
   type HandlerContext,
 } from "./commands";
 import { formatCall, shownColor, shownLabel, stepLine } from "./format";
+import { sectionHandlers } from "./sections";
 import { AT_HINT, singleHandlers } from "./single";
 
 /** Thrown by wrappers (the editor store) that turn a failed ApplyResult into an exception. */
@@ -29,7 +30,7 @@ export class FlowlineCommandError extends FlowlineTreeError {
 }
 
 /** Every command handler by op. */
-const HANDLERS: Record<string, Handler> = { ...singleHandlers };
+const HANDLERS: Record<string, Handler> = { ...singleHandlers, ...sectionHandlers };
 
 /** How many shape errors a failed result carries besides the first. */
 const MORE_ERRORS = 9;
@@ -103,6 +104,7 @@ export function apply(
     nodes: nodesOf(manifest),
     index: 0,
     placeholders: new Map(),
+    sectionPlaceholders: new Map(),
     used: new Map(),
     renamed: new Map(),
   };
@@ -128,7 +130,8 @@ export function apply(
       const r = handler(cur, cmd, ctx);
       cur = r.doc;
       if (r.created !== undefined) {
-        ctx.placeholders.set(`$${i + 1}`, r.created);
+        const defined = r.kind === "section" ? ctx.sectionPlaceholders : ctx.placeholders;
+        defined.set(`$${i + 1}`, r.created);
         ctx.used.set(`$${i + 1}`, r.created);
       }
     } catch (e) {
@@ -178,7 +181,7 @@ export function apply(
   if (added.length > ADDED_MAX) {
     issues.more = { added: added.length - ADDED_MAX, fetch: { tool: "getIssues", args: {} } };
   }
-  const changed = changedOutline(cur, changedStepIds(doc, cur), after, manifest);
+  const changed = changedOutline(doc, cur, changedStepIds(doc, cur), after, manifest, ctx.renamed);
   return { ok: true, doc: cur, ids, renamed, changed, issues };
 }
 
@@ -338,15 +341,27 @@ function sectionLine(section: Section): string {
 /**
  * `changed`: a `+`/`~` line per added/updated step and section in `after`'s pre-order (a
  * section just before its first step), then `- <id>` per removed step and `- ▣ <id>` per removed
- * section. Cut to {@link CHANGED_MAX} with a `getSteps` marker for the steps left out.
+ * section. A changed workflow name, trigger or output mapping leads with `~ workflow "<name>"`,
+ * `~ trigger <type>`, `~ output` (`- output` when removed). A step whose ID changed (an entry
+ * of `renamed` whose old ID is gone and new ID is new) shows as `~ <old> → <step line>` instead
+ * of `+ <new>` and `- <old>`. Cut to {@link CHANGED_MAX} with a `getSteps` marker for the steps
+ * left out.
  */
 function changedOutline(
+  before: WorkflowDoc,
   after: WorkflowDoc,
   delta: ReturnType<typeof changedStepIds>,
   issues: Issue[],
   manifest: Manifest,
+  renamed: ReadonlyMap<string, string>,
 ): string {
   const nodes = nodesOf(manifest);
+  const removedSteps = new Set(delta.removed);
+  /** New ID → old ID, for renames the step delta sees as an add plus a remove. */
+  const renamedFrom = new Map<string, string>();
+  for (const [old, now] of renamed) {
+    if (removedSteps.has(old) && delta.added.includes(now)) renamedFrom.set(now, old);
+  }
   const counts = new Map<string, number>();
   for (const i of issues) {
     if (i.stepId !== undefined) counts.set(i.stepId, (counts.get(i.stepId) ?? 0) + 1);
@@ -364,7 +379,21 @@ function changedOutline(
     if (list) list.push(s);
     else sectionsAt.set(s.first, [s]);
   }
-  const lines: { text: string; kind: "step" | "removed" | "section"; stepId?: string }[] = [];
+  const lines: { text: string; kind: "doc" | "step" | "removed" | "section"; stepId?: string }[] =
+    [];
+  const differs = (a: unknown, b: unknown) => a !== b && JSON.stringify(a) !== JSON.stringify(b);
+  if (before.name !== after.name) {
+    lines.push({
+      text: `~ workflow ${JSON.stringify(shownLabel(String(after.name)))}`,
+      kind: "doc",
+    });
+  }
+  if (differs(before.trigger, after.trigger)) {
+    lines.push({ text: `~ trigger ${shownLabel(String(after.trigger?.type))}`, kind: "doc" });
+  }
+  if (differs(before.output, after.output)) {
+    lines.push({ text: after.output ? "~ output" : "- output", kind: "doc" });
+  }
   const seen = new Set<string>();
   walkSteps(after, (step) => {
     if (seen.has(step.id)) return;
@@ -373,7 +402,15 @@ function changedOutline(
       lines.push({ text: `${sectionMark.get(s.id)} ${sectionLine(s)}`, kind: "section" });
     }
     sectionsAt.delete(step.id);
-    const mark = addedSteps.has(step.id) ? "+" : updatedSteps.has(step.id) ? "~" : undefined;
+    const from = renamedFrom.get(step.id);
+    const mark =
+      from !== undefined
+        ? `~ ${from} →`
+        : addedSteps.has(step.id)
+          ? "+"
+          : updatedSteps.has(step.id)
+            ? "~"
+            : undefined;
     if (mark) {
       const line = stepLine(step, nodes.get(step.type), counts.get(step.id) ?? 0, 120);
       lines.push({ text: `${mark} ${line}`, kind: "step", stepId: step.id });
@@ -383,7 +420,10 @@ function changedOutline(
   for (const s of leftover) {
     lines.push({ text: `${sectionMark.get(s.id)} ${sectionLine(s)}`, kind: "section" });
   }
-  for (const id of delta.removed) lines.push({ text: `- ${id}`, kind: "removed" });
+  const renamedAway = new Set(renamedFrom.values());
+  for (const id of delta.removed) {
+    if (!renamedAway.has(id)) lines.push({ text: `- ${id}`, kind: "removed" });
+  }
   for (const id of delta.sections.removed) lines.push({ text: `- ▣ ${id}`, kind: "section" });
 
   const whole = lines.map((l) => l.text).join("\n");

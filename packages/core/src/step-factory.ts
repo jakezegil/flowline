@@ -5,7 +5,8 @@
  * @module
  */
 import { branchesFor } from "./json-schema";
-import type { JSONSchema, NodeManifest, Step, ValueExpr } from "./types";
+import { FlowlineTreeError, findStep, updateStep } from "./tree";
+import type { JSONSchema, NodeManifest, Step, ValueExpr, WorkflowDoc } from "./types";
 
 /**
  * Initial config for a new step or trigger: the `default` of each top-level property of the
@@ -66,4 +67,50 @@ export function createStep(id: string, m: NodeManifest): Step {
  */
 export function jsonEqual(a: unknown, b: unknown): boolean {
   return a === b || JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * The doc with step `id` switched to node `m`: its ID stays (so references stay attached), config
+ * resets to `m`'s defaults and the name override is dropped. `disabled` and the step's
+ * annotations (`note`, `color`) are kept, and so are its children: branches `m` also declares keep
+ * their steps, and non-empty branches `m` doesn't declare stay as undeclared leftovers (the policy
+ * of {@link syncBranches}), which the validator flags (`branch.unknown`).
+ *
+ * @throws {FlowlineTreeError} If `id` doesn't exist.
+ *
+ * @example
+ * replaceStepType(doc, "notify", manifest.nodes.find((n) => n.type === "crm.getDeal")!)
+ */
+export function replaceStepType(doc: WorkflowDoc, id: string, m: NodeManifest): WorkflowDoc {
+  const found = findStep(doc, id);
+  if (!found) throw new FlowlineTreeError(`Step "${id}" not found`);
+  const old = found.step;
+  const replaced = syncBranches(
+    {
+      id,
+      type: m.type,
+      config: defaultConfig(m.input),
+      ...(old.disabled ? { disabled: true } : {}),
+      ...(old.note !== undefined ? { note: old.note } : {}),
+      ...(old.color !== undefined ? { color: old.color } : {}),
+      ...(old.branches ? { branches: old.branches } : {}),
+    },
+    m,
+  );
+  return updateStep(doc, id, () => replaced);
+}
+
+/**
+ * The display name for a copy of `base`. Strips a trailing " (copy)" or " (copy N)", then returns
+ * "<stem> (copy)", or "<stem> (copy 2)", "(copy 3)"… for the first name not in `taken`.
+ *
+ * @example
+ * copyName("Send email", new Set()) // "Send email (copy)"
+ * copyName("Send email (copy)", new Set(["Send email (copy)"])) // "Send email (copy 2)"
+ */
+export function copyName(base: string, taken: ReadonlySet<string>): string {
+  const stem = base.replace(/ \(copy(?: \d+)?\)$/, "");
+  let name = `${stem} (copy)`;
+  for (let n = 2; taken.has(name); n++) name = `${stem} (copy ${n})`;
+  return name;
 }

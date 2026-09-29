@@ -5,7 +5,7 @@
  * @module
  */
 import { z } from "zod";
-import { ANNOTATION_COLORS } from "../annotations";
+import { ANNOTATION_COLORS, NOTE_MAX_CHARS } from "../annotations";
 import type { AnnotationColor, JSONSchema, Manifest } from "../types";
 import { type ApplyError, type Command, type CommandErrorCode, closest } from "./commands";
 import { compactSchema } from "./compact-schema";
@@ -69,8 +69,21 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
   const nodeTypes = manifest?.nodes.map((n) => n.type) ?? [];
   const nodeType =
     nodeTypes.length > 0 ? z.enum(nodeTypes as [string, ...string[]]) : z.string().min(1);
+  const triggerTypes = manifest?.triggers.map((t) => t.type) ?? [];
+  const triggerType =
+    triggerTypes.length > 0 ? z.enum(triggerTypes as [string, ...string[]]) : z.string().min(1);
   const color = z.enum(ANNOTATION_COLORS as unknown as [AnnotationColor, ...AnnotationColor[]]);
   const json = jsonValue();
+  /** An op that sets one key (`nullIsValue` internal only) or merges `config`. */
+  const keyOrMerge = (op: string) => [
+    z.strictObject({
+      op: z.literal(op),
+      key: z.string().min(1),
+      value: json,
+      ...(internal ? { nullIsValue: z.boolean().optional() } : {}),
+    }),
+    z.strictObject({ op: z.literal(op), config: z.record(z.string(), json) }),
+  ];
   const members = new Map<string, z.ZodType[]>([
     [
       "addStep",
@@ -107,6 +120,84 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
         }),
       ],
     ],
+    ["duplicateStep", [z.strictObject({ op: z.literal("duplicateStep"), id: stepRef })]],
+    [
+      "renameStep",
+      [z.strictObject({ op: z.literal("renameStep"), id: stepRef, name: z.string() })],
+    ],
+    [
+      "renameStepId",
+      [z.strictObject({ op: z.literal("renameStepId"), id: stepRef, newId: z.string() })],
+    ],
+    ["setType", [z.strictObject({ op: z.literal("setType"), id: stepRef, type: nodeType })]],
+    [
+      "setDisabled",
+      [z.strictObject({ op: z.literal("setDisabled"), id: stepRef, disabled: z.boolean() })],
+    ],
+    [
+      "setNote",
+      [
+        z.strictObject({
+          op: z.literal("setNote"),
+          id: stepRef,
+          note: z.string().max(NOTE_MAX_CHARS).nullable(),
+        }),
+      ],
+    ],
+    [
+      "setColor",
+      [z.strictObject({ op: z.literal("setColor"), id: stepRef, color: color.nullable() })],
+    ],
+    [
+      "setTrigger",
+      [
+        z.strictObject({
+          op: z.literal("setTrigger"),
+          type: triggerType,
+          config: z.record(z.string(), json).optional(),
+        }),
+      ],
+    ],
+    ["setTriggerConfig", keyOrMerge("setTriggerConfig")],
+    ["setOutput", keyOrMerge("setOutput")],
+    [
+      "renameWorkflow",
+      [
+        z.strictObject({
+          op: z.literal("renameWorkflow"),
+          name: z.string().regex(/\S/, { message: "The name can't be blank" }),
+        }),
+      ],
+    ],
+    [
+      "addSection",
+      [
+        z.strictObject({
+          op: z.literal("addSection"),
+          first: stepRef,
+          last: stepRef,
+          title: z.string(),
+          color,
+          note: z.string().max(NOTE_MAX_CHARS).optional(),
+          id: z.string().optional(),
+        }),
+      ],
+    ],
+    [
+      "updateSection",
+      [
+        z.strictObject({
+          op: z.literal("updateSection"),
+          id: stepRef,
+          title: z.string().optional(),
+          color: color.optional(),
+          note: z.string().max(NOTE_MAX_CHARS).nullable().optional(),
+          first: stepRef.optional(),
+          last: stepRef.optional(),
+        }),
+      ],
+    ],
+    ["removeSection", [z.strictObject({ op: z.literal("removeSection"), id: stepRef })]],
   ]);
   const all = [...members.values()].flat();
   const union = z.union(all as [z.ZodType, z.ZodType, ...z.ZodType[]]) as z.ZodType<Command>;
@@ -409,7 +500,7 @@ export function shapeErrors(
       },
     ];
   }
-  // An op with two forms (setConfig): the `config` key picks the merge form.
+  // An op with two forms (setConfig, setTriggerConfig, setOutput): `config` picks the merge form.
   const schema =
     members.length > 1 && !("config" in cmd) ? members[0] : members[members.length - 1];
   const parsed = (schema as z.ZodType).safeParse(cmd);

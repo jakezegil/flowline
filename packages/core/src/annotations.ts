@@ -340,53 +340,99 @@ function tooLong(note: unknown): string | undefined {
     : undefined;
 }
 
-/** @internal Validator checks: `section.broken`, `section.overlap`, `note.tooLong`. */
-export function annotationIssues(doc: WorkflowDoc): Issue[] {
-  const issues: Issue[] = [];
+/**
+ * @internal An annotation issue with what it is about: the step, or the section's index in
+ * `doc.sections` and the kind of problem. Section IDs can repeat, so the index is what tells two
+ * same-ID sections' issues apart.
+ */
+export type AnnotationProblem =
+  | { issue: Issue; kind: "stepNote"; stepId: string }
+  | { issue: Issue; kind: "sectionNote" | "color" | "reversed" | "branches"; index: number }
+  | { issue: Issue; kind: "missing"; index: number; missing: string }
+  | { issue: Issue; kind: "id"; index: number; duplicate: boolean }
+  | { issue: Issue; kind: "overlap"; index: number; other: number };
+
+/** @internal {@link annotationIssues}, each with what it is about. */
+export function annotationProblems(doc: WorkflowDoc): AnnotationProblem[] {
+  const problems: AnnotationProblem[] = [];
   walkSteps(doc, (step) => {
     const message = tooLong(step.note);
-    if (message)
-      issues.push({ code: "note.tooLong", severity: "warning", message, stepId: step.id });
+    if (message) {
+      problems.push({
+        issue: { code: "note.tooLong", severity: "warning", message, stepId: step.id },
+        kind: "stepNote",
+        stepId: step.id,
+      });
+    }
   });
 
   const sections = Array.isArray(doc.sections) ? doc.sections : [];
   const seenIds = new Set<string>();
   const runs: ReturnType<typeof sectionRun>[] = [];
-  for (const section of sections) {
+  for (let index = 0; index < sections.length; index++) {
+    const section = sections[index] as Section;
     const broken = (reason: string) =>
-      issues.push(
-        sectionIssue(
-          doc,
-          section,
-          "section.broken",
-          `Section “${section.title}” no longer covers a run of steps: ${reason}`,
-        ),
+      sectionIssue(
+        doc,
+        section,
+        "section.broken",
+        `Section “${section.title}” no longer covers a run of steps: ${reason}`,
       );
     const run = sectionRun(doc, section);
     runs.push(run);
     if (!run) {
       const missing = [section.first, section.last].filter((id) => !findStep(doc, id));
       if (missing.length > 0) {
-        for (const id of new Set(missing)) broken(`step "${id}" is missing`);
+        for (const id of new Set(missing)) {
+          problems.push({
+            issue: broken(`step "${id}" is missing`),
+            kind: "missing",
+            index,
+            missing: id,
+          });
+        }
       } else {
         const a = findStep(doc, section.first)?.location;
         const z = findStep(doc, section.last)?.location;
-        broken(
-          a?.parentId !== z?.parentId || a?.branch !== z?.branch
-            ? "its first and last steps are in different branches"
-            : "its first step comes after its last",
-        );
+        const branches = a?.parentId !== z?.parentId || a?.branch !== z?.branch;
+        problems.push({
+          issue: broken(
+            branches
+              ? "its first and last steps are in different branches"
+              : "its first step comes after its last",
+          ),
+          kind: branches ? "branches" : "reversed",
+          index,
+        });
       }
     }
     if (!isAnnotationColor(section.color)) {
-      broken(`its colour "${String(section.color)}" isn't one of ${ANNOTATION_COLORS.join(", ")}`);
+      problems.push({
+        issue: broken(
+          `its colour "${String(section.color)}" isn't one of ${ANNOTATION_COLORS.join(", ")}`,
+        ),
+        kind: "color",
+        index,
+      });
     }
-    if (!isValidStepId(section.id) || seenIds.has(section.id)) {
-      broken(`its ID "${String(section.id)}" is invalid or used twice`);
+    const duplicate = seenIds.has(section.id);
+    if (!isValidStepId(section.id) || duplicate) {
+      problems.push({
+        issue: broken(`its ID "${String(section.id)}" is invalid or used twice`),
+        kind: "id",
+        index,
+        duplicate,
+      });
     }
     seenIds.add(section.id);
     const message = tooLong(section.note);
-    if (message) issues.push(sectionIssue(doc, section, "note.tooLong", message));
+    if (message) {
+      problems.push({
+        issue: sectionIssue(doc, section, "note.tooLong", message),
+        kind: "sectionNote",
+        index,
+      });
+    }
   }
 
   for (let j = 0; j < sections.length; j++) {
@@ -397,11 +443,24 @@ export function annotationIssues(doc: WorkflowDoc): Issue[] {
       if (!ri || ri.parentId !== rj.parentId || ri.branch !== rj.branch) continue;
       if (ri.start <= rj.end && rj.start <= ri.end) {
         const [a, b] = [sections[i] as Section, sections[j] as Section];
-        issues.push(
-          sectionIssue(doc, b, "section.overlap", `Sections “${a.title}” and “${b.title}” overlap`),
-        );
+        problems.push({
+          issue: sectionIssue(
+            doc,
+            b,
+            "section.overlap",
+            `Sections “${a.title}” and “${b.title}” overlap`,
+          ),
+          kind: "overlap",
+          index: j,
+          other: i,
+        });
       }
     }
   }
-  return issues;
+  return problems;
+}
+
+/** @internal Validator checks: `section.broken`, `section.overlap`, `note.tooLong`. */
+export function annotationIssues(doc: WorkflowDoc): Issue[] {
+  return annotationProblems(doc).map((p) => p.issue);
 }

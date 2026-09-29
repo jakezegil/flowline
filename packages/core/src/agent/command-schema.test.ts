@@ -46,6 +46,53 @@ describe("commandSchema", () => {
     expect(commandSchema(m, { internal: true }).safeParse(cmd).success).toBe(true);
     expect(commandSchema(m, { internal: false }).safeParse(cmd).success).toBe(false);
   });
+
+  test("nullIsValue on setTriggerConfig and setOutput is internal only, too", () => {
+    for (const op of ["setTriggerConfig", "setOutput"]) {
+      const cmd = { op, key: "k", value: null, nullIsValue: true };
+      expect(commandSchema(m, { internal: true }).safeParse(cmd).success).toBe(true);
+      expect(commandSchema(m, { internal: false }).safeParse(cmd).success).toBe(false);
+      expect(JSON.stringify(opJsonSchema(m, op, []))).not.toContain("nullIsValue");
+    }
+  });
+
+  test("the new ops parse in their documented forms", () => {
+    const s = commandSchema(m);
+    const trigger = m.triggers[0]?.type as string;
+    for (const cmd of [
+      { op: "duplicateStep", id: "a" },
+      { op: "renameStep", id: "a", name: "" },
+      { op: "renameStepId", id: "$1", newId: "b" },
+      { op: "setType", id: "a", type: "crm.getDeal" },
+      { op: "setDisabled", id: "a", disabled: false },
+      { op: "setNote", id: "a", note: null },
+      { op: "setColor", id: "a", color: "blue" },
+      { op: "setColor", id: "a", color: null },
+      { op: "setTrigger", type: trigger },
+      { op: "setTrigger", type: trigger, config: { stage: "x", gone: null } },
+      { op: "setTriggerConfig", key: "k", value: 1 },
+      { op: "setTriggerConfig", config: { k: null } },
+      { op: "setOutput", key: "k", value: { $ref: "steps.a.b" } },
+      { op: "setOutput", config: { k: null } },
+      { op: "renameWorkflow", name: "W" },
+      { op: "addSection", first: "a", last: "b", title: "T", color: "gray" },
+      { op: "addSection", first: "a", last: "a", title: "T", color: "gray", note: "n", id: "t" },
+      { op: "updateSection", id: "t", note: null, first: "a" },
+      { op: "removeSection", id: "$1" },
+    ]) {
+      expect(s.safeParse(cmd).success, JSON.stringify(cmd)).toBe(true);
+    }
+    for (const cmd of [
+      { op: "setColor", id: "a", color: "red" },
+      { op: "setTrigger", type: "nope.nope" },
+      { op: "renameWorkflow", name: "  " },
+      { op: "setNote", id: "a", note: "x".repeat(4001) },
+      { op: "updateSection", id: "t", color: null },
+      { op: "addSection", first: "a", last: "b", title: "T" },
+    ]) {
+      expect(s.safeParse(cmd).success, JSON.stringify(cmd)).toBe(false);
+    }
+  });
 });
 
 describe("opJsonSchema", () => {
@@ -77,6 +124,20 @@ describe("opJsonSchema", () => {
       "moveStep",
       "removeStep",
       "setConfig",
+      "duplicateStep",
+      "renameStep",
+      "renameStepId",
+      "setType",
+      "setDisabled",
+      "setNote",
+      "setColor",
+      "setTrigger",
+      "setTriggerConfig",
+      "setOutput",
+      "renameWorkflow",
+      "addSection",
+      "updateSection",
+      "removeSection",
     ]);
   });
 

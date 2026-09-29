@@ -1,21 +1,36 @@
 /**
- * Single-step command handlers: `addStep`, `removeStep`, `moveStep`, `setConfig`.
+ * Single-step command handlers: `addStep`, `removeStep`, `moveStep`, `setConfig`,
+ * `duplicateStep`, `renameStep`, `renameStepId`, `setType`, `setDisabled`, `setNote`,
+ * `setColor`, plus the trigger, output and workflow-name commands.
  *
  * @module
  */
+import { ANNOTATION_COLORS, isAnnotationColor, NOTE_MAX_CHARS } from "../annotations";
 import { isValidStepId, RESERVED_STEP_IDS, STEP_ID_PATTERN } from "../ids";
 import { branchesFor } from "../json-schema";
-import { createStep, jsonEqual, syncBranches } from "../step-factory";
+import {
+  copyName,
+  createStep,
+  defaultConfig,
+  jsonEqual,
+  replaceStepType,
+  syncBranches,
+} from "../step-factory";
 import {
   allStepIds,
   branchList,
+  codeBlocksRename,
+  duplicateStep,
   findStep,
   generateStepId,
   insertStep,
+  isGeneratedStepId,
   moveStep,
   removeStep,
+  renameStepId,
   type StepLocation,
   updateStep,
+  walkSteps,
 } from "../tree";
 import type { NodeManifest, Step, ValueExpr, WorkflowDoc } from "../types";
 import { formatPath } from "./command-schema";
@@ -26,6 +41,7 @@ import {
   closest,
   type Handler,
   type HandlerContext,
+  type PlaceholderKind,
   type StepRef,
 } from "./commands";
 import { resolveStepRef, resolveValuePlaceholders } from "./placeholders";
@@ -41,17 +57,53 @@ function join(base: string, seg: string | number): string {
   return base === "" ? formatPath([seg]) : `${base}${formatPath(["x", seg]).slice(1)}`;
 }
 
-/** @internal The real ID a placeholder names, recorded as used; throws `placeholder.unknown`. */
+/** Every placeholder defined so far, of both kinds, in batch order. */
+function definedPlaceholders(ctx: HandlerContext): string[] {
+  const all = [...ctx.placeholders.keys(), ...ctx.sectionPlaceholders.keys()];
+  const n = (p: string) => (/^\$[0-9]+$/.test(p) ? Number(p.slice(1)) : Number.POSITIVE_INFINITY);
+  return all.sort((a, b) => n(a) - n(b));
+}
+
+/** @internal The `placeholder.unknown` failure for `ref`. */
+export function unknownPlaceholder(ctx: HandlerContext, ref: string, path: string): CommandFailure {
+  return new CommandFailure("placeholder.unknown", `Unknown placeholder "${ref}"`, path, {
+    defined: definedPlaceholders(ctx),
+    note: "$n is the result of commands[n-1]",
+  });
+}
+
+/** @internal The `placeholder.kind` failure: `ref` names a `got` where a `want` ID goes. */
+export function wrongKind(
+  ref: string,
+  got: PlaceholderKind,
+  want: PlaceholderKind,
+  path: string,
+): CommandFailure {
+  const by = /^\$[0-9]+$/.test(ref) ? ` (created by commands[${Number(ref.slice(1)) - 1}])` : "";
+  return new CommandFailure(
+    "placeholder.kind",
+    `Placeholder "${ref}" names a ${got}, but this argument takes a ${want} ID`,
+    path,
+    {
+      expected: want,
+      got,
+      note: `${ref} names a ${got}${by}; this argument takes a ${want} ID`,
+    },
+  );
+}
+
+/**
+ * @internal The real step ID a step argument names (a placeholder resolved, and recorded as
+ * used); throws `placeholder.unknown`, or `placeholder.kind` for a section's placeholder.
+ */
 export function placeholderId(ctx: HandlerContext, ref: StepRef, path: string): string {
   if (typeof ref !== "string") {
     throw new CommandFailure("command.invalid", "A step ID must be a string", path);
   }
   const id = resolveStepRef(ref, ctx.placeholders);
   if (id === undefined) {
-    throw new CommandFailure("placeholder.unknown", `Unknown placeholder "${ref}"`, path, {
-      defined: [...ctx.placeholders.keys()],
-      note: "$n is the result of commands[n-1]",
-    });
+    if (ctx.sectionPlaceholders.has(ref)) throw wrongKind(ref, "section", "step", path);
+    throw unknownPlaceholder(ctx, ref, path);
   }
   if (ref !== id) ctx.used.set(ref, id);
   return id;
@@ -74,14 +126,16 @@ export function existingStep(
   return { id, step: found.step, location: found.location };
 }
 
-/** @internal `v` with its placeholders resolved; throws `placeholder.unknown`. */
+/**
+ * @internal `v` with its placeholders resolved; throws `placeholder.unknown`, or
+ * `placeholder.kind` for a section's placeholder in a `steps.$n` reference.
+ */
 export function resolvedValue(ctx: HandlerContext, v: ValueExpr, path: string): ValueExpr {
   const r = resolveValuePlaceholders(v, ctx.placeholders, ctx.used);
   if (r.unknown !== undefined) {
-    throw new CommandFailure("placeholder.unknown", `Unknown placeholder "${r.unknown}"`, path, {
-      defined: [...ctx.placeholders.keys()],
-      note: "$n is the result of commands[n-1]",
-    });
+    // `steps.$n` is a step reference: a section's placeholder has no output to read.
+    if (ctx.sectionPlaceholders.has(r.unknown)) throw wrongKind(r.unknown, "section", "step", path);
+    throw unknownPlaceholder(ctx, r.unknown, path);
   }
   return r.value;
 }
@@ -109,6 +163,27 @@ export const AT_HINT = {
 
 /** The step ID rule, as a hint. */
 const ID_RULE = `Start with a letter or underscore, then letters, digits and underscores only; not ${[...RESERVED_STEP_IDS].join(", ")}`;
+
+/** Throws `id.invalid` or `id.taken` unless `id` can name a new step in `doc`. */
+function checkNewStepId(doc: WorkflowDoc, id: unknown, path: string): void {
+  if (!isValidStepId(id as string)) {
+    throw new CommandFailure(
+      "id.invalid",
+      `Step ID "${String(id)}" must start with a letter or underscore and contain only letters, digits and underscores`,
+      path,
+      {
+        rule: ID_RULE,
+        pattern: STEP_ID_PATTERN.source,
+        suggested: generateStepId(doc, String(id)),
+      },
+    );
+  }
+  if (allStepIds(doc).has(id as string)) {
+    throw new CommandFailure("id.taken", `Step ID "${String(id)}" is already used`, path, {
+      suggested: generateStepId(doc, id as string),
+    });
+  }
+}
 
 /** Every step ID in `step`'s subtree, `step` included. */
 function subtree(step: Step, into = new Set<string>()): Set<string> {
@@ -216,23 +291,7 @@ const addStep: Handler = (doc, command, ctx) => {
   const node = nodeOf(ctx, cmd.type, "type");
   let id: string;
   if (cmd.id !== undefined) {
-    if (!isValidStepId(cmd.id)) {
-      throw new CommandFailure(
-        "id.invalid",
-        `Step ID "${String(cmd.id)}" must start with a letter or underscore and contain only letters, digits and underscores`,
-        "id",
-        {
-          rule: ID_RULE,
-          pattern: STEP_ID_PATTERN.source,
-          suggested: generateStepId(doc, String(cmd.id)),
-        },
-      );
-    }
-    if (allStepIds(doc).has(cmd.id)) {
-      throw new CommandFailure("id.taken", `Step ID "${cmd.id}" is already used`, "id", {
-        suggested: generateStepId(doc, cmd.id),
-      });
-    }
+    checkNewStepId(doc, cmd.id, "id");
     id = cmd.id;
   } else {
     id = generateStepId(doc, node.type);
@@ -283,10 +342,22 @@ const moveStepHandler: Handler = (doc, command, ctx) => {
   return { doc: moveStep(prepared, id, loc) };
 };
 
-const setConfig: Handler = (doc, command, ctx) => {
-  const cmd = command as Cmd<"setConfig">;
-  const { id, step } = existingStep(doc, ctx, cmd.id, "id");
-  const config = step.config;
+/** The two forms of a config edit (setConfig, setTriggerConfig, setOutput). */
+type ConfigEdit =
+  | { key: string; value: ValueExpr | null; nullIsValue?: boolean }
+  | { config: Record<string, ValueExpr | null> };
+
+/**
+ * @internal `config` with `edit` applied (placeholders resolved), or `undefined` when nothing
+ * changes. The key form sets one key: `null` removes it unless `nullIsValue`, and `undefined`
+ * (only reachable in trusted mode) removes it, as the editor's setters do. The `config` form
+ * merges, and `null` removes.
+ */
+export function patchConfig(
+  ctx: HandlerContext,
+  config: Record<string, ValueExpr>,
+  edit: ConfigEdit,
+): Record<string, ValueExpr> | undefined {
   let next: Record<string, ValueExpr> | undefined;
   const set = (key: string, value: ValueExpr | null, remove: boolean, path: string) => {
     const cur = next ?? config;
@@ -300,27 +371,207 @@ const setConfig: Handler = (doc, command, ctx) => {
     if (Object.hasOwn(cur, key) && jsonEqual(cur[key], v)) return;
     next = { ...cur, [key]: v };
   };
-  if ("config" in cmd) {
-    if (!isObject(cmd.config)) {
+  if ("config" in edit) {
+    if (!isObject(edit.config)) {
       throw new CommandFailure("command.invalid", "config must be an object", "config");
     }
-    for (const [key, value] of Object.entries(cmd.config)) {
+    for (const [key, value] of Object.entries(edit.config)) {
       set(key, value, value === null, join("config", key));
     }
   } else {
-    if (typeof cmd.key !== "string" || cmd.key === "") {
+    if (typeof edit.key !== "string" || edit.key === "") {
       throw new CommandFailure("command.invalid", "key must be a non-empty string", "key");
     }
-    // `undefined` (only reachable in trusted mode) removes, as the editor's setConfig does.
     const remove =
-      (cmd.value === null && cmd.nullIsValue !== true) || (cmd.value as unknown) === undefined;
-    set(cmd.key, cmd.value, remove, "value");
+      (edit.value === null && edit.nullIsValue !== true) || (edit.value as unknown) === undefined;
+    set(edit.key, edit.value, remove, "value");
   }
+  return next;
+}
+
+const setConfig: Handler = (doc, command, ctx) => {
+  const cmd = command as Cmd<"setConfig">;
+  const { id, step } = existingStep(doc, ctx, cmd.id, "id");
+  const next = patchConfig(ctx, step.config, cmd);
   if (next === undefined) return { doc };
   const node = ctx.nodes.get(step.type);
   const updated: Step = { ...step, config: next };
   const synced = node ? syncBranches(updated, node) : updated;
   return { doc: updateStep(doc, id, () => synced) };
+};
+
+/**
+ * @internal Records that step `from` is now `to`: `renamed` keeps one old → new entry per step
+ * of the input doc (dropped when a step is renamed back), and step placeholders (and their
+ * `ids` entries) that named `from` now name `to`. Section placeholders are left alone, even when
+ * a section has the same ID as the step.
+ */
+export function recordRename(ctx: HandlerContext, from: string, to: string): void {
+  if (from === to) return;
+  let chained = false;
+  for (const [old, now] of ctx.renamed) {
+    if (now !== from) continue;
+    chained = true;
+    if (old === to) ctx.renamed.delete(old);
+    else ctx.renamed.set(old, to);
+  }
+  if (!chained) ctx.renamed.set(from, to);
+  for (const [k, v] of ctx.placeholders) {
+    if (v !== from) continue;
+    ctx.placeholders.set(k, to);
+    if (ctx.used.has(k)) ctx.used.set(k, to);
+  }
+}
+
+/** A step's display name: its own name, else its node's, else its ID. */
+function displayName(step: Step, ctx: HandlerContext): string {
+  return step.name ?? ctx.nodes.get(step.type)?.name ?? step.id;
+}
+
+const duplicateStepHandler: Handler = (doc, command, ctx) => {
+  const cmd = command as Cmd<"duplicateStep">;
+  const { id } = existingStep(doc, ctx, cmd.id, "id");
+  const { doc: copied, newId } = duplicateStep(doc, id);
+  const copy = findStep(copied, newId)?.step as Step;
+  const taken = new Set<string>();
+  walkSteps(copied, (s) => taken.add(displayName(s, ctx)));
+  const name = copyName(displayName(copy, ctx), taken);
+  return { doc: updateStep(copied, newId, (s) => ({ ...s, name })), created: newId };
+};
+
+const renameStepHandler: Handler = (doc, command, ctx) => {
+  const cmd = command as Cmd<"renameStep">;
+  const { id, step } = existingStep(doc, ctx, cmd.id, "id");
+  if (typeof cmd.name !== "string") {
+    throw new CommandFailure("command.invalid", "name must be a string", "name");
+  }
+  const name = cmd.name.trim();
+  if ((step.name ?? "") === name) return { doc };
+  const { name: _, ...rest } = step;
+  return { doc: updateStep(doc, id, () => (name === "" ? rest : { ...rest, name })) };
+};
+
+const renameStepIdHandler: Handler = (doc, command, ctx) => {
+  const cmd = command as Cmd<"renameStepId">;
+  const { id } = existingStep(doc, ctx, cmd.id, "id");
+  if (cmd.newId === id) return { doc, created: id };
+  checkNewStepId(doc, cmd.newId, "newId");
+  const next = renameStepId(doc, id, cmd.newId, ctx.manifest);
+  recordRename(ctx, id, cmd.newId);
+  return { doc: next, created: cmd.newId };
+};
+
+const setType: Handler = (doc, command, ctx) => {
+  const cmd = command as Cmd<"setType">;
+  const { id, step } = existingStep(doc, ctx, cmd.id, "id");
+  const node = nodeOf(ctx, cmd.type, "type");
+  if (step.type === node.type) return { doc, created: id };
+  const replaced = replaceStepType(doc, id, node);
+  // As the editor's Replace: an ID generated from the old type would misname the step, so it is
+  // regenerated (and references follow), unless code reads the step in a way a rename breaks.
+  if (
+    !isGeneratedStepId(id, step.type) ||
+    isGeneratedStepId(id, node.type) ||
+    codeBlocksRename(replaced, id, ctx.manifest)
+  ) {
+    return { doc: replaced, created: id };
+  }
+  const free = generateStepId(replaced, node.type);
+  const next = renameStepId(replaced, id, free, ctx.manifest);
+  recordRename(ctx, id, free);
+  return { doc: next, created: free };
+};
+
+const setDisabled: Handler = (doc, command, ctx) => {
+  const cmd = command as Cmd<"setDisabled">;
+  const { id, step } = existingStep(doc, ctx, cmd.id, "id");
+  const disabled = cmd.disabled === true;
+  if ((step.disabled === true) === disabled) return { doc };
+  const { disabled: _, ...rest } = step;
+  return { doc: updateStep(doc, id, () => (disabled ? { ...rest, disabled: true } : rest)) };
+};
+
+const setNote: Handler = (doc, command, ctx) => {
+  const cmd = command as Cmd<"setNote">;
+  const { id, step } = existingStep(doc, ctx, cmd.id, "id");
+  const note = cmd.note ?? "";
+  if (typeof note !== "string" || note.length > NOTE_MAX_CHARS) {
+    throw new CommandFailure(
+      "command.invalid",
+      `A note is a string of at most ${NOTE_MAX_CHARS} characters, or null`,
+      "note",
+      { expected: { type: ["string", "null"], maxLength: NOTE_MAX_CHARS } },
+    );
+  }
+  if ((step.note ?? "") === note) return { doc };
+  const { note: _, ...rest } = step;
+  return { doc: updateStep(doc, id, () => (note === "" ? rest : { ...rest, note })) };
+};
+
+const setColor: Handler = (doc, command, ctx) => {
+  const cmd = command as Cmd<"setColor">;
+  const { id, step } = existingStep(doc, ctx, cmd.id, "id");
+  const color = cmd.color ?? undefined;
+  if (color !== undefined && !isAnnotationColor(color)) {
+    throw new CommandFailure(
+      "command.invalid",
+      `A colour is one of ${ANNOTATION_COLORS.join(", ")}, or null`,
+      "color",
+      { expected: { enum: [...ANNOTATION_COLORS, null] } },
+    );
+  }
+  if (step.color === color) return { doc };
+  const { color: _, ...rest } = step;
+  return { doc: updateStep(doc, id, () => (color === undefined ? rest : { ...rest, color })) };
+};
+
+const setTrigger: Handler = (doc, command, ctx) => {
+  const cmd = command as Cmd<"setTrigger">;
+  const t = ctx.manifest.triggers.find((x) => x.type === cmd.type);
+  if (!t) {
+    throw new CommandFailure(
+      "trigger.unknown",
+      `Unknown trigger type "${String(cmd.type)}"`,
+      "type",
+      {
+        closest: closest(
+          String(cmd.type),
+          ctx.manifest.triggers.map((x) => x.type),
+          10,
+        ),
+      },
+    );
+  }
+  const same = doc.trigger.type === t.type;
+  if (same && cmd.config === undefined) return { doc };
+  const start = same ? doc.trigger.config : defaultConfig(t.config);
+  const merged = cmd.config === undefined ? undefined : patchConfig(ctx, start, cmd as ConfigEdit);
+  if (same && merged === undefined) return { doc };
+  return { doc: { ...doc, trigger: { type: t.type, config: merged ?? start } } };
+};
+
+const setTriggerConfig: Handler = (doc, command, ctx) => {
+  const next = patchConfig(ctx, doc.trigger.config, command as ConfigEdit);
+  if (next === undefined) return { doc };
+  return { doc: { ...doc, trigger: { ...doc.trigger, config: next } } };
+};
+
+const setOutput: Handler = (doc, command, ctx) => {
+  const next = patchConfig(ctx, doc.output ?? {}, command as ConfigEdit);
+  if (next === undefined) return { doc };
+  const { output: _, ...rest } = doc;
+  return { doc: Object.keys(next).length > 0 ? { ...rest, output: next } : rest };
+};
+
+const renameWorkflow: Handler = (doc, command) => {
+  const cmd = command as Cmd<"renameWorkflow">;
+  if (typeof cmd.name !== "string") {
+    throw new CommandFailure("command.invalid", "name must be a string", "name");
+  }
+  const name = cmd.name.trim();
+  // A blank name is refused by the shape check; trusted callers get the editor's no-op.
+  if (name === "" || name === doc.name) return { doc };
+  return { doc: { ...doc, name } };
 };
 
 /** @internal The single-step handlers by op. */
@@ -329,4 +580,15 @@ export const singleHandlers: Record<string, Handler> = {
   removeStep: removeStepHandler,
   moveStep: moveStepHandler,
   setConfig,
+  duplicateStep: duplicateStepHandler,
+  renameStep: renameStepHandler,
+  renameStepId: renameStepIdHandler,
+  setType,
+  setDisabled,
+  setNote,
+  setColor,
+  setTrigger,
+  setTriggerConfig,
+  setOutput,
+  renameWorkflow,
 };
