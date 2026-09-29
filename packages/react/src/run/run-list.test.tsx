@@ -332,6 +332,7 @@ describe("RunList: staying current", () => {
   });
 
   it("updates a row at once when a viewer of the same client sees the run change", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const waiting = row("r1", "waiting");
     const listRuns = vi
       .fn()
@@ -348,7 +349,11 @@ describe("RunList: staying current", () => {
     // What useRun (and so RunViewer) publishes after loading the run, e.g. once it was cancelled.
     act(() => publishRunChange(client, { ...waiting, status: "cancelled" }));
     expect(within(list).getByRole("button", { name: /Cancelled/ })).toBeTruthy();
-    await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(2));
+    // CHANGE_RELOAD_MS in run-list.tsx debounces the reload after a run-change publish.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(listRuns).toHaveBeenCalledTimes(2);
   });
 
   it("drops a run that no longer matches the filter", async () => {
