@@ -9,9 +9,16 @@ import { type AnnotationColor, isAnnotationColor, type Section } from "@flowline
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Pencil, StickyNote, TriangleAlert, Ungroup, Wrench } from "lucide-react";
-import { type JSX, memo, useContext, useEffect, useMemo, useRef } from "react";
+import { type JSX, memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useEditorStore, useEditorStoreApi } from "../hooks";
-import { nodeElement, sectionActions, sectionRepair } from "./actions";
+import {
+  isLastOccurrence,
+  nodeElement,
+  occurrenceIndex,
+  safeEdit,
+  sectionActions,
+  sectionRepair,
+} from "./actions";
 import {
   type CanvasUiStore,
   PortalContainerContext,
@@ -133,7 +140,8 @@ export const SectionRegion = memo(function SectionRegion({
 });
 
 /**
- * A section's inline title field. Enter or blur saves, Escape keeps the old title. `keyboard` is
+ * A section's inline title field. Enter or blur saves (`null` when unchanged), Escape keeps the
+ * old title. `keyboard` is
  * true when it ended with Enter or Escape (focus should go back to the chip).
  */
 function TitleInput({
@@ -150,10 +158,13 @@ function TitleInput({
     ref.current?.focus({ preventScroll: true });
     ref.current?.select();
   }, []);
+  // The title as the edit started: an unchanged one saves nothing (an edit made meanwhile
+  // elsewhere is kept).
+  const [base] = useState(initial);
   const finish = (title: string | null, keyboard = false) => {
     if (done.current) return;
     done.current = true;
-    onDone(title, keyboard);
+    onDone(title !== null && title.trim() !== base.trim() ? title.trim() : null, keyboard);
   };
   return (
     <input
@@ -169,6 +180,34 @@ function TitleInput({
         if (e.key === "Escape") finish(null, true);
       }}
       onBlur={(e) => finish(e.currentTarget.value)}
+    />
+  );
+}
+
+/** A section note's editor, starting from the canvas' draft when there is one. */
+function SectionNoteEditor({
+  occurrence,
+  note,
+  onDone,
+}: {
+  occurrence: string;
+  note: string;
+  onDone(text: string | null, keyboard: boolean): void;
+}): JSX.Element {
+  const ui = useCanvasUiApi();
+  const labels = useLabels();
+  const [start] = useState(() => ui.getState().noteDraft ?? { text: note, base: note });
+  return (
+    <NoteEditor
+      initial={start.text}
+      base={start.base}
+      label={labels.sectionNote}
+      onDraft={(text) => {
+        if (ui.getState().editingNote === sectionNoteKey(occurrence)) {
+          ui.getState().setNoteDraft({ text, base: start.base });
+        }
+      }}
+      onDone={onDone}
     />
   );
 }
@@ -203,17 +242,23 @@ export const SectionHeader = memo(function SectionHeader({
   const ui = useCanvasUiApi();
   const container = useContext(PortalContainerContext);
   const keepEditorFocus = useKeepEditorFocus();
-  const section = useSection(id, data.sectionId);
   const sectionId = data.sectionId;
-  const renaming = useCanvasUi((s) => s.renamingSection === sectionId);
-  const editingNote = useCanvasUi((s) => s.editingNote === sectionNoteKey(sectionId));
-  const issues = useEditorStore((s) => s.issues);
+  // This header's occurrence key: UI state is keyed by it, so when the doc repeats the section's
+  // ID only this header reacts.
+  const occurrence = id.slice("sectionHeader:".length);
   const doc = useEditorStore((s) => s.doc);
+  const index = occurrenceIndex(doc, occurrence);
+  const section = index === -1 ? undefined : doc.sections?.[index];
+  // Commands act on the last section with an ID: an earlier one's menu offers only Fix.
+  const editable = index !== -1 && isLastOccurrence(doc, index);
+  const renaming = useCanvasUi((s) => s.renamingSection === occurrence) && editable;
+  const editingNote = useCanvasUi((s) => s.editingNote === sectionNoteKey(occurrence)) && editable;
+  const issues = useEditorStore((s) => s.issues);
   const own = useMemo(() => issues.filter((i) => i.sectionId === sectionId), [issues, sectionId]);
   const fixable = useMemo(() => sectionRepair(doc, own, sectionId), [doc, own, sectionId]);
   const actions = useMemo(
-    () => sectionActions(store, ui, root, sectionId),
-    [store, ui, root, sectionId],
+    () => sectionActions(store, ui, root, sectionId, occurrence),
+    [store, ui, root, sectionId, occurrence],
   );
   if (!section) return null;
   const title = sectionTitle(section, labels.untitledSection);
@@ -249,8 +294,12 @@ export const SectionHeader = memo(function SectionHeader({
         <TitleInput
           initial={typeof section.title === "string" ? section.title : ""}
           onDone={(value, keyboard) => {
+            // A stale input (its section left the doc meanwhile) saves nothing.
+            if (ui.getState().renamingSection !== occurrence) return;
             ui.getState().stopSectionRename();
-            if (value !== null) store.getState().updateSection(sectionId, { title: value.trim() });
+            if (value !== null) {
+              safeEdit(ui, () => store.getState().updateSection(sectionId, { title: value }));
+            }
             if (keyboard) focusChip(root(), ui, id);
           }}
         />
@@ -287,34 +336,45 @@ export const SectionHeader = memo(function SectionHeader({
             onClick={(e) => e.stopPropagation()}
             onCloseAutoFocus={keepEditorFocus}
           >
-            <M.Item className="fl-menu__item" onSelect={actions.rename}>
-              <Row icon={Pencil} label={labels.renameSection} />
-            </M.Item>
-            <ColorSubmenu kit={M} current={section.color} onPick={actions.setColor} />
-            <M.Item className="fl-menu__item" onSelect={actions.editNote}>
-              <Row icon={StickyNote} label={labels.sectionNote} />
-            </M.Item>
+            {editable && (
+              <>
+                <M.Item className="fl-menu__item" onSelect={actions.rename}>
+                  <Row icon={Pencil} label={labels.renameSection} />
+                </M.Item>
+                <ColorSubmenu kit={M} current={section.color} onPick={actions.setColor} />
+                <M.Item className="fl-menu__item" onSelect={actions.editNote}>
+                  <Row icon={StickyNote} label={labels.sectionNote} />
+                </M.Item>
+              </>
+            )}
             {fixable && (
               <M.Item className="fl-menu__item" onSelect={actions.repair}>
                 <Row icon={Wrench} label={labels.fixIssue} />
               </M.Item>
             )}
-            <M.Separator className="fl-menu__sep" />
-            <M.Item className="fl-menu__item" data-danger onSelect={actions.ungroup}>
-              <Row icon={Ungroup} label={labels.ungroup} />
-            </M.Item>
+            {editable && (
+              <>
+                <M.Separator className="fl-menu__sep" />
+                <M.Item className="fl-menu__item" data-danger onSelect={actions.ungroup}>
+                  <Row icon={Ungroup} label={labels.ungroup} />
+                </M.Item>
+              </>
+            )}
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
       {editingNote && (
         <div className="fl-section-note" data-color={color}>
-          <NoteEditor
-            initial={note ?? ""}
-            label={labels.sectionNote}
+          <SectionNoteEditor
+            occurrence={occurrence}
+            note={note ?? ""}
             onDone={(value, keyboard) => {
+              if (ui.getState().editingNote !== sectionNoteKey(occurrence)) return;
               ui.getState().stopNoteEdit();
               if (value !== null) {
-                store.getState().updateSection(sectionId, { note: savedNote(value) });
+                safeEdit(ui, () =>
+                  store.getState().updateSection(sectionId, { note: savedNote(value) }),
+                );
               }
               if (keyboard) focusChip(root(), ui, id);
             }}

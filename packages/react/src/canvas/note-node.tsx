@@ -5,9 +5,9 @@
  * @module
  */
 import type { Node, NodeProps } from "@xyflow/react";
-import { type JSX, memo, useContext, useMemo } from "react";
+import { type JSX, memo, useContext, useMemo, useState } from "react";
 import { stepIndex, useEditorStore, useEditorStoreApi } from "../hooks";
-import { focusNode, nodeElement, noteActions, tooLongNote } from "./actions";
+import { focusNode, nodeElement, noteActions, safeEdit, tooLongNote } from "./actions";
 import { RootElementContext, useCanvasUi, useCanvasUiApi, useLabels } from "./canvas-context";
 import { NoteEditor, savedNote } from "./note-editor";
 import { drawColor } from "./section-node";
@@ -20,6 +20,37 @@ export interface NoteNodeData extends Record<string, unknown> {
 
 /** A sticky-note node. */
 export type NoteNode = Node<NoteNodeData, "note">;
+
+/**
+ * The editor of step `stepId`'s note, starting from the canvas' draft when there is one (the
+ * editor remounted after its step was renamed), else from the note.
+ */
+function StepNoteEditor({
+  stepId,
+  note,
+  onDone,
+}: {
+  stepId: string;
+  note: string;
+  onDone(text: string | null, keyboard: boolean): void;
+}): JSX.Element {
+  const ui = useCanvasUiApi();
+  const labels = useLabels();
+  const [start] = useState(() => ui.getState().noteDraft ?? { text: note, base: note });
+  return (
+    <NoteEditor
+      initial={start.text}
+      base={start.base}
+      label={labels.editNote}
+      onDraft={(text) => {
+        if (ui.getState().editingNote === stepId) {
+          ui.getState().setNoteDraft({ text, base: start.base });
+        }
+      }}
+      onDone={onDone}
+    />
+  );
+}
 
 /**
  * A step's note: its first three lines on the step's colour (yellow when it has none), with the
@@ -45,12 +76,15 @@ export const NoteCard = memo(function NoteCard({ data }: NodeProps<NoteNode>): J
   if (editing) {
     return (
       <div className="fl-note" data-color={tone} data-editing="">
-        <NoteEditor
-          initial={text}
-          label={labels.editNote}
+        <StepNoteEditor
+          stepId={stepId}
+          note={text}
           onDone={(value, keyboard) => {
+            // A stale editor (its step renamed or removed meanwhile) saves nothing.
+            if (ui.getState().editingNote !== stepId) return;
             ui.getState().stopNoteEdit();
-            if (value !== null) store.getState().setNote(stepId, savedNote(value));
+            if (value !== null)
+              safeEdit(ui, () => store.getState().setNote(stepId, savedNote(value)));
             if (!keyboard) return;
             // Back to the note when it is still there, else to its card.
             requestAnimationFrame(() => {

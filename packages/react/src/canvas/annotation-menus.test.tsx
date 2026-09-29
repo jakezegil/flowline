@@ -318,3 +318,181 @@ describe("labels", () => {
     expect(within(menu).queryByText(L.ungroup)).toBeNull();
   });
 });
+
+describe("review round 1", () => {
+  const long = "x".repeat(5000);
+  const noteBox = () => screen.findByRole("textbox", { name: L.editNote });
+  const openNote = (id: string) =>
+    fireEvent.click(node(`note:${id}`).querySelector(".fl-note") as HTMLElement);
+
+  test("I1: blurring an untouched over-long note saves nothing and throws nothing", async () => {
+    const store = storeOf(docOf({ a: { note: long } }));
+    render(<WorkflowCanvas store={store} />);
+    const before = store.getState().doc;
+    openNote("a");
+    const box = await noteBox();
+    expect(() => fireEvent.blur(box)).not.toThrow();
+    expect(store.getState().doc).toBe(before);
+    expect(screen.queryByRole("textbox", { name: L.editNote })).toBeNull();
+  });
+
+  test("I1: an edited note still over the limit keeps the editor open; Shorten saves 4000", async () => {
+    const store = storeOf(docOf({ a: { note: long } }));
+    render(<WorkflowCanvas store={store} />);
+    openNote("a");
+    const box = await noteBox();
+    fireEvent.change(box, { target: { value: "y".repeat(4500) } });
+    fireEvent.blur(box);
+    expect(stepOf(store, "a")?.note).toBe(long);
+    expect(screen.getByRole("textbox", { name: L.editNote })).toBe(box);
+    expect(box.getAttribute("aria-invalid")).toBe("true");
+    const hint = screen.getByText(L.noteTooLong(4500, 4000));
+    fireEvent.click(
+      within(hint.parentElement as HTMLElement).getByRole("button", { name: L.shortenNote }),
+    );
+    expect(stepOf(store, "a")?.note).toBe("y".repeat(4000));
+    expect(screen.queryByRole("textbox", { name: L.editNote })).toBeNull();
+  });
+
+  test("I1: the same for an over-long section note", async () => {
+    const store = storeOf(docOf({ sections: [intro({ note: long })] }));
+    render(<WorkflowCanvas store={store} />);
+    const before = store.getState().doc;
+    fireEvent.click(within(await chipMenu("intro")).getByText(L.sectionNote));
+    let box = await screen.findByRole("textbox", { name: L.sectionNote });
+    expect(() => fireEvent.blur(box)).not.toThrow();
+    expect(store.getState().doc).toBe(before);
+    fireEvent.click(within(await chipMenu("intro")).getByText(L.sectionNote));
+    box = await screen.findByRole("textbox", { name: L.sectionNote });
+    fireEvent.change(box, { target: { value: "z".repeat(4200) } });
+    fireEvent.blur(box);
+    expect(store.getState().doc.sections?.[0]?.note).toBe(long);
+    const hint = screen.getByText(L.noteTooLong(4200, 4000));
+    fireEvent.click(
+      within(hint.parentElement as HTMLElement).getByRole("button", { name: L.shortenNote }),
+    );
+    expect(store.getState().doc.sections?.[0]?.note).toBe("z".repeat(4000));
+  });
+
+  test("I1: a rejected save (store gone read-only) doesn't throw", async () => {
+    const store = storeOf(docOf({ a: { note: "old" } }));
+    render(<WorkflowCanvas store={store} />);
+    openNote("a");
+    const box = await noteBox();
+    fireEvent.change(box, { target: { value: "new" } });
+    expect(() => {
+      act(() => store.getState().setReadOnly(true));
+      if (box.isConnected) fireEvent.blur(box);
+    }).not.toThrow();
+    expect(stepOf(store, "a")?.note).toBe("old");
+  });
+
+  const dupes = (): Section[] => [
+    { id: "s", title: "One", color: "blue", first: "a", last: "a" },
+    { id: "s", title: "Two", color: "pink", first: "c", last: "c" },
+  ];
+  const chipOf = (nodeId: string) => within(node(nodeId)).getByRole("button");
+  async function menuOf(nodeId: string): Promise<HTMLElement> {
+    fireEvent.pointerDown(chipOf(nodeId), { button: 0, pointerType: "mouse" });
+    return screen.findByRole("menu");
+  }
+  const closeMenu = async (menu: HTMLElement) => {
+    fireEvent.keyDown(menu, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  };
+
+  test("I2: with a repeated section ID only the last chip edits; the others offer only Fix", async () => {
+    const store = storeOf(docOf({ sections: dupes() }));
+    render(<WorkflowCanvas store={store} />);
+    const first = await menuOf("sectionHeader:s");
+    for (const item of [L.renameSection, L.color, L.sectionNote, L.ungroup]) {
+      expect(within(first).queryByText(item)).toBeNull();
+    }
+    expect(within(first).getByText(L.fixIssue)).toBeTruthy();
+    await closeMenu(first);
+
+    fireEvent.click(within(await menuOf("sectionHeader:s~1")).getByText(L.renameSection));
+    const inputs = await screen.findAllByRole("textbox", { name: L.sectionTitleInput });
+    expect(inputs).toHaveLength(1);
+    const input = inputs[0] as HTMLElement;
+    expect(node("sectionHeader:s~1").contains(input)).toBe(true);
+    fireEvent.change(input, { target: { value: "Second" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(store.getState().doc.sections?.map((s) => s.title)).toEqual(["One", "Second"]);
+    // Let the chip's deferred refocus run before opening its menu again.
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+
+    const sub = await colorSubmenu(await menuOf("sectionHeader:s~1"));
+    fireEvent.click(within(sub).getByText(L.colorNames.green));
+    expect(store.getState().doc.sections?.map((s) => s.color)).toEqual(["blue", "green"]);
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    fireEvent.click(within(await menuOf("sectionHeader:s~1")).getByText(L.ungroup));
+    expect(store.getState().doc.sections?.map((s) => s.title)).toEqual(["One"]);
+    expect(await screen.findByText(L.sectionDeleted("Second"))).toBeTruthy();
+  });
+
+  test("I3: an agent edit made while the note editor is open survives an unchanged blur", async () => {
+    const store = storeOf(docOf({ a: { note: "old" } }));
+    render(<WorkflowCanvas store={store} />);
+    openNote("a");
+    const box = await noteBox();
+    act(() => void store.getState().apply([{ op: "setNote", id: "a", note: "agent" }]));
+    fireEvent.blur(screen.queryByRole("textbox", { name: L.editNote }) ?? box);
+    expect(stepOf(store, "a")?.note).toBe("agent");
+  });
+
+  test("I3: the same for a section title", async () => {
+    const store = storeOf(docOf({ sections: [intro()] }));
+    render(<WorkflowCanvas store={store} />);
+    fireEvent.click(within(await chipMenu("intro")).getByText(L.renameSection));
+    const input = await screen.findByRole("textbox", { name: L.sectionTitleInput });
+    act(() => void store.getState().apply([{ op: "updateSection", id: "intro", title: "Agent" }]));
+    fireEvent.blur(input);
+    expect(store.getState().doc.sections?.[0]?.title).toBe("Agent");
+  });
+
+  test("I3: a draft survives a rename of its step", async () => {
+    const store = storeOf(docOf({ a: { note: "old" } }));
+    render(<WorkflowCanvas store={store} />);
+    openNote("a");
+    fireEvent.change(await noteBox(), { target: { value: "draft" } });
+    act(() => void store.getState().apply([{ op: "renameStepId", id: "a", newId: "a2" }]));
+    const box = await noteBox();
+    expect(node("note:a2").contains(box)).toBe(true);
+    expect((box as HTMLTextAreaElement).value).toBe("draft");
+    fireEvent.blur(box);
+    expect(stepOf(store, "a2")?.note).toBe("draft");
+  });
+
+  test("I3: removing the step closes the editor; undo doesn't reopen it", async () => {
+    const store = storeOf(docOf({ a: { note: "old" } }));
+    render(<WorkflowCanvas store={store} />);
+    openNote("a");
+    fireEvent.change(await noteBox(), { target: { value: "draft" } });
+    expect(() =>
+      act(() => void store.getState().apply([{ op: "removeStep", id: "a" }])),
+    ).not.toThrow();
+    expect(screen.queryByRole("textbox", { name: L.editNote })).toBeNull();
+    act(() => store.getState().undo());
+    expect(stepOf(store, "a")?.note).toBe("old");
+    expect(screen.queryByRole("textbox", { name: L.editNote })).toBeNull();
+  });
+
+  test("M2: Remove note right after an edit is its own undo step", async () => {
+    const store = storeOf(docOf({ a: { note: "old" } }));
+    render(<WorkflowCanvas store={store} />);
+    openNote("a");
+    const box = await noteBox();
+    fireEvent.change(box, { target: { value: "edited" } });
+    fireEvent.blur(box);
+    expect(stepOf(store, "a")?.note).toBe("edited");
+    fireEvent.click(within(await stepMenu("a")).getByText(L.removeNote));
+    expect(stepOf(store, "a")?.note).toBeUndefined();
+    const toast = await screen.findByText(L.noteDeleted);
+    fireEvent.click(
+      within(toast.parentElement as HTMLElement).getByRole("button", { name: L.undo }),
+    );
+    expect(stepOf(store, "a")?.note).toBe("edited");
+  });
+});

@@ -95,6 +95,12 @@ export interface EditorState {
    * highlight: step IDs, section IDs, and a `token` that is new on every flash.
    */
   flash: { ids: string[]; sections: string[]; token: number } | null;
+  /**
+   * The step renames (old → new ID) of the edit, undo or redo that produced `doc`, so UI state
+   * keyed by step ID (an open note editor) can follow them. Only meaningful while
+   * `renames.doc === doc`; `null` before the first edit.
+   */
+  renames: { doc: WorkflowDoc; map: Record<string, string> } | null;
   /** Whether {@link EditorActions.undo} would do anything. */
   canUndo: boolean;
   /** Whether {@link EditorActions.redo} would do anything. */
@@ -501,7 +507,13 @@ export function createEditorStore(init: {
       const selection = "selection" in patch ? (patch.selection ?? null) : get().selection;
       const kept = "range" in patch ? (patch.range ?? null) : get().range;
       const range = pruneRange(prev, next, kept, renamed);
-      set({ ...derived(next), ...patch, selection: validSelection(next, selection), range });
+      set({
+        ...derived(next),
+        ...patch,
+        selection: validSelection(next, selection),
+        range,
+        renames: { doc: next, map: renamed },
+      });
       syncTestState();
     };
 
@@ -563,6 +575,7 @@ export function createEditorStore(init: {
         ...derived(next),
         selection: validSelection(next, mapped),
         range: travelRange(get().doc, next, get().range, map, result.value.range),
+        renames: { doc: next, map },
       });
       syncTestState();
     };
@@ -675,6 +688,7 @@ export function createEditorStore(init: {
       range: null,
       readOnly: init.readOnly === true,
       flash: null,
+      renames: null,
 
       apply(commands, opts) {
         if (get().readOnly) return { ok: false, error: READ_ONLY };

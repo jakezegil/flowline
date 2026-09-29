@@ -106,6 +106,10 @@ export interface FlowlineLabels {
   fixIssue: string;
   /** Cuts a note that is too long down to the maximum length. */
   shortenNote: string;
+  /** Hint in a note editor whose text is over the limit (`length` characters, `max` allowed). */
+  noteTooLong(length: number, max: number): string;
+  /** Toast after the issues pill's Fix, naming the repaired issue (its message). */
+  issueFixed(message: string): string;
   /** Accessible name of a section's header menu. */
   sectionMenu(title: string): string;
 
@@ -742,6 +746,9 @@ export const defaultLabels: FlowlineLabels = {
   noteDeleted: "Note removed",
   fixIssue: "Fix",
   shortenNote: "Shorten",
+  noteTooLong: (length, max) =>
+    `This note is ${length} characters; notes can be ${max} at most. Shorten it to save.`,
+  issueFixed: (message) => `Fixed: ${message}`,
   sectionMenu: (title) => `Section actions: ${title.trim() || untitled}`,
   groupIntoSection: "Group into section",
   defaultSectionTitle: "Section",

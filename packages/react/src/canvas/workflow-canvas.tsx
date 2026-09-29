@@ -40,7 +40,7 @@ import {
 import { useFlowlineAppearance } from "../provider";
 import { type EditorStore, holdReadOnly, TRIGGER_KEY } from "../store/editor-store";
 import { themeStyle } from "../theme";
-import { rangeIds, shiftSelect } from "./actions";
+import { rangeIds, reconcileEditors, shiftSelect } from "./actions";
 import { AddPlaceholder } from "./add-placeholder";
 import {
   CanvasUiContext,
@@ -422,7 +422,7 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
         readOnly,
         labels.sectionHeader(sectionTitle(section, labels.untitledSection), note),
         firstCard ? firstCard.x + firstCard.w / 2 : undefined,
-        editingNote === sectionNoteKey(ls.sectionId),
+        editingNote === sectionNoteKey(ls.id.slice("section:".length)),
       );
       out.push(region);
       const first = `step:${section?.first ?? ""}`;
@@ -628,6 +628,15 @@ export function WorkflowCanvas(props: {
         : { overlay },
     );
   }, [ui, readOnly, overlay]);
+  // Inline editors follow their step through renames and close when their target goes.
+  useEffect(
+    () =>
+      store.subscribe((s, prev) => {
+        if (s.doc === prev.doc) return;
+        reconcileEditors(ui, s.doc, s.renames?.doc === s.doc ? s.renames.map : {});
+      }),
+    [store, ui],
+  );
   useEffect(() => {
     if (ui.getState().labels !== labels) ui.setState({ labels });
   }, [ui, labels]);

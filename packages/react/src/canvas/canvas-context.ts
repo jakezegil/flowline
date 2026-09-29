@@ -82,15 +82,23 @@ export interface CanvasUiState {
   /** Step whose name is being edited inline. */
   renaming: string | null;
   /**
-   * Section (its ID in the doc) whose title is being edited inline: set when a range is grouped
-   * into a new section.
+   * Section whose title is being edited inline (set when a range is grouped into a new section),
+   * by its occurrence key: the section's ID, or `<id>~<index>` for a later occurrence of an ID
+   * the doc repeats (the header node's ID without its `sectionHeader:` prefix). So only one
+   * header reacts.
    */
   renamingSection: string | null;
   /**
-   * The note being edited inline: a step ID, or `"section:<id>"` for a section's note (see
-   * {@link sectionNoteKey}).
+   * The note being edited inline: a step ID, or `"section:<occurrence key>"` for a section's
+   * note (see {@link sectionNoteKey}). It follows step renames and is cleared when its step or
+   * section leaves the doc.
    */
   editingNote: string | null;
+  /**
+   * The open note editor's text so far and the note it started from, so the editor comes back
+   * with the draft when it remounts (its step was renamed). Cleared with {@link editingNote}.
+   */
+  noteDraft: { text: string; base: string } | null;
   toasts: Toast[];
   /**
    * A screen-reader-only message in the toast region's live region (e.g. "3 steps selected").
@@ -113,6 +121,8 @@ export interface CanvasUiActions {
   /** Starts editing a note inline (see {@link CanvasUiState.editingNote}). */
   startNoteEdit(key: string): void;
   stopNoteEdit(): void;
+  /** Records the open note editor's draft (see {@link CanvasUiState.noteDraft}). */
+  setNoteDraft(draft: { text: string; base: string }): void;
   /** Shows a toast for 5 seconds. */
   toast(message: string, action?: Toast["action"]): void;
   dismissToast(id: number): void;
@@ -123,8 +133,11 @@ export interface CanvasUiActions {
 /** A canvas' UI store. */
 export type CanvasUiStore = StoreApi<CanvasUiState & CanvasUiActions>;
 
-/** The {@link CanvasUiState.editingNote} key of section `sectionId`'s note. */
-export const sectionNoteKey = (sectionId: string): string => `section:${sectionId}`;
+/**
+ * The {@link CanvasUiState.editingNote} key of a section's note, from its occurrence key (see
+ * {@link CanvasUiState.renamingSection}).
+ */
+export const sectionNoteKey = (occurrence: string): string => `section:${occurrence}`;
 
 /** How long a toast stays up. */
 export const TOAST_MS = 5000;
@@ -143,6 +156,7 @@ export function createCanvasUiStore(init: {
     renaming: null,
     renamingSection: null,
     editingNote: null,
+    noteDraft: null,
     toasts: [],
     announcement: null,
     openPicker: (request, anchor) => set({ picker: { request, anchor } }),
@@ -157,10 +171,13 @@ export function createCanvasUiStore(init: {
     stopSectionRename: () => {
       if (get().renamingSection !== null) set({ renamingSection: null });
     },
-    startNoteEdit: (key) => set({ editingNote: key }),
+    startNoteEdit: (key) => set({ editingNote: key, noteDraft: null }),
     stopNoteEdit: () => {
-      if (get().editingNote !== null) set({ editingNote: null });
+      if (get().editingNote !== null || get().noteDraft !== null) {
+        set({ editingNote: null, noteDraft: null });
+      }
     },
+    setNoteDraft: (draft) => set({ noteDraft: draft }),
     toast(message, action) {
       const notice: FlowlineNotice = {
         message,

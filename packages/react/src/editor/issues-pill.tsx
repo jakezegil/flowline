@@ -6,12 +6,13 @@ import {
   walkSteps,
 } from "@flowlinejs/core";
 import { Plus, TriangleAlert, Wrench } from "lucide-react";
-import { type JSX, useMemo, useState } from "react";
+import { type JSX, useMemo, useRef, useState } from "react";
 import { repairIssue } from "../canvas/actions";
 import { useEditorStore, useEditorStoreApi, useIssues } from "../hooks";
 import { useFlowlineAppearance } from "../provider";
 import { TRIGGER_KEY } from "../store/editor-store";
 import { Hint } from "../ui/primitives";
+import { useOptionalToast } from "../ui/toaster";
 
 /** Prefix of an {@link issueTargets} key that names a section rather than a step. */
 const SECTION_PREFIX = "section:";
@@ -75,9 +76,9 @@ const PULSE_MS = 1600;
  * points out the "+" under the trigger and opens the step picker there.
  *
  * An annotation issue with a one-click repair (`section.broken`, `section.overlap`,
- * `note.tooLong`) gets a Fix button next to the pill: for the issue shown while cycling (or the
- * selected step's), else for the first fixable issue. It is the only way to fix a broken section
- * that has no region to click. Hidden on a read-only store.
+ * `note.tooLong`) gets a Fix button next to the pill, for the target cycled to (or the selected
+ * step): the only way to fix a broken section that has no region to click, which cycling reaches
+ * too. A fix toasts "Fixed: …" with Undo. Hidden on a read-only store.
  */
 export function IssuesPill(): JSX.Element | null {
   const { labels } = useFlowlineAppearance();
@@ -93,6 +94,8 @@ export function IssuesPill(): JSX.Element | null {
     [doc, issues],
   );
   const [cycling, setCycling] = useState(false);
+  const pill = useRef<HTMLButtonElement>(null);
+  const toast = useOptionalToast();
   // The section target last cycled to (it can't be the selection).
   const [sectionCursor, setSectionCursor] = useState<string | null>(null);
   if (issues.length === 0) return null;
@@ -125,15 +128,15 @@ export function IssuesPill(): JSX.Element | null {
   const cursor = cycling && sectionCursor !== null ? sectionCursor : selection;
   const at = targets.findIndex((t) => t.key === cursor);
   const current = cycling && at !== -1 ? targets[at] : undefined;
-  const hint = current
-    ? `${labels.issuePosition(at + 1, targets.length)}: ${current.issue.message}`
-    : labels.showNextIssue;
-  // The Fix on offer: the current target's (else the selection's) fixable issue; when not
-  // cycling and there is none, the first fixable one.
+  // The Fix on offer: the fixable issue of the target cycled to, else of the selection. Cycling
+  // reaches every target, sections without a step included.
   const focusKey = current?.key ?? selection;
-  const fix = readOnly
-    ? undefined
-    : (fixable.find((i) => targetKey(i) === focusKey) ?? (cycling ? undefined : fixable[0]));
+  const fix = readOnly ? undefined : fixable.find((i) => targetKey(i) === focusKey);
+  // The hint names the issue Fix repairs when there is one.
+  const shown = current && fix ? fix : current?.issue;
+  const hint = shown
+    ? `${labels.issuePosition(at + 1, targets.length)}: ${shown.message}`
+    : labels.showNextIssue;
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: groups the pill and its Fix, so cycling ends only when focus leaves both.
     <span
@@ -147,6 +150,7 @@ export function IssuesPill(): JSX.Element | null {
     >
       <Hint content={hint}>
         <button
+          ref={pill}
           type="button"
           className="fl-issues"
           data-tone={errors > 0 ? "danger" : "warning"}
@@ -178,9 +182,25 @@ export function IssuesPill(): JSX.Element | null {
             type="button"
             className="fl-issues-fix"
             aria-description={fix.message}
-            onClick={() => {
-              repairIssue(store, fix);
+            onClick={(e) => {
+              const editor = e.currentTarget.closest(".fl-editor");
+              if (!repairIssue(store, fix)) return;
               setSectionCursor(null);
+              toast?.({
+                message: labels.issueFixed(fix.message),
+                action: {
+                  label: labels.undo,
+                  run: () => {
+                    if (!store.getState().readOnly) store.getState().undo();
+                  },
+                },
+              });
+              // The Fix goes away with its issue: focus stays on the pill, or on the canvas
+              // when the pill goes too.
+              requestAnimationFrame(() => {
+                if (pill.current?.isConnected) pill.current.focus();
+                else editor?.querySelector<HTMLElement>(".fl-canvas")?.focus();
+              });
             }}
           >
             <Wrench size={12} strokeWidth={2.25} aria-hidden />
