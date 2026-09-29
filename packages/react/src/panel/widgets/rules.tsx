@@ -1,21 +1,50 @@
 /**
  * The `"rules"` widget: a condition builder for a rule group
- * (`{ combinator: "and" | "or", rules: (Rule | RuleGroup)[] }`, rules `{ left, op, right?,
- * caseSensitive? }`). Operators are filtered by the type of the left value; unary operators hide
- * the right value. Groups nest one level.
+ * (`{ combinator: "and" | "or", rules: (Rule | RuleGroup)[], compare? }`, rules `{ left, op,
+ * right?, caseSensitive? }`). The top-level group chooses the compare mode (strict or loose,
+ * defaulting to the schema default). Operators are filtered by the type of the left value, host
+ * operators (`x-flowline.operators` of the `op` field) included; unary operators hide the right
+ * value, and right-hand literals are stored in the left value's type (`5`, not `"5"`). Groups
+ * nest one level.
  *
  * @module
  */
-import { isRef, isTpl, type JSONSchema, type ScopeEntry, type ValueExpr } from "@flowlinejs/core";
+import {
+  type Issue,
+  isRef,
+  isTpl,
+  type JSONSchema,
+  type RuleOperatorMeta,
+  type RuleValueType,
+  type ScopeEntry,
+  type ValueExpr,
+} from "@flowlinejs/core";
 import { CaseSensitive, ListPlus, Plus } from "lucide-react";
-import type { JSX } from "react";
+import { type JSX, useId, useState } from "react";
 import { useFlowlineAppearance } from "../../provider";
 import { ItemActions, useItemKeys } from "../fields/collections";
-import { FieldShell, IssueNotes, Segmented } from "../fields/shell";
+import { useRefMode } from "../fields/controls";
+import { FieldShell, IssueNotes, RefToggle, Segmented } from "../fields/shell";
 import { type FieldProps, useFormEnv } from "../form-context";
 import { RefTextInput } from "../ref-text-input";
-import { deref, isAny, issuesAt, issuesUnder, refSchema, typesOf, unionMembers } from "../schema";
+import {
+  deref,
+  isAny,
+  issuesAt,
+  issuesUnder,
+  metaOf,
+  refSchema,
+  typesOf,
+  unionMembers,
+} from "../schema";
 import { asObject } from "../schema-form";
+import {
+  type CompareMode,
+  literalText,
+  literalTypeIssue,
+  toTypedList,
+  toTypedLiteral,
+} from "./literal";
 
 type Combinator = "and" | "or";
 interface Rule {
@@ -27,6 +56,8 @@ interface Rule {
 interface Group {
   combinator: Combinator;
   rules: (Rule | Group)[];
+  /** Top-level group only. */
+  compare?: CompareMode;
 }
 
 const ALL_OPS = [
@@ -50,7 +81,7 @@ const UNARY = new Set(["isEmpty", "isNotEmpty", "isTrue", "isFalse"]);
 const TEXT_OPS = new Set(["eq", "neq", "contains", "notContains", "startsWith", "endsWith", "in"]);
 
 /** The kind of value a rule compares, which decides the operators offered. */
-export type ValueType = "string" | "date" | "number" | "boolean" | "array" | "object" | "any";
+export type ValueType = RuleValueType;
 
 /** Operators that make sense per left-value type (`any` offers everything). */
 export const OPS_BY_TYPE: Record<ValueType, string[]> = {
@@ -100,6 +131,17 @@ export function valueTypeOf(v: ValueExpr | undefined, scope: ScopeEntry[]): Valu
   return "any";
 }
 
+/** A compare mode value, or `undefined`. */
+export function asCompare(v: unknown): CompareMode | undefined {
+  return v === "strict" || v === "loose" ? v : undefined;
+}
+
+/** The default of an object schema's `compare` property (`"loose"` when it has none). */
+export function compareDefault(root: JSONSchema, schema: JSONSchema): CompareMode {
+  const props = deref(root, schema).properties as Record<string, unknown> | undefined;
+  return asCompare(deref(root, props?.compare).default) ?? "loose";
+}
+
 function isGroup(v: unknown): v is Group {
   const o = asObject(v as ValueExpr);
   return o !== undefined && Array.isArray(o.rules);
@@ -109,20 +151,203 @@ function asGroup(v: ValueExpr | undefined): Group {
   const o = asObject(v);
   const combinator = o?.combinator === "or" ? "or" : "and";
   const rules = Array.isArray(o?.rules) ? (o.rules as unknown as (Rule | Group)[]) : [];
-  return { combinator, rules };
+  const compare = asCompare(o?.compare);
+  return compare ? { combinator, rules, compare } : { combinator, rules };
 }
 
-/** The operators the rule schema allows, in schema order (falls back to every operator). */
-function schemaOps(root: JSONSchema, schema: JSONSchema): string[] {
+/** `group` with every rule's `caseSensitive` removed (nested groups included). */
+function withoutMatchCase(group: Group): Group {
+  return {
+    ...group,
+    rules: group.rules.map((r) => {
+      if (isGroup(r)) return withoutMatchCase(r);
+      const { caseSensitive: _c, ...rest } = r;
+      return rest;
+    }),
+  };
+}
+
+/** The operators a rule schema offers: allowed ids in schema order, host operators and labels. */
+interface OperatorSet {
+  ids: string[];
+  /** Host operators (`x-flowline.operators` of the `op` field). */
+  custom: RuleOperatorMeta[];
+  /** Operator labels of the `op` field (`x-flowline.enumLabels`). */
+  labels: Record<string, string>;
+  /** Built-in and host operators without a right-hand value. */
+  unary: Set<string>;
+}
+
+/** The operators the rule schema allows (falls back to every built-in operator). */
+function schemaOps(root: JSONSchema, schema: JSONSchema): OperatorSet {
   const rulesProp = deref(root, (schema.properties as Record<string, unknown> | undefined)?.rules);
   const items = deref(root, rulesProp.items);
   const candidates = unionMembers(root, items) ?? [items];
   for (const m of candidates) {
     const op = deref(root, (m.properties as Record<string, unknown> | undefined)?.op);
-    if (Array.isArray(op.enum)) return op.enum.filter((x): x is string => typeof x === "string");
+    if (!Array.isArray(op.enum)) continue;
+    const ids = op.enum.filter((x): x is string => typeof x === "string");
+    const meta = metaOf(op);
+    const custom = (meta.operators ?? []).filter((o) => ids.includes(o.id));
+    const unary = new Set([
+      ...UNARY,
+      ...custom.filter((o) => o.arity === "unary").map((o) => o.id),
+    ]);
+    return { ids, custom, labels: meta.enumLabels ?? {}, unary };
   }
-  return ALL_OPS;
+  return { ids: ALL_OPS, custom: [], labels: {}, unary: UNARY };
 }
+
+/** The operators offered for a `type` left value: built-in ones, then host ones for that type. */
+function opsFor(type: ValueType, ops: OperatorSet): string[] {
+  const builtin = OPS_BY_TYPE[type].filter((o) => ops.ids.includes(o));
+  const custom = ops.custom.filter((o) => !o.types || o.types.includes(type)).map((o) => o.id);
+  return [...builtin, ...custom];
+}
+
+/**
+ * A right-hand value re-typed for a change of operator: entering "is one of" turns a literal
+ * into a list (`5` → `[5]`), leaving it turns a list back into text. Other values stay.
+ */
+function retype(v: ValueExpr, list: boolean, type: ValueType): ValueExpr {
+  return list === Array.isArray(v) ? v : retypeLiteral(v, list, type);
+}
+
+/**
+ * A literal (or list of literals) typed anew for a `type` value, as if its text were typed
+ * again: `"5"` becomes `5` once the value is a number, `5` becomes `"5"` once it's text.
+ * References and templates stay.
+ */
+function retypeLiteral(v: ValueExpr, list: boolean, type: ValueType): ValueExpr {
+  if (isRef(v) || isTpl(v)) return v;
+  const text = literalText(v);
+  if (text === undefined) return v;
+  return list ? toTypedList(text, type) : toTypedLiteral(text, type);
+}
+
+const sameValue = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * @internal A literal typed like the value it's compared with (spec §6.5): a true/false choice
+ * for `boolean` (with the `{x}` toggle for a reference), else text with reference pills that
+ * stores numbers for `number` (`"5"` → `5`, other text stays text) and, with `list`, a list of
+ * such literals from comma-separated text (`"5, 7"` → `[5, 7]`).
+ */
+export function TypedValueInput({
+  value,
+  onChange,
+  type,
+  list = false,
+  ariaLabel,
+  placeholder,
+  describedBy,
+}: {
+  value: ValueExpr | undefined;
+  onChange(v: ValueExpr): void;
+  type: ValueType;
+  list?: boolean;
+  ariaLabel: string;
+  placeholder?: string;
+  /** ID of an element describing the value (its `rule.literalType` warning). */
+  describedBy?: string | undefined;
+}): JSX.Element {
+  const env = useFormEnv();
+  const { labels } = useFlowlineAppearance();
+  const choice = type === "boolean" && !list;
+  const mode = useRefMode(value, (v) => onChange(v ?? ""), choice && !env.readOnly);
+  /** The text as typed while it maps to the stored literal ("5.0" stays "5.0", not "5"). */
+  const [draft, setDraft] = useState<string | null>(null);
+  const toLiteral = (t: string): ValueExpr =>
+    list ? toTypedList(t, type) : toTypedLiteral(t, type);
+  const text = (
+    <RefTextInput
+      value={
+        draft !== null && sameValue(toLiteral(draft), value) ? draft : (literalText(value) ?? value)
+      }
+      onChange={(v) => {
+        if (typeof v === "string") {
+          setDraft(v);
+          onChange(toLiteral(v));
+        } else {
+          setDraft(null);
+          onChange(v ?? "");
+        }
+      }}
+      scope={env.scope}
+      samples={env.samples}
+      invalidRefs={env.invalidRefs}
+      {...(placeholder === undefined ? {} : { placeholder })}
+      ariaLabel={ariaLabel}
+      readOnly={env.readOnly}
+      {...(choice ? { singlePill: true } : {})}
+      {...(describedBy ? { describedBy } : {})}
+    />
+  );
+  const items = list && Array.isArray(value) ? value : [];
+  if (!list && !choice) return text;
+  if (list) {
+    // The same tree with or without tags, so the editor keeps focus as the first item appears.
+    return (
+      <div className="fl-typed">
+        {text}
+        {items.length > 0 && (
+          // The typed items, as stored (numbers apart from text); the text above says the same.
+          <ul className="fl-typed__tags" aria-hidden>
+            {items.map((item, i) => (
+              <li
+                // biome-ignore lint/suspicious/noArrayIndexKey: items can repeat; the list is re-derived from text.
+                key={i}
+                className="fl-typed__tag"
+                data-type={typeof item}
+              >
+                {literalText(item) ?? JSON.stringify(item)}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="fl-f__help">{labels.ruleListHint}</p>
+      </div>
+    );
+  }
+  // A stored literal that isn't true/false (legacy text such as "yes", or even "true") stays
+  // visible as a disabled option, so picking true or false always stores a boolean.
+  const other =
+    typeof value === "string" && value !== ""
+      ? labels.literalOption(labels.literalKinds.string, value)
+      : typeof value === "number"
+        ? labels.literalOption(labels.literalKinds.number, String(value))
+        : undefined;
+  return (
+    <div className="fl-typed fl-typed--choice">
+      {mode.on ? (
+        text
+      ) : (
+        <select
+          className="fl-input fl-select"
+          aria-label={ariaLabel}
+          aria-describedby={describedBy}
+          value={typeof value === "boolean" ? String(value) : other ? OTHER : ""}
+          disabled={env.readOnly}
+          onChange={(e) => onChange(e.target.value === "" ? "" : e.target.value === "true")}
+        >
+          {other ? (
+            <option value={OTHER} disabled>
+              {other}
+            </option>
+          ) : (
+            typeof value !== "boolean" && <option value="">{labels.chooseOption}</option>
+          )}
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
+      )}
+      <RefToggle on={mode.on} onToggle={mode.toggle} disabled={env.readOnly} />
+    </div>
+  );
+}
+
+/** Option value of a stored literal the true/false choice shows as it is. */
+const OTHER = "(other)";
 
 const NEW_RULE: Rule = { left: "", op: "eq", right: "" };
 
@@ -133,6 +358,7 @@ function RuleRow({
   count,
   path,
   ops,
+  compare,
   join,
   within,
   onChange,
@@ -143,7 +369,8 @@ function RuleRow({
   index: number;
   count: number;
   path: string;
-  ops: string[];
+  ops: OperatorSet;
+  compare: CompareMode;
   join?: string;
   /** The enclosing group's name, for rules inside a nested group ("Group 1, Value 2"). */
   within?: string;
@@ -154,21 +381,27 @@ function RuleRow({
   const env = useFormEnv();
   const { labels } = useFlowlineAppearance();
   const type = valueTypeOf(rule.left, env.scope);
-  const allowed = OPS_BY_TYPE[type].filter((o) => ops.includes(o));
+  const allowed = opsFor(type, ops);
   const offered = allowed.includes(rule.op) ? allowed : [rule.op, ...allowed];
   const opName = (op: string) =>
-    (type === "date" ? labels.ruleOpsDate[op] : undefined) ?? labels.ruleOps[op] ?? op;
-  const unary = UNARY.has(rule.op);
-  const caseable = TEXT_OPS.has(rule.op) && (type === "string" || type === "any");
+    (type === "date" ? labels.ruleOpsDate[op] : undefined) ??
+    labels.ruleOps[op] ??
+    ops.labels[op] ??
+    op;
+  const unary = ops.unary.has(rule.op);
+  const caseable =
+    compare !== "strict" && TEXT_OPS.has(rule.op) && (type === "string" || type === "any");
   const base = labels.itemTitle(labels.ruleLeft, index + 1);
   const name = within ? `${within}, ${base}` : base;
   const setOp = (op: string) => {
     const { right: _r, caseSensitive: _c, ...rest } = rule;
     const next: Rule = { ...rest, op };
-    if (!UNARY.has(op)) next.right = rule.right ?? "";
+    if (!ops.unary.has(op)) next.right = retype(rule.right ?? "", op === "in", type);
     if (TEXT_OPS.has(op) && rule.caseSensitive) next.caseSensitive = true;
     onChange(next);
   };
+  const literal = unary ? undefined : literalTypeIssue(rule, type, compare, { labels });
+  const warningId = useId();
   return (
     <li className="fl-rule">
       {join && <span className="fl-rule__join">{join}</span>}
@@ -176,7 +409,16 @@ function RuleRow({
         <div className="fl-rule__fields">
           <RefTextInput
             value={rule.left}
-            onChange={(v) => onChange({ ...rule, left: v ?? "" })}
+            onChange={(v) => {
+              const left = v ?? "";
+              const next = { ...rule, left };
+              // A literal to compare with follows the value's type, as if typed again.
+              const leftType = valueTypeOf(left, env.scope);
+              if (!unary && rule.right !== undefined && leftType !== type) {
+                next.right = retypeLiteral(rule.right, rule.op === "in", leftType);
+              }
+              onChange(next);
+            }}
             scope={env.scope}
             samples={env.samples}
             invalidRefs={env.invalidRefs}
@@ -216,12 +458,11 @@ function RuleRow({
             )}
           </div>
           {!unary && (
-            <RefTextInput
+            <TypedValueInput
               value={rule.right}
-              onChange={(v) => onChange({ ...rule, right: v ?? "" })}
-              scope={env.scope}
-              samples={env.samples}
-              invalidRefs={env.invalidRefs}
+              onChange={(v) => onChange({ ...rule, right: v })}
+              type={type}
+              list={rule.op === "in"}
               placeholder={
                 rule.op === "in"
                   ? labels.ruleListPlaceholder
@@ -230,7 +471,7 @@ function RuleRow({
                     : labels.ruleRight
               }
               ariaLabel={`${name}: ${labels.ruleRight}`}
-              readOnly={env.readOnly}
+              describedBy={literal ? warningId : undefined}
             />
           )}
         </div>
@@ -244,7 +485,67 @@ function RuleRow({
         />
       </div>
       <IssueNotes issues={issuesUnder(env.issues, path)} />
+      <LiteralWarning id={warningId} issue={literal} />
     </li>
+  );
+}
+
+/**
+ * @internal The `rule.literalType` warning of a value, in a polite live region that is always
+ * there, so the warning is announced when it appears while typing. `id` describes the value.
+ */
+export function LiteralWarning({
+  id,
+  issue,
+}: {
+  id: string;
+  issue: Issue | undefined;
+}): JSX.Element {
+  return (
+    <div id={id} className="fl-literal-warning" role="status">
+      {issue && <IssueNotes issues={[issue]} />}
+    </div>
+  );
+}
+
+/** The compare-mode choice (strict or loose) of the top-level group, with a one-line hint. */
+function CompareSelect({
+  value,
+  label,
+  onChange,
+}: {
+  value: CompareMode;
+  /** Accessible name. */
+  label: string;
+  onChange(v: CompareMode): void;
+}): JSX.Element {
+  const env = useFormEnv();
+  const { labels } = useFlowlineAppearance();
+  const id = useId();
+  return (
+    <div className="fl-compare">
+      <div className="fl-compare__row">
+        {/* The visible label (a click target); the accessible name also says whose choice it is. */}
+        <label className="fl-compare__label" htmlFor={`${id}select`}>
+          {labels.compare}
+        </label>
+        <select
+          id={`${id}select`}
+          className="fl-input fl-select fl-compare__select"
+          aria-label={label}
+          aria-describedby={`${id}hint`}
+          value={value}
+          disabled={env.readOnly}
+          onChange={(e) => onChange(e.target.value === "strict" ? "strict" : "loose")}
+        >
+          <option value="strict">{labels.compareStrict}</option>
+          <option value="loose">{labels.compareLoose}</option>
+        </select>
+      </div>
+      <p id={`${id}hint`} className="fl-f__help fl-compare__hint">
+        {value === "strict" ? labels.compareStrictHint : labels.compareLooseHint}
+      </p>
+    </div>
   );
 }
 
@@ -253,13 +554,16 @@ function GroupEditor({
   group,
   path,
   ops,
+  compare,
   nested,
   label,
   onChange,
 }: {
   group: Group;
   path: string;
-  ops: string[];
+  ops: OperatorSet;
+  /** The compare mode in effect (the top-level group's, else the schema default). */
+  compare: CompareMode;
   nested: boolean;
   label: string;
   onChange(g: Group): void;
@@ -295,6 +599,16 @@ function GroupEditor({
           onChange={(combinator) => onChange({ ...group, combinator })}
         />
       </div>
+      {!nested && (
+        <CompareSelect
+          value={compare}
+          label={`${label}: ${labels.compare}`}
+          onChange={(mode) =>
+            // Strict always matches case, so the Match case flags would only linger unused.
+            onChange({ ...(mode === "strict" ? withoutMatchCase(group) : group), compare: mode })
+          }
+        />
+      )}
       {group.rules.length === 0 ? (
         !nested && <p className="fl-empty-note">{labels.emptyRules}</p>
       ) : (
@@ -313,6 +627,7 @@ function GroupEditor({
                       group={asGroup(r as unknown as ValueExpr)}
                       path={rulePath}
                       ops={ops}
+                      compare={compare}
                       nested
                       label={name}
                       onChange={(g) => setRules(group.rules.map((x, j) => (j === i ? g : x)))}
@@ -338,6 +653,7 @@ function GroupEditor({
                 count={group.rules.length}
                 path={rulePath}
                 ops={ops}
+                compare={compare}
                 {...(i > 0 ? { join } : {})}
                 {...(nested ? { within: label } : {})}
                 onChange={(nr) => setRules(group.rules.map((x, j) => (j === i ? nr : x)))}
@@ -383,19 +699,23 @@ function GroupEditor({
 export function RulesWidget(p: FieldProps): JSX.Element {
   const env = useFormEnv();
   const ops = schemaOps(env.root, p.schema);
+  const group = asGroup(p.value);
   return (
     <FieldShell
       label={p.label}
       required={p.required}
       description={p.schema.description as string | undefined}
-      issues={issuesAt(env.issues, p.path).concat(issuesAt(env.issues, `${p.path}.rules`))}
+      issues={issuesAt(env.issues, p.path)
+        .concat(issuesAt(env.issues, `${p.path}.rules`))
+        .concat(issuesAt(env.issues, `${p.path}.compare`))}
       group
       bare={p.bare}
     >
       <GroupEditor
-        group={asGroup(p.value)}
+        group={group}
         path={p.path}
         ops={ops}
+        compare={group.compare ?? compareDefault(env.root, p.schema)}
         nested={false}
         label={p.label}
         onChange={(g) => p.onChange(g as unknown as ValueExpr)}

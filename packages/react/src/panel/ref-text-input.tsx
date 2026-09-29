@@ -261,6 +261,8 @@ export function RefTextInput(props: {
   json?: boolean;
   onJsonError?(invalid: boolean): void;
   schema?: JSONSchema;
+  /** ID of an element that describes the field (e.g. a warning about its value). */
+  describedBy?: string;
 }): JSX.Element {
   const {
     value,
@@ -274,6 +276,7 @@ export function RefTextInput(props: {
     literalOnly = false,
     readOnly = false,
     json = false,
+    describedBy,
   } = props;
   const filterType = useMemo(
     () => (json ? undefined : pickFilterFor(props.schema)),
@@ -394,7 +397,10 @@ export function RefTextInput(props: {
       "aria-multiline": multiline ? "true" : "false",
       // Read-only content isn't editable, so it isn't focusable either unless told to be.
       ...(readOnly ? { tabindex: "0" } : {}),
-      ...(withPicker ? { "aria-describedby": hintId, "aria-controls": pickerId } : {}),
+      ...(withPicker ? { "aria-controls": pickerId } : {}),
+      ...(describedBy || withPicker
+        ? { "aria-describedby": [withPicker ? hintId : "", describedBy ?? ""].join(" ").trim() }
+        : {}),
     });
   const placeholderText = placeholder ?? (singlePill ? labels.pickValue : "");
 
@@ -483,7 +489,7 @@ export function RefTextInput(props: {
   // biome-ignore lint/correctness/useExhaustiveDependencies: attrs() reads exactly these
   useEffect(() => {
     viewRef.current?.dispatch({ effects: compartments.current.attrs.reconfigure(attrs()) });
-  }, [ariaLabel, withPicker, hintId, pickerId, multiline, readOnly]);
+  }, [ariaLabel, withPicker, hintId, pickerId, multiline, readOnly, describedBy]);
   useEffect(() => {
     viewRef.current?.dispatch({
       effects: [

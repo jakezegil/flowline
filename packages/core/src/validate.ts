@@ -61,7 +61,12 @@ export type IssueCode =
   | "config.format"
   | "network.blocked"
   | "step.unreachable"
-  | "doc.empty";
+  | "doc.empty"
+  /**
+   * A rule compares with a literal of another type than its value in strict mode, so it never
+   * matches. Raised by the editor's rules and cases widgets, never by {@link validateWorkflow}.
+   */
+  | "rule.literalType";
 
 /** One problem found by {@link validateWorkflow}. */
 export interface Issue {

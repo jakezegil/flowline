@@ -3647,6 +3647,74 @@
     flex-wrap: wrap;
     gap: 4px 10px;
   }
+  /* compare mode of a condition's rules */
+  .fl-compare {
+    display: grid;
+    gap: 3px;
+  }
+  .fl-compare__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .fl-compare__label {
+    font-size: 12px;
+    color: var(--fl-text-muted);
+  }
+  .fl-compare__select {
+    width: auto;
+    min-height: 26px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    font-size: 12px;
+  }
+  .fl-compare__hint {
+    font-size: 11.5px;
+  }
+  /* The always-present live region of a rule.literalType warning: no box of its own, so an
+     empty one adds no gap to the rule's grid. */
+  .fl-literal-warning {
+    display: contents;
+  }
+  /* typed right-hand values */
+  .fl-typed {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+  .fl-typed--choice {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .fl-typed--choice > :first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .fl-typed__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .fl-typed__tag {
+    padding: 1px 7px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--fl-text);
+    background: var(--fl-subtle);
+    border: 1px solid var(--fl-border);
+    border-radius: 999px;
+  }
+  .fl-typed__tag[data-type="number"],
+  .fl-typed__tag[data-type="boolean"] {
+    font-family: var(--fl-font-mono);
+    color: var(--fl-accent-text);
+    background: var(--fl-accent-soft);
+    border-color: transparent;
+  }
 
   /* cases and field declarations */
   .fl-case,
