@@ -4,10 +4,11 @@
  * @module
  */
 import type { PluginDefinition } from "@flowlinejs/core";
+import pkg from "../package.json" with { type: "json" };
 import { createBuiltinPlugin } from "./builtin-plugin";
 
-/** Package version. */
-export const VERSION = "0.1.0";
+/** Package version, read from `package.json` so it can never drift from the published version. */
+export const VERSION: string = pkg.version;
 
 export type { RuleOperatorMeta, RuleValueType } from "@flowlinejs/core";
 export { type BuiltinOptions, createBuiltinPlugin } from "./builtin-plugin";

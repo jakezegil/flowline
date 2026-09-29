@@ -27,9 +27,10 @@ import {
   stoppedAtOf,
   type WorkflowAuditEntry,
 } from "@flowlinejs/engine";
+import pkg from "../package.json" with { type: "json" };
 
-/** Package version. */
-export const VERSION = "0.1.0";
+/** Package version, read from `package.json` so it can never drift from the published version. */
+export const VERSION: string = pkg.version;
 
 interface StoredRun {
   run: Run;

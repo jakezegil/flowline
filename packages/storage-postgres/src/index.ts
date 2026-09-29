@@ -24,13 +24,14 @@ import {
   type StorageAdapter,
   type WorkflowAuditEntry,
 } from "@flowlinejs/engine";
+import pkg from "../package.json" with { type: "json" };
 import { type PoolLike, type Queryable, withTransaction } from "./migrate";
 import { quoteSchema } from "./schema";
 
 export { migrate, type PoolClientLike, type PoolLike, type Queryable } from "./migrate";
 
-/** Package version. */
-export const VERSION = "0.1.0";
+/** Package version, read from `package.json` so it can never drift from the published version. */
+export const VERSION: string = pkg.version;
 
 /** Options of {@link createPostgresStorage}. */
 export interface PgStorageOptions {
