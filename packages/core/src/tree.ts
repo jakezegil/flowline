@@ -37,6 +37,15 @@ export interface FoundStep {
   ancestors: { step: Step; branch: string }[];
 }
 
+/**
+ * @internal The step list of `step`'s branch `branch`, if the step holds it. Own keys only, so a
+ * branch named `constructor` or `__proto__` is never an inherited property.
+ */
+export function branchList(step: Step, branch: string): Step[] | undefined {
+  const branches = step.branches;
+  return branches && Object.hasOwn(branches, branch) ? branches[branch] : undefined;
+}
+
 /** Finds a step by ID anywhere in the tree, or `undefined` if no step has that ID. */
 export function findStep(doc: WorkflowDoc, id: string): FoundStep | undefined {
   function search(
@@ -104,7 +113,7 @@ function getList(
   if (parentId === null) return doc.steps;
   const found = findStep(doc, parentId);
   if (!found || branch === undefined) return undefined;
-  return found.step.branches?.[branch];
+  return branchList(found.step, branch);
 }
 
 /**

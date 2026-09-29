@@ -50,3 +50,21 @@ describe("resolveValuePlaceholders", () => {
     expect(resolveValuePlaceholders({ $ref: "steps.$x.a" }, ids).unknown).toBe("$x");
   });
 });
+
+describe("escaped template text", () => {
+  test("\\{{ … }} is literal and left untouched", () => {
+    const tpl = "\\{{ steps.$1.x }} and {{ steps.$1.deal.id }} and \\{{{ steps.$1.y }}";
+    const r = resolveValuePlaceholders({ $tpl: tpl }, ids);
+    expect(r).toEqual({
+      value: {
+        $tpl: "\\{{ steps.$1.x }} and {{ steps.getDeal.deal.id }} and \\{{{ steps.$1.y }}",
+      },
+    });
+  });
+
+  test("an escaped placeholder alone leaves the value itself", () => {
+    const v = { $tpl: "\\{{ steps.$9.x }}" };
+    expect(resolveValuePlaceholders(v, ids)).toEqual({ value: v });
+    expect(resolveValuePlaceholders(v, ids).value).toBe(v);
+  });
+});

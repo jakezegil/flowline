@@ -8,7 +8,7 @@ import { isValidStepId } from "./ids";
 // Import cycle: tree.ts imports upkeepSections from here. Neither module may use the other at top
 // level (only inside functions), or one entry order sees it uninitialized. For example, never
 // write `class X extends FlowlineTreeError` in this file.
-import { findStep, walkSteps } from "./tree";
+import { branchList, findStep, walkSteps } from "./tree";
 import type { AnnotationColor, Section, Step, WorkflowDoc } from "./types";
 import type { Issue } from "./validate";
 
@@ -34,7 +34,8 @@ export function isAnnotationColor(v: unknown): v is AnnotationColor {
 function listAt(doc: WorkflowDoc, parentId: string | null, branch: string | undefined): Step[] {
   if (parentId === null) return doc.steps;
   if (branch === undefined) return [];
-  return findStep(doc, parentId)?.step.branches?.[branch] ?? [];
+  const owner = findStep(doc, parentId)?.step;
+  return (owner && branchList(owner, branch)) ?? [];
 }
 
 /** A key identifying one step list. */

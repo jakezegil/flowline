@@ -10,8 +10,39 @@ import type { StepRef } from "./commands";
 
 /** A `steps.$x` at the start of a ref path (after optional spaces). */
 const REF_HEAD = /^(\s*steps\s*\.\s*)(\$[A-Za-z0-9_]+)/;
-/** A `{{ steps.$x` inside a template. */
-const TPL_HEAD = /(\{\{\s*steps\s*\.\s*)(\$[A-Za-z0-9_]+)/g;
+
+/**
+ * `tpl` with the inside of each `{{ … }}` reference passed through `fn`, and everything else
+ * (literal text, `\{{` escapes) kept byte for byte. Scans as `parseTemplate` does, so
+ * exactly the parts it reads as references are rewritten.
+ */
+function mapTemplateRefs(tpl: string, fn: (inner: string) => string): string {
+  let out = "";
+  const n = tpl.length;
+  let i = 0;
+  while (i < n) {
+    if (tpl.charAt(i) === "\\" && tpl.charAt(i + 1) === "{" && tpl.charAt(i + 2) === "{") {
+      out += tpl.slice(i, i + 3);
+      i += 3;
+      continue;
+    }
+    if (tpl.charAt(i) === "{" && tpl.charAt(i + 1) === "{" && tpl.charAt(i + 2) === "{") {
+      out += "{";
+      i++;
+      continue;
+    }
+    if (tpl.charAt(i) === "{" && tpl.charAt(i + 1) === "{") {
+      const end = tpl.indexOf("}}", i + 2);
+      if (end === -1) return out + tpl.slice(i);
+      out += `{{${fn(tpl.slice(i + 2, end))}}}`;
+      i = end + 2;
+      continue;
+    }
+    out += tpl.charAt(i);
+    i++;
+  }
+  return out;
+}
 
 /**
  * @internal The real step ID for `ref`: a placeholder (`$…`) looked up in `ids`, anything else
@@ -58,9 +89,11 @@ export function resolveValuePlaceholders(
     }
     if (isTpl(x)) {
       if (!x.$tpl.includes("$")) return x;
-      const next = x.$tpl.replace(TPL_HEAD, (all, head: string, p: string) => {
-        const id = sub(p);
-        return id === undefined ? all : `${head}${id}`;
+      const next = mapTemplateRefs(x.$tpl, (inner) => {
+        const m = REF_HEAD.exec(inner);
+        if (!m) return inner;
+        const id = sub(m[2] as string);
+        return id === undefined ? inner : `${m[1]}${id}${inner.slice(m[0].length)}`;
       });
       return next === x.$tpl ? x : { ...x, $tpl: next };
     }

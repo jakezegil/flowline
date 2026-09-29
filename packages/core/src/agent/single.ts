@@ -3,11 +3,12 @@
  *
  * @module
  */
-import { isValidStepId } from "../ids";
+import { isValidStepId, RESERVED_STEP_IDS, STEP_ID_PATTERN } from "../ids";
 import { branchesFor } from "../json-schema";
 import { createStep, jsonEqual, syncBranches } from "../step-factory";
 import {
   allStepIds,
+  branchList,
   findStep,
   generateStepId,
   insertStep,
@@ -96,6 +97,19 @@ export function nodeOf(ctx: HandlerContext, type: unknown, path: string): NodeMa
   return node;
 }
 
+/** The valid `At` forms, as a hint. */
+export const AT_HINT = {
+  expected: [
+    "{ after: stepId }",
+    "{ before: stepId }",
+    "{ in: { stepId, branch }, index? }",
+    "{ start: true }",
+  ],
+};
+
+/** The step ID rule, as a hint. */
+const ID_RULE = `Start with a letter or underscore, then letters, digits and underscores only; not ${[...RESERVED_STEP_IDS].join(", ")}`;
+
 /** Every step ID in `step`'s subtree, `step` included. */
 function subtree(step: Step, into = new Set<string>()): Set<string> {
   into.add(step.id);
@@ -115,12 +129,18 @@ export function locate(
   path: string,
   exclude?: Set<string>,
 ): { doc: WorkflowDoc; loc: StepLocation } {
-  if (!isObject(at)) throw new CommandFailure("location.invalid", "Missing location", path);
+  if (!isObject(at)) {
+    throw new CommandFailure("location.invalid", "Missing location", path, AT_HINT);
+  }
   const intoSelf = (p: string) =>
     new CommandFailure(
       "move.intoSelf",
       "A step can't be moved next to or into a step inside itself",
       p,
+      {
+        expected: "a location outside the moved step's subtree",
+        subtree: [...(exclude ?? [])].slice(0, 20),
+      },
     );
   if ("after" in at || "before" in at) {
     const key = "after" in at ? "after" : "before";
@@ -142,7 +162,12 @@ export function locate(
   if ("in" in at) {
     const target = at.in as unknown;
     if (!isObject(target)) {
-      throw new CommandFailure("location.invalid", "`in` needs a stepId and a branch", path);
+      throw new CommandFailure(
+        "location.invalid",
+        "`in` needs a stepId and a branch",
+        path,
+        AT_HINT,
+      );
     }
     const ownerPath = join(join(path, "in"), "stepId");
     const ownerId = placeholderId(ctx, target.stepId as StepRef, ownerPath);
@@ -150,7 +175,7 @@ export function locate(
     const owner = existingStep(doc, ctx, target.stepId as StepRef, ownerPath);
     const branch = target.branch;
     const node = ctx.nodes.get(owner.step.type);
-    const held = typeof branch === "string" ? owner.step.branches?.[branch] : undefined;
+    const held = typeof branch === "string" ? branchList(owner.step, branch) : undefined;
     const declared = node ? branchesFor(node, owner.step).map((b) => b.id) : [];
     if (!held && !(typeof branch === "string" && declared.includes(branch))) {
       const branches = [...new Set([...declared, ...Object.keys(owner.step.branches ?? {})])];
@@ -169,6 +194,7 @@ export function locate(
         "location.invalid",
         `Index ${String(index)} is out of range [0, ${list.length}] for branch "${b}" of "${owner.id}"`,
         join(path, "index"),
+        { expected: `an integer from 0 to ${list.length}`, min: 0, max: list.length },
       );
     }
     const next = held
@@ -181,6 +207,7 @@ export function locate(
     "location.invalid",
     "A location is { after }, { before }, { in: { stepId, branch }, index? } or { start: true }",
     path,
+    AT_HINT,
   );
 }
 
@@ -194,10 +221,17 @@ const addStep: Handler = (doc, command, ctx) => {
         "id.invalid",
         `Step ID "${String(cmd.id)}" must start with a letter or underscore and contain only letters, digits and underscores`,
         "id",
+        {
+          rule: ID_RULE,
+          pattern: STEP_ID_PATTERN.source,
+          suggested: generateStepId(doc, String(cmd.id)),
+        },
       );
     }
     if (allStepIds(doc).has(cmd.id)) {
-      throw new CommandFailure("id.taken", `Step ID "${cmd.id}" is already used`, "id");
+      throw new CommandFailure("id.taken", `Step ID "${cmd.id}" is already used`, "id", {
+        suggested: generateStepId(doc, cmd.id),
+      });
     }
     id = cmd.id;
   } else {

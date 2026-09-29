@@ -6,7 +6,7 @@
 import { FlowlineTreeError, walkSteps } from "../tree";
 import type { Manifest, NodeManifest, Section, Step, WorkflowDoc } from "../types";
 import { type Issue, validateWorkflow } from "../validate";
-import { shapeErrors } from "./command-schema";
+import { formatPath, shapeErrors } from "./command-schema";
 import {
   type ApplyError,
   type ApplyOptions,
@@ -17,7 +17,7 @@ import {
   type HandlerContext,
 } from "./commands";
 import { formatCall, shownColor, shownLabel, stepLine } from "./format";
-import { singleHandlers } from "./single";
+import { AT_HINT, singleHandlers } from "./single";
 
 /** Thrown by wrappers (the editor store) that turn a failed ApplyResult into an exception. */
 export class FlowlineCommandError extends FlowlineTreeError {
@@ -133,12 +133,14 @@ export function apply(
       }
     } catch (e) {
       if (e instanceof CommandFailure) {
-        const path = e.path === "" ? `commands[${i}]` : `commands[${i}].${e.path}`;
+        // `e.path` is a formatted relative path (`id`, `config["a.[b"]`): join, never rewrite.
+        const head = formatPath(["commands", i]);
+        const path = e.path === "" ? head : `${head}${e.path.startsWith("[") ? "" : "."}${e.path}`;
         return {
           ok: false,
           error: {
             index: i,
-            path: path.replace(".[", "["),
+            path,
             code: e.code,
             message: e.message,
             ...(e.hint !== undefined ? { hint: e.hint } : {}),
@@ -153,6 +155,7 @@ export function apply(
             path: `commands[${i}]`,
             code: "location.invalid",
             message: e.message,
+            hint: AT_HINT,
           },
         };
       }
@@ -361,25 +364,27 @@ function changedOutline(
     if (list) list.push(s);
     else sectionsAt.set(s.first, [s]);
   }
-  const lines: { text: string; stepId?: string }[] = [];
+  const lines: { text: string; kind: "step" | "removed" | "section"; stepId?: string }[] = [];
   const seen = new Set<string>();
   walkSteps(after, (step) => {
     if (seen.has(step.id)) return;
     seen.add(step.id);
     for (const s of sectionsAt.get(step.id) ?? []) {
-      lines.push({ text: `${sectionMark.get(s.id)} ${sectionLine(s)}` });
+      lines.push({ text: `${sectionMark.get(s.id)} ${sectionLine(s)}`, kind: "section" });
     }
     sectionsAt.delete(step.id);
     const mark = addedSteps.has(step.id) ? "+" : updatedSteps.has(step.id) ? "~" : undefined;
     if (mark) {
       const line = stepLine(step, nodes.get(step.type), counts.get(step.id) ?? 0, 120);
-      lines.push({ text: `${mark} ${line}`, stepId: step.id });
+      lines.push({ text: `${mark} ${line}`, kind: "step", stepId: step.id });
     }
   });
   for (const list of sectionsAt.values()) leftover.push(...list);
-  for (const s of leftover) lines.push({ text: `${sectionMark.get(s.id)} ${sectionLine(s)}` });
-  for (const id of delta.removed) lines.push({ text: `- ${id}` });
-  for (const id of delta.sections.removed) lines.push({ text: `- ▣ ${id}` });
+  for (const s of leftover) {
+    lines.push({ text: `${sectionMark.get(s.id)} ${sectionLine(s)}`, kind: "section" });
+  }
+  for (const id of delta.removed) lines.push({ text: `- ${id}`, kind: "removed" });
+  for (const id of delta.sections.removed) lines.push({ text: `- ▣ ${id}`, kind: "section" });
 
   const whole = lines.map((l) => l.text).join("\n");
   if (whole.length <= CHANGED_MAX) return whole;
@@ -396,12 +401,23 @@ function changedOutline(
       shown.push(id);
       len += add;
     }
-    const list = formatCall({ tool: "getSteps", args: { ids: shown } });
-    const more = shown.length < ids.length ? list.replace(/\]\}\)$/, ",…]})") : list;
-    return `… ${rest.length} more changes: ${more}`;
+    const head = `… ${rest.length} more ${rest.length === 1 ? "change" : "changes"}`;
+    const counts = (n: number, what: string) => (n > 0 ? [`${n} ${what}`] : []);
+    const removed = rest.filter((l) => l.kind === "removed").length;
+    const sections = rest.filter((l) => l.kind === "section").length;
+    const unshown = ids.length - shown.length;
+    const parts = [
+      ...counts(unshown, unshown === 1 ? "step not listed" : "steps not listed"),
+      ...counts(removed, removed === 1 ? "step removed" : "steps removed"),
+      ...counts(sections, sections === 1 ? "section" : "sections"),
+    ];
+    const tail = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+    // Removed steps and section lines can't be fetched: no getSteps call without an ID to fetch.
+    if (shown.length === 0) return `${head}${tail}`;
+    return `${head}: ${formatCall({ tool: "getSteps", args: { ids: shown } })}${tail}`;
   };
-  // The marker is at most ~360 chars: keep the lines that fit beside the largest one.
-  const room = CHANGED_MAX - (MARKER_IDS_MAX + 100);
+  // The marker is at most ~450 chars: keep the lines that fit beside the largest one.
+  const room = CHANGED_MAX - (MARKER_IDS_MAX + 150);
   const kept: string[] = [];
   let len = 0;
   for (const line of lines) {

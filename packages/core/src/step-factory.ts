@@ -36,20 +36,21 @@ export function defaultConfig(schema: JSONSchema): Record<string, ValueExpr> {
 export function syncBranches(step: Step, m: NodeManifest): Step {
   const declared = branchesFor(m, step).map((b) => b.id);
   const current = step.branches ?? {};
-  const next: Record<string, Step[]> = {};
-  for (const id of declared) next[id] = current[id] ?? [];
+  // A Map, so branch IDs such as `constructor` or `__proto__` are plain keys.
+  const next = new Map<string, Step[]>();
+  for (const id of declared) next.set(id, (Object.hasOwn(current, id) && current[id]) || []);
   for (const [id, list] of Object.entries(current)) {
-    if (!(id in next) && list.length > 0) next[id] = list;
+    if (!next.has(id) && list.length > 0) next.set(id, list);
   }
   const same =
-    Object.keys(next).length === Object.keys(current).length &&
-    Object.keys(next).every((id) => current[id] === next[id]);
+    next.size === Object.keys(current).length &&
+    [...next].every(([id, list]) => Object.hasOwn(current, id) && current[id] === list);
   if (same) return step;
-  if (Object.keys(next).length === 0) {
+  if (next.size === 0) {
     const { branches: _, ...rest } = step;
     return rest;
   }
-  return { ...step, branches: next };
+  return { ...step, branches: Object.fromEntries(next) };
 }
 
 /** A new step of node type `m` with default config and an empty list per declared branch. */

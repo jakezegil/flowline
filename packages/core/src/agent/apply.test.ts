@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { FlowlineTreeError, findStep, walkSteps } from "../tree";
+import { FlowlineTreeError, findStep, insertStep, moveStep, walkSteps } from "../tree";
 import type { Manifest, NodeManifest, Step, WorkflowDoc } from "../types";
 import { apply, changedStepIds, FlowlineCommandError } from "./apply";
 import type { ApplyResult, Command } from "./commands";
@@ -851,5 +851,191 @@ describe("FlowlineCommandError", () => {
     expect(e.name).toBe("FlowlineCommandError");
     expect(e.message).toBe(r.error.message);
     expect(e.error).toBe(r.error);
+  });
+});
+
+describe("branch names that are Object.prototype keys", () => {
+  const names = ["constructor", "toString", "hasOwnProperty", "__proto__"];
+  for (const branch of names) {
+    for (const trusted of [false, true]) {
+      for (const index of [undefined, 0]) {
+        const label = `"${branch}"${index === undefined ? "" : " at index 0"}${trusted ? " (trusted)" : ""}`;
+        test(`${label} is branch.unknown`, () => {
+          const d = doc();
+          const before = structuredClone(d);
+          const at = { in: { stepId: "check", branch }, ...(index === undefined ? {} : { index }) };
+          const opts = trusted ? { trusted, report: false } : {};
+          const add = fail(apply(d, [{ op: "addStep", at, type: "flow.stop" }], m, opts));
+          expect(add.error).toMatchObject({
+            code: "branch.unknown",
+            path: "commands[0].at.in.branch",
+            hint: { branches: ["then", "else"] },
+          });
+          const move = fail(apply(d, [{ op: "moveStep", id: "wait", to: at }], m, opts));
+          expect(move.error).toMatchObject({
+            code: "branch.unknown",
+            path: "commands[0].to.in.branch",
+          });
+          expect(d).toEqual(before);
+        });
+      }
+    }
+  }
+
+  test("the tree ops reject them as missing branches", () => {
+    for (const branch of names) {
+      const loc = { parentId: "check", branch, index: 0 };
+      expect(() => insertStep(doc(), loc, { id: "x", type: "flow.stop", config: {} })).toThrow(
+        FlowlineTreeError,
+      );
+      expect(() => moveStep(doc(), "wait", loc)).toThrow(FlowlineTreeError);
+    }
+  });
+
+  test("a switch case with such an ID is a real branch", () => {
+    const d: WorkflowDoc = {
+      ...doc(),
+      steps: [
+        {
+          id: "sw",
+          type: "flow.switch",
+          config: { value: "x", cases: [] },
+          branches: { default: [] },
+        },
+      ],
+    };
+    const cases = [
+      { id: "constructor", label: "C", value: "c" },
+      { id: "__proto__", label: "P", value: "p" },
+    ];
+    const r = ok(
+      apply(
+        d,
+        [
+          { op: "setConfig", id: "sw", key: "cases", value: cases },
+          { op: "addStep", at: { in: { stepId: "sw", branch: "constructor" } }, type: "flow.stop" },
+          { op: "addStep", at: { in: { stepId: "sw", branch: "__proto__" } }, type: "flow.delay" },
+        ],
+        m,
+      ),
+    );
+    const branches = r.doc.steps[0]?.branches as Record<string, Step[]>;
+    expect(Object.keys(branches)).toEqual(["constructor", "__proto__", "default"]);
+    expect(Object.getPrototypeOf(branches)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(branches, "constructor")?.value).toEqual([
+      expect.objectContaining({ id: "stop" }),
+    ]);
+    expect(Object.getOwnPropertyDescriptor(branches, "__proto__")?.value).toEqual([
+      expect.objectContaining({ id: "delay" }),
+    ]);
+  });
+});
+
+describe("the changed cap marker", () => {
+  test("only removals left out: counts, no getSteps call", () => {
+    const steps: Step[] = Array.from({ length: 300 }, (_, i) => ({
+      id: `step_${i}`,
+      type: "flow.delay",
+      config: { duration: "1m" },
+    }));
+    const d: WorkflowDoc = { ...doc(), steps };
+    const cmds: Command[] = steps.map((s) => ({ op: "removeStep", id: s.id }));
+    const r = ok(apply(d, cmds, m));
+    expect(r.changed.length).toBeLessThanOrEqual(2000);
+    const last = r.changed.split("\n").at(-1) as string;
+    expect(last).toMatch(/^… \d+ more changes \(\d+ steps removed\)$/);
+    expect(r.changed).not.toContain("getSteps");
+  });
+
+  test("IDs too long to list: counts, no empty or partial ID list", () => {
+    const cmds: Command[] = Array.from({ length: 50 }, (_, i) => ({
+      op: "addStep",
+      at: { after: "wait" },
+      type: "flow.delay",
+      id: `${"x".repeat(400)}_${i}`,
+      config: { duration: "1m" },
+    }));
+    const r = ok(apply(doc(), cmds, m));
+    expect(r.changed.length).toBeLessThanOrEqual(2000);
+    const last = r.changed.split("\n").at(-1) as string;
+    expect(last).toMatch(/^… \d+ more changes \(\d+ steps not listed\)$/);
+    expect(r.changed).not.toContain("getSteps");
+  });
+
+  test("a listed marker holds whole IDs only, and counts the rest", () => {
+    const cmds: Command[] = Array.from({ length: 300 }, () => ({
+      op: "addStep",
+      at: { after: "wait" },
+      type: "flow.stop",
+    }));
+    const last = ok(apply(doc(), cmds, m))
+      .changed.split("\n")
+      .at(-1) as string;
+    const parts =
+      /^… (\d+) more changes: getSteps\(\{ids:(\[[^\]]*\])\}\) \((\d+) steps not listed\)$/.exec(
+        last,
+      );
+    expect(parts).not.toBeNull();
+    const listed = JSON.parse(parts?.[2] as string) as string[];
+    expect(listed.length).toBeGreaterThan(0);
+    expect(listed.every((id) => /^stop(_\d+)?$/.test(id))).toBe(true);
+    expect(listed.length + Number(parts?.[3])).toBe(Number(parts?.[1]));
+  });
+});
+
+describe("error paths and hints", () => {
+  test("a config key containing .[ keeps the path well-formed", () => {
+    const r = fail(
+      apply(
+        doc(),
+        [{ op: "setConfig", id: "wait", config: { "a.[b": { $ref: "steps.$9.x" } } }],
+        m,
+      ),
+    );
+    expect(r.error).toMatchObject({
+      code: "placeholder.unknown",
+      path: 'commands[0].config["a.[b"]',
+    });
+  });
+
+  test("id.taken suggests a free ID; id.invalid states the rule", () => {
+    const taken = fail(
+      apply(doc(), [{ op: "addStep", at: { start: true }, type: "flow.stop", id: "load" }], m),
+    );
+    expect(taken.error.hint).toEqual({ suggested: "load_2" });
+    const invalid = fail(
+      apply(doc(), [{ op: "addStep", at: { start: true }, type: "flow.stop", id: "9x" }], m),
+    );
+    expect(invalid.error.hint).toMatchObject({
+      pattern: "^[A-Za-z_][A-Za-z0-9_]*$",
+      suggested: "_9x",
+    });
+    expect((invalid.error.hint as { rule: string }).rule).toContain("letter or underscore");
+  });
+
+  test("move.intoSelf and location.invalid say what a valid target is", () => {
+    const self = fail(apply(doc(), [{ op: "moveStep", id: "check", to: { after: "notify" } }], m));
+    expect(self.error.hint).toEqual({
+      expected: "a location outside the moved step's subtree",
+      subtree: ["check", "notify"],
+    });
+    const index = fail(
+      apply(
+        doc(),
+        [
+          {
+            op: "addStep",
+            at: { in: { stepId: "check", branch: "then" }, index: 5 },
+            type: "flow.stop",
+          },
+        ],
+        m,
+      ),
+    );
+    expect(index.error.hint).toEqual({ expected: "an integer from 0 to 1", min: 0, max: 1 });
+    const bad = { op: "addStep", at: { start: false }, type: "flow.stop" } as unknown as Command;
+    const form = fail(apply(doc(), [bad], m, { trusted: true }));
+    expect(form.error.code).toBe("location.invalid");
+    expect((form.error.hint as { expected: string[] }).expected).toContain("{ start: true }");
   });
 });

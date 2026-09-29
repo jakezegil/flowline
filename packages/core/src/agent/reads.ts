@@ -15,7 +15,7 @@ import {
   type ScopeEntry,
   walkScope,
 } from "../scope";
-import { FlowlineTreeError, findStep, type StepLocation, walkSteps } from "../tree";
+import { branchList, FlowlineTreeError, findStep, type StepLocation, walkSteps } from "../tree";
 import type {
   JSONSchema,
   Manifest,
@@ -321,7 +321,7 @@ function stepDetail(
     detail.branches = all.map((b, i) => ({
       id: b.id,
       label: cutter.str(b.label, `branches[${i}].label`),
-      steps: step.branches?.[b.id]?.length ?? 0,
+      steps: branchList(step, b.id)?.length ?? 0,
     }));
   }
 
