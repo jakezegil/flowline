@@ -7,7 +7,7 @@ The Flowline workflow editor, run viewer and run list for React. See the
 
 Import the stylesheet once, next to your app's own CSS:
 
-```ts
+```ts file=styles.ts
 import "@flowlinejs/react/styles.css";
 ```
 
@@ -46,7 +46,7 @@ place a layer is named fixes its order, so do this in a file imported first:
 .app-header { … }
 ```
 
-```ts
+```ts file=main.ts
 import "./layers.css";
 import "@flowlinejs/react/styles.css";
 import "./app.css";
@@ -83,9 +83,76 @@ WCAG AA contrast (4.5:1) on `-bg` in both colour modes, so keep that in mind whe
 them. A colour outside the six draws as gray. The ring that flashes around steps an agent just
 changed is `--fl-changed`. It is derived from `--fl-accent`, so it follows your accent.
 
-```ts
-const theme = { tokens: { annotYellowBg: "#fff4c2", annotYellowText: "#5c4300" } };
+```ts file=theme.ts
+import type { FlowlineTheme } from "@flowlinejs/react";
+
+export const theme: FlowlineTheme = {
+  tokens: { annotYellowBg: "#fff4c2", annotYellowText: "#5c4300" },
+};
 ```
 
 When you do override a Flowline rule, an unlayered rule with any specificity wins. You don't need
 `!important`.
+
+## Agent bridge
+
+The bridge lets an AI agent edit the open workflow the way a person does. Its reads see the
+editor's current doc at call time, and its edits go through the editor store's `apply`, so each
+batch is one undo step, flashes the changed steps on the canvas, and is rejected with code
+`"readOnly"` while the editor is read-only. It serves the same tools as core's `commandCatalog`
+(see the [core README](../core/README.md#agents)); `bridge.runTool(name, args)` runs one call.
+
+For an agent loop outside React, create a bridge per store with `createAgentBridge` in
+`onStoreReady`. The editor calls it for every store it creates (first load, a new `workflowId`, a
+retry, a new workflow), and runs the cleanup you return when that store is replaced or the
+editor unmounts:
+
+```tsx file=AgentEditor.tsx
+import { commandCatalog, type Manifest, type ToolDefinition } from "@flowlinejs/core";
+import { createAgentBridge, WorkflowEditor } from "@flowlinejs/react";
+
+/** Your agent loop: it sends `tools` to the model and calls `run` for each tool call. */
+interface Agent {
+  attach(tools: ToolDefinition[], run: (name: string, args: unknown) => unknown): void;
+  detach(): void;
+}
+
+export function AgentEditor({ agent, manifest }: { agent: Agent; manifest: Manifest }) {
+  return (
+    <WorkflowEditor
+      workflowId="welcome-contact"
+      onStoreReady={(store) => {
+        const bridge = createAgentBridge(store);
+        agent.attach(commandCatalog(manifest), (name, args) => bridge.runTool(name, args));
+        return () => agent.detach();
+      }}
+    />
+  );
+}
+```
+
+Inside the editor (a custom panel, for example), `useWorkflowAgentBridge()` returns the bridge of
+the enclosing editor's store, the same object until the store changes. `bridge.read` holds every
+read bound to the store (`bridge.read.overview({ budget: 2000 })`), and `bridge.apply(commands)`
+runs a batch directly:
+
+```tsx file=AgentPanel.tsx
+import { type EditorStore, useWorkflowAgentBridge } from "@flowlinejs/react";
+
+export function AgentPanel({ store }: { store: EditorStore }) {
+  const bridge = useWorkflowAgentBridge(store);
+  const { text } = bridge.read.overview({ budget: 2000 });
+  const rename = () => bridge.apply([{ op: "renameWorkflow", name: "Welcome VIPs" }]);
+  return (
+    <aside>
+      <pre>{text}</pre>
+      <button type="button" onClick={rename}>
+        Rename
+      </button>
+    </aside>
+  );
+}
+```
+
+Pass it as `renderPanel={(store) => <AgentPanel store={store} />}`. Without an argument, the hook
+uses the store of the enclosing `<WorkflowEditor>` or `<WorkflowCanvas>`.

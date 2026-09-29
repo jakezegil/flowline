@@ -753,6 +753,87 @@ The provider accepts `client`, `theme`, `labels`, `icons` and `widgets`.
 - **Widgets.** `widgets` registers custom config-field controls, selected by
   `ui(schema, { widget })`. See the [plugin guide](docs/guides/writing-a-plugin.md#custom-widgets).
 
+On the canvas, users can annotate a workflow. Annotations are for people: the engine ignores
+them, and they are saved in the doc (`step.note`, `step.color` and `doc.sections`).
+
+- **Notes.** A step's menu has "Add note", which pins a sticky note beside the card. Notes hold
+  up to 4000 characters.
+- **Colours.** A step's "Color" submenu gives its card an accent in one of six colours: yellow,
+  blue, green, pink, purple and gray.
+- **Sections.** A section is a titled, coloured region around a run of consecutive steps in one
+  list, with an optional note. Its header chip has a menu to rename it, change its colour, edit
+  its note or ungroup it (the steps stay).
+- **Range selection.** Shift-click a second card, or press ⇧↑/⇧↓, to select a run of steps in
+  one list. The RangeBar above the canvas groups the run into a section (⌘G / Ctrl+G), and
+  duplicates (⌘D), copies (⌘C), moves (⌥↑/⌥↓) or deletes it. Its right-click menu has the same
+  items.
+- **Backspace/Delete** deletes what has focus: the selected step or range on the canvas and in
+  the side panel outside text fields, a note, a section chip (which ungroups it), and the range
+  from a RangeBar button. Only the unmodified keys count, never while typing or while a modal is
+  open, and holding the key down deletes once.
+
+`<WorkflowEditor onStoreReady>` hands you every editor store it creates (the first load, a new
+`workflowId`, a retry, a new workflow), and runs the cleanup you return when that store is
+replaced or the editor unmounts. Attach an AI agent there with `createAgentBridge(store)`, or
+call `useWorkflowAgentBridge()` inside the editor. Both give the agent the tools described next,
+running against the live doc, with each batch one undo step. See the
+[react README](packages/react/README.md#agent-bridge).
+
+## Agents: reads, commands and the tool catalog
+
+`@flowlinejs/core` lets an AI agent read and edit a workflow with a handful of tool calls.
+
+- **Reads** summarize the doc within a character budget. `overview` and `outline` render it as
+  an outline, one line per step, section or branch, and list whatever they left out in
+  `omitted`, each entry with the exact follow-up call that returns it. `focus` and `getSteps`
+  return steps with their config, compact input schema and the refs in scope. `findSteps`,
+  `availableRefs`, `listNodeTypes`, `describeNodeTypes` and `getIssues` cover the rest.
+- **Commands** go through one function: `apply(doc, commands, manifest)`. The batch is atomic.
+  If any command fails, the doc is untouched and `error` names the failing command's path with
+  a hint. Placeholders connect the commands of a batch: `$1` is the step `commands[0]`
+  created, and a new step with `ref: "deal"` is `$deal`, also inside refs and templates
+  (`{{ steps.$deal.deal.ownerId }}`). Bulk commands such as `insertSteps`, which inserts a whole
+  flow with nested branches, keep batches short.
+- **`commandCatalog(manifest)`** turns all of this into tool definitions for a tool-calling
+  model, with JSON Schema inputs built from your manifest, and **`runTool`** runs one call.
+
+The mini-crm example has an agent that builds its whole "deal stuck in stage" workflow from a
+blank doc in three calls: `describeNodeTypes`, one `apply` and `getIssues`
+(`examples/mini-crm/server/src/agent-scenario.test.ts`). A server-side agent loop looks like
+this:
+
+```ts file=flowline/agent.ts
+// flowline/agent.ts
+import { commandCatalog, runTool, type ToolDefinition, type WorkflowDoc } from "@flowlinejs/core";
+import { engine } from "./engine";
+
+/** One model turn: the tool calls it made, or none when it's done. Wraps your LLM SDK. */
+type Model = (
+  tools: ToolDefinition[],
+  results: unknown[],
+) => Promise<{ name: string; args: unknown }[]>;
+
+/** Let `model` edit `doc` until it stops calling tools, and return the edited doc. */
+export async function runAgent(model: Model, doc: WorkflowDoc): Promise<WorkflowDoc> {
+  const manifest = engine.registry.manifest();
+  const tools = commandCatalog(manifest);
+  let results: unknown[] = [];
+  for (let turn = 0; turn < 20; turn++) {
+    const calls = await model(tools, results);
+    if (calls.length === 0) break;
+    results = calls.map(({ name, args }) => {
+      const r = runTool({ doc, manifest }, name, args);
+      if (r.ok && r.doc) doc = r.doc; // a successful apply
+      return r.ok ? r.result : r.error;
+    });
+  }
+  return doc;
+}
+```
+
+Save the result with `engine.saveWorkflow` as usual. See the
+[core README](packages/core/README.md#agents) for `apply` and the reads called directly.
+
 ## Testing
 
 `@flowlinejs/engine/testing` exports `testNode`, which runs one handler, and `runWorkflowInMemory`,
@@ -804,6 +885,8 @@ These are out of scope for v1, but the design leaves room for them:
 - A poll-state route and a "last checked" panel in the editor
 - Multi-event support in `core.event` itself (today it's for plugin triggers)
 - Custom rule operators in switch cases
+- An MCP server exposing the tool catalog
+- A copilot UI in the editor, built on the agent bridge
 
 ## Development
 

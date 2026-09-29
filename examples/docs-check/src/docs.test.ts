@@ -1,10 +1,11 @@
 /**
- * Keeps the docs honest: every TypeScript block in README.md and the plugin guide is extracted
- * (see `extract.ts`), typechecked against the real packages, and the README quick start is run
- * end to end, with memory storage standing in for Postgres and no port opened.
+ * Keeps the docs honest: every TypeScript block in README.md, the plugin guide and the core and
+ * react package READMEs is extracted (see `extract.ts`) and typechecked against the real
+ * packages. The README quick start is run end to end, with memory storage standing in for
+ * Postgres and no port opened, and the core README's agent snippet is run too.
  */
 import { execFile } from "node:child_process";
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -24,8 +25,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = join(HERE, "..");
 const REPO = join(PKG, "../..");
 const OUT = join(PKG, ".generated");
-const DOCS = { readme: "README.md", guide: "docs/guides/writing-a-plugin.md" } as const;
+const DOCS = {
+  readme: "README.md",
+  guide: "docs/guides/writing-a-plugin.md",
+  core: "packages/core/README.md",
+  react: "packages/react/README.md",
+} as const;
 type Project = keyof typeof DOCS;
+const PROJECTS = Object.keys(DOCS) as Project[];
 
 const unannotated: string[] = [];
 
@@ -33,7 +40,9 @@ const unannotated: string[] = [];
 function generate(project: Project): void {
   const dir = join(OUT, project);
   rmSync(dir, { recursive: true, force: true });
-  cpSync(join(PKG, "stubs", project), dir, { recursive: true });
+  const stubs = join(PKG, "stubs", project);
+  if (existsSync(stubs)) cpSync(stubs, dir, { recursive: true });
+  else mkdirSync(dir, { recursive: true });
   const { blocks, unannotated: lines } = extractBlocks(
     readFileSync(join(REPO, DOCS[project]), "utf8"),
   );
@@ -63,15 +72,15 @@ async function typecheck(project: Project): Promise<string> {
   }
 }
 
-const load = (file: string) => import(pathToFileURL(join(OUT, "readme", file)).href);
+const load = (file: string, project: Project = "readme") =>
+  import(pathToFileURL(join(OUT, project, file)).href);
 
 /** The Hono app server.ts passes to (mocked) `serve`. */
 type HonoApp = { fetch(req: Request): Promise<Response> };
 let app: HonoApp;
 
 beforeAll(async () => {
-  generate("readme");
-  generate("guide");
+  for (const project of PROJECTS) generate(project);
   // Mount the README's server once, so every test can call the handler on its own.
   await load("server.ts");
   const { serve } = await import("@hono/node-server");
@@ -83,11 +92,27 @@ describe("docs", () => {
     expect(unannotated).toEqual([]);
   });
 
-  it("typechecks the README and plugin guide snippets", async () => {
-    const [readme, guide] = await Promise.all([typecheck("readme"), typecheck("guide")]);
-    expect(readme).toBe("");
-    expect(guide).toBe("");
+  it("typechecks the README, plugin guide and package README snippets", async () => {
+    const errors = await Promise.all(PROJECTS.map(typecheck));
+    expect(Object.fromEntries(PROJECTS.map((p, i) => [p, errors[i]]))).toEqual(
+      Object.fromEntries(PROJECTS.map((p) => [p, ""])),
+    );
   }, 60_000);
+
+  it("runs the core README's agent snippet: apply, then overview", async () => {
+    const { result, summary, catalog, checked } = (await load("agent.ts", "core")) as {
+      result: { ok: boolean; ids: Record<string, string>; doc: { sections?: unknown[] } };
+      summary: { text: string; omitted: unknown[] };
+      catalog: { name: string }[];
+      checked: { ok: boolean; result: unknown };
+    };
+    expect(result).toMatchObject({ ok: true, ids: { $1: "refresh" } });
+    expect(result.doc.sections).toHaveLength(1);
+    expect(summary.text).toContain("refresh");
+    expect(summary.omitted).toEqual([]);
+    expect(catalog.map((t) => t.name)).toContain("apply");
+    expect(checked).toMatchObject({ ok: true, result: { errors: 0 } });
+  });
 
   it("runs the README quick start to a completed run", async () => {
     const { engine } = (await load("flowline/engine.ts")) as { engine: Engine };
