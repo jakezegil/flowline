@@ -1,12 +1,14 @@
 import {
   type AnnotationColor,
+  type ApplyError,
+  FlowlineCommandError,
   findStep,
   type Section,
   type Step,
   type WorkflowDoc,
 } from "@flowlinejs/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { mockClient, setupDom } from "../../test/dom";
 import { docWith, manifest, step } from "../../test/fixtures";
 import { defaultLabels as L } from "../labels";
@@ -319,6 +321,35 @@ describe("labels", () => {
   });
 });
 
+/** Replaces the store's `setNote` with a spy, calling through unless `impl` is given. */
+function spyOnSetNote(store: EditorStore, impl?: (id: string, note: string | null) => void) {
+  const real = store.getState().setNote;
+  const spy = vi.fn(impl ?? real);
+  store.setState({ setNote: spy });
+  return spy;
+}
+
+/**
+ * Collects uncaught errors: React 19 reports an error thrown in an event handler
+ * asynchronously (window "error", console.error), so `expect(...).not.toThrow()` can't see it.
+ */
+function watchErrors(): { seen: unknown[]; stop(): void } {
+  const seen: unknown[] = [];
+  const onError = (e: ErrorEvent) => {
+    seen.push(e.error ?? e.message);
+    e.preventDefault();
+  };
+  window.addEventListener("error", onError);
+  const log = vi.spyOn(console, "error").mockImplementation((...args) => void seen.push(args));
+  return {
+    seen,
+    stop() {
+      window.removeEventListener("error", onError);
+      log.mockRestore();
+    },
+  };
+}
+
 describe("review round 1", () => {
   const long = "x".repeat(5000);
   const noteBox = () => screen.findByRole("textbox", { name: L.editNote });
@@ -328,10 +359,15 @@ describe("review round 1", () => {
   test("I1: blurring an untouched over-long note saves nothing and throws nothing", async () => {
     const store = storeOf(docOf({ a: { note: long } }));
     render(<WorkflowCanvas store={store} />);
+    const setNote = spyOnSetNote(store);
+    const errors = watchErrors();
     const before = store.getState().doc;
     openNote("a");
-    const box = await noteBox();
-    expect(() => fireEvent.blur(box)).not.toThrow();
+    fireEvent.blur(await noteBox());
+    await new Promise((r) => setTimeout(r, 0));
+    errors.stop();
+    expect(setNote).not.toHaveBeenCalled();
+    expect(errors.seen).toEqual([]);
     expect(store.getState().doc).toBe(before);
     expect(screen.queryByRole("textbox", { name: L.editNote })).toBeNull();
   });
@@ -374,16 +410,28 @@ describe("review round 1", () => {
     expect(store.getState().doc.sections?.[0]?.note).toBe("z".repeat(4000));
   });
 
-  test("I1: a rejected save (store gone read-only) doesn't throw", async () => {
+  test("I1: a rejected save toasts the error instead of throwing", async () => {
     const store = storeOf(docOf({ a: { note: "old" } }));
     render(<WorkflowCanvas store={store} />);
+    const rejection = new FlowlineCommandError({
+      index: 0,
+      path: "commands[0]",
+      code: "command.invalid",
+      message: "Rejected by the test",
+    } as ApplyError);
+    const setNote = spyOnSetNote(store, () => {
+      throw rejection;
+    });
+    const errors = watchErrors();
     openNote("a");
     const box = await noteBox();
     fireEvent.change(box, { target: { value: "new" } });
-    expect(() => {
-      act(() => store.getState().setReadOnly(true));
-      if (box.isConnected) fireEvent.blur(box);
-    }).not.toThrow();
+    fireEvent.blur(box);
+    await new Promise((r) => setTimeout(r, 0));
+    errors.stop();
+    expect(setNote).toHaveBeenCalledWith("a", "new");
+    expect(errors.seen).toEqual([]);
+    expect(await screen.findByText("Rejected by the test")).toBeTruthy();
     expect(stepOf(store, "a")?.note).toBe("old");
   });
 
