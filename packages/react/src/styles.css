@@ -3671,6 +3671,11 @@
   .fl-compare__hint {
     font-size: 11.5px;
   }
+  /* The always-present live region of a rule.literalType warning: no box of its own, so an
+     empty one adds no gap to the rule's grid. */
+  .fl-literal-warning {
+    display: contents;
+  }
   /* typed right-hand values */
   .fl-typed {
     display: grid;

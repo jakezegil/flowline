@@ -4,6 +4,7 @@ import {
   defineTrigger,
   type JSONSchema,
   type Manifest,
+  type RuleValueType,
   type ValueExpr,
   validateWorkflow,
   type WorkflowDoc,
@@ -16,6 +17,7 @@ import { z } from "zod";
 import builtin from "../../../playground/builtin-manifest.json";
 import { editorView, setupCodeMirrorDom, typeInto } from "../../../test/codemirror-dom";
 import { mockClient } from "../../../test/dom";
+import { defaultLabels, type FlowlineLabels } from "../../labels";
 import { FlowlineProvider } from "../../provider";
 import { SchemaForm } from "../schema-form";
 import { literalTypeIssue, toTypedList, toTypedLiteral } from "./literal";
@@ -256,6 +258,15 @@ describe("typed literals", () => {
     expect(toTypedList("5, 7", "number")).toEqual([5, 7]);
     expect(toTypedList("won, lost,", "string")).toEqual(["won", "lost"]);
     expect(toTypedList("5, x", "number")).toEqual([5, "x"]);
+    // Edge cases: only finite numeric text becomes a number; true/false match exactly (trimmed).
+    expect(toTypedLiteral("-0", "number")).toBe(-0);
+    expect(toTypedLiteral("1e3", "number")).toBe(1000);
+    expect(toTypedLiteral("NaN", "number")).toBe("NaN");
+    expect(toTypedLiteral("1e999", "number")).toBe("1e999");
+    expect(toTypedLiteral("TRUE", "boolean")).toBe("TRUE");
+    expect(toTypedLiteral("true ", "boolean")).toBe(true);
+    // Commas always separate values (the widget's hint says so).
+    expect(toTypedList("1,000", "number")).toEqual([1, 0]);
   });
 
   test("rule.literalType warns about a literal of another type, in strict mode only", () => {
@@ -278,6 +289,43 @@ describe("typed literals", () => {
     expect(literalTypeIssue(rule, "any", "strict")).toBeUndefined();
     // Host operators decide their own types.
     expect(literalTypeIssue({ ...rule, op: "isUnassigned" }, "number", "strict")).toBeUndefined();
+    // Text with a reference renders as text: fine for text values, never a list.
+    const tpl = { $tpl: "{{trigger.deal.stage}}, lost" };
+    expect(literalTypeIssue({ ...rule, right: tpl }, "string", "strict")).toBeUndefined();
+    expect(literalTypeIssue({ ...list, right: tpl }, "string", "strict")).toBeDefined();
+  });
+
+  test("the warning says what each side actually is, with the field labels in effect", () => {
+    const rule = { left: amount, op: "eq", right: "5" };
+    const say = (r: Record<string, unknown>, t: RuleValueType, labels?: FlowlineLabels) =>
+      literalTypeIssue({ ...rule, ...r }, t, "strict", labels ? { labels } : {})?.message;
+    expect(say({}, "number")).toBe(
+      "Compare with is text but Value is a number; strict mode will never match",
+    );
+    expect(say({ right: 5 }, "string")).toBe(
+      "Compare with is a number but Value is text; strict mode will never match",
+    );
+    expect(say({ right: "true" }, "boolean")).toBe(
+      "Compare with is text but Value is true/false; strict mode will never match",
+    );
+    expect(say({ right: [true] }, "boolean")).toBe(
+      "Compare with is a list but Value is true/false; strict mode will never match",
+    );
+    // A legacy comma-separated text on "is one of".
+    expect(say({ op: "in", right: "won, lost" }, "string")).toBe(
+      "Compare with is text but Value is text, which needs a list of text values; strict mode will never match",
+    );
+    expect(say({ op: "in", right: [5, "7"] }, "number")).toBe(
+      "Compare with is a list that includes text but Value is a number, which needs a list of numbers; strict mode will never match",
+    );
+    expect(say({ op: "in", right: { $tpl: "{{trigger.deal.stage}}, lost" } }, "string")).toBe(
+      "Compare with is text with a reference but Value is text, which needs a list of text values; strict mode will never match",
+    );
+    // Overridden field labels name the fields.
+    const labels = { ...defaultLabels, ruleLeft: "Field", ruleRight: "Target" };
+    expect(say({}, "number", labels)).toBe(
+      "Target is text but Field is a number; strict mode will never match",
+    );
   });
 });
 
@@ -300,10 +348,24 @@ describe("rules widget: compare modes and typed literals", () => {
       target: { value: "strict" },
     });
     expect(rulesOf().compare).toBe("strict");
-    expect(screen.getByText(warning)).toBeTruthy();
+    const note = screen.getByText(
+      "Compare with is text but Value is a number; strict mode will never match",
+    );
+    // A polite live region that describes the value it's about.
+    const region = note.closest("[role=status]") as HTMLElement;
+    expect(region).toBeTruthy();
+    const describedBy =
+      editorView("Value 1: Compare with").contentDOM.getAttribute("aria-describedby");
+    expect(describedBy?.split(" ")).toContain(region.id);
     retype("Value 1: Compare with", "12");
     expect(rulesOf().rules[0]?.right).toBe(12);
     expect(screen.queryByText(warning)).toBeNull();
+  });
+
+  test("a literal follows a change of the left-hand type", () => {
+    renderDeal("core.condition", start([{ left: amount, op: "eq", right: 5 }]));
+    retype("Value 1: Value", "abc");
+    expect(rulesOf().rules[0]).toEqual({ left: "abc", op: "eq", right: "5" });
   });
 
   test("a true/false field takes a true/false choice", () => {
@@ -313,6 +375,47 @@ describe("rules widget: compare modes and typed literals", () => {
     expect(rulesOf().rules[0]?.right).toBe(true);
     fireEvent.change(choice, { target: { value: "false" } });
     expect(rulesOf().rules[0]?.right).toBe(false);
+  });
+
+  test("a true/false field shows a stored text value, and choosing replaces it", () => {
+    renderDeal(
+      "core.condition",
+      start([
+        { left: won, op: "eq", right: "yes" },
+        { left: won, op: "eq", right: "true" },
+      ]),
+      { compare: "strict" },
+    );
+    const [yes, text] = screen.getAllByRole("combobox", { name: /Compare with/ }) as [
+      HTMLSelectElement,
+      HTMLSelectElement,
+    ];
+    expect(yes.selectedOptions[0]?.textContent).toBe("text: yes");
+    expect(text.selectedOptions[0]?.textContent).toBe("text: true");
+    expect(
+      screen.getAllByText(
+        "Compare with is text but Value is true/false; strict mode will never match",
+      ),
+    ).toHaveLength(2);
+    fireEvent.change(text, { target: { value: "true" } });
+    fireEvent.change(yes, { target: { value: "false" } });
+    expect(rulesOf().rules.map((r) => r.right)).toEqual([false, true]);
+    expect(screen.queryByText(warning)).toBeNull();
+  });
+
+  test("a legacy text list on 'is one of' is flagged as text under strict", () => {
+    renderDeal("core.condition", start([{ left: amount, op: "in", right: "5, 7" }]), {
+      compare: "strict",
+    });
+    expect(
+      screen.getByText(
+        "Compare with is text but Value is a number, which needs a list of numbers; strict mode will never match",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/Separate values with commas/)).toBeTruthy();
+    retype("Value 1: Compare with", "5, 7");
+    expect(rulesOf().rules[0]?.right).toEqual([5, 7]);
+    expect(screen.queryByText(warning)).toBeNull();
   });
 
   test("'is one of' stores a list typed like the left-hand value", () => {
@@ -446,7 +549,12 @@ describe("cases widget", () => {
     retype("Big: Matches", "5");
     expect(latest.cases).toEqual([{ id: "big", label: "Big", value: 5 }]);
     retype("Big: Matches", "five");
-    expect(screen.getByText(/strict mode will never match/i)).toBeTruthy();
+    // Named by the cases' own field labels.
+    expect(
+      screen.getByText(
+        "Matches is text but Value to match is a number; strict mode will never match",
+      ),
+    ).toBeTruthy();
     fireEvent.click(within(compare).getByRole("radio", { name: "Loose" }));
     expect(screen.queryByText(/strict mode will never match/i)).toBeNull();
   });

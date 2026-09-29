@@ -10,6 +10,7 @@
  * @module
  */
 import {
+  type Issue,
   isRef,
   isTpl,
   type JSONSchema,
@@ -209,7 +210,16 @@ function opsFor(type: ValueType, ops: OperatorSet): string[] {
  * into a list (`5` → `[5]`), leaving it turns a list back into text. Other values stay.
  */
 function retype(v: ValueExpr, list: boolean, type: ValueType): ValueExpr {
-  if (list === Array.isArray(v) || isRef(v) || isTpl(v)) return v;
+  return list === Array.isArray(v) ? v : retypeLiteral(v, list, type);
+}
+
+/**
+ * A literal (or list of literals) typed anew for a `type` value, as if its text were typed
+ * again: `"5"` becomes `5` once the value is a number, `5` becomes `"5"` once it's text.
+ * References and templates stay.
+ */
+function retypeLiteral(v: ValueExpr, list: boolean, type: ValueType): ValueExpr {
+  if (isRef(v) || isTpl(v)) return v;
   const text = literalText(v);
   if (text === undefined) return v;
   return list ? toTypedList(text, type) : toTypedLiteral(text, type);
@@ -230,6 +240,7 @@ export function TypedValueInput({
   list = false,
   ariaLabel,
   placeholder,
+  describedBy,
 }: {
   value: ValueExpr | undefined;
   onChange(v: ValueExpr): void;
@@ -237,10 +248,11 @@ export function TypedValueInput({
   list?: boolean;
   ariaLabel: string;
   placeholder?: string;
+  /** ID of an element describing the value (its `rule.literalType` warning). */
+  describedBy?: string | undefined;
 }): JSX.Element {
   const env = useFormEnv();
   const { labels } = useFlowlineAppearance();
-  const id = useId();
   const choice = type === "boolean" && !list;
   const mode = useRefMode(value, (v) => onChange(v ?? ""), choice && !env.readOnly);
   /** The text as typed while it maps to the stored literal ("5.0" stays "5.0", not "5"). */
@@ -268,6 +280,7 @@ export function TypedValueInput({
       ariaLabel={ariaLabel}
       readOnly={env.readOnly}
       {...(choice ? { singlePill: true } : {})}
+      {...(describedBy ? { describedBy } : {})}
     />
   );
   const items = list && Array.isArray(value) ? value : [];
@@ -292,24 +305,38 @@ export function TypedValueInput({
             ))}
           </ul>
         )}
+        <p className="fl-f__help">{labels.ruleListHint}</p>
       </div>
     );
   }
-  const current = typeof value === "boolean" || value === "true" || value === "false";
+  // A stored literal that isn't true/false (legacy text such as "yes", or even "true") stays
+  // visible as a disabled option, so picking true or false always stores a boolean.
+  const other =
+    typeof value === "string" && value !== ""
+      ? labels.literalOption(labels.literalKinds.string, value)
+      : typeof value === "number"
+        ? labels.literalOption(labels.literalKinds.number, String(value))
+        : undefined;
   return (
     <div className="fl-typed fl-typed--choice">
       {mode.on ? (
         text
       ) : (
         <select
-          id={id}
           className="fl-input fl-select"
           aria-label={ariaLabel}
-          value={current ? String(value) : ""}
+          aria-describedby={describedBy}
+          value={typeof value === "boolean" ? String(value) : other ? OTHER : ""}
           disabled={env.readOnly}
           onChange={(e) => onChange(e.target.value === "" ? "" : e.target.value === "true")}
         >
-          {!current && <option value="">{labels.chooseOption}</option>}
+          {other ? (
+            <option value={OTHER} disabled>
+              {other}
+            </option>
+          ) : (
+            typeof value !== "boolean" && <option value="">{labels.chooseOption}</option>
+          )}
           <option value="true">true</option>
           <option value="false">false</option>
         </select>
@@ -318,6 +345,9 @@ export function TypedValueInput({
     </div>
   );
 }
+
+/** Option value of a stored literal the true/false choice shows as it is. */
+const OTHER = "(other)";
 
 const NEW_RULE: Rule = { left: "", op: "eq", right: "" };
 
@@ -370,10 +400,8 @@ function RuleRow({
     if (TEXT_OPS.has(op) && rule.caseSensitive) next.caseSensitive = true;
     onChange(next);
   };
-  const literal = unary
-    ? undefined
-    : literalTypeIssue(rule, type, compare, labels.literalTypeWarning);
-  const issues = issuesUnder(env.issues, path);
+  const literal = unary ? undefined : literalTypeIssue(rule, type, compare, { labels });
+  const warningId = useId();
   return (
     <li className="fl-rule">
       {join && <span className="fl-rule__join">{join}</span>}
@@ -381,7 +409,16 @@ function RuleRow({
         <div className="fl-rule__fields">
           <RefTextInput
             value={rule.left}
-            onChange={(v) => onChange({ ...rule, left: v ?? "" })}
+            onChange={(v) => {
+              const left = v ?? "";
+              const next = { ...rule, left };
+              // A literal to compare with follows the value's type, as if typed again.
+              const leftType = valueTypeOf(left, env.scope);
+              if (!unary && rule.right !== undefined && leftType !== type) {
+                next.right = retypeLiteral(rule.right, rule.op === "in", leftType);
+              }
+              onChange(next);
+            }}
             scope={env.scope}
             samples={env.samples}
             invalidRefs={env.invalidRefs}
@@ -434,6 +471,7 @@ function RuleRow({
                     : labels.ruleRight
               }
               ariaLabel={`${name}: ${labels.ruleRight}`}
+              describedBy={literal ? warningId : undefined}
             />
           )}
         </div>
@@ -446,8 +484,27 @@ function RuleRow({
           disabled={env.readOnly}
         />
       </div>
-      <IssueNotes issues={literal ? [...issues, { ...literal, field: `${path}.right` }] : issues} />
+      <IssueNotes issues={issuesUnder(env.issues, path)} />
+      <LiteralWarning id={warningId} issue={literal} />
     </li>
+  );
+}
+
+/**
+ * @internal The `rule.literalType` warning of a value, in a polite live region that is always
+ * there, so the warning is announced when it appears while typing. `id` describes the value.
+ */
+export function LiteralWarning({
+  id,
+  issue,
+}: {
+  id: string;
+  issue: Issue | undefined;
+}): JSX.Element {
+  return (
+    <div id={id} className="fl-literal-warning" role="status">
+      {issue && <IssueNotes issues={[issue]} />}
+    </div>
   );
 }
 
@@ -468,10 +525,12 @@ function CompareSelect({
   return (
     <div className="fl-compare">
       <div className="fl-compare__row">
-        <span className="fl-compare__label" aria-hidden>
+        {/* The visible label (a click target); the accessible name also says whose choice it is. */}
+        <label className="fl-compare__label" htmlFor={`${id}select`}>
           {labels.compare}
-        </span>
+        </label>
         <select
+          id={`${id}select`}
           className="fl-input fl-select fl-compare__select"
           aria-label={label}
           aria-describedby={`${id}hint`}

@@ -345,10 +345,32 @@ export interface FlowlineLabels {
   /** One line under the compare choice explaining loose mode. */
   compareLooseHint: string;
   /**
-   * Warns that, in strict mode, a rule's literal has another type than its `leftType` value
-   * (`"string"`, `"date"`, `"number"` or `"boolean"`), so it never matches.
+   * Warns that, in strict mode, a rule's literal (named `rightLabel`, e.g. "Compare with") has
+   * another type than the value it's compared with (`leftLabel`, e.g. "Value"), so it never
+   * matches. `rightType` and `leftType` are phrases from {@link literalKinds},
+   * {@link literalListIncludes} and {@link literalNeedsList}, e.g. "text" and "a number".
    */
-  literalTypeWarning(leftType: string): string;
+  literalTypeWarning(args: {
+    rightLabel: string;
+    rightType: string;
+    leftLabel: string;
+    leftType: string;
+  }): string;
+  /** What a value is, as {@link literalTypeWarning} says it: "text", "a number", … */
+  literalKinds: Record<
+    "string" | "number" | "boolean" | "date" | "template" | "object" | "list",
+    string
+  >;
+  /** Items of a list of each kind: "numbers", "text values", … */
+  literalKindsPlural: Record<"string" | "number" | "boolean" | "date", string>;
+  /** A list with an item of another kind: "a list that includes text". */
+  literalListIncludes(kind: string): string;
+  /** An "is one of" value's kind: "a number, which needs a list of numbers". */
+  literalNeedsList(kind: string, items: string): string;
+  /** A stored value the true/false choice can't show, e.g. "text: yes". */
+  literalOption(kind: string, text: string): string;
+  /** Help under the value of an "is one of" rule. */
+  ruleListHint: string;
   /** Operator names of the rule builder. */
   ruleOps: Record<string, string>;
   /** Operator names when the value is a date. */
@@ -796,17 +818,27 @@ export const defaultLabels: FlowlineLabels = {
   compareLoose: "Loose",
   compareStrictHint: 'Values of the same type only, matching case: "5" doesn\'t equal 5.',
   compareLooseHint: 'Converts numeric text, "true"/"false" and dates: "5" equals 5.',
-  literalTypeWarning: (leftType) => {
-    const kind =
-      leftType === "number"
-        ? "a number"
-        : leftType === "boolean"
-          ? "true/false"
-          : leftType === "date"
-            ? "a date (text)"
-            : "text";
-    return `Compare with isn't ${kind} like Value; strict mode will never match`;
+  literalTypeWarning: ({ rightLabel, rightType, leftLabel, leftType }) =>
+    `${rightLabel} is ${rightType} but ${leftLabel} is ${leftType}; strict mode will never match`,
+  literalKinds: {
+    string: "text",
+    number: "a number",
+    boolean: "true/false",
+    date: "a date",
+    template: "text with a reference",
+    object: "an object",
+    list: "a list",
   },
+  literalKindsPlural: {
+    string: "text values",
+    number: "numbers",
+    boolean: "true/false values",
+    date: "dates",
+  },
+  literalListIncludes: (kind) => `a list that includes ${kind}`,
+  literalNeedsList: (kind, items) => `${kind}, which needs a list of ${items}`,
+  literalOption: (kind, text) => `${kind}: ${text}`,
+  ruleListHint: "Separate values with commas (so 1,000 is two values).",
   ruleOps: {
     eq: "equals",
     neq: "does not equal",
@@ -1045,6 +1077,8 @@ export function resolveLabels(overrides: Partial<FlowlineLabels> | undefined): F
     rulesJoin: { ...defaultLabels.rulesJoin, ...overrides.rulesJoin },
     ruleOps: { ...defaultLabels.ruleOps, ...overrides.ruleOps },
     ruleOpsDate: { ...defaultLabels.ruleOpsDate, ...overrides.ruleOpsDate },
+    literalKinds: { ...defaultLabels.literalKinds, ...overrides.literalKinds },
+    literalKindsPlural: { ...defaultLabels.literalKindsPlural, ...overrides.literalKindsPlural },
     fieldTypes: { ...defaultLabels.fieldTypes, ...overrides.fieldTypes },
     testSignal: { ...defaultLabels.testSignal, ...overrides.testSignal },
   };

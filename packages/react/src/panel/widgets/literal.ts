@@ -6,7 +6,7 @@
  * @module
  */
 import { type Issue, isRef, isTpl, type RuleValueType } from "@flowlinejs/core";
-import { defaultLabels } from "../../labels";
+import { defaultLabels, type FlowlineLabels } from "../../labels";
 
 /** A literal a rule compares with. */
 export type Literal = string | number | boolean;
@@ -83,31 +83,60 @@ export function literalText(v: unknown): string | undefined {
   return undefined;
 }
 
+/** Options of {@link literalTypeIssue}. */
+export interface LiteralTypeIssueOptions {
+  /** Labels in effect (default {@link defaultLabels}). */
+  labels?: FlowlineLabels;
+  /** Name of the compared value's field (default `labels.ruleLeft`). */
+  leftLabel?: string;
+  /** Name of the literal's field (default `labels.ruleRight`). */
+  rightLabel?: string;
+}
+
 /**
  * The `rule.literalType` warning when, in `"strict"` mode, `rule` compares a `leftType` value
  * with a literal of another type (e.g. `"5"` on a number field), which strict mode never
- * matches. Nothing for loose mode, references and templates, empty values, unary and host
- * operators, and left values without a single literal type (lists, objects, any). `"in"` wants
- * a list of literals of `leftType`. `message` words the warning (default
- * `defaultLabels.literalTypeWarning`).
+ * matches. `"in"` wants a list of literals of `leftType`; a template (text with a reference)
+ * counts as text. Nothing for loose mode, references, empty values, unary and host operators,
+ * and left values without a single literal type (lists, objects, any). The message names the
+ * fields by `leftLabel`/`rightLabel` and says what each value actually is.
  */
 export function literalTypeIssue(
   rule: RuleLike,
   leftType: RuleValueType,
   compare: CompareMode,
-  message: (leftType: string) => string = defaultLabels.literalTypeWarning,
+  opts: LiteralTypeIssueOptions = {},
 ): Issue | undefined {
   const want = LITERAL_TYPE[leftType];
   const right = rule.right;
   if (compare !== "strict" || !want || !BINARY.has(rule.op)) return undefined;
-  if (right === undefined || right === "" || isExpr(right)) return undefined;
-  const fits = (v: unknown) => typeof v === want || isExpr(v);
-  const ok = rule.op === "in" ? Array.isArray(right) && right.every(fits) : fits(right);
-  return ok
-    ? undefined
-    : { code: "rule.literalType", severity: "warning", message: message(leftType) };
-}
-
-function isExpr(v: unknown): boolean {
-  return isRef(v) || isTpl(v);
+  if (right === undefined || right === "" || isRef(right)) return undefined;
+  const list = rule.op === "in";
+  const fits = (v: unknown) => isRef(v) || (isTpl(v) ? want === "string" : typeof v === want);
+  const ok = list ? Array.isArray(right) && right.every(fits) : fits(right);
+  if (ok) return undefined;
+  const labels = opts.labels ?? defaultLabels;
+  const kind = (v: unknown): string => {
+    if (isTpl(v)) return labels.literalKinds.template;
+    if (Array.isArray(v)) {
+      const odd = v.find((item) => !fits(item));
+      return odd === undefined ? labels.literalKinds.list : labels.literalListIncludes(kind(odd));
+    }
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+      return labels.literalKinds[typeof v as "string" | "number" | "boolean"];
+    }
+    return labels.literalKinds.object;
+  };
+  const leftKind = labels.literalKinds[leftType as "string" | "number" | "boolean" | "date"];
+  const plural = labels.literalKindsPlural[leftType as "string" | "number" | "boolean" | "date"];
+  return {
+    code: "rule.literalType",
+    severity: "warning",
+    message: labels.literalTypeWarning({
+      rightLabel: opts.rightLabel ?? labels.ruleRight,
+      rightType: kind(right),
+      leftLabel: opts.leftLabel ?? labels.ruleLeft,
+      leftType: list ? labels.literalNeedsList(leftKind, plural) : leftKind,
+    }),
+  };
 }
