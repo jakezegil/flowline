@@ -53,8 +53,9 @@ See `docs/superpowers/specs/2026-09-28-flowline-triggers-conditions-design.md` f
   `renewPollLease`, `commitPoll`, `getPollState`). Third-party storage adapters must implement the
   new methods and re-run the conformance suite.
 - Postgres schema moves to v4: `dedupe_keys` gains a required `run_id` and every pre-v4 row is
-  deleted (dedupe history is reset once; nothing is deployed pre-1.0, so there's no backfill), and
-  a new `poll_states` table is added. Stop workers, run `migrate()`, then start upgraded workers.
+  deleted, so dedupe history is reset once on upgrade from 0.1.0 (there is no backfill; a
+  retried event inside its old window may start a second run once). A new `poll_states` table is
+  added. Stop workers, run `migrate()`, then start upgraded workers.
 - `builtinPlugin` is unchanged, but hosts wanting a strict default or custom operators now use
   `createBuiltinPlugin({ compare?, operators? })` in their own registry instead.
 - `TriggerKind` and `RunOrigin` gain a `"poll"` variant; an exhaustive `switch` on either needs a
