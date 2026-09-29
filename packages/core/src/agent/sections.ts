@@ -17,8 +17,8 @@ import {
   sectionRun,
 } from "../annotations";
 import { isValidStepId, STEP_ID_PATTERN } from "../ids";
-import type { StepLocation } from "../tree";
-import type { Section, WorkflowDoc } from "../types";
+import { branchList, findStep, type StepLocation } from "../tree";
+import type { Section, Step, WorkflowDoc } from "../types";
 import { type Command, CommandFailure, type Handler, type HandlerContext } from "./commands";
 import { existingStep, unknownPlaceholder, wrongKind } from "./single";
 
@@ -89,6 +89,27 @@ export function stepRun(
     );
   }
   return { first: a.id, last: z.id, location: a.location, end: z.location.index };
+}
+
+/**
+ * @internal {@link stepRun} with the run's top-level steps (`steps`) and their IDs (`ids`), in
+ * order.
+ */
+export function runSteps(
+  doc: WorkflowDoc,
+  ctx: HandlerContext,
+  firstRef: string,
+  lastRef: string,
+  paths: { first: string; last: string },
+): ReturnType<typeof stepRun> & { steps: Step[]; ids: string[] } {
+  const run = stepRun(doc, ctx, firstRef, lastRef, paths);
+  const { parentId, branch, index } = run.location;
+  const list =
+    parentId === null
+      ? doc.steps
+      : (branchList(findStep(doc, parentId)?.step as Step, branch as string) ?? []);
+  const steps = list.slice(index, run.end + 1);
+  return { ...run, steps, ids: steps.map((s) => s.id) };
 }
 
 /** @internal The `section.overlap` failure: the run `first`…`last` overlaps `other`. */

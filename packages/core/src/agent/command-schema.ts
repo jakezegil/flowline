@@ -10,6 +10,21 @@ import { STEP_ID_PATTERN } from "../ids";
 import type { AnnotationColor, JSONSchema, Manifest } from "../types";
 import { type ApplyError, type Command, type CommandErrorCode, closest } from "./commands";
 import { compactSchema } from "./compact-schema";
+import type { Where } from "./read-types";
+
+/**
+ * Strict Zod schema of `Where`, shared by the selector commands and the read argument schemas.
+ *
+ * @example
+ * whereSchema.safeParse({ type: "crm.sendEmail", within: { stepId: "check" } }).success // true
+ */
+export const whereSchema: z.ZodType<Where> = z.strictObject({
+  type: z.string().optional(),
+  section: z.string().optional(),
+  within: z.strictObject({ stepId: z.string().min(1), branch: z.string().optional() }).optional(),
+  nameContains: z.string().optional(),
+  configHas: z.string().optional(),
+});
 
 /** The longest a `command.invalid` hint schema is, in characters of JSON. */
 const HINT_MAX = 1500;
@@ -261,6 +276,69 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
   members.set("replaceSteps", [
     z.strictObject({ op: z.literal("replaceSteps"), first: stepRef, last: stepRef, steps }),
   ]);
+  const expectCount = z.number().int().min(0);
+  const set = z.strictObject({
+    name: z.string().optional(),
+    disabled: z.boolean().optional(),
+    note: z.string().max(NOTE_MAX_CHARS).nullable().optional(),
+    color: color.nullable().optional(),
+  });
+  const patch = z.record(z.string(), json);
+  members.set("duplicateSteps", [
+    z.strictObject({
+      op: z.literal("duplicateSteps"),
+      first: stepRef,
+      last: stepRef,
+      at: at.optional(),
+    }),
+  ]);
+  members.set("updateSteps", [
+    z.strictObject({
+      op: z.literal("updateSteps"),
+      updates: z
+        .array(z.strictObject({ id: stepRef, set: set.optional(), config: patch.optional() }))
+        .min(1),
+    }),
+    z.strictObject({
+      op: z.literal("updateSteps"),
+      where: whereSchema,
+      set: set.optional(),
+      config: patch.optional(),
+      expect: expectCount,
+    }),
+  ]);
+  members.set("replaceInConfig", [
+    z.strictObject({
+      op: z.literal("replaceInConfig"),
+      find: z.string().min(1, { message: "find can't be empty" }),
+      replace: z.string(),
+      where: whereSchema.optional(),
+      expect: expectCount,
+    }),
+  ]);
+  members.set("moveSteps", [
+    z.strictObject({ op: z.literal("moveSteps"), first: stepRef, last: stepRef, to: at }),
+  ]);
+  members.set("removeSteps", [
+    z.strictObject({ op: z.literal("removeSteps"), ids: z.array(stepRef).min(1) }),
+    z.strictObject({ op: z.literal("removeSteps"), first: stepRef, last: stepRef }),
+    z.strictObject({ op: z.literal("removeSteps"), where: whereSchema, expect: expectCount }),
+  ]);
+  members.set("wrapSteps", [
+    z.strictObject({
+      op: z.literal("wrapSteps"),
+      first: stepRef,
+      last: stepRef,
+      in: z.strictObject({
+        type: nodeType,
+        branch: z.string().min(1),
+        config: patch.optional(),
+      }),
+    }),
+  ]);
+  members.set("unwrapStep", [
+    z.strictObject({ op: z.literal("unwrapStep"), id: stepRef, keep: z.string().min(1) }),
+  ]);
   const all = [...members.values()].flat();
   const union = z.union(all as [z.ZodType, z.ZodType, ...z.ZodType[]]) as z.ZodType<Command>;
   return { members, union, json: new Map(), fragment };
@@ -271,6 +349,12 @@ function memberFor(op: string, members: z.ZodType[], cmd: Record<string, unknown
   if (members.length === 1) return members[0] as z.ZodType;
   // insertSteps: `verbatim: true` picks the paste form.
   if (op === "insertSteps") return members[cmd.verbatim === true ? 1 : 0] as z.ZodType;
+  // updateSteps: `updates` picks the list form, else the selector form.
+  if (op === "updateSteps") return members["updates" in cmd ? 0 : 1] as z.ZodType;
+  // removeSteps: `ids`, then `where`, else the run form.
+  if (op === "removeSteps") {
+    return members["ids" in cmd ? 0 : "where" in cmd ? 2 : 1] as z.ZodType;
+  }
   // setConfig, setTriggerConfig, setOutput: `config` picks the merge form.
   return members[!("config" in cmd) ? 0 : members.length - 1] as z.ZodType;
 }

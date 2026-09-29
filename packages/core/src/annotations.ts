@@ -97,6 +97,11 @@ export interface SectionEffect {
    * the span of the members that didn't move (or when the whole run moved).
    */
   moved?: ReadonlySet<string>;
+  /**
+   * Old member IDs whose section stays put even when every survivor is in `moved` (the step an
+   * unwrap replaces with moved steps): it keeps all its survivors and wins an overlap (rule 4).
+   */
+  anchored?: ReadonlySet<string>;
 }
 
 /** Where a step sits in `after`: its list and index. */
@@ -161,9 +166,15 @@ function upkeepOne(
   if (survivors.length === 0) return { span: undefined, runMoved: false };
 
   const moved = effect.moved;
-  const runMoved = !!moved && survivors.every((id) => moved.has(id));
+  const anchored = !!effect.anchored && members.some((id) => effect.anchored?.has(id));
+  const runMoved = !anchored && !!moved && survivors.every((id) => moved.has(id));
   let kept = survivors;
-  if (moved && !runMoved && survivors.some((id) => moved.has(id))) {
+  if (
+    moved &&
+    !runMoved &&
+    survivors.some((id) => moved.has(id)) &&
+    survivors.some((id) => !moved.has(id))
+  ) {
     const anchors = survivors.filter((id) => !moved.has(id));
     const movedMembers = new Set(survivors.filter((id) => moved.has(id)));
     const key = (places.get(anchors[0] as string) as Place).key;
@@ -207,7 +218,8 @@ function overlaps(a: [Place, Place], b: [Place, Place]): boolean {
  * 1. A section's members are its run in `before`. A section already broken there is kept as is.
  * 2. Each member is replaced by `effect.subst.get(id) ?? [id]`, and IDs gone from `after` are
  *    dropped. A member in `effect.moved` stays only if the whole run moved, or if it landed within
- *    the span of the members that didn't move (or next to it, past only moved members).
+ *    the span of the members that didn't move (or next to it, past only moved members). A
+ *    section with a member in `effect.anchored` never counts as moved: it keeps every survivor.
  * 3. The new `first`/`last` are the lowest and highest index of the survivors in the list of the
  *    first survivor; steps between them are members by contiguity. No survivor: the section is
  *    removed.

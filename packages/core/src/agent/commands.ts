@@ -7,7 +7,7 @@
 import type { ValidationContext } from "../scope";
 import type { AnnotationColor, Manifest, NodeManifest, ValueExpr, WorkflowDoc } from "../types";
 import type { Issue } from "../validate";
-import type { FollowUp } from "./read-types";
+import type { FollowUp, Where } from "./read-types";
 
 /**
  * A step argument: a real step ID, `"$<n>"` for the step `commands[n-1]` created in the same
@@ -161,6 +161,25 @@ export interface Fragment {
 }
 
 /**
+ * One step's edit in an `updateSteps` command: fields to `set`, and a `config` patch.
+ *
+ * - `set.name` is trimmed; `""` clears the display name.
+ * - `set.note: null` (or `""`) and `set.color: null` remove the field.
+ * - `config` merges keys; `null` removes a key.
+ *
+ * @example
+ * { id: "notify", set: { name: "Tell the owner", color: "blue" }, config: { subject: "Hi" } }
+ */
+export interface StepUpdate {
+  /** The step to update. */
+  id: StepRef;
+  /** Fields to set. */
+  set?: { name?: string; disabled?: boolean; note?: string | null; color?: AnnotationColor | null };
+  /** Config keys to set; `null` removes a key. */
+  config?: ConfigPatch;
+}
+
+/**
  * The bulk commands.
  *
  * - `insertSteps` inserts a run of new steps (with nested branches) at `at`. The whole fragment
@@ -176,6 +195,31 @@ export interface Fragment {
  *   run holds the new steps; a section holding part of it shrinks to its remaining members, and
  *   one inside the replaced steps is removed. Replacing a run with identical steps changes nothing. Refs elsewhere to the removed steps are reported, not rejected. `$n`
  *   is the first new top-level step.
+ * - `duplicateSteps` copies the run `first`…`last` (with subtrees) with fresh IDs, right after
+ *   `last` unless `at` says otherwise; refs inside the copy to steps of the run point at their
+ *   copies. Each top-level copy is named `"<name> (copy)"`, `"(copy 2)"`, …. Copies placed right
+ *   after `last` join a section that `last` ends. `$n` is the first copy.
+ * - `updateSteps` applies `updates` in order (a later update sees earlier ones), or applies one
+ *   `set`/`config` to every step `where` matches.
+ * - `replaceInConfig` replaces every occurrence of `find` (plain, case-sensitive) in string
+ *   values and `$tpl` text of step config (not in `$ref`s, `{{ }}` refs or the trigger), in
+ *   every step or the ones `where` matches. `expect` counts the steps changed.
+ * - `moveSteps` moves the run as a block; `to` is resolved after the run is taken out, and a
+ *   target in the run's subtree fails with `move.intoSelf`. A section equal to or inside the run
+ *   moves with it; a section holding part of it keeps the members that land in its span.
+ * - `removeSteps` removes the given steps, the run `first`…`last`, or the `where` matches
+ *   (a step inside another removed step goes with it). Dangling refs are reported.
+ * - `wrapSteps` puts the run in branch `in.branch` of a new `in.type` step, in the run's
+ *   place. The first section holding the run, or part of it (a section equal to the run too),
+ *   gets the wrapper; a later section holding part of it shrinks to its other members. A
+ *   section strictly inside the run moves into the branch. `in.config` merges over the node's
+ *   defaults, and a `null` value removes a key. `$n` is the wrapper.
+ * - `unwrapStep` replaces a branching step with the steps of its branch `keep`; the other
+ *   branches' steps are removed. A section holding the unwrapped step keeps its place; a lifted
+ *   section overlapping it is dropped.
+ *
+ * Every selector (`where`) form requires `expect`: a different match count fails with
+ * `expect.mismatch` (hint `{ matched }`), and `expect: 0` with no match changes nothing.
  *
  * @example
  * { op: "insertSteps", at: { after: "getDeal" }, steps: [{ type: "crm.sendEmail", config: { subject: "Hi" } }] }
@@ -193,7 +237,28 @@ export type BulkCommand =
        */
       verbatim?: boolean;
     }
-  | { op: "replaceSteps"; first: StepRef; last: StepRef; steps: Fragment[] };
+  | { op: "replaceSteps"; first: StepRef; last: StepRef; steps: Fragment[] }
+  | { op: "duplicateSteps"; first: StepRef; last: StepRef; at?: At }
+  | { op: "updateSteps"; updates: StepUpdate[] }
+  | {
+      op: "updateSteps";
+      where: Where;
+      set?: StepUpdate["set"];
+      config?: ConfigPatch;
+      expect: number;
+    }
+  | { op: "replaceInConfig"; find: string; replace: string; where?: Where; expect: number }
+  | { op: "moveSteps"; first: StepRef; last: StepRef; to: At }
+  | { op: "removeSteps"; ids: StepRef[] }
+  | { op: "removeSteps"; first: StepRef; last: StepRef }
+  | { op: "removeSteps"; where: Where; expect: number }
+  | {
+      op: "wrapSteps";
+      first: StepRef;
+      last: StepRef;
+      in: { type: string; branch: string; config?: Record<string, ValueExpr> };
+    }
+  | { op: "unwrapStep"; id: StepRef; keep: string };
 
 /**
  * One edit `apply` runs. Every command is `{ op, … }`; step arguments accept placeholders

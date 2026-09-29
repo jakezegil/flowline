@@ -6,6 +6,7 @@
 import { FlowlineTreeError, walkSteps } from "../tree";
 import type { Manifest, NodeManifest, Section, Step, WorkflowDoc } from "../types";
 import { type Issue, validateWorkflow } from "../validate";
+import { bulkHandlers } from "./bulk";
 import { formatPath, shapeErrors } from "./command-schema";
 import {
   type ApplyError,
@@ -35,6 +36,7 @@ const HANDLERS: Record<string, Handler> = {
   ...singleHandlers,
   ...sectionHandlers,
   ...fragmentHandlers,
+  ...bulkHandlers,
 };
 
 /** How many shape errors a failed result carries besides the first. */
