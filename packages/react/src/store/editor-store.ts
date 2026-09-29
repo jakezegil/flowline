@@ -1,19 +1,15 @@
 import {
-  codeBlocksRename,
-  duplicateStep as coreDuplicateStep,
-  insertStep as coreInsertStep,
-  moveStep as coreMoveStep,
+  type ApplyResult,
+  apply,
+  type Command,
   removeStep as coreRemoveStep,
+  FlowlineCommandError,
   findStep,
-  generateStepId,
   type Issue,
-  isGeneratedStepId,
+  jsonEqual,
   type Manifest,
-  type NodeManifest,
-  renameStepId,
   type Step,
   type StepLocation,
-  updateStep,
   type ValidationContext,
   type ValueExpr,
   validateWorkflow,
@@ -21,16 +17,7 @@ import {
   walkSteps,
 } from "@flowlinejs/core";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import {
-  cloneWithFreshIds,
-  createStep,
-  defaultConfig,
-  jsonEqual,
-  replaceStepType,
-  subtreeIds,
-  syncBranches,
-  withConfigValue,
-} from "./commands";
+import { atFromLocation, cloneWithFreshIds, stepToFragment, subtreeIds } from "./commands";
 import { emptyHistory, type History, recordEdit, redoEdit, undoEdit } from "./history";
 
 /** Selection / sample key standing for the workflow's trigger. */
@@ -88,9 +75,10 @@ export interface EditorState {
 
 /**
  * Editor commands. Every doc-changing command is one undo step (except bursts of edits to the
- * same field, see {@link EditorActions.setConfig}) and revalidates the doc. Commands given an
- * unknown step ID, node type or invalid location throw (`FlowlineTreeError` or `Error`) and leave
- * the state unchanged.
+ * same field, see {@link EditorActions.setConfig}) and revalidates the doc. Each runs through
+ * core's `apply`; a command that changes nothing adds no history. Commands given an unknown step
+ * ID, node or trigger type throw `FlowlineCommandError`, and an invalid location throws
+ * `FlowlineTreeError` (which `FlowlineCommandError` extends); the state is left unchanged.
  */
 export interface EditorActions {
   /**
@@ -100,7 +88,8 @@ export interface EditorActions {
    */
   insertStep(loc: StepLocation, nodeType: string, opts?: InsertOptions): string;
   /**
-   * Changes a step's node type. Config resets to the new type's defaults; child steps stay in
+   * Changes a step's node type. Config resets to the new type's defaults and the name override
+   * is dropped; its note and colour are kept (annotations belong to the step). Child steps stay in
    * their branches, and branches the new type doesn't declare are kept (and flagged by the
    * validator) rather than dropped or merged. A tested step becomes `needs-test`. Same type:
    * no-op. An ID the editor generated from the old type (`httpRequest_2`) is regenerated from
@@ -222,6 +211,9 @@ interface LocalData {
   testState: Record<string, TestState>;
   sampleTypes: Record<string, string>;
 }
+
+/** A successful {@link apply} result. */
+type Applied = Extract<ApplyResult, { ok: true }>;
 
 const storageKey = (workflowId: string) => `flowline:samples:${workflowId}`;
 
@@ -358,12 +350,6 @@ export function createEditorStore(init: {
       ? { samples: {}, testState: {}, sampleTypes: {} }
       : loadLocal(init.doc);
 
-  const nodeManifest = (type: string): NodeManifest => {
-    const m = manifest.nodes.find((n) => n.type === type);
-    if (!m) throw new Error(`Unknown node type "${type}"`);
-    return m;
-  };
-
   /** Issues the server reported, for the doc `serverBase` (see `setServerIssues`). */
   let serverIssues: Issue[] = [];
   let serverBase: WorkflowDoc | null = null;
@@ -445,20 +431,64 @@ export function createEditorStore(init: {
       syncTestState();
     };
 
-    /** Commits `next`, which adds `step`: resets local data left over under its IDs, selects it. */
-    const commitNew = (next: WorkflowDoc, step: Step, opts: InsertOptions | undefined): string => {
-      const ids = subtreeIds(step);
+    /**
+     * Runs `commands` on the current doc through core's `apply` (trusted, no report). Throws
+     * {@link FlowlineCommandError} when the batch fails; `undefined` when it changes nothing (the
+     * no-op identity rule), so callers skip the commit and its side effects.
+     */
+    const run = (commands: Command[]): Applied | undefined => {
+      const doc = get().doc;
+      const r = apply(doc, commands, manifest, { ctx, trusted: true, report: false });
+      if (!r.ok) throw new FlowlineCommandError(r.error);
+      return r.doc === doc ? undefined : r;
+    };
+
+    /** Commits an applied batch, carrying the selection over renamed step IDs. */
+    const commitApplied = (
+      r: Applied,
+      patch: Partial<EditorState> = {},
+      coalesceKey?: string,
+    ): void => {
+      const selection = "selection" in patch ? (patch.selection ?? null) : get().selection;
+      const mapped =
+        selection !== null && Object.hasOwn(r.renamed, selection)
+          ? (r.renamed[selection] as string)
+          : selection;
+      commit(r.doc, { ...patch, selection: mapped }, coalesceKey);
+    };
+
+    /** Local data (samples, test state) with the entries under `ids` dropped. */
+    const resetLocal = (ids: readonly string[]): Partial<EditorState> => {
       const { samples, testState, sampleTypes } = get();
-      commit(next, {
-        ...setLocal({
-          samples: without(samples, ids),
-          testState: without(testState, ids),
-          sampleTypes: without(sampleTypes, ids),
-        }),
+      return setLocal({
+        samples: without(samples, ids),
+        testState: without(testState, ids),
+        sampleTypes: without(sampleTypes, ids),
+      });
+    };
+
+    /**
+     * Commits a batch that added step `$1`: resets local data left over under its subtree's IDs
+     * and selects it.
+     */
+    const commitNew = (r: Applied | undefined, opts: InsertOptions | undefined): string => {
+      const id = r?.ids.$1;
+      const step = r && id !== undefined ? findStep(r.doc, id)?.step : undefined;
+      if (!r || !step) throw new Error("A step-adding command added no step");
+      commitApplied(r, {
+        ...resetLocal(subtreeIds(step)),
         ...(opts?.select === false ? {} : { selection: step.id }),
       });
       return step.id;
     };
+
+    /** A `{ key, value }` config edit: `undefined` removes the key, `null` is stored. */
+    const keyValue = (key: string, value: ValueExpr | undefined) =>
+      value === undefined
+        ? { key, value: null }
+        : value === null
+          ? { key, value, nullIsValue: true }
+          : { key, value };
 
     return {
       ...derived(init.doc),
@@ -473,133 +503,75 @@ export function createEditorStore(init: {
       clipboard: null,
 
       insertStep(loc, nodeType, opts) {
-        const step = createStep(generateStepId(get().doc, nodeType), nodeManifest(nodeType));
-        return commitNew(coreInsertStep(get().doc, loc, step), step, opts);
+        const at = atFromLocation(get().doc, loc);
+        return commitNew(run([{ op: "addStep", at, type: nodeType }]), opts);
       },
 
       replaceStep(id, nodeType) {
-        const m = nodeManifest(nodeType);
-        const found = findStep(get().doc, id);
-        if (found?.step.type === nodeType) return;
-        const replaced = replaceStepType(get().doc, id, m);
-        if (
-          !found ||
-          !isGeneratedStepId(id, found.step.type) ||
-          isGeneratedStepId(id, nodeType) ||
-          // Code that reads this step dynamically would break silently: keep its ID.
-          codeBlocksRename(replaced, id, manifest)
-        ) {
-          commit(replaced, needsTest(id));
-          return;
-        }
-        // An ID generated from the old type would now misname the step (`httpRequest` for a
-        // Transform): regenerate it, and point references at the new ID.
-        const free = generateStepId(replaced, nodeType);
-        const { samples, testState, sampleTypes, selection } = get();
-        commit(renameStepId(replaced, id, free, manifest), {
-          ...setLocal({
-            samples: without(samples, [free]),
-            testState: without(testState, [free]),
-            sampleTypes: without(sampleTypes, [free]),
-          }),
-          ...(selection === id ? { selection: free } : {}),
-        });
+        const r = run([{ op: "setType", id, type: nodeType }]);
+        if (!r) return;
+        const free = r.renamed[id];
+        // An ID generated from the old type was regenerated (references follow): the new ID
+        // starts without local data, and the selection follows it.
+        commitApplied(r, free === undefined ? needsTest(id) : resetLocal([free]));
       },
 
       removeStep(id) {
         const found = findStep(get().doc, id);
-        const next = coreRemoveStep(get().doc, id);
+        const r = run([{ op: "removeStep", id }]);
+        if (!r) return;
         const ids = found ? subtreeIds(found.step) : [id];
         const { selection } = get();
-        commit(next, selection !== null && ids.includes(selection) ? { selection: null } : {});
+        commitApplied(r, selection !== null && ids.includes(selection) ? { selection: null } : {});
       },
 
       duplicateStep(id, opts) {
-        const { doc, newId } = coreDuplicateStep(get().doc, id);
-        const copy = findStep(doc, newId)?.step as Step;
-        const base = copy.name ?? manifest.nodes.find((n) => n.type === copy.type)?.name ?? copy.id;
-        const taken = new Set<string>();
-        walkSteps(doc, (s) => {
-          if (s.name !== undefined) taken.add(s.name);
-        });
-        const name = copyName(base, taken);
-        const named = updateStep(doc, newId, (s) => ({ ...s, name }));
-        return commitNew(named, findStep(named, newId)?.step as Step, opts);
+        return commitNew(run([{ op: "duplicateStep", id }]), opts);
       },
 
       moveStep(id, to) {
-        const from = findStep(get().doc, id)?.location;
-        const same =
-          from?.parentId === to.parentId &&
-          (to.parentId === null || from.branch === to.branch) &&
-          from.index === to.index;
-        if (!same) commit(coreMoveStep(get().doc, id, to));
+        const { doc } = get();
+        // `to` counts positions after the step's removal, as the command's anchor does.
+        const at = findStep(doc, id)
+          ? atFromLocation(coreRemoveStep(doc, id), to)
+          : ({ start: true } as const);
+        const r = run([{ op: "moveStep", id, to: at }]);
+        if (r) commitApplied(r);
       },
 
       renameStep(id, name) {
-        const trimmed = name.trim();
-        const next = updateStep(get().doc, id, (s) => {
-          if ((s.name ?? "") === trimmed) return s;
-          const { name: _, ...rest } = s;
-          return trimmed === "" ? rest : { ...rest, name: trimmed };
-        });
-        commit(unchangedIfSame(get().doc, next, id), {}, `name\u0000${id}`);
+        const r = run([{ op: "renameStep", id, name }]);
+        if (r) commitApplied(r, {}, `name\u0000${id}`);
       },
 
       toggleDisabled(id) {
-        commit(
-          updateStep(get().doc, id, (s) => {
-            const { disabled, ...rest } = s;
-            return disabled ? rest : { ...rest, disabled: true };
-          }),
-        );
+        const disabled = findStep(get().doc, id)?.step.disabled !== true;
+        const r = run([{ op: "setDisabled", id, disabled }]);
+        if (r) commitApplied(r);
       },
 
       setConfig(id, key, value) {
         const found = findStep(get().doc, id);
         if (found && jsonEqual(found.step.config[key], value)) return;
-        const m = manifest.nodes.find((n) => n.type === found?.step.type);
-        const next = updateStep(get().doc, id, (s) => {
-          const updated = { ...s, config: withConfigValue(s.config, key, value) };
-          return m ? syncBranches(updated, m) : updated;
-        });
-        commit(next, needsTest(id), `config\u0000${id}\u0000${key}`);
+        const r = run([{ op: "setConfig", id, ...keyValue(key, value) }]);
+        if (r) commitApplied(r, needsTest(id), `config\u0000${id}\u0000${key}`);
       },
 
       setTrigger(type) {
-        const t = manifest.triggers.find((x) => x.type === type);
-        if (!t) throw new Error(`Unknown trigger type "${type}"`);
-        const { doc } = get();
-        if (doc.trigger.type === type) return;
-        commit(
-          { ...doc, trigger: { type, config: defaultConfig(t.config) } },
-          needsTest(TRIGGER_KEY),
-        );
+        const r = run([{ op: "setTrigger", type }]);
+        if (r) commitApplied(r, needsTest(TRIGGER_KEY));
       },
 
       setTriggerConfig(key, value) {
-        const { doc } = get();
-        if (jsonEqual(doc.trigger.config[key], value)) return;
-        commit(
-          {
-            ...doc,
-            trigger: { ...doc.trigger, config: withConfigValue(doc.trigger.config, key, value) },
-          },
-          needsTest(TRIGGER_KEY),
-          `trigger\u0000${key}`,
-        );
+        if (jsonEqual(get().doc.trigger.config[key], value)) return;
+        const r = run([{ op: "setTriggerConfig", ...keyValue(key, value) }]);
+        if (r) commitApplied(r, needsTest(TRIGGER_KEY), `trigger\u0000${key}`);
       },
 
       setOutput(key, value) {
-        const { doc } = get();
-        if (jsonEqual(doc.output?.[key], value)) return;
-        const { output: _, ...rest } = doc;
-        const output = withConfigValue(doc.output ?? {}, key, value);
-        commit(
-          Object.keys(output).length > 0 ? { ...rest, output } : rest,
-          {},
-          `output\u0000${key}`,
-        );
+        if (jsonEqual(get().doc.output?.[key], value)) return;
+        const r = run([{ op: "setOutput", ...keyValue(key, value) }]);
+        if (r) commitApplied(r, {}, `output\u0000${key}`);
       },
 
       select(id) {
@@ -621,8 +593,9 @@ export function createEditorStore(init: {
       paste(loc, opts) {
         const { clipboard, doc } = get();
         if (!clipboard) return null;
-        const copy = cloneWithFreshIds(doc, clipboard);
-        return commitNew(coreInsertStep(doc, loc, copy), copy, opts);
+        const at = atFromLocation(doc, loc);
+        const copy = stepToFragment(cloneWithFreshIds(doc, clipboard));
+        return commitNew(run([{ op: "insertSteps", at, verbatim: true, steps: [copy] }]), opts);
       },
 
       setSample(id, output, producedBy) {
@@ -655,10 +628,8 @@ export function createEditorStore(init: {
       },
 
       renameWorkflow(name) {
-        const trimmed = name.trim();
-        const { doc } = get();
-        if (trimmed === "" || trimmed === doc.name) return;
-        commit({ ...doc, name: trimmed }, {}, "workflowName");
+        const r = run([{ op: "renameWorkflow", name }]);
+        if (r) commitApplied(r, {}, "workflowName");
       },
 
       markSaved(version, doc) {
@@ -690,14 +661,6 @@ export function createEditorStore(init: {
   });
 }
 
-/** "<base> (copy)", or "(copy 2)", "(copy 3)", … when that name is taken. */
-function copyName(base: string, taken: ReadonlySet<string>): string {
-  const stem = base.replace(/ \(copy(?: \d+)?\)$/, "");
-  let name = `${stem} (copy)`;
-  for (let n = 2; taken.has(name); n++) name = `${stem} (copy ${n})`;
-  return name;
-}
-
 /**
  * Whether a server issue reported for `base` still applies to `doc`: its step (or the trigger, or
  * the output mapping) is unchanged; a workflow-level issue, only while nothing changed. Callers
@@ -715,9 +678,4 @@ function stillApplies(issue: Issue, base: WorkflowDoc, doc: WorkflowDoc): boolea
   if (issue.field?.startsWith("output.") || issue.field === "output")
     return doc.output === base.output;
   return false;
-}
-
-/** `prev` when updating step `id` produced an identical step, so no-op edits add no history. */
-function unchangedIfSame(prev: WorkflowDoc, next: WorkflowDoc, id: string): WorkflowDoc {
-  return findStep(prev, id)?.step === findStep(next, id)?.step ? prev : next;
 }

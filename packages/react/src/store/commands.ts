@@ -6,49 +6,74 @@
  */
 
 import {
+  type At,
+  branchList,
   createStep,
   defaultConfig,
   duplicateStep,
   FlowlineTreeError,
+  type Fragment,
   findStep,
   jsonEqual,
-  type NodeManifest,
+  replaceStepType,
   type Step,
+  type StepLocation,
   syncBranches,
-  updateStep,
-  type ValueExpr,
   type WorkflowDoc,
 } from "@flowlinejs/core";
 
 // Moved to core (`step-factory.ts`); re-exported so existing imports keep working.
-export { createStep, defaultConfig, jsonEqual, syncBranches };
+export { createStep, defaultConfig, jsonEqual, replaceStepType, syncBranches };
 
 /**
- * Changes the type of step `id` to `m`, keeping its ID (so downstream references stay attached)
- * and `disabled` flag; config resets to `m`'s defaults and the name override is dropped.
+ * The command anchor for a StepLocation: `after` the previous sibling, else `start` (top level)
+ * or `in` the branch at index 0.
  *
- * Children never silently change meaning: branches `m` also declares keep their steps, and
- * non-empty branches `m` doesn't declare are kept as undeclared leftovers (the same policy as
- * {@link syncBranches}). The canvas still shows them and the validator flags them
- * (`branch.unknown`), which blocks publishing until the user moves or deletes those steps.
- *
- * @throws {FlowlineTreeError} If `id` doesn't exist.
+ * @throws {FlowlineTreeError} For a missing parent or branch, or an out-of-range index.
  */
-export function replaceStepType(doc: WorkflowDoc, id: string, m: NodeManifest): WorkflowDoc {
-  const found = findStep(doc, id);
-  if (!found) throw new FlowlineTreeError(`Step "${id}" not found`);
-  const old = found.step;
-  const replaced = syncBranches(
-    {
-      id,
-      type: m.type,
-      config: defaultConfig(m.input),
-      ...(old.disabled ? { disabled: true } : {}),
-      ...(old.branches ? { branches: old.branches } : {}),
-    },
-    m,
-  );
-  return updateStep(doc, id, () => replaced);
+export function atFromLocation(doc: WorkflowDoc, loc: StepLocation): At {
+  let list: Step[] | undefined;
+  if (loc.parentId === null) {
+    list = doc.steps;
+  } else {
+    const parent = findStep(doc, loc.parentId)?.step;
+    list = parent && loc.branch !== undefined ? branchList(parent, loc.branch) : undefined;
+  }
+  if (!list) {
+    throw new FlowlineTreeError(
+      `Cannot insert into parent "${loc.parentId ?? "<root>"}" branch "${loc.branch ?? ""}": not found`,
+    );
+  }
+  if (!Number.isInteger(loc.index) || loc.index < 0 || loc.index > list.length) {
+    throw new FlowlineTreeError(`Insert index ${loc.index} out of range [0, ${list.length}]`);
+  }
+  const prev = list[loc.index - 1];
+  if (prev) return { after: prev.id };
+  if (loc.parentId === null) return { start: true };
+  return { in: { stepId: loc.parentId, branch: loc.branch as string }, index: 0 };
+}
+
+/** A step (with subtree) as a verbatim fragment, keeping IDs, config and branches exactly. */
+export function stepToFragment(step: Step): Fragment {
+  const frag: Fragment = { id: step.id, type: step.type, config: step.config };
+  if (step.name !== undefined) frag.name = step.name;
+  if (step.disabled !== undefined) frag.disabled = step.disabled;
+  if (step.note !== undefined) frag.note = step.note;
+  if (step.color !== undefined) frag.color = step.color;
+  if (step.branches) {
+    const branches: Record<string, Fragment[]> = {};
+    for (const [key, list] of Object.entries(step.branches)) {
+      // An own property even for `__proto__`, never the prototype.
+      Object.defineProperty(branches, key, {
+        value: list.map(stepToFragment),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+    frag.branches = branches;
+  }
+  return frag;
 }
 
 /**
@@ -72,17 +97,4 @@ export function subtreeIds(step: Step): string[] {
     for (const child of list) ids.push(...subtreeIds(child));
   }
   return ids;
-}
-
-/** `config` with `key` set to `value`, or removed when `value` is `undefined`. */
-export function withConfigValue(
-  config: Record<string, ValueExpr>,
-  key: string,
-  value: ValueExpr | undefined,
-): Record<string, ValueExpr> {
-  if (value === undefined) {
-    const { [key]: _, ...rest } = config;
-    return rest;
-  }
-  return { ...config, [key]: value };
 }
