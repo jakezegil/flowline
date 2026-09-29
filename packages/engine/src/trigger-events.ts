@@ -58,7 +58,11 @@ export type TriggerEvent =
       since: number;
       until: number;
       message: string;
-      nextAt: number;
+      /**
+       * When the interval will be polled again. Absent when the poll lease was lost: the state
+       * then belongs to its new holder, which polls the interval again.
+       */
+      nextAt?: number;
     };
 
 /**

@@ -285,8 +285,11 @@ export type DurationInput = number | string;
  * {@link FieldDecl} list at config path `"output"` (as in `core.subflow`). When a sub-flow run
  * finishes, the engine checks its output mapping against those fields and fails the run (and the
  * calling step) on a mismatch.
+ *
+ * `poll` triggers are driven by `engine.tickPolls()`: their `poll` function is asked for the items
+ * that became due in successive, non-overlapping intervals, and each item starts one run.
  */
-export type TriggerKind = "event" | "webhook" | "manual" | "schedule" | "subflow";
+export type TriggerKind = "event" | "webhook" | "manual" | "schedule" | "subflow" | "poll";
 
 /** Serializable description of a trigger type. */
 export interface TriggerManifest {
@@ -306,6 +309,16 @@ export interface TriggerManifest {
   event?: string;
   /** For `event` triggers listening to several events: the event names it listens to. */
   events?: string[];
+  /**
+   * For `poll` triggers that declare one: the minimum time between polls of one workflow, in ms.
+   * Absent: the engine's `poll.defaultInterval` applies.
+   */
+  interval?: number;
+  /**
+   * For `poll` triggers that declare one: the longest interval one poll covers, in ms. Absent:
+   * the engine's `poll.defaultMaxInterval` applies.
+   */
+  maxInterval?: number;
   /** Input-side JSON Schema of the trigger's config. */
   config: JSONSchema;
   /** Shape of the payload, available as `trigger` in reference scope. */

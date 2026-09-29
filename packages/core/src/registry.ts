@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  durationMs,
   FlowlineDefinitionError,
   type NodeDefinition,
   type PluginDefinition,
@@ -173,6 +174,9 @@ function triggerManifest(plugin: string, def: TriggerDefinition<any, any>): Trig
     kind: def.kind,
     event: def.event,
     events: def.events ? [...def.events] : undefined,
+    // Checked by `defineTrigger`; a definition that skipped it gets no (invalid) value.
+    interval: def.interval === undefined ? undefined : durationMs(def.interval),
+    maxInterval: def.maxInterval === undefined ? undefined : durationMs(def.maxInterval),
     config,
     payload,
   });

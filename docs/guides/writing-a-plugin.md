@@ -210,7 +210,7 @@ export const contactCreated = defineTrigger({
   type: "crm.contactCreated",
   name: "Contact created",
   icon: "user-plus",
-  kind: "event", // "event" | "webhook" | "manual" | "schedule" | "subflow"
+  kind: "event", // "event" | "webhook" | "manual" | "schedule" | "subflow" | "poll"
   event: "contact.created",
   config: z.object({
     source: ui(z.string(), { label: "Only from source", placeholder: "web" }).optional(),
@@ -260,6 +260,41 @@ export const callEnded = defineTrigger({
 `normalize` runs before payload validation, with the delivered event name (one of `events`).
 Returning `undefined` skips that delivery (not a rejection); throwing rejects just that match. The
 run's `startedBy.event` is always the raw delivered event name, whichever of `events` it was.
+
+### Polling for items that became due
+
+When nothing emits an event, e.g. "a deal has been in a stage for N days", a `poll` trigger asks
+your data for the items that became due in a time interval:
+
+```ts nocheck
+const DAY = 86_400_000;
+export const dealStuckInStage = defineTrigger({
+  type: "crm.dealStuckInStage",
+  name: "Deal stuck in stage",
+  kind: "poll",
+  interval: "5m", // minimum time between polls; default "1m"
+  maxInterval: "24h", // longest interval one call covers; default "24h"
+  config: z.object({ stage: z.string(), days: z.number().int().min(1).default(3) }),
+  payload: z.object({ dealId: z.string(), days: z.number() }),
+  poll: async ({ config, since, until, ctx }) => ({
+    items: (await ctx.services.crm.listDeals({ stage: config.stage }))
+      .filter((d) => {
+        const due = Date.parse(d.stageEnteredAt) + config.days * DAY;
+        return due > since && due <= until; // crossed the threshold in (since, until]
+      })
+      .map((d) => ({ key: `${d.id}:${d.stageEnteredAt}`, payload: { dealId: d.id, days: config.days } })),
+  }),
+});
+```
+
+`engine.tickPolls()` (called by the worker every `pollEveryMs`, default 15 s) calls `poll` over
+contiguous, non-overlapping intervals `(since, until]`: the first starts when the workflow was
+published, each next one where the last ended. Each item starts one run, deduped by its `key` per
+workflow (within the trigger's `dedupe.window`, else 7 days), so an item that is returned again
+never starts twice. After downtime the backlog is caught up in chunks of at most `maxInterval`.
+If `poll` throws, nothing advances and the same interval is polled again after `interval`. An
+optional `cursor` in the result is handed back to the next call. `ctx.signal` aborts if the
+engine loses the poll's lease; pass it to `fetch`.
 
 ## UI metadata
 

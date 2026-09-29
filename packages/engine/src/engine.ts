@@ -110,6 +110,30 @@ export interface EngineOptions {
     defaultWindow?: DurationInput;
   };
   /**
+   * Poll triggers (`kind: "poll"`), driven by {@link Engine.tickPolls}. An invalid value makes
+   * `createEngine` throw `FlowlineDefinitionError`.
+   */
+  poll?: {
+    /**
+     * Minimum time between polls of one workflow when its trigger sets no `interval`: whole ms or
+     * a duration such as `"5m"`. Default `"1m"`.
+     */
+    defaultInterval?: DurationInput;
+    /**
+     * Longest interval one `poll` call covers when the trigger sets no `maxInterval` (never less
+     * than the trigger's `interval`): whole ms or a duration. Not shorter than
+     * `defaultInterval`. Default `"24h"`.
+     */
+    defaultMaxInterval?: DurationInput;
+    /**
+     * Upper bound on `poll` calls per workflow in one `tickPolls` while catching up a backlog
+     * longer than `maxInterval`; a positive integer. Default `10`.
+     */
+    maxCallsPerTick?: number;
+    /** Poll lease duration in ms, renewed every `leaseMs / 2` while polling. Default `60_000`. */
+    leaseMs?: number;
+  };
+  /**
    * @internal Test-only hooks (crash injection). Not part of the public API; may change at any
    * time.
    */
@@ -125,6 +149,11 @@ export interface EngineOptions {
      * `"result"` for every other commit. `stepPath` is `""` for run-level commits.
      */
     beforeCommit?(runId: string, stepPath: string, phase: "start" | "result"): void | Promise<void>;
+    /**
+     * Called after a poll call's items were launched, before its advance is committed; throwing
+     * simulates a crash between the two (the lease is left to expire).
+     */
+    beforeCommitPoll?(tenantId: string, workflowId: string): void | Promise<void>;
   };
 }
 
@@ -267,7 +296,8 @@ export interface Engine {
   /**
    * Poll for runnable runs in the background: `concurrency` independent loops call
    * {@link Engine.runOnce}, sleeping `pollMs` (with jitter) when idle; the first loop also calls
-   * {@link Engine.tickSchedules} every `scheduleEveryMs`. `stop()` awaits in-flight work.
+   * {@link Engine.tickSchedules} every `scheduleEveryMs` and {@link Engine.tickPolls} every
+   * `pollEveryMs`. `stop()` awaits in-flight work.
    */
   startWorker(opts?: WorkerOptions): Worker;
   /**
@@ -324,6 +354,33 @@ export interface Engine {
    * started.
    */
   tickSchedules(): Promise<number>;
+  /**
+   * Poll every published workflow (all tenants) whose trigger is kind `poll` and whose poll state
+   * is due, and resolve the number of runs started. Per workflow, under one poll lease (so of
+   * many engines ticking concurrently, one polls it):
+   *
+   * - The trigger's `poll` is called for `(since, until]`: `since` is the previous interval's
+   *   `until` (the publish time for the first poll), `until` is now, capped at
+   *   `since + maxInterval`. Intervals are contiguous and never overlap.
+   * - Each returned item starts one run (`startedBy: { kind: "poll", since, until, itemKey }`),
+   *   deduped per workflow by its key within the trigger's dedupe window (else
+   *   `dedupe.defaultWindow`). An item with an empty key, an invalid payload or a failed launch is
+   *   reported as `trigger.rejected` and the others still start.
+   * - A backlog longer than `maxInterval` (after downtime) is caught up in successive calls, at
+   *   most `poll.maxCallsPerTick` per tick, each call's advance committed before the next. The
+   *   next poll is due `interval` after `until`, or at once while still behind.
+   * - A `poll` that throws (or returns no `items` array, or loses its lease) advances nothing:
+   *   the same interval is polled again after `interval`, and `poll.failed` is reported.
+   *
+   * Delivery is at-least-once per item and exactly-once within the dedupe window. Each call is
+   * reported as `poll.completed` through `onTriggerEvent`.
+   *
+   * Workflows are polled one after another, so a slow `poll` delays the rest of the tick (and,
+   * in a worker, the first loop's run claims and `stop()`). Nothing times a `poll` out: its lease
+   * is renewed while it runs. A `poll` should honour `ctx.signal` (pass it to `fetch`) and bound
+   * its own work.
+   */
+  tickPolls(): Promise<number>;
   /**
    * Save `doc` as the workflow's next version and audit it (`saved`). A webhook-triggered doc
    * without a slug (`trigger.config.slug`) keeps the previous version's slug, or gets a new random
@@ -412,7 +469,9 @@ function withBuiltins({ registry, builtins = true }: EngineOptions): Registry {
  * The built-in `core.*` nodes and triggers are available unless `builtins: false`.
  *
  * @throws `FlowlineDefinitionError` when the registry's manifest can't be built (see
- * `Registry.manifest`), or `dedupe.defaultWindow` is invalid.
+ * `Registry.manifest`), `dedupe.defaultWindow` or a `poll` option is invalid, or a registered poll
+ * trigger's effective `maxInterval` is shorter than its effective `interval` once the `poll`
+ * defaults are applied.
  *
  * @example
  * ```ts
@@ -657,6 +716,7 @@ export function createEngine(options: EngineOptions): Engine {
         {
           runOnce: claimOnce,
           tickSchedules: () => triggers.tickSchedules(),
+          tickPolls: (workerId) => triggers.tickPolls(workerId),
           defaultWorkerId,
           ...(opts.logger ? { logger: opts.logger } : {}),
         },
@@ -665,6 +725,7 @@ export function createEngine(options: EngineOptions): Engine {
     emit: triggers.emit,
     start: triggers.start,
     tickSchedules: triggers.tickSchedules,
+    tickPolls: () => triggers.tickPolls(defaultWorkerId),
     saveWorkflow: workflows.saveWorkflow,
     publish: workflows.publish,
     validate: workflows.validate,

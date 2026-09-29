@@ -953,6 +953,8 @@ export const defaultLabels: FlowlineLabels = {
         return "Schedule";
       case "subflow":
         return "Called by another workflow";
+      case "poll":
+        return `Polled (item ${o.itemKey})`;
     }
   },
   retryFromFailed: "Retry from failed step",
