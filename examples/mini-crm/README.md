@@ -33,8 +33,8 @@ data.
 
 | Page | What it shows |
 | --- | --- |
-| Contacts | Contacts table. "New contact" reports `contact.created` |
-| Deals | Pipeline summary and deals table. The stage select PATCHes the deal (`deal.updated`), and each row links to the latest run a change started |
+| Contacts | Contacts table. "New contact" reports `contact.created`. Each row's **AI call** and **VoIP call** log a finished sample call (`POST /api/calls`), and the toast links the runs it started |
+| Deals | Pipeline summary and deals table. The stage select PATCHes the deal (`deal.updated`). Each row shows since when the deal has been in its stage, and links to the latest run about the deal, whether a change or the stuck-deal sweep started it |
 | Workflows | Every workflow with its trigger and published version. "New workflow" picks a name and a trigger, saves the workflow as a draft, then opens the editor |
 | Workflow editor | `<WorkflowEditor>`, full-bleed, with a breadcrumb in `headerLeft` |
 | Runs | `<RunList>` beside `<RunViewer>`. `/runs/:id` deep links a run, and `?workflow=` filters the list. While a run waits on an approval, a bar above the viewer approves or rejects it |
@@ -69,6 +69,39 @@ URLs.
 
 On startup the demo workflows are saved and published for `acme`. A workflow that already exists
 is left alone, so edits made in the editor survive a restart against Postgres.
+
+The host registers the built-in plugin itself, with
+`createBuiltinPlugin({ compare: "strict", operators: [isUnassigned] })`:
+
+- **Strict by default.** Conditions and switches compare values of the same type only, with no
+  parsing of numeric text and no case folding. The demo workflows compare with typed literals
+  (`500`, not `"500"`), so they behave the same as under loose. A condition can still choose
+  **Loose** in the editor.
+- **`isUnassigned`** (`server/src/operators.ts`) is a host operator. Conditions offer it as "is
+  unassigned", and it is true for a missing, `null` or `""` value.
+
+### Fake clock
+
+`MINI_CRM_FAKE_CLOCK=1` runs the CRM and the engine on a clock you can move forward, so "three days
+later" takes one request. It is off by default, and `pnpm dev` uses the real clock. The e2e tests
+turn it on.
+
+The fake clock starts at the real time and keeps ticking with it. `POST /api/demo/advance { ms }`
+adds `ms` to it and moves everything that reads the clock:
+
+- the store's timestamps, such as `stageEnteredAt` and a call's `endedAt`;
+- the engine's timers, such as a Delay step, which the worker wakes once they are due;
+- poll triggers. The route sweeps them before it answers, and the worker also sweeps them every
+  second while the fake clock is on.
+
+```sh
+MINI_CRM_FAKE_CLOCK=1 pnpm --filter @flowlinejs/example-mini-crm start
+curl -X POST localhost:8787/api/demo/advance -H 'content-type: application/json' \
+  -d '{"ms":259200000}'   # 3 days
+```
+
+Without the fake clock the route answers 404. In code, pass `advanceClock` to `createMiniCrm`
+together with the `clock` it moves (`createFakeClock()` from `server/src/fake-clock.ts`).
 
 ### Storage and restarts
 
@@ -114,19 +147,29 @@ Treat webhook slugs as credentials, and show them only to users of the owning te
 
 ### Layout
 
-- `server/src/crm-store.ts`: the in-memory CRM (contacts, deals, users, outbox, approvals) with
-  seed data. It reports `contact.created` and `deal.updated` to a listener, which the app forwards
-  to `engine.emit`, with the event ID as the dedupe key.
+- `server/src/crm-store.ts`: the in-memory CRM (contacts, deals, users, calls, outbox, approvals)
+  with seed data. It reports `contact.created`, `deal.updated`, `ai_call.ended` and
+  `voip_call.ended` to a listener. The app forwards them to `engine.emit`, with the event ID as the
+  dedupe key.
+  - The two call events come from two systems and differ in shape. The AI agent sends
+    `{ call: { id, contactId, seconds, endedAt, transcriptSummary } }`, and the phone system sends
+    `{ callId, contactId, durationMs, endedAt }`.
+  - A deal's `stageEnteredAt` is set at seed time and whenever its stage changes.
   - Here a failed emit is only logged.
   - A production host would write events to a transactional outbox and redeliver them with the
     stored ID.
 - `server/src/plugin/`: the `crm` plugin.
   - Nodes: `findContactByEmail`, `getContact`, `createContact`, `updateContact`, `assignOwner`,
-    `updateDeal`, `sendEmail` and `requestApproval`.
-  - Triggers: `contactCreated` and `dealUpdated`.
+    `getDeal`, `updateDeal`, `getUser`, `sendEmail` and `requestApproval`.
+  - Triggers: `contactCreated`, `dealUpdated`, `callEnded` (a multi-event trigger) and
+    `dealStuckInStage` (a poll trigger).
   - User ID fields use the `crm.userSelect` widget, which the web app registers.
+- `server/src/operators.ts`: the host's `isUnassigned` rule operator.
 - `server/src/flows/`: the demo workflows (see below).
-- `server/src/app.ts`: `createMiniCrm()` wires the store, the engine and the Hono app.
+- `server/src/app.ts`: `createMiniCrm()` wires the store, the engine and the Hono app. Its
+  `onTriggerEvent` logs deduplicated deliveries and keeps the last 100 trigger events for
+  `GET /api/demo/trigger-events`.
+- `server/src/fake-clock.ts`: the clock behind `MINI_CRM_FAKE_CLOCK`.
 - `server/src/index.ts`: starts the server.
 
 ### REST API
@@ -145,14 +188,17 @@ statuses:
 | --- | --- |
 | `GET /api/contacts` | `Contact[]`, newest first |
 | `POST /api/contacts` `{ firstName, lastName, email, company?, source?, ownerId? }` | 201 `Contact`; reports `contact.created`. 409 when the email is taken |
-| `GET /api/deals` | `Deal[]` |
-| `PATCH /api/deals/:id` `{ name?, stage?, amount?, ownerId? }` | `{ deal, changes }`, where `changes` names the fields that changed. Reports `deal.updated` when something changed |
+| `POST /api/calls` `{ id?, contactId, kind: "ai" \| "voip", durationSec, summary? }` | 201 `Call`; reports `ai_call.ended` or `voip_call.ended`. With an `id` that was logged before: 200 with that call, and its event is reported again, like a phone system redelivering its webhook |
+| `GET /api/deals` | `Deal[]`, each with `stageEnteredAt` |
+| `PATCH /api/deals/:id` `{ name?, stage?, amount?, ownerId? }` | `{ deal, changes }`, where `changes` names the fields that changed. Reports `deal.updated` when something changed. A stage change also cancels the deal's waiting `deal-stuck-in-stage` runs |
 | `GET /api/users` | `User[]`. `role` is `rep` or `manager`, and `team` is `smb` or `enterprise` |
 | `GET /api/outbox` | `OutboxMessage[]`, newest first: every email a workflow sent, with the `runId` and `workflowId` that sent it |
 | `GET /api/approvals` | `Approval[]`, newest first: `{ id, runId, stepPath, title, approverId, status, createdAt, decidedAt }`. `status` is `pending`, `approved`, `rejected` or `expired` |
 | `POST /api/approvals/:id/decision` `{ decision: "approved" \| "rejected" }` | 202 `{ approval }`, and the waiting run resumes. 409 `{ error, approval }` when it was already decided. 410 `{ error: "gone", approval }` when the run no longer waits, e.g. it was cancelled; the approval becomes `expired` |
 | `GET /api/demo` | `{ tenantId, userId, webhooks }`. `webhooks` maps workflow IDs to webhook paths, e.g. `webhooks["inbound-lead-routing"]` |
-| `POST /api/demo/reset` | 204. Cancels the tenant's unfinished runs, then restores the CRM seed data and empties the outbox and approvals. Workflows are kept |
+| `POST /api/demo/reset` | 204. Cancels the tenant's unfinished runs, then restores the CRM seed data and empties the calls, outbox and approvals. Workflows are kept |
+| `GET /api/demo/trigger-events` | The last 100 trigger events, newest first: deliveries that started no run (`trigger.deduped`, `trigger.rejected`) and poll sweeps (`poll.completed`, `poll.failed`) |
+| `POST /api/demo/advance` `{ ms }` | 204. Only with the [fake clock](#fake-clock), else 404. Moves the clock forward by `ms`, then sweeps the poll triggers |
 | `/flowline/*` | The Flowline engine: the editor API (`/flowline/manifest`, `/flowline/workflows`, `/flowline/runs`, ...), webhooks and callbacks |
 
 To find the runs a CRM change started, list them with `GET /flowline/runs?workflowId=...`.
@@ -219,6 +265,32 @@ curl -X POST "localhost:8787/api/approvals/$ID/decision" \
   - Deals under 10,000 stop with "Small deal".
   - Otherwise the flow waits 1 minute and loads the contact. A `core.transform` step then
     composes a thank-you subject and body, and the flow emails the customer.
+- **`any-call-ended`**: `crm.callEnded`, a trigger over two events, `ai_call.ended` and
+  `voip_call.ended`.
+  - `normalize` maps both payloads onto one shape,
+    `{ call: { id, contactId, source, durationSec, endedAt, summary? } }`. The run's origin still
+    names the raw event ("Event voip_call.ended").
+  - The trigger dedupes on the call ID for an hour. A redelivered call therefore starts no second
+    run, and shows up as `trigger.deduped` in `GET /api/demo/trigger-events`.
+  - The workflow sets `minSeconds: 30`, so shorter calls start nothing.
+  - The flow loads the contact. A strict condition then checks that `ownerId` is not empty. If it
+    is set, the flow loads the owner and emails them. Otherwise it stops with "No owner".
+  - Try it with **AI call** and **VoIP call** on a Contacts row.
+- **`deal-stuck-in-stage`**: `crm.dealStuckInStage`, a poll trigger, set to `{ stage: "proposal",
+  days: 3 }`.
+  - Every 10 seconds, the sweep starts one run for each deal that is still in the stage and whose
+    `stageEnteredAt + 3 days` falls in the swept interval. The item key is
+    `<dealId>:<stageEnteredAt>`, so a stint fires once, and re-entering the stage is a new stint.
+  - A deal that moves on before its three days are up never fires.
+  - The run loads the deal again and checks, with a strict condition, that it is still in the
+    stage. It then nudges the owner ("Navy Labs expansion has been in proposal for 3 days"), waits
+    1 minute, and checks again. If the deal is still stuck, the run escalates to manager `u_ava`.
+    Each check that fails stops the run with "Deal moved on".
+  - When a deal's stage changes, the host cancels that deal's waiting or queued runs, by `system`
+    with reason "Stage changed" (`cancelStuckRunsOnStageChange`, on by default). The run viewer
+    shows who cancelled the run and why. Without the hook, the re-check stops the run instead.
+  - Try it with the fake clock: advance 3 days, look at Outbox and Runs, then change the deal's
+    stage on Deals.
 
 Steps run at least once, so the side-effecting nodes pass `ctx.idempotencyKey` to the store:
 

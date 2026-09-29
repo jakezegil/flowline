@@ -1,6 +1,7 @@
 /**
  * Deals: the pipeline at a glance and a table whose stage select PATCHes the deal. Each change
- * reports `deal.updated`; rows show the latest workflow run a change of that deal started.
+ * reports `deal.updated`; rows show since when the deal is in its stage and the latest workflow
+ * run about that deal (started by a change, or by the "Deal stuck in stage" sweep).
  *
  * @module
  */
@@ -26,6 +27,7 @@ import {
   EmptyState,
   ErrorState,
   formatMoney,
+  fullTime,
   PageHeader,
   RunBadge,
   SkeletonRows,
@@ -47,6 +49,23 @@ type DealTrigger = { deal?: { id?: string } } | null;
 const dealIdOf = (trigger: unknown) => (trigger as DealTrigger)?.deal?.id;
 
 /**
+ * "Sep 28, 3:04 PM": an absolute time, because the demo clock can be moved ahead of the
+ * browser's (`MINI_CRM_FAKE_CLOCK`), which would make a relative time read "in 3 days".
+ */
+const shortTime = (at: string): string =>
+  new Date(at).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+/** Whether a run is about a deal: started by a change to it, or by a poll sweep over deals. */
+const isDealRun = (r: RunSummary) =>
+  (r.startedBy.kind === "event" && r.startedBy.event === "deal.updated") ||
+  r.startedBy.kind === "poll";
+
+/**
  * The latest run each deal's updates started, by deal ID: seeded from recent runs, extended as
  * this page changes deals, and refreshed while any of them is still going.
  */
@@ -55,9 +74,7 @@ function useDealRuns() {
 
   const load = useCallback(async () => {
     const recent = await flowline.listRuns({ limit: 50 });
-    const fromDeals = recent
-      .filter((r) => r.startedBy.kind === "event" && r.startedBy.event === "deal.updated")
-      .slice(0, 20);
+    const fromDeals = recent.filter(isDealRun).slice(0, 20);
     const details = await Promise.all(fromDeals.map((r) => flowline.getRun(r.id)));
     const next: Record<string, RunSummary> = {};
     // Newest first, so the first run seen per deal is its latest.
@@ -207,11 +224,12 @@ export function DealsPage(): JSX.Element {
                 <th>Owner</th>
                 <th className="num">Amount</th>
                 <th>Stage</th>
+                <th>In stage since</th>
                 <th>Automation</th>
               </tr>
             </thead>
             <tbody>
-              {!deals.data && <SkeletonRows cols={6} />}
+              {!deals.data && <SkeletonRows cols={7} />}
               {deals.data?.map((d) => {
                 const run = runs[d.id];
                 return (
@@ -240,6 +258,9 @@ export function DealsPage(): JSX.Element {
                           ))}
                         </select>
                       </span>
+                    </td>
+                    <td className="muted" title={fullTime(d.stageEnteredAt)}>
+                      {shortTime(d.stageEnteredAt)}
                     </td>
                     <td>
                       {run ? (

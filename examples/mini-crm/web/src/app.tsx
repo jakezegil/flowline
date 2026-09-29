@@ -17,6 +17,7 @@ import {
   Monitor,
   Moon,
   PanelLeft,
+  PhoneOff,
   RotateCcw,
   Route as RouteIcon,
   Sun,
@@ -53,6 +54,7 @@ const ICONS = {
   "calendar-clock": CalendarClock,
   contact: Contact,
   "log-in": LogIn,
+  "phone-off": PhoneOff,
   route: RouteIcon,
 };
 

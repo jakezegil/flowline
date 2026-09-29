@@ -2,9 +2,10 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { subjectOf } from "../run-subject";
-import { WelcomeHint } from "./contacts";
+import { ToastProvider } from "../ui";
+import { CallButtons, WelcomeHint } from "./contacts";
 import { isValidAddress } from "./outbox";
 import { shortName } from "./runs";
 
@@ -47,6 +48,50 @@ describe("Outbox: recipients", () => {
     expect(isValidAddress("ava@acme.test, ben@acme.test")).toBe(false);
     expect(isValidAddress("ava")).toBe(false);
     expect(isValidAddress("")).toBe(false);
+  });
+});
+
+describe("Contacts: logging calls", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("posts an AI call and a VoIP call for the contact", async () => {
+    const posted: { url: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          posted.push({ url, body });
+          return new Response(JSON.stringify({ id: "call_1", endedAt: "", ...body }), {
+            status: 201,
+          });
+        }
+        // The runs the call started (none here).
+        return new Response("[]", { status: 200 });
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <CallButtons contact={{ id: "c_1", firstName: "Grace", lastName: "Hopper" }} />
+        </ToastProvider>
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Log AI call with Grace Hopper" }));
+    await userEvent.click(screen.getByRole("button", { name: "Log VoIP call with Grace Hopper" }));
+    expect(posted).toEqual([
+      {
+        url: "/api/calls",
+        body: {
+          contactId: "c_1",
+          kind: "ai",
+          durationSec: 95,
+          summary: "Asked about pricing for the team plan.",
+        },
+      },
+      { url: "/api/calls", body: { contactId: "c_1", kind: "voip", durationSec: 240 } },
+    ]);
+    expect(await screen.findAllByText(/call with Grace Hopper logged/)).not.toHaveLength(0);
   });
 });
 

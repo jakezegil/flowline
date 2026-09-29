@@ -5,7 +5,9 @@ import { defineConfig, devices } from "playwright/test";
  *
  * Playwright starts its own server and web app on dedicated ports and never reuses a running one,
  * so a `pnpm dev` on the default ports doesn't interfere. Engine storage is in memory, so every
- * suite run starts from the seed workflows, and each test resets the CRM data first.
+ * suite run starts from the seed workflows, and each test resets the CRM data first. The server
+ * runs on the fake clock (`MINI_CRM_FAKE_CLOCK=1`), so a test can jump days ahead with
+ * `POST /api/demo/advance`.
  */
 const SERVER_PORT = 8921;
 const WEB_PORT = 5421;
@@ -44,6 +46,7 @@ export default defineConfig({
         PORT: String(SERVER_PORT),
         PUBLIC_URL: `http://localhost:${SERVER_PORT}`,
         DATABASE_URL: "",
+        MINI_CRM_FAKE_CLOCK: "1",
       },
     },
     {

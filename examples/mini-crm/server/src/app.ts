@@ -10,12 +10,15 @@ import {
   type Engine,
   FlowlineValidationError,
   type StorageAdapter,
+  type TriggerEvent,
 } from "@flowlinejs/engine";
+import { createBuiltinPlugin } from "@flowlinejs/nodes-builtin";
 import { createMemoryStorage } from "@flowlinejs/storage-memory";
 import { Hono } from "hono";
 import { z } from "zod";
 import { CrmError, type CrmStore, createCrmStore, DEAL_STAGES } from "./crm-store";
-import { seedFlows } from "./flows";
+import { DEAL_STUCK_WORKFLOW_ID, seedFlows } from "./flows";
+import { isUnassigned } from "./operators";
 import { crmPlugin, restoreApprovals } from "./plugin";
 
 /** The demo's only tenant. */
@@ -35,7 +38,22 @@ export interface MiniCrmOptions {
   publicUrl?: string;
   /** Engine and server logger. */
   logger?: Logger;
+  /**
+   * Moves the shared `clock` forward by `ms`. When set, `POST /api/demo/advance { ms }` is served:
+   * it advances the clock and sweeps the poll triggers at once. Leave it unset with a real clock
+   * (the route then answers 404).
+   */
+  advanceClock?: (ms: number) => void;
+  /**
+   * Cancel the waiting and queued runs of `deal-stuck-in-stage` for a deal whose stage changes,
+   * with reason "Stage changed". Default `true`. With `false`, such a run wakes up, sees the deal
+   * moved on and stops by itself.
+   */
+  cancelStuckRunsOnStageChange?: boolean;
 }
+
+/** How many trigger events `GET /api/demo/trigger-events` keeps. */
+const TRIGGER_EVENT_BUFFER = 100;
 
 /** A wired-up mini CRM. */
 export interface MiniCrm {
@@ -67,6 +85,16 @@ const DealPatchBody = z
   .strict();
 
 const DecisionBody = z.object({ decision: z.enum(["approved", "rejected"]) });
+
+const NewCallBody = z.object({
+  id: z.string().min(1).optional(),
+  contactId: z.string().min(1),
+  kind: z.enum(["ai", "voip"]),
+  durationSec: z.number().int().nonnegative(),
+  summary: z.string().optional(),
+});
+
+const AdvanceBody = z.object({ ms: z.number().int().positive() });
 
 /**
  * Who is calling. The demo has no login, so every request, to `/api` and to `/flowline` alike, is
@@ -128,15 +156,56 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
   const clock = opts.clock ?? Date.now;
   const logger = opts.logger ?? consoleLogger;
   const crm = createCrmStore({ clock });
+  /** The latest trigger events, newest first (see `GET /api/demo/trigger-events`). */
+  const triggerEvents: TriggerEvent[] = [];
   const engine = createEngine({
-    registry: createRegistry([crmPlugin]),
+    // The host registers the built-in plugin itself to choose its defaults: conditions and
+    // switches compare strictly (same types only, case-sensitive), and conditions get the CRM's
+    // "is unassigned" operator. The editor manifest comes from the same registry.
+    registry: createRegistry([
+      createBuiltinPlugin({ compare: "strict", operators: [isUnassigned] }),
+      crmPlugin,
+    ]),
     storage: opts.storage ?? createMemoryStorage(),
     services: { crm },
     clock,
     logger,
     ...(opts.publicUrl ? { publicUrl: opts.publicUrl } : {}),
     authorize: demoAuthorize,
+    // Deliveries that start no run (deduped, rejected) and poll sweeps. The engine already logs
+    // `trigger.rejected` and `poll.failed` at warn.
+    onTriggerEvent: (e) => {
+      triggerEvents.unshift(e);
+      triggerEvents.length = Math.min(triggerEvents.length, TRIGGER_EVENT_BUFFER);
+      if (e.type === "trigger.deduped") {
+        logger.info("delivery deduplicated", { workflowId: e.workflowId, key: e.key });
+      } else if (e.type === "poll.completed") {
+        logger.debug("poll completed", { workflowId: e.workflowId, started: e.started });
+      }
+    },
   });
+
+  /**
+   * Cancel the runs of `deal-stuck-in-stage` still waiting (or queued) for deal `dealId`: its
+   * stage changed, so the reminder is moot. Cancellation is the host's call; the workflow also
+   * re-checks the stage before each email, so a run this misses stops by itself.
+   */
+  const cancelStuckRuns = async (dealId: string): Promise<void> => {
+    for (const status of ["waiting", "queued"] as const) {
+      const runs = await engine.storage.listRuns(TENANT_ID, {
+        workflowId: DEAL_STUCK_WORKFLOW_ID,
+        status,
+        limit: 1000,
+      });
+      for (const summary of runs) {
+        const run = await engine.storage.getRun(TENANT_ID, summary.id);
+        if ((run?.trigger as { deal?: { id?: unknown } } | undefined)?.deal?.id !== dealId) {
+          continue;
+        }
+        await engine.cancelRun(TENANT_ID, summary.id, { by: "system", reason: "Stage changed" });
+      }
+    }
+  };
 
   // CRM changes start workflows, with the event's ID as the dedupe key. `emit` isolates each
   // matching workflow's trigger: one with an incompatible payload schema is reported in
@@ -145,6 +214,20 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
   // same stored ID until every match starts or is deliberately rejected; the dedupe key makes
   // redelivery start one run per workflow.
   crm.onEvent(async (event) => {
+    if (
+      opts.cancelStuckRunsOnStageChange !== false &&
+      event.type === "deal.updated" &&
+      event.payload.changes.includes("stage")
+    ) {
+      try {
+        await cancelStuckRuns(event.payload.deal.id);
+      } catch (err) {
+        logger.error("could not cancel stuck-deal runs", {
+          dealId: event.payload.deal.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     try {
       const result = await engine.emit(event.type, event.payload, {
         tenantId: TENANT_ID,
@@ -191,6 +274,15 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
   app.patch("/api/deals/:id", async (c) => {
     const body = await readBody(c.req.raw, DealPatchBody);
     return c.json(await crm.updateDeal(c.req.param("id"), body));
+  });
+
+  // Logging a call reports `ai_call.ended` or `voip_call.ended`. Posting an ID that exists
+  // redelivers that call's event (200), as a phone system retrying its webhook would; the
+  // `any-call-ended` trigger dedupes it by call ID.
+  app.post("/api/calls", async (c) => {
+    const body = await readBody(c.req.raw, NewCallBody);
+    const known = body.id !== undefined && crm.listCalls().some((x) => x.id === body.id);
+    return c.json(await crm.logCall(body), known ? 200 : 201);
   });
 
   app.get("/api/users", (c) => c.json(crm.listUsers()));
@@ -266,6 +358,19 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
     crm.reset();
     return c.body(null, 204);
   });
+  // Recent trigger events (deduped and rejected deliveries, poll sweeps), newest first.
+  app.get("/api/demo/trigger-events", (c) => c.json(triggerEvents));
+  const { advanceClock } = opts;
+  if (advanceClock) {
+    // Demo time travel: "three days later" in one request. The poll triggers are swept right
+    // away, so their runs exist when this answers; the worker wakes timers due by the new time.
+    app.post("/api/demo/advance", async (c) => {
+      const { ms } = await readBody(c.req.raw, AdvanceBody);
+      advanceClock(ms);
+      await engine.tickPolls();
+      return c.body(null, 204);
+    });
+  }
 
   app.all("/flowline/*", (c) => engine.handler(c.req.raw));
 

@@ -14,9 +14,10 @@ import {
   getContact,
   updateContact,
 } from "./contacts";
-import { updateDeal } from "./deals";
+import { getDeal, updateDeal } from "./deals";
 import { sendEmail } from "./email";
-import { contactCreated, dealUpdated } from "./triggers";
+import { callEnded, contactCreated, dealStuckInStage, dealUpdated } from "./triggers";
+import { getUser } from "./users";
 
 declare module "@flowlinejs/core" {
   interface FlowlineServices {
@@ -33,25 +34,28 @@ export {
   getContact,
   updateContact,
 } from "./contacts";
-export { updateDeal } from "./deals";
+export { getDeal, updateDeal } from "./deals";
 export { sendEmail } from "./email";
-export { contactCreated, dealUpdated } from "./triggers";
+export { callEnded, contactCreated, dealStuckInStage, dealUpdated } from "./triggers";
+export { getUser } from "./users";
 
 /** The `crm` plugin. User ID fields use the `crm.userSelect` widget, which the web app provides. */
 export const crmPlugin: PluginDefinition = definePlugin({
   id: "crm",
   name: "Mini CRM",
   icon: "building-2",
-  description: "Contacts, deals, email and approvals from the mini CRM.",
+  description: "Contacts, deals, users, calls, email and approvals from the mini CRM.",
   nodes: [
     findContactByEmail,
     getContact,
     createContact,
     updateContact,
     assignOwner,
+    getDeal,
     updateDeal,
+    getUser,
     sendEmail,
     requestApproval,
   ],
-  triggers: [contactCreated, dealUpdated],
+  triggers: [contactCreated, dealUpdated, callEnded, dealStuckInStage],
 });
