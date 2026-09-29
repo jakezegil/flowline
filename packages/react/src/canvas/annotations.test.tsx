@@ -300,7 +300,7 @@ describe("review round 1", () => {
     expect(node("note:email").querySelector(".fl-note")?.getAttribute("title")).toBe(note);
   });
 
-  test("M4: undo and redo work while a note has focus; Delete still doesn't", () => {
+  test("M4: undo and redo work while a note has focus; Delete deletes the note, not the step", () => {
     const store = storeOf(annotatedDoc({ stepNote: "hello" }));
     render(<WorkflowCanvas store={store} />);
     act(() => store.getState().renameStep("email2", "Follow-up"));
@@ -308,12 +308,14 @@ describe("review round 1", () => {
     const noteNode = node("note:email");
     noteNode.focus();
     const name = () => store.getState().doc.steps.find((s) => s.id === "email2")?.name;
-    fireEvent.keyDown(noteNode, { key: "Delete" });
-    expect(store.getState().doc.steps.map((s) => s.id)).toContain("email2");
     fireEvent.keyDown(noteNode, { key: "z", metaKey: true, ctrlKey: true });
     expect(name()).toBeUndefined();
     fireEvent.keyDown(noteNode, { key: "z", metaKey: true, ctrlKey: true, shiftKey: true });
     expect(name()).toBe("Follow-up");
+    // Task 15: Delete on a focused note removes that note, never the selected step.
+    fireEvent.keyDown(noteNode, { key: "Delete" });
+    expect(store.getState().doc.steps.map((s) => s.id)).toContain("email2");
+    expect(store.getState().doc.steps.find((s) => s.id === "email")?.note).toBeUndefined();
   });
 
   test("M5: an untitled section's region and chip names use the untitledSection label", async () => {

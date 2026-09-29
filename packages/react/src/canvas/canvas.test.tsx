@@ -759,3 +759,49 @@ describe("WorkflowCanvas", () => {
     expect(resolveIconIn(undefined, "GitFork")).toBe(resolveIconIn(undefined, "git-fork"));
   });
 });
+
+describe("S15: Backspace/Delete on the card's “…” and on “+” delete the selected step", () => {
+  test("Backspace on the selected card's “…” trigger deletes it", async () => {
+    const user = userEvent.setup();
+    render(<WorkflowCanvas store={store} />);
+    act(() => store.getState().select("email"));
+    within(card("email"))
+      .getByRole("button", { name: /^Actions for / })
+      .focus();
+    await user.keyboard("{Backspace}");
+    expect(findStep(store.getState().doc, "email")).toBeUndefined();
+    expect(await screen.findByText("Deleted “Send email”")).toBeTruthy();
+  });
+
+  test("Backspace (and Delete) on a “+” deletes the selected step", async () => {
+    const user = userEvent.setup();
+    render(<WorkflowCanvas store={store} />);
+    act(() => store.getState().select("email"));
+    (screen.getAllByRole("button", { name: PLUS })[0] as HTMLElement).focus();
+    await user.keyboard("{Backspace}");
+    expect(findStep(store.getState().doc, "email")).toBeUndefined();
+    // Focus goes to the neighbour on the next frame; wait so it doesn't steal focus back.
+    await waitFor(() => expect(document.activeElement).toBe(card("load")));
+    const plus = screen.getAllByRole("button", { name: PLUS })[0] as HTMLElement;
+    plus.focus();
+    expect(document.activeElement).toBe(plus);
+    await user.keyboard("{Delete}");
+    expect(store.getState().doc.steps).toEqual([]);
+  });
+
+  test("Enter on “+” still opens the picker; back on it, Backspace deletes", async () => {
+    const user = userEvent.setup();
+    render(<WorkflowCanvas store={store} />);
+    act(() => store.getState().select("email"));
+    const plus = screen.getAllByRole("button", { name: PLUS })[1] as HTMLElement;
+    plus.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "Add step" })).toBeTruthy();
+    expect(findStep(store.getState().doc, "email")).toBeDefined();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(plus));
+    await user.keyboard("{Backspace}");
+    expect(findStep(store.getState().doc, "email")).toBeUndefined();
+  });
+});

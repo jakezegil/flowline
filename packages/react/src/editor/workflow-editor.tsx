@@ -2,7 +2,7 @@ import type { ValidationContext, WorkflowDoc } from "@flowlinejs/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { type JSX, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { PortalContainerContext } from "../canvas/canvas-context";
-import { focusedKey } from "../canvas/keyboard";
+import { DeleteScopeContext, focusedKey } from "../canvas/delete-key";
 import { WorkflowCanvas } from "../canvas/workflow-canvas";
 import { EditorContext, useEditorStore } from "../hooks";
 import { ConfigPanel } from "../panel/config-panel";
@@ -57,31 +57,36 @@ function EditorBody({
   const { labels } = useFlowlineAppearance();
   const selection = useEditorStore((s) => s.selection);
   useUnsavedGuard(store, onDirtyChange);
+  // Backspace/Delete on the panel's non-text controls delete the selection too (the canvas
+  // listens for keys from here).
+  const [body, setBody] = useState<HTMLDivElement | null>(null);
   return (
-    <div className="fl-editor__body">
-      <div
-        className="fl-editor__canvas"
-        onKeyDownCapture={(e) => {
-          // Enter or Space on a canvas card opens its panel: move focus there so the keyboard
-          // follows.
-          if ((e.key !== "Enter" && e.key !== " ") || e.metaKey || e.ctrlKey || e.altKey) return;
-          const target = e.target as HTMLElement;
-          if (target.closest("button, input, textarea, select, [contenteditable='true']")) return;
-          if (focusedKey(target) === undefined && store.getState().selection === null) return;
-          const body = e.currentTarget.parentElement;
-          requestAnimationFrame(() =>
-            body?.querySelector<HTMLElement>(".fl-panel [data-autofocus]")?.focus(),
-          );
-        }}
-      >
-        <WorkflowCanvas store={store} />
+    <DeleteScopeContext.Provider value={body}>
+      <div ref={setBody} className="fl-editor__body">
+        <div
+          className="fl-editor__canvas"
+          onKeyDownCapture={(e) => {
+            // Enter or Space on a canvas card opens its panel: move focus there so the keyboard
+            // follows.
+            if ((e.key !== "Enter" && e.key !== " ") || e.metaKey || e.ctrlKey || e.altKey) return;
+            const target = e.target as HTMLElement;
+            if (target.closest("button, input, textarea, select, [contenteditable='true']")) return;
+            if (focusedKey(target) === undefined && store.getState().selection === null) return;
+            const body = e.currentTarget.parentElement;
+            requestAnimationFrame(() =>
+              body?.querySelector<HTMLElement>(".fl-panel [data-autofocus]")?.focus(),
+            );
+          }}
+        >
+          <WorkflowCanvas store={store} />
+        </div>
+        {selection !== null && (
+          <aside className="fl-panel" aria-label={labels.stepSettings}>
+            {renderPanel ? renderPanel(store) : <ConfigPanel store={store} />}
+          </aside>
+        )}
       </div>
-      {selection !== null && (
-        <aside className="fl-panel" aria-label={labels.stepSettings}>
-          {renderPanel ? renderPanel(store) : <ConfigPanel store={store} />}
-        </aside>
-      )}
-    </div>
+    </DeleteScopeContext.Provider>
   );
 }
 
