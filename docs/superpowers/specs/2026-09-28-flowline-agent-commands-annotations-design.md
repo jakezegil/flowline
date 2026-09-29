@@ -339,3 +339,12 @@ The plan (`docs/superpowers/plans/2026-09-28-flowline-agent-commands-annotations
 - **Clipboard.** `EditorState.clipboard` stays `Step | null`, and a new `clipboardRun` holds a copied run.
 - **Branch enums in the catalog** (§4.4) apply only when no node in the manifest has `fromConfig` branches. Otherwise `branch` fields are free text. Shared enums sit once under `$defs`.
 - **Backspace/Delete** on the canvas's "…" and "+" buttons deletes the selected step. This is a deliberate change.
+- **Duplicate and invalid section IDs.** When two sections share an ID, `updateSection` and `removeSection` act on the later one. Fix works like this:
+  - A duplicate ID: remove the later copy, then re-add it with the same run, title, colour and note under a fresh ID from `sectionIdFor`.
+  - An invalid ID: the same, on that section.
+  - A section whose `first`/`last` are in different branches: shrink it to its first step.
+- **The §3 example is illustrative** in its spacing (padding widths, spaces before `·`). The exact bytes come from the formatting rules, pinned by a snapshot test. What must match is each line's content, with whitespace collapsed, in order.
+- **Budget floor.** An `overview`/`outline` result never exceeds `budget` once `budget` is at least the floor: header + totals + one tail marker, with its omission. Below the floor, the result is exactly the floor. Any note that is cut, even at the default 120 chars, is listed in `omitted`, with a `full: true` follow-up.
+- **Strict command schemas.** Unknown keys in a command fail with `command.invalid`, and the error names the key.
+- **`runTool("apply")`** checks only the `{ commands: [...] }` envelope. Command errors come back inside the `ApplyResult`, with hints.
+- **Duplicate names** follow the editor's `(copy)`, `(copy 2)`… sequence, through core's `copyName`.

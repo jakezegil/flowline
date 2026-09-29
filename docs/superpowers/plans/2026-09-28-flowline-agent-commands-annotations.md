@@ -25,9 +25,12 @@
 
 ## Global Constraints
 
-- **Precondition:** the triggers/conditions batch (0.2.0) is fully merged on `flowkit-v1`, including its Task 12 (docs).
-  - Task 11 is already in (`3224bfa`), so these exist: `examples/mini-crm/server/src/flows/deal-stuck.ts` (exports `dealStuckFlow`, `DEAL_STUCK_WORKFLOW_ID`, `STUCK_DEAL_MANAGER_ID`), `crm.dealStuckInStage`, `crm.getDeal`, `crm.getUser`, and `e2e/triggers.spec.ts`.
-  - If the 0.2.0 docs commit is missing when Task 17 starts, stop and report to the controller.
+- **Preconditions:**
+  - The triggers/conditions batch (0.2.0) is merged on `flowkit-v1`, including its Task 11 (`3224bfa`) and its Task 12 (`c9ed2b7`, docs plus the 0.2.0 changeset). So these exist:
+    - `examples/mini-crm/server/src/flows/deal-stuck.ts`, exporting `dealStuckFlow`, `DEAL_STUCK_WORKFLOW_ID` and `STUCK_DEAL_MANAGER_ID`
+    - `crm.dealStuckInStage`, `crm.getDeal` and `crm.getUser`
+    - `e2e/triggers.spec.ts`
+  - **Before Task 17 only**, 0.2.0 must already be versioned and released on `main`: `.changeset/triggers-conditions.md` has been consumed, and every package's `package.json` reads `0.2.0`. Before Task 17 starts, the controller does the branch merge that brings that release into the integration branch. If either condition fails when Task 17 starts, stop and report to the controller.
 - **Branch and naming:** the integration branch is `flowkit-v1`. The package scope is `@flowlinejs/*`; never introduce a `flowkit` identifier.
 - **TypeScript and modules:**
   - All packages are ESM-only, with `"type": "module"`.
@@ -63,8 +66,58 @@
   - `layout/layout-tree.test.ts` and its snapshot file
   - the existing mini-crm e2e specs
 
-  The only allowed edits are the ones a task names explicitly: Task 15 changes Backspace on canvas buttons, pinned by a new test.
+  The only allowed behaviour change is Task 15's. Backspace/Delete on the card "…" trigger, on the "+" insert buttons, and on editor-body controls outside the canvas deletes the selection, and new tests pin this. Toast buttons and menus keep today's behaviour: `canvas.test.tsx` "Backspace on the toast's Undo button doesn't delete the selected step" stays green.
 - **No-op identity:** a command that changes nothing leaves the doc object identical. When every command in a batch is a no-op, `apply` returns the **input doc object** (`toBe`). The editor's history relies on this, through `commit`'s `next === prev` check.
+- **Derived colour tokens:** `color-mix` tokens such as `--fl-changed` are exempt from the light/dark rule. They inherit the light and dark values of the tokens they mix (`--fl-accent`), so they are declared once, in the derived block.
+
+### Cross-task contracts (every task; binding)
+
+These rules span tasks. Each task also restates the parts it owns.
+
+- **Placeholders.**
+  - `$n` is **1-based**: `$n` is the result of `commands[n-1]`, and error paths stay 0-based.
+  - A fragment step with `ref: "deal"` is `$deal`.
+  - Placeholders are accepted in every step-ID and section-ID argument (typed `StepRef`), and inside `$ref` paths and `$tpl` strings as `steps.$1…` / `steps.$deal…`.
+  - `ids` maps every placeholder used or created to the real ID.
+- **Rejected vs. reported.**
+  - `apply` rejects (`ok: false`):
+    - unknown steps, sections, node types and trigger types
+    - invalid locations, unknown branches, taken or invalid IDs and invalid runs
+    - overlap on `addSection`
+    - `expect` mismatches
+    - command shape errors
+  - For **non-verbatim fragments only**, it also rejects these validation codes (the **fragment reject list**): `node.unknown`, `branch.unknown`, `config.invalid`, `ref.syntax`, `ref.unresolved`, `ref.outOfScope`, `step.invalidId`, `step.duplicateId`.
+  - Everything else, including `config.required` and all warnings, goes to `issues.added`.
+  - `setConfig`, `setTriggerConfig` and `setOutput` accept any JSON value, and never reject it for its content.
+- **`null` in config patches** removes the key. `nullIsValue: true` (on `setConfig`, `setTriggerConfig` and `setOutput`) stores a literal `null`.
+- **Internal fields.** `nullIsValue` and `insertSteps.verbatim` are accepted only by `commandSchema(m, { internal: true })`, the default inside `apply`. They are absent from `commandSchema(m, { internal: false })`, from the catalog and from every example.
+- **Strict schemas.** Every command object schema is a `z.strictObject`, so an unknown key fails with `command.invalid` and the error names the key.
+- **Verbatim insert (paste):**
+  - The given IDs are used as-is.
+  - Config is taken as-is, with no defaults merged.
+  - Branches are kept as-is, including undeclared ones, and unknown node types are allowed.
+  - It only reports issues; it never rejects on validation.
+- **Trusted mode.** `apply(doc, cmds, m, { trusted: true, report: false })` skips the shape parse, the issue delta, `changedStepIds` and `changed`. `ids` and `renamed` are still filled. The editor's method wrappers use this mode, and `commandSchema` is cached per manifest object.
+- **`setType { id, type }`** is the editor's Replace. It follows `replaceStepType` semantics, and a generated ID is regenerated unless `codeBlocksRename`.
+- **`setTrigger`:**
+  - Same type with no `config`: a no-op.
+  - Same type with `config`: merges it.
+  - Different type: resets to the defaults, then merges.
+- **`At`** forms: `{ after }`, `{ before }`, `{ in: { stepId, branch }, index? }`, `{ start: true }`. For moves, the anchor is resolved after the moved steps are removed.
+- **Duplicate names** use `copyName` from core: `(copy)`, then `(copy 2)`, and so on, stripping an existing `(copy N)` suffix first.
+- **Read signatures.** Every read is `(doc, manifest, args, opts?)`, where `args` is exactly the tool input and `opts` is `{ ctx? }`. The node-type reads accept `doc: WorkflowDoc | null`. `FollowUp.args`, `runTool` and `BoundReads` pass `args` through unchanged.
+- **Host glue.**
+  - Bridge reads call `store.getState()` at call time.
+  - Bridge `apply` and `runTool("apply")` go through `store.apply`.
+  - `onStoreReady` fires for every store the editor creates. The cleanup it returns runs when that store is replaced or the editor unmounts.
+- **Read-only.** `EditorState.readOnly` is the single source of truth. `<WorkflowCanvas readOnly>` sets it while mounted, and `CanvasUiState.readOnly` is removed.
+- **Errors.** `FlowlineCommandError extends FlowlineTreeError`, and `FlowlineTreeError.name` is widened to `string`.
+- **Clipboard.** `EditorState.clipboard` stays `Step | null`, holding the first copied step. `clipboardRun: Step[] | null` holds the whole run.
+- **Section issues** carry `sectionId`, plus `stepId` = `first` when that step exists.
+- **Result caps:**
+  - `issues.added` holds at most 20 issues. The rest are counted in `issues.more`, with a `getIssues` follow-up.
+  - The `command.invalid` hint is the compact JSON Schema at the failing path, at most 1500 chars.
+  - Shape errors are all found before any command runs: `error` is the first, and `more` holds up to 9 others.
 
 ## Review Focus
 
@@ -112,92 +165,18 @@ Also exercised:
 - a read-only editor rejects `apply` with `code: "readOnly"`
 - a doc from before 0.3.0 runs identically on the engine
 
-## Decisions the spec leaves open (binding for this plan; also recorded in spec §10)
+## Decisions: rationale only (not needed to implement; recorded in spec §10)
 
-- **Placeholders.**
-  - `$n` is **1-based**: `$n` is the result of `commands[n-1]`, so `$1` is the step or section created by `commands[0]`. Error paths stay 0-based, and the `placeholder.unknown` hint and the `apply` description say so.
-  - A fragment step with `ref: "deal"` is addressed as `$deal`.
-  - Placeholders are accepted:
-    - in every step-ID argument
-    - in every section-ID argument (`updateSection.id`, `removeSection.id` and the rest are typed `StepRef`)
-    - inside `$ref` paths and `$tpl` strings, as `steps.$1…` / `steps.$deal…`
-  - `$` never appears in a real ID, and refs can't start with a digit, so the forms never collide.
-  - `ids` maps every placeholder used or created to the real ID.
-- **What `apply` rejects vs. reports.**
-  - `apply` rejects (`ok: false`) structural problems:
-    - unknown steps, sections, node types or trigger types
-    - invalid locations and unknown branches
-    - taken or invalid IDs
-    - invalid runs
-    - overlap on `addSection`
-    - `expect` mismatches
-    - command shape errors
-  - **For non-verbatim fragments only**, it also rejects validation issues with these codes: `node.unknown`, `branch.unknown`, `config.invalid`, `ref.syntax`, `ref.unresolved`, `ref.outOfScope`, `step.invalidId`, `step.duplicateId`.
-  - Everything else is reported in `issues.added`: `config.required` and all warnings.
-  - `setConfig` accepts any JSON value and never rejects it for its content, so the editor keeps accepting half-typed input.
-- **`setConfig` and `null`.**
-  - Per spec, `null` removes a key.
-  - `nullIsValue: true` stores a literal `null`. The editor store sets it when its `setConfig` receives `null`; `undefined` maps to removal.
-  - `nullIsValue` is **internal**: it's left out of the catalog schema and its examples.
-- **Verbatim insert (paste).**
-  - `insertSteps { verbatim: true }` is **internal**: it's accepted by `apply` but not in the catalog.
-  - It inserts fragments exactly as given: the given IDs, config as-is with no defaults merged, and branches as-is, including undeclared ones.
-  - It only reports issues and never rejects on validation.
-  - Paste uses it, so paste keeps today's behaviour: it always succeeds, and the validator flags problems afterwards.
-- **Trusted mode.**
-  - `apply(doc, cmds, m, { trusted: true, report: false })` skips the Zod shape parse, the issue delta, `changedStepIds` and the `changed` outline.
-  - The editor's method wrappers use it. `commandSchema(manifest)` is cached per manifest object.
-- **Extra command.** `setType { id, type }` is the editor's Replace:
-  - config resets, children are kept
-  - generated IDs are regenerated exactly as in today's `replaceStep`
-
-  It exists because `EditorActions.replaceStep` has no spec command.
-- **`setTrigger` semantics.**
-  - Same type with no `config`: a no-op.
-  - Same type with `config`: merges it, like `setTriggerConfig`.
-  - Different type: resets to the defaults, then merges `config`.
-- **`At` forms.**
-  - The four forms: `{ after: id }`, `{ before: id }`, `{ in: { stepId, branch }, index? }`, `{ start: true }` (the top of the top-level list).
-  - For `moveStep`/`moveSteps`, the anchor is resolved **after** the moved steps are removed, like today's `moveStep`.
-- **Moved members stay members.**
-  - A step moved within its section's list keeps its membership if it lands **inside the section's span**, for example ⌥↑ on an interior member.
-  - The precise rule is Task 1's upkeep rule 2.
-- **Read signatures.**
-  - Every read is `(doc, manifest, args, opts?)`, where `args` is exactly the tool's input object and `opts` is `{ ctx?: ValidationContext }`.
-  - The node-type reads accept `doc: WorkflowDoc | null` and ignore it.
-  - `FollowUp.args`, `runTool` and the bridge's `BoundReads` pass `args` through unchanged.
-- **Paging.**
-  - `outline` takes an optional `stepId` (omit it for the top-level list) and an optional `after`, so a flat 500-step list can be paged.
-  - `getSteps` takes either `{ ids }` or `{ where, after?, limit? }`. The second form returns `next` when more steps match.
-  - Config and notes omissions point at the paging form, so `omitted` stays small.
-- **Host glue.**
-  - Core adds `runTool(state, name, args)`. React adds `createAgentBridge(store)` (not a hook) and `useWorkflowAgentBridge(store?)`, which wraps it.
-  - Bridge reads read `store.getState()` at call time. The bridge's `apply` and `runTool("apply", …)` go through `store.apply`, so history, flash and readOnly all apply.
-  - `<WorkflowEditor>` gains `onStoreReady?(store): void | (() => void)`. It fires for **every** store the editor creates (initial load, `workflowId` change, `retry()`, `startNew()`). The cleanup it returns runs when that store is replaced or the editor unmounts.
-  - A bridge created for a store that has been replaced keeps editing the old store. This is documented, and hosts drop the bridge in the cleanup.
-- **One read-only flag.**
-  - `EditorState.readOnly` is the single source of truth.
-  - `<WorkflowCanvas readOnly>` sets it on the store while mounted, and restores the previous value on unmount.
-  - The canvas UI and keyboard code read the store flag. `CanvasUiState.readOnly` is removed; it is internal and not exported.
-- **Errors.**
-  - `FlowlineCommandError extends FlowlineTreeError`, so hosts that catch `FlowlineTreeError` keep working.
-  - `FlowlineTreeError.name` is widened to `string` so the subclass can set its own name. That is a type-only widening.
-- **Change highlight.** No change-highlight token exists today. `--fl-changed` (derived from `--fl-accent`) and the `fl-flash` animation are new, and `prefers-reduced-motion` turns the animation off.
-- **Range "move".** The canvas has no move UI today. Ranges and single steps get **Move up / Move down** (⌥↑ / ⌥↓), which moves the run one position within its list.
-- **Clipboard.** `EditorState.clipboard` stays `Step | null`: the first copied step, which keeps the existing tests. A new `clipboardRun: Step[] | null` holds the whole copied run. This is not breaking.
-- **Section IDs.**
-  - Generated from the title: `"Check the deal"` → `check_the_deal`. The maximum length is 32 chars; the ID is `section` when nothing usable remains, and `_2`, `_3`… are appended when taken.
-  - `addSection` and `insertSteps.section` accept an explicit `id?`.
-- **Section issues** carry `stepId` = the section's `first` when that step exists, plus a new optional `Issue.sectionId`. The issues pill navigates to the step and offers **Fix**.
-- **Section notes on the canvas.** The header chip shows a one-line excerpt of the note (cut to 60 chars), with the full text as a tooltip. This satisfies §6's "appears in its header".
-- **Branch enums in the catalog.**
-  - `branch` fields are an enum of the union of all static branch IDs, plus `body` for loops, only when no node in the manifest has `fromConfig` branches.
-  - Otherwise they are free text, with a description saying so.
-  - mini-crm ships the builtin switch, so it gets free text.
-- **Result size caps.**
-  - `issues.added` is capped at 20. `issues.more` counts the rest and gives a `getIssues` follow-up.
-  - The `command.invalid` hint is the compact JSON Schema at the failing path only, capped at 1500 chars.
-  - All shape errors are found before any command runs: `error` is the first, and `more` (up to 9) lists the others.
+- `setType` exists because `EditorActions.replaceStep` has no spec command, and §5 needs one code path.
+- 1-based `$n` matches the spec's `$1, $2` example. Refs can't start with a digit, so `$1` and `$ref` never collide.
+- Paste is verbatim so that it keeps today's behaviour: it always succeeds, and the validator flags problems afterwards.
+- Trusted mode exists so a keystroke costs what it costs today. The 200-step `< 20ms` test pins this.
+- Reads take one `args` object so that follow-ups, `runTool` and the bridge share one call shape.
+- `outline({ after })` paging exists because collapsing branches alone can't fit a flat 500-step list into 4000 chars.
+- A single read-only flag exists so that a bridge on a `<WorkflowCanvas readOnly>` is rejected too.
+- The branch-enum limit trades schema precision in manifests with `fromConfig` nodes, such as mini-crm's switch, for a simple rule.
+- The §3 example in the spec is illustrative in its spacing. The Task 2 snapshot is the source of truth for exact bytes.
+- Moved members stay in their section so that ⌥↑/⌥↓ reorders inside a section without leaving it.
 
 ## File structure (new or changed)
 
@@ -207,7 +186,8 @@ packages/core/src/
   annotations.ts   (new)       ANNOTATION_COLORS, NOTE_MAX_CHARS, sectionRun, sectionOf, upkeepSections, sectionIdFor, annotationIssues
   tree.ts                      tree ops keep sections intact; FlowlineTreeError.name widened; cloneRunWithFreshIds
   validate.ts                  section.broken, section.overlap, note.tooLong; Issue.sectionId
-  step-factory.ts  (new)       defaultConfig, syncBranches, createStep (moved from react/store/commands.ts)
+  step-factory.ts  (new)       defaultConfig, syncBranches, createStep, jsonEqual (T4), replaceStepType, copyName (T5)
+  json-schema.ts               export derefSchema (T3)
   agent/
     read-types.ts  (new)       Where, ReadArgs, ReadResults, ReadToolName, FollowUp, Omission, OutlineResult, StepDetail, RefInfo
     format.ts      (new)       outline line format, budgets, truncation, collapse markers
@@ -216,7 +196,7 @@ packages/core/src/
     compact-schema.ts (new)    compactSchema
     reads.ts       (new)       focus, getSteps, findSteps, availableRefs, listNodeTypes, describeNodeTypes, getIssues, reads
     commands.ts    (new)       Command union, At, StepRef, Fragment, StepUpdate, ApplyResult, ApplyError, CommandErrorCode
-    command-schema.ts (new)    Zod schemas; commandSchema(manifest?, opts?) cached per manifest; opJsonSchema
+    command-schema.ts (new)    strict Zod schemas; commandSchema(manifest?, opts?) cached per manifest; opJsonSchema; whereSchema
     placeholders.ts (new)      placeholder resolution in IDs, $ref and $tpl
     apply.ts       (new)       apply pipeline, changedStepIds, issue delta, changed outline, FlowlineCommandError
     single.ts      (new)       single-step handlers
@@ -224,7 +204,7 @@ packages/core/src/
     fragments.ts   (new)       insertSteps (incl. verbatim), replaceSteps
     bulk.ts        (new)       duplicateSteps, updateSteps, replaceInConfig, moveSteps, removeSteps, wrapSteps, unwrapStep
     repairs.ts     (new)       annotationRepairs
-    catalog.ts     (new)       commandCatalog, ToolDefinition, runTool
+    catalog.ts     (new)       commandCatalog, ToolDefinition, runTool, readArgSchemas
   index.ts                     exports
 packages/engine/src/annotations.test.ts (new)
 packages/react/src/
@@ -244,7 +224,7 @@ packages/react/src/
   labels.ts, theme.ts, styles.css, index.ts
   playground/fixtures.ts, playground/main.tsx, playground/screenshot.mjs
 examples/mini-crm/
-  server/src/flows/deal-stuck.ts, server/src/app.test.ts
+  server/src/app.ts (createCrmRegistry), server/src/flows/deal-stuck.ts, server/src/app.test.ts
   server/src/catalog.test.ts (new), server/src/agent-scenario.test.ts (new)
   e2e/annotations.spec.ts (new)
 README.md, packages/core/README.md, packages/react/README.md, examples/mini-crm/README.md
@@ -275,7 +255,7 @@ docs/superpowers/specs/2026-09-28-flowline-agent-commands-annotations-design.md 
 | 17 | Docs, agent scenario, changeset | docs, mini-crm, .changeset | 16 | — |
 
 Why the parallel pairs are safe:
-- **Task 11** touches only `packages/react/src/layout/*` and `canvas/geometry.ts`. The one exception is `packages/react/src/index.ts`: it appends four constant exports there, which is a trivial merge. It needs only Task 1's types.
+- **Task 11** touches only `packages/react/src/layout/*` and `canvas/geometry.ts`. The one exception is `packages/react/src/index.ts`: it appends four constants and the `LayoutSection`/`LayoutNote` types there, which is a trivial merge. It needs only Task 1's types. Its `layoutTree` and `edgeGeometries` changes are additive: the existing return types stay, so `workflow-canvas.tsx` (edited by Task 10 at the same time) keeps compiling.
 - **Task 9** touches only `packages/react/src/store/*` and uses only Tasks 4–6 core APIs, so it can run alongside the core-only Tasks 7 and 8.
 - **Tasks 2–8** each edit `packages/core/src/index.ts` and must run in order.
 
@@ -325,7 +305,7 @@ export class FlowlineTreeError extends Error { override readonly name: string = 
 export const ANNOTATION_COLORS: readonly AnnotationColor[]; // the six, in the order above
 export const NOTE_MAX_CHARS = 4000;
 export function isAnnotationColor(v: unknown): v is AnnotationColor;
-/** The run a section covers, or undefined when it is broken (missing endpoint, two lists, reversed). A bad colour does not make the run undefined. */
+/** The run a section covers, or undefined when it is broken (missing endpoint, two lists, reversed). A bad colour or an invalid/duplicate section ID does not make the run undefined. */
 export function sectionRun(doc: WorkflowDoc, section: Section):
   | { parentId: string | null; branch?: string; start: number; end: number; ids: string[] }
   | undefined;
@@ -340,7 +320,12 @@ export interface SectionEffect {
 }
 /** `after` with its `sections` updated for an edit from `before`; returns `after` itself when nothing changes. */
 export function upkeepSections(before: WorkflowDoc, after: WorkflowDoc, effect?: SectionEffect): WorkflowDoc;
-/** A fresh section ID from a title, unique among `doc.sections`. */
+/**
+ * A fresh section ID from a title, unique among `doc.sections`.
+ * Rule: lowercase the title, replace each run of characters outside [a-z0-9] with "_", and trim "_" from both ends.
+ * Cut to 32 chars, prefix "section_" if the slug starts with a digit, and use "section" when nothing is left.
+ * If the ID is taken, append "_2", "_3", … ("Check the deal" → "check_the_deal", then "check_the_deal_2").
+ */
 export function sectionIdFor(doc: WorkflowDoc, title: string): string;
 /** @internal Validator checks: section.broken, section.overlap, note.tooLong. */
 export function annotationIssues(doc: WorkflowDoc): Issue[];
@@ -405,7 +390,7 @@ Validation (`annotationIssues`, called at the end of `validateWorkflow`, all **w
     - move `c` above `b` (⌥↑ on an interior member) → `c..d`, and `c` is still a member
     - move `b` above `a` → `c..d`
     - move `d` below `e` → `b..c`
-    - move `d` above `c` → `b..d` with the order `b,d,c`
+    - move `d` above `c` → `b..c`, with the order `b,d,c` and `d` still a member
     - move `b` to the end of the list → `c..d`
     - move `e` between `b` and `c` → `e` is a member by contiguity
   - Renames, duplicates and inserts:
@@ -416,6 +401,7 @@ Validation (`annotationIssues`, called at the end of `validateWorkflow`, all **w
     - `insertStep` right before `b` or right after `c` → not a member
   - Nesting: a section inside the `if` of a step that is itself inside an outer section. Removing the outer section's steps outside the branch leaves the inner section untouched.
   - Identity: an edit that doesn't touch sections returns a doc whose `sections` array is `toBe` the old one.
+- `sectionIdFor`: `"Check the deal"` → `check_the_deal`; taken → `check_the_deal_2`; `"!!!"` → `section`; `"2024 plan"` → `section_2024_plan`; a 50-char title is cut to 32 chars.
 - Validator:
   - Each broken shape, an overlap, a 4001-char note on a step and on a section, and `color: "red"` on a section each produce the codes above, with severity `warning` and `stepId`/`sectionId` as specified.
   - A doc without `sections`, and one with `sections: []`, produce no new issues.
@@ -440,7 +426,7 @@ Validation (`annotationIssues`, called at the end of `validateWorkflow`, all **w
 
 **Interfaces**
 
-Consumes: Task 1 (`sectionRun`, `ANNOTATION_COLORS`), `validateWorkflow`, `walkSteps`, `findStep`, `branchesFor`.
+Consumes: Task 1 (`sectionRun`, `ANNOTATION_COLORS`, `isAnnotationColor`), `validateWorkflow`, `walkSteps`, `findStep`, `branchesFor`.
 
 Produces:
 ```ts
@@ -501,28 +487,31 @@ Line format (the spec §3 example):
 - **Steps:**
   - The line starts with `<id>` padded to the list's widest ID + 2, then `<node label>`.
   - Then, in order: ` “<name>”` if set, ` [<color>]` if set, ` · N issue(s)` if there are any, and `: note "<note>"`.
-  - Notes are cut to 120 chars, then to 40 under budget pressure.
+  - Notes are cut to 120 chars, then to 40 under budget pressure. **Any** cut, at 120 or at 40, adds the `notes` omission (budget step 2), whose `fetch` has `full: true`.
 - **Config:** when there is room, each step with config gets a continuation line `<indent>    config <compact JSON>`.
 - **Totals:** the last line, e.g. `— 12 steps · 1 section · 2 notes · 0 errors · 1 warning`.
 
-Budget: characters, default 4000. **`resultSize(result) <= budget` always**, so the budget covers `text` plus serialized `omitted`. Content is dropped in this order:
+Budget: characters, default 4000. The budget covers `text` plus serialized `omitted`. The **floor** is header + totals + one tail marker, with its omission. When `budget` ≥ the floor, `resultSize(result) <= budget`. Below the floor, the result is exactly the floor. Content is dropped in this order:
 1. **Config.** Render with config. If over budget, drop every config line and add one `Omission { what: "config", count, fetch: { tool: "getSteps", args: { where: {} or { within }, include: ["config"], limit: 50 } } }`, plus a text line `(config left out: getSteps({where:{},include:["config"],limit:50}))`. For `outline` of a branch, `where` is `{ within: { stepId, branch } }`.
-2. **Notes.** Still over: cut notes to 40 chars. Add `Omission { what: "notes", fetch: { tool: "getSteps", args: { ids: <cut ids>, include: [], full: true } } }`. If that ID list alone would take more than 400 chars, use `{ where: {}, include: [], full: true, limit: 50 }` instead.
+2. **Notes.** Still over: cut notes to 40 chars. Whenever any note was cut (at either length), add `Omission { what: "notes", fetch: { tool: "getSteps", args: { ids: <cut ids>, include: [], full: true } } }`. If that ID list alone would take more than 400 chars, use `{ where: {}, include: [], full: true, limit: 50 }` instead.
 3. **Branches.** Still over: collapse branches deepest first. Ties go to the branch with the most steps, then the last in pre-order. A collapsed branch becomes `… 12 steps in branch else: outline({stepId:"recheck",branch:"else"})`, with one `Omission { what: "branch" }` each.
 4. **List tail.** Still over, whether from the text or from the omissions list itself: collapse the tail of the longest remaining list to `… 380 more steps after step_120: outline({after:"step_120"})`, adding `stepId`/`branch` for a branch list, with one `Omission { what: "steps" }`. Collapsing a tail also drops the branch omissions inside it.
-5. **Tiny budgets.** If the header plus totals plus one tail marker exceed the budget, return exactly those, and don't throw.
+5. **Tiny budgets.** If the floor exceeds the budget, return exactly the floor, and don't throw.
 
 **Tests must pin**
-- The outline of the spec §3 example: `overview(specExampleDoc(), m, {})` reproduces the example lines exactly, as a golden string that includes the section header, branch glyphs, the `· 1 issue` suffix and the notes.
+- The spec §3 example, which is illustrative in its spacing (spec §10):
+  - `overview(specExampleDoc(), m, { budget: B })`, where `B` is the smallest budget that drops config but keeps everything else, is pinned as an inline snapshot of the rule-based output. The snapshot is the byte-level source of truth.
+  - Separately, each line of the spec example, with runs of whitespace collapsed to one space, appears in order in the whitespace-collapsed output.
 - Small docs:
   - A 5-step doc: one read includes every step's config, and `omitted` is `[]`.
   - An unknown-colour section renders `[gray]`.
   - A broken section renders `(broken)` without throwing.
 - Budget, at 5, 50 and 500 steps, flat and 12-deep:
-  - `resultSize <= 4000` (Review Focus 4).
+  - `resultSize <= 4000` (Review Focus 4). The floor is far below 4000 for these docs.
   - For 500 flat steps, paging `outline({ after })` through every `steps` omission until none remain returns every step ID exactly once across all pages.
   - For 12-deep, each `branch` follow-up (`outline` with that `stepId`/`branch`) returns that branch's steps.
-- Custom budgets: `budget: 600` is respected. `budget: 50` returns header + totals + one `steps` omission and never throws.
+- Custom budgets: `budget: 600` gives `resultSize <= 600`. `budget: 50` (below the floor) returns exactly the floor's shape: the header line, one tail marker line and the totals line in `text`, and one `steps` omission. It never throws, and its size is not asserted.
+- An under-budget doc with a 300-char note: the note is cut to 120, and `omitted` holds one `notes` omission with `fetch.args.full === true`.
 - The `config` omission's `fetch` is `{ tool: "getSteps", args: { where: {}, include: ["config"], limit: 50 } }`. The `notes` omission's `fetch.args.full` is `true`. Task 3 executes both.
 
 - [ ] **Step 1:** Write `fixtures.ts` and the failing tests. Run `pnpm vitest run --project core packages/core/src/agent/outline.test.ts`. Expected: FAIL.
@@ -535,12 +524,12 @@ Budget: characters, default 4000. **`resultSize(result) <= budget` always**, so 
 
 **Files:**
 - Create: `packages/core/src/agent/selectors.ts`, `agent/compact-schema.ts`, `agent/reads.ts`
-- Modify: `agent/read-types.ts` (add `RefInfo`, `StepDetail`, `ReadResults`), `packages/core/src/index.ts`
+- Modify: `agent/read-types.ts` (add `RefInfo`, `StepDetail`, `ReadResults`), `packages/core/src/json-schema.ts` (export `derefSchema`), `packages/core/src/index.ts`
 - Test: `packages/core/src/agent/reads.test.ts`, `agent/selectors.test.ts`, `agent/compact-schema.test.ts`, `agent/budget.test.ts` (extend: execute every omission)
 
 **Interfaces**
 
-Consumes: Task 2 types and `overview`/`outline`, `availableScope`, `schemaAtPath`, `describeType`, `derefSchema`, `branchesFor`, `validateWorkflow`, `configValueAt`, `sectionOf`, `cutString`.
+Consumes: Task 2 types and `overview`/`outline`, `availableScope`, `schemaAtPath`, `describeType`, `branchesFor`, `validateWorkflow`, `configValueAt`, `sectionOf`, `cutString`.
 
 Produces:
 ```ts
@@ -576,6 +565,9 @@ export interface ReadResults {
 /** A read, callable uniformly as reads[name](doc, manifest, args). */
 export type ReadFn<K extends ReadToolName> = (doc: WorkflowDoc, manifest: Manifest, args: ReadArgs[K], opts?: ReadOptions) => ReadResults[K];
 
+// json-schema.ts (newly exported; wraps the existing private `deref(root, schema)`)
+/** Resolves a local `$ref` in `schema` against `root` (one level), as the validator does. */
+export function derefSchema(root: JSONSchema, schema: JSONSchema): JSONSchema;
 // selectors.ts
 /** Matching step IDs in pre-order. */
 export function matchSteps(doc: WorkflowDoc, manifest: Manifest, where: Where): string[];
@@ -624,11 +616,11 @@ What each read does:
 - `listNodeTypes({ query: "mail" })` ranks results, and `category` filters them.
 - `describeNodeTypes` for a static-branch node, a `fromConfig` node (switch), a loop and an unknown type (which lands in `unknown`). `input` has no `x-flowline` keys other than label, widget and enumLabels.
 - `compactSchema`: a recursive `$defs` schema terminates.
-- Uniform calls: every entry of `reads` is callable as `reads[name](doc, m, args)`. This is a typecheck test via a loop over a `FollowUp[]`.
+- Uniform calls: loop over a `FollowUp[]` with one entry per read. Each `reads[f.tool](doc, m, f.args)` returns a result for which `expect(result).toBeDefined()` holds, and each has the expected top-level key (`text`, `id`, `steps`, `count`, `refs`, `types` or `issues`).
 - A legacy doc with broken sections (Review Focus 3) reads through every read without throwing.
 
 - [ ] **Step 1:** Write the failing tests. Run `pnpm vitest run --project core packages/core/src/agent/reads.test.ts`. Expected: FAIL.
-- [ ] **Step 2:** Implement. Export `reads`, each read, `matchSteps`, `compactSchema`, `ReadFn`, `ReadResults`, `RefInfo` and `StepDetail`.
+- [ ] **Step 2:** Implement. Export `reads`, each read, `matchSteps`, `compactSchema`, `derefSchema`, `ReadFn`, `ReadResults`, `RefInfo` and `StepDetail`.
 - [ ] **Step 3:** Gates. Commit `feat(core): focus, getSteps and the other agent reads`.
 
 ---
@@ -636,7 +628,7 @@ What each read does:
 ### Task 4: core — `apply` pipeline with addStep, removeStep, moveStep, setConfig
 
 **Files:**
-- Create: `packages/core/src/step-factory.ts`. Move `defaultConfig`, `syncBranches` and `createStep` verbatim from `packages/react/src/store/commands.ts`, which now re-exports them from core.
+- Create: `packages/core/src/step-factory.ts`. Move `defaultConfig`, `syncBranches`, `createStep` and `jsonEqual` verbatim from `packages/react/src/store/commands.ts`, which now re-exports them from core.
 - Create: `packages/core/src/agent/commands.ts`, `agent/command-schema.ts`, `agent/placeholders.ts`, `agent/apply.ts`, `agent/single.ts`
 - Modify: `packages/core/src/index.ts`, `packages/react/src/store/commands.ts`
 - Test: `packages/core/src/step-factory.test.ts` (move the React tests of these helpers here, if any exist), `agent/apply.test.ts`, `agent/placeholders.test.ts`, `agent/command-schema.test.ts`
@@ -720,7 +712,11 @@ export function resolveValuePlaceholders(v: ValueExpr, ids: Map<string, string>)
 export function defaultConfig(schema: JSONSchema): Record<string, ValueExpr>;
 export function syncBranches(step: Step, m: NodeManifest): Step;
 export function createStep(id: string, m: NodeManifest): Step;
+/** Deep JSON equality (moved from react). */
+export function jsonEqual(a: unknown, b: unknown): boolean;
 ```
+
+Every command object schema is a `z.strictObject`, so an unknown key (for example `verbatim` under `internal: false`) fails with `command.invalid`, and the error message names the key. The internal-only fields (`nullIsValue` on `setConfig`, `setTriggerConfig` and `setOutput`; `verbatim` on `insertSteps`) exist only in the `internal: true` variant.
 
 The pipeline:
 1. **Shape.** Unless `trusted`, parse **every** command with `commandSchema(manifest, { internal: true })` before running any.
@@ -786,10 +782,11 @@ The pipeline:
 - `trusted: true, report: false`: the same doc as the default mode for a setConfig batch, with `changed === ""`. An invalid-shape command in trusted mode is not shape-checked, but handlers still reject unknown IDs.
 - The `command.invalid` hint for `addStep` without `at` is a JSON Schema containing the `at` property, and is at most 1500 chars long.
 - `commandSchema(m) === commandSchema(m)`: the cache works.
+- Strictness: `{ op: "removeStep", id: "a", extra: 1 }` fails with `command.invalid`, and the message contains `extra`. `commandSchema(m, { internal: false })` rejects `nullIsValue` on `setConfig`.
 
-- [ ] **Step 1:** Move `defaultConfig`/`syncBranches`/`createStep` to core with their tests. Make `packages/react/src/store/commands.ts` import and re-export them. Run `pnpm vitest run --project react packages/react/src/store`. Expected: PASS, since this is a pure move.
+- [ ] **Step 1:** Move `defaultConfig`/`syncBranches`/`createStep`/`jsonEqual` to core with their tests. Make `packages/react/src/store/commands.ts` import and re-export them. Run `pnpm vitest run --project react packages/react/src/store`. Expected: PASS, since this is a pure move.
 - [ ] **Step 2:** Write the failing tests. Run `pnpm vitest run --project core packages/core/src/agent/apply.test.ts`. Expected: FAIL.
-- [ ] **Step 3:** Implement. Export `apply`, `Command`, `At`, `StepRef`, `SectionInput`, `ApplyResult`, `ApplyError`, `ApplyOptions`, `CommandErrorCode`, `FlowlineCommandError`, `changedStepIds`, `commandSchema`, `opJsonSchema`, `defaultConfig`, `syncBranches` and `createStep`.
+- [ ] **Step 3:** Implement. Export `apply`, `Command`, `At`, `StepRef`, `SectionInput`, `ApplyResult`, `ApplyError`, `ApplyOptions`, `CommandErrorCode`, `FlowlineCommandError`, `changedStepIds`, `commandSchema`, `opJsonSchema`, `defaultConfig`, `syncBranches`, `createStep` and `jsonEqual`.
 - [ ] **Step 4:** Gates. Commit `feat(core): atomic apply pipeline with the core step commands`.
 
 ---
@@ -798,8 +795,10 @@ The pipeline:
 
 **Files:**
 - Create: `packages/core/src/agent/sections.ts`, `agent/repairs.ts`
-- Modify: `agent/commands.ts` (`SingleCommand`, `SectionCommand`), `agent/command-schema.ts`, `agent/single.ts`, `agent/apply.ts` (dispatch)
-- Test: `packages/core/src/agent/single.test.ts`, `agent/sections.test.ts`, `agent/repairs.test.ts`
+- Modify: `agent/commands.ts` (`SingleCommand`, `SectionCommand`), `agent/command-schema.ts`, `agent/single.ts`, `agent/apply.ts` (dispatch), `packages/core/src/index.ts`
+- Modify: `packages/core/src/step-factory.ts`. Move `replaceStepType` there from `packages/react/src/store/commands.ts`, and add `copyName`, a public port of the private `copyName` in `packages/react/src/store/editor-store.ts:694` with identical rules.
+- Modify: `packages/react/src/store/commands.ts`, which re-exports `replaceStepType` from core. Task 9 deletes the private React `copyName`.
+- Test: `packages/core/src/agent/single.test.ts`, `agent/sections.test.ts`, `agent/repairs.test.ts`, `packages/core/src/step-factory.test.ts` (extend)
 
 **Interfaces**
 
@@ -807,8 +806,17 @@ Consumes: the Task 4 pipeline. From the tree: `renameStepId`, `codeBlocksRename`
 
 Produces:
 ```ts
+// step-factory.ts (public)
+/** The doc with step `id` switched to node `m`: config reset to defaults, children kept (moved verbatim from react). */
+export function replaceStepType(doc: WorkflowDoc, id: string, m: NodeManifest): WorkflowDoc;
+/**
+ * The display name for a copy of `base`. Strips a trailing " (copy)" or " (copy N)", then returns
+ * "<stem> (copy)", or "<stem> (copy 2)", "(copy 3)"… for the first name not in `taken`.
+ */
+export function copyName(base: string, taken: ReadonlySet<string>): string;
+// commands.ts
 type SingleCommand =
-  | { op: "duplicateStep"; id: StepRef }                    // copy named "<name> (copy)" like the editor
+  | { op: "duplicateStep"; id: StepRef }                    // copy named copyName(display name, all display names)
   | { op: "renameStep"; id: StepRef; name: string }         // "" clears
   | { op: "renameStepId"; id: StepRef; newId: string }
   | { op: "setType"; id: StepRef; type: string }
@@ -816,9 +824,9 @@ type SingleCommand =
   | { op: "setNote"; id: StepRef; note: string | null }     // ≤ NOTE_MAX_CHARS; null or "" removes
   | { op: "setColor"; id: StepRef; color: AnnotationColor | null }
   | { op: "setTrigger"; type: string; config?: ConfigPatch }
-  | { op: "setTriggerConfig"; key: string; value: ValueExpr | null; nullIsValue?: boolean }
+  | { op: "setTriggerConfig"; key: string; value: ValueExpr | null; /** @internal */ nullIsValue?: boolean }
   | { op: "setTriggerConfig"; config: ConfigPatch }
-  | { op: "setOutput"; key: string; value: ValueExpr | null; nullIsValue?: boolean }
+  | { op: "setOutput"; key: string; value: ValueExpr | null; /** @internal */ nullIsValue?: boolean }
   | { op: "setOutput"; config: ConfigPatch }
   | { op: "renameWorkflow"; name: string };
 type SectionCommand =
@@ -830,6 +838,8 @@ type SectionCommand =
 export function annotationRepairs(doc: WorkflowDoc, issue: Issue): Command[];
 ```
 
+`nullIsValue` on `setTriggerConfig`/`setOutput` is internal, like `setConfig`'s. It is accepted only by `commandSchema(…, { internal: true })`, and never appears in the catalog.
+
 How each command behaves:
 - **`setType`** reproduces `EditorActions.replaceStep` exactly:
   - The same type is a no-op.
@@ -837,8 +847,8 @@ How each command behaves:
   - A generated ID is regenerated via `renameStepId`, unless `codeBlocksRename`.
   - It records `renamed[old] = new` and `ids["$n"]` = the resulting ID.
 - **`renameStepId`** records `renamed`.
-- **`duplicateStep`** sets `ids["$n"]` = the copy's ID.
-- **`setTrigger`** follows the Decisions semantics. An unknown type fails with `Unknown trigger type "<t>"` (`trigger.unknown`).
+- **`duplicateStep`** names the copy `copyName(displayName, <display names of all steps>)`, which reproduces the editor's `(copy)`, `(copy 2)`… sequence. It sets `ids["$n"]` = the copy's ID.
+- **`setTrigger`:** the same type with no `config` is a no-op; the same type with `config` merges it, like `setTriggerConfig`; a different type resets to the defaults, then merges `config`. An unknown type fails with `Unknown trigger type "<t>"` (`trigger.unknown`).
 - **`setOutput`**: removing the last key removes `doc.output`, as the store does today.
 - **`addSection`:**
   - `first`/`last` must be in one list and in order; otherwise it fails with `run.invalid`, with hint `{ first: location, last: location }`.
@@ -846,16 +856,24 @@ How each command behaves:
   - `ids["$n"]` = the section ID.
 - **`updateSection`** with `first`/`last` re-checks both rules. An unknown ID fails with `section.notFound`, whose hint lists the section IDs.
 - **`removeSection`** keeps the steps.
+- **Duplicated section IDs:** when two sections in `doc.sections` share an ID, `updateSection` and `removeSection` act on the **later** one.
 - **`annotationRepairs`**, by issue:
   - A broken section with one surviving endpoint: `updateSection`, shrinking it to that endpoint.
   - A broken section with no surviving endpoint: `removeSection`.
   - A reversed section: `updateSection`, swapping `first` and `last`.
+  - First and last in different branches: `updateSection { last: <first> }`, shrinking the section to its first step.
   - A bad colour: `updateSection { color: "gray" }`.
+  - A duplicate or invalid section ID: `removeSection` of that section (the later one, for a duplicate), then `addSection` with the same `first`, `last`, `title`, `color` and `note`, and a fresh ID from `sectionIdFor`.
   - `section.overlap`: `removeSection` of the later section.
   - `note.tooLong`: `setNote` (or `updateSection { note }`) cut to 4000 chars.
 
 **Tests must pin**
-- A table with one row per command: the normal case, plus `step.notFound`/`section.notFound` with the input left untouched.
+- A table with one row per command. Each row covers:
+  - the normal case
+  - `step.notFound`/`section.notFound`, with the input left untouched
+  - a `$n`-addressed row, where the target is created by an earlier command in the batch
+  - an atomic row: the command succeeds, and a failing next command leaves the input deep-equal to a pre-call `structuredClone`
+- `duplicateStep` twice on "Send email" names the copies "Send email (copy)" and "Send email (copy 2)". `copyName("A (copy 2)", {"A (copy)"})` is `"A (copy 2)"`.
 - No-op identity (M8), one row each, where `result.doc` `toBe` the input:
   - `renameStep` to the same name
   - `renameStepId` to the same ID
@@ -869,10 +887,9 @@ How each command behaves:
   - `setOutput` with an equal value
   - `renameWorkflow` with the same name
   - `updateSection` with the same values
-- `setType`: rows copied from the existing `replaceStep` store tests:
-  - a generated ID is regenerated, refs are rewritten, and `renamed` is set
-  - a chosen ID is kept
-  - a code-blocked rename is kept
+- `setType`: core-specific assertions only. The store's `replaceStep` tests keep covering the rest through Task 9.
+  - A generated ID is regenerated, and a `{{steps.<old>…}}` ref elsewhere is rewritten.
+  - `renamed` is `{ old: new }`, and `ids["$1"]` is the new ID.
 - `setTrigger`:
   - A different type resets the config to its defaults, then merges `config`.
   - The same type with `config` merges it.
@@ -886,9 +903,9 @@ How each command behaves:
   - `moveStep` of a section's `first` via `apply` shrinks the section.
   - ⌥↑ of an interior member via `moveStep` keeps the section (Review Focus 1).
 - `setNote` with 4001 chars fails with `command.invalid` at `commands[0].note`.
-- `annotationRepairs` fixes each issue kind, so `validateWorkflow` no longer reports it.
+- `annotationRepairs` fixes each issue kind, one row each: missing endpoint (one survivor and none), reversed, different branches, bad colour, duplicate ID, invalid ID, overlap and a long note. After applying the returned commands, `validateWorkflow` no longer reports the issue. For a duplicate ID, the first section keeps its ID and the later one gets `sectionIdFor(title)`.
 
-- [ ] **Step 1:** Failing tests. **Step 2:** Implement, and export `annotationRepairs`. **Step 3:** Gates. Commit `feat(core): single-step, trigger, output and section commands`.
+- [ ] **Step 1:** Failing tests. **Step 2:** Move `replaceStepType`, add `copyName` and implement the commands. Export `annotationRepairs`, `replaceStepType` and `copyName`. **Step 3:** Gates, including `pnpm vitest run --project react packages/react/src/store`. Commit `feat(core): single-step, trigger, output and section commands`.
 
 ---
 
@@ -896,7 +913,7 @@ How each command behaves:
 
 **Files:**
 - Create: `packages/core/src/agent/fragments.ts`
-- Modify: `agent/commands.ts` (declare `BulkCommand`), `agent/command-schema.ts`, `agent/apply.ts`
+- Modify: `agent/commands.ts` (declare `BulkCommand`), `agent/command-schema.ts`, `agent/apply.ts`, `packages/core/src/index.ts`
 - Test: `packages/core/src/agent/fragments.test.ts`
 
 **Interfaces**
@@ -930,7 +947,7 @@ type BulkCommand =
    - Branches must be declared by the node (`branchesFor` on the built step). An undeclared key fails with `branch.unknown` at `…steps[0].branches.<key>`, with the declared IDs as hint.
    - `syncBranches` fills in missing declared branches.
 2. **Insert and validate.** Insert the run at `at`, then validate the candidate doc once.
-   - Reject on the first issue among the inserted steps whose code is in the fragment reject list.
+   - Reject on the first issue among the inserted steps whose code is one of `node.unknown`, `branch.unknown`, `config.invalid`, `ref.syntax`, `ref.unresolved`, `ref.outOfScope`, `step.invalidId` or `step.duplicateId`. Every other issue, including `config.required` and warnings, goes to `issues.added`.
    - Map the issue back to its fragment path, e.g. `commands[i].steps[0].branches.else[1].config.to`.
    - Hints: for `ref.*`, the valid refs at that position; for `config.invalid`, `compactSchema` of that field (≤ 1500 chars).
 3. **Section.** `section` wraps the inserted top-level run as `{ id: section.id ?? sectionIdFor(title), first, last }`. Overlap with an existing section in that list fails with `section.overlap`.
@@ -968,7 +985,8 @@ type BulkCommand =
   - Replacing exactly a section's run makes the section span the new steps.
   - Reversed or two-list runs fail with `run.invalid`.
 - Atomicity (Review Focus 2): a failing fragment after a successful `insertSteps` in the same batch leaves the input doc untouched.
-- Schema split: `commandSchema(m, { internal: false })` rejects `verbatim`, while `internal: true` accepts it.
+- Schema split: `commandSchema(m, { internal: false })` rejects `verbatim` (the object is strict, so this fails with `command.invalid`), while `internal: true` accepts it.
+- Every placement row: the `$n` form (`insertSteps` at `{ after: "$1" }` after an `addStep`) and the atomic row (a failing next command) hold for both `insertSteps` and `replaceSteps`.
 
 - [ ] **Step 1:** Failing tests. **Step 2:** Implement, and export `Fragment`. **Step 3:** Gates. Commit `feat(core): insertSteps and replaceSteps with whole-fragment validation`.
 
@@ -993,8 +1011,10 @@ Produces:
  * that point at steps of the run to their copies. Refs to steps outside the run are kept.
  */
 export function cloneRunWithFreshIds(doc: WorkflowDoc, steps: readonly Step[]): { steps: Step[]; ids: Map<string, string> };
-// commands.ts — appended to BulkCommand
+// commands.ts
 export interface StepUpdate { id: StepRef; set?: { name?: string; disabled?: boolean; note?: string | null; color?: AnnotationColor | null }; config?: ConfigPatch }
+type BulkCommand =
+  | /* Task 6 members: insertSteps, replaceSteps */
   | { op: "duplicateSteps"; first: StepRef; last: StepRef; at?: At }      // default: right after last
   | { op: "updateSteps"; updates: StepUpdate[] }
   | { op: "updateSteps"; where: Where; set?: StepUpdate["set"]; config?: ConfigPatch; expect: number }
@@ -1002,13 +1022,16 @@ export interface StepUpdate { id: StepRef; set?: { name?: string; disabled?: boo
   | { op: "moveSteps"; first: StepRef; last: StepRef; to: At }
   | { op: "removeSteps"; ids: StepRef[] } | { op: "removeSteps"; first: StepRef; last: StepRef } | { op: "removeSteps"; where: Where; expect: number }
   | { op: "wrapSteps"; first: StepRef; last: StepRef; in: { type: string; branch: string; config?: Record<string, ValueExpr> } }
-  | { op: "unwrapStep"; id: StepRef; keep: string }
+  | { op: "unwrapStep"; id: StepRef; keep: string };
+// command-schema.ts (exported from the module for Task 8, not from index.ts)
+/** Strict Zod schema of `Where`, shared by the selector commands and the read argument schemas. */
+export const whereSchema: z.ZodType<Where>;
 ```
 
 How each command behaves:
 - **Selectors:** every selector command requires `expect`. A different match count fails with `expect.mismatch`, with hint `{ matched: [ids] }`. `expect: 0` with no matches is a no-op success that returns the input doc (`toBe`).
 - **`duplicateSteps`:**
-  - The copy comes from `cloneRunWithFreshIds`, and names get " (copy)" like `duplicateStep`.
+  - The copy comes from `cloneRunWithFreshIds`. Each top-level copy is named with `copyName`, like `duplicateStep`.
   - When the copy is inserted right after `last`, `upkeepSections` uses subst `last → [last, …copies]`, so copies of a section's run join it.
   - `ids["$n"]` = the first copy.
 - **`updateSteps`:**
@@ -1034,21 +1057,21 @@ How each command behaves:
   - `upkeepSections` uses subst `id → kept IDs`. A section from the kept branch that now overlaps an outer section in the lifted list is dropped by upkeep rule 4, and listed as `- ▣ <id>` in `changed`.
 
 **Tests must pin**
-- Each command: the normal case, `expect.mismatch` (with the matched IDs), and `expect: 0` as a `toBe` no-op.
+- Each command: the normal case; `expect.mismatch` (with the matched IDs) and `expect: 0` as a `toBe` no-op for selector forms; a `$n`-addressed row (`first`/`last`/`id` created earlier in the batch); and an atomic row, where a failing next command leaves the input deep-equal to a pre-call `structuredClone`.
 - `updateSteps` list form: two updates to the same step, where the second wins; `set.name: ""` clears the name.
 - The spec §8 section-upkeep matrix through commands, one row each. Each row asserts the final `sections`, and that `validateWorkflow` reports no `section.*` issue:
   - delete: `removeSteps` of the first member, of the last member, and of all members
   - move: `moveSteps` of the whole run, of a part, of one member out, and of an interior pair up one (which keeps them)
   - duplicate: `duplicateSteps` of the section's run, and of its last member
-  - wrap: the whole section run, a run inside a section, and a run overlapping a section's start (which is `run.invalid` only if the run crosses lists; otherwise the section shrinks per upkeep)
+  - wrap: the whole section run; a run inside a section; and a run overlapping a section's start, in the same list, where the wrapper takes the member's place and the section becomes `wrapper..last`
   - unwrap: inside a section, and with a kept branch that contains its own section
-  - replace: from Task 6, re-run here for completeness
+  - replace: covered by Task 6's `replaceSteps` rows, not repeated here
 - `cloneRunWithFreshIds([load, email(uses {{steps.load.x}})])`: the copy of `email` references the copy of `load`, and an outside ref stays unchanged. `duplicateSteps` gets the same result.
 - `replaceInConfig`: literals and templates are changed and `$ref`s are not.
 - `moveSteps` into its own subtree fails with `move.intoSelf`.
 - `unwrapStep` keeping `else`: the `else` steps are lifted in order, and the removed `if` steps are listed in `changed`.
 
-- [ ] **Step 1:** Failing tests. **Step 2:** Implement. Export `cloneRunWithFreshIds`, `StepUpdate` and `Where` (already exported). **Step 3:** Gates. Commit `feat(core): bulk edit and restructure commands with section upkeep`.
+- [ ] **Step 1:** Failing tests. **Step 2:** Implement. Export `cloneRunWithFreshIds` and `StepUpdate` from `index.ts` (`Where` is already exported). Export `whereSchema` from `command-schema.ts` only. **Step 3:** Gates. Commit `feat(core): bulk edit and restructure commands with section upkeep`.
 
 ---
 
@@ -1058,11 +1081,11 @@ How each command behaves:
 - Create: `packages/core/src/agent/catalog.ts`
 - Modify: `packages/core/src/index.ts`
 - Test: `packages/core/src/agent/catalog.test.ts` (fixture manifest), plus `examples/mini-crm/server/src/catalog.test.ts` and its snapshot `__snapshots__/catalog.test.ts.snap` (a snapshot against the mini-crm manifest)
-- Possibly modify: `examples/mini-crm/server/src/app.ts`, to export `createCrmRegistry()` building the same registry the app uses, if it isn't exported already.
+- Modify: `examples/mini-crm/server/src/app.ts`. Extract the inline `createRegistry([...])` (around line 170) into an exported `createCrmRegistry(): Registry`, and have the app use it.
 
 **Interfaces**
 
-Consumes: Tasks 2–3 `reads`/`ReadArgs`, Tasks 4–7 `apply`, `commandSchema(manifest, { internal: false })`, `opJsonSchema`.
+Consumes: Tasks 2–3 `reads`/`ReadArgs`, Tasks 4–7 `apply`, `commandSchema(manifest, { internal: false })`, `opJsonSchema`, and Task 7's `whereSchema` (from `agent/command-schema.ts`).
 
 Produces:
 ```ts
@@ -1073,16 +1096,20 @@ export type ToolState = { doc: WorkflowDoc; manifest: Manifest; ctx?: Validation
 export function runTool(state: ToolState, name: string, args: unknown):
   | { ok: true; result: unknown; doc?: WorkflowDoc }
   | { ok: false; error: { code: "tool.unknown" | "command.invalid"; message: string; path?: string } };
+/** Strict Zod schemas of each read's arguments (Where reuses whereSchema). The catalog's read input schemas are generated from these. */
+export const readArgSchemas: { [K in ReadToolName]: z.ZodType<ReadArgs[K]> };
+// examples/mini-crm/server/src/app.ts
+export function createCrmRegistry(): Registry;
 ```
 
 What the catalog contains:
 - **The `apply` tool.** Its input is `{ commands: Command[] }`. The schema is `z.toJSONSchema(z.object({ commands: z.array(commandSchema(manifest, { internal: false })) }), { target: "draft-2020-12", io: "input", reused: "ref" })`, with the top-level `$schema` removed. Shared pieces (the node-type enum, `At`, `Fragment`, `ValueExpr`, `Where`) sit once under `$defs`.
-- **One tool per read.** Names equal the read names, and the input schemas equal `ReadArgs[name]`.
+- **One tool per read.** Names equal the read names, and each input schema is `z.toJSONSchema(readArgSchemas[name], …)` with the same options.
 - **Manifest enums:**
   - node `type` fields, via one shared `$defs` enum
   - trigger `type` in `setTrigger`
   - `listNodeTypes.category`, from the manifest's categories
-  - `branch` fields, per the Decisions rule
+  - `branch` fields: an enum of the union of every node's static branch IDs, plus `body` for loops, **only when no node in the manifest has `fromConfig` branches**. Otherwise the field is a string, whose description says the valid IDs depend on the node, and says to use `describeNodeTypes`.
 - **Descriptions** are written for a model, each with one short JSON example.
   - `overview`: "Start here. Then describeNodeTypes for any node type you'll add."
   - `apply` explains:
@@ -1096,10 +1123,9 @@ What the catalog contains:
 - **Output:** plain JSON Schema, with no `x-flowline` keys.
 
 What `runTool` does:
-- For a read, it parses `args` with the read's argument schema, then calls `reads[name](state.doc, state.manifest, args, { ctx })`.
-- For `apply`, it parses `{ commands }` and calls `apply(state.doc, commands, state.manifest, { ctx })`.
+- For a read, it parses `args` with `readArgSchemas[name]`, then calls `reads[name](state.doc, state.manifest, args, { ctx })`. Bad read arguments fail with `command.invalid`, with `path`.
+- For `apply`, it checks only the envelope `{ commands: unknown[] }`; a bad envelope fails with `command.invalid`. Otherwise it calls `apply(state.doc, commands, state.manifest, { ctx })` and returns the `ApplyResult` as `result`, with `ok: true`. Command shape errors come back inside `result` (with `hint` and `more`), not as a `runTool` error.
 - An unknown tool fails with `tool.unknown`.
-- Bad arguments fail with `command.invalid`, with `path`.
 
 **Tests must pin**
 - Fixture manifest:
@@ -1111,12 +1137,17 @@ What `runTool` does:
   - The `setTrigger.type` enum equals the trigger types.
   - With no `fromConfig` node, `branch` is an enum; with one, it is a string.
 - `JSON.stringify(catalog)` contains no `x-flowline`, no `"$schema"`, no `nullIsValue` and no `verbatim`.
-- `runTool` round trip on a fixture: `overview`, then `apply`, then `getIssues`, feeding each call's `doc` into the next. An unknown tool fails with `tool.unknown`; bad args fail with `command.invalid` and a path.
+- `runTool` round trip on a fixture: `overview`, then `apply`, then `getIssues`, feeding each call's `doc` into the next.
+- `runTool` errors:
+  - an unknown tool fails with `tool.unknown`
+  - bad read args fail with `command.invalid` and a path
+  - `apply` with `{ commands: 3 }` fails with `command.invalid`
+  - `apply` with a malformed command returns `ok: true`, with `result.ok === false`, `result.error.code === "command.invalid"` and a `hint`
 - mini-crm:
   - `expect(commandCatalog(createCrmRegistry().manifest())).toMatchSnapshot()`.
   - `JSON.stringify(catalog).length < 40_000`, a size budget. If it fails, shrink the descriptions and `$defs`; don't raise the limit without the controller's approval.
 
-- [ ] **Step 1:** Failing tests. **Step 2:** Implement, and export `commandCatalog`, `ToolDefinition`, `runTool` and `ToolState`. **Step 3:** Write the snapshot with `pnpm vitest run --project mini-crm examples/mini-crm/server/src/catalog.test.ts -u`, run once. Review it by eye for the enums, `$defs` and descriptions. **Step 4:** Gates. Commit `feat(core): manifest-derived tool catalog and runTool`.
+- [ ] **Step 1:** Failing tests. **Step 2:** Implement, and export `commandCatalog`, `ToolDefinition`, `runTool`, `ToolState` and `readArgSchemas`. Extract `createCrmRegistry()`. **Step 3:** Write the snapshot with `pnpm vitest run --project mini-crm examples/mini-crm/server/src/catalog.test.ts -u`, run once. Review it by eye for the enums, `$defs` and descriptions. **Step 4:** Gates. Commit `feat(core): manifest-derived tool catalog and runTool`.
 
 ---
 
@@ -1130,7 +1161,7 @@ This task can run alongside Tasks 7–8. It touches only `packages/react/src/sto
 
 **Interfaces**
 
-Consumes: core `apply` with `{ trusted: true, report: false }`, `Command`, `At`, `Fragment`, `FlowlineCommandError` (Tasks 4–6).
+Consumes: core `apply` with `{ trusted: true, report: false }`, `Command`, `At`, `Fragment`, `FlowlineCommandError` (Tasks 4–6), and `copyName` (Task 5). Delete the private `copyName` in `editor-store.ts` and import core's.
 
 Produces:
 ```ts
@@ -1166,7 +1197,7 @@ The mapping from method to command:
 - `setTriggerConfig` → `setTriggerConfig`
 - `setOutput` → `setOutput`
 - `renameWorkflow` → `renameWorkflow`
-- `paste` → `insertSteps { verbatim: true, steps: [stepToFragment(cloneWithFreshIds(doc, clipboard))] }`
+- `paste` → `insertSteps { at: atFromLocation(doc, loc), verbatim: true, steps: [stepToFragment(cloneWithFreshIds(doc, clipboard))] }`
 
 These are not doc commands and stay as they are: `select`, `setServerIssues`, samples, `hydrateLocal`, `undo`, `redo`, `markSaved`, `markPublished`, `replaceDoc`, `copy`.
 
@@ -1174,7 +1205,8 @@ These are not doc commands and stay as they are: `select`, `setServerIssues`, sa
 - The whole existing `editor-store.test.ts` passes **without edits**, including the 200-step `< 20ms` revalidation test, clipboard lines 289/291, the unknown node and trigger messages, and the history round trip.
 - `editor-store.apply.test.ts`:
   - A failed action throws `FlowlineCommandError`, which is also `instanceof FlowlineTreeError`.
-  - A no-op action (`renameStep` to the same name, `toggleDisabled` twice then undo twice, `setTrigger` to the current type) adds no history entry.
+  - A no-op action adds no history entry: `renameStep` to the same name, and `setTrigger` to the current type.
+  - `toggleDisabled` twice, then `undo()` twice, returns the original doc object (`toBe`).
   - A paste of a step whose refs are out of scope at the target succeeds.
   - A paste keeps a config with a removed default key without that key.
 
@@ -1188,7 +1220,7 @@ These are not doc commands and stay as they are: `select`, `setServerIssues`, sa
 ### Task 10: react — store state, `apply` action, agent bridge, `onStoreReady`
 
 **Files:**
-- Modify: `packages/react/src/store/editor-store.ts`, `canvas/canvas-context.ts` (remove `readOnly` from `CanvasUiState`), `canvas/workflow-canvas.tsx` (the `readOnly` prop sets the store flag), `canvas/keyboard.ts` and `canvas/actions.ts` (read the store's `readOnly`), `editor/editor-load.ts` (store lifecycle), `editor/workflow-editor.tsx` (`onStoreReady`), `run/run-viewer.tsx` (`readOnly: true`), `index.ts`
+- Modify: `packages/react/src/store/editor-store.ts`, `canvas/canvas-context.ts` (remove `readOnly` from `CanvasUiState`), `canvas/workflow-canvas.tsx` (the `readOnly` prop sets the store flag), and the readers of the store's `readOnly`: `canvas/keyboard.ts`, `canvas/actions.ts`, `canvas/step-card.tsx` (line ~305), `canvas/edges.tsx` (line ~37) and `canvas/add-placeholder.tsx` (line ~23). Also modify `editor/editor-load.ts` (store lifecycle), `editor/workflow-editor.tsx` (`onStoreReady`), `run/run-viewer.tsx` (`readOnly: true`) and `index.ts`.
 - Create: `packages/react/src/agent-bridge.ts`
 - Test: `packages/react/src/store/editor-store.range.test.ts` (new), `packages/react/src/agent-bridge.test.tsx` (new), `editor/workflow-editor.test.tsx` (extend), `editor-store.test.ts` (unchanged)
 
@@ -1290,10 +1322,10 @@ Read-only as the single source of truth:
 
 ### Task 11: react — layout reserves space for sections and notes; loop routing
 
-This task can run alongside Tasks 2–10. It touches only `packages/react/src/layout/*`, `canvas/geometry.ts`, and four constant exports in `index.ts`, and it needs only Task 1's types.
+This task can run alongside Tasks 2–10. It touches only `packages/react/src/layout/*`, `canvas/geometry.ts`, and a few exports in `index.ts` (four constants and the `LayoutSection`/`LayoutNote` types), and it needs only Task 1's types. Keep every change additive, because Task 10 edits `workflow-canvas.tsx` at the same time.
 
 **Files:**
-- Modify: `packages/react/src/layout/constants.ts`, `packages/react/src/layout/layout-tree.ts`, `packages/react/src/canvas/geometry.ts`, `packages/react/src/index.ts` (export the new constants)
+- Modify: `packages/react/src/layout/constants.ts`, `packages/react/src/layout/layout-tree.ts`, `packages/react/src/canvas/geometry.ts`, `packages/react/src/index.ts` (export the new constants and the `LayoutSection`/`LayoutNote` types, with TSDoc)
 - Test: `packages/react/src/layout/layout-tree.test.ts` (extend; the existing snapshot must not change), `canvas/geometry.test.ts` (extend, or create if absent)
 
 **Interfaces**
@@ -1313,7 +1345,7 @@ export interface LayoutNote { id: string /* "note:<stepId>" */; stepId: string; 
 export function layoutTree(doc, manifest): { nodes: LayoutNode[]; edges: LayoutEdge[]; sections: LayoutSection[]; notes: LayoutNote[]; width: number; height: number };
 // geometry.ts
 export interface CanvasRect { x: number; y: number; w: number; h: number }
-export function edgeGeometries(nodes, edges, gutter, obstacles?: readonly CanvasRect[]): EdgeGeometry[];   // obstacles default []
+export function edgeGeometries(nodes, edges, gutter, obstacles?: readonly CanvasRect[]): Map<string, EdgeGeometry>;   // return type unchanged; obstacles default []
 ```
 
 Layout rules:
@@ -1351,7 +1383,7 @@ Layout rules:
 - A section whose member is a condition block has its rect bottom below the block's join node.
 - Colours and broken sections: a broken section gives no region and no throw; `color: "red"` on a valid run gives a region with `color: "gray"` (Review Focus 3).
 - Geometry: a loop whose body contains a section gets a `loopReturn` path whose x is left of the section rect. Without obstacles, the output is unchanged.
-- Determinism: laying out the same doc twice gives deep-equal results.
+- Determinism on the annotated fixture: sections in a branch, notes, and a loop with a section. Laying it out twice gives deep-equal results. The existing `layout-tree.test.ts:231` test covers plain docs.
 
 - [ ] **Step 1:** Failing tests. **Step 2:** Refactor sizes to extents, keeping the existing outputs byte-identical. Then add sections, notes and the geometry obstacles. **Step 3:** Run `pnpm vitest run --project react packages/react/src/layout packages/react/src/canvas/geometry.test.ts`, then the gates. Commit `feat(react): layout reserves space for sections and notes`.
 
@@ -1415,6 +1447,7 @@ What gets rendered:
   - The header chip and note are not buttons: no menu, no editing. They are still in the accessibility tree.
 - **CSS:**
   - 18 tokens (`--fl-annot-<c>-{bg,border,text}`) in the light `.fl-root` block, and identically in both dark blocks.
+  - `--fl-changed` is a derived `color-mix` token, and is exempt from the light/dark rule (Global Constraints). It inherits `--fl-accent`'s light and dark values, so it is declared once.
   - `--fl-changed: color-mix(in srgb, var(--fl-accent) 45%, transparent)` in the derived block.
   - `@keyframes fl-flash`: a box-shadow ring of `--fl-changed`, 900ms, applied via `.fl-card[data-flash]`. `@media (prefers-reduced-motion: reduce) { .fl-card[data-flash] { animation: none } }`.
 - **Playground:**
@@ -1445,7 +1478,7 @@ What gets rendered:
 
 **Files:**
 - Create: `packages/react/src/canvas/range-bar.tsx`
-- Modify: `canvas/workflow-canvas.tsx` (shift-click), `canvas/actions.ts` (`rangeActions`), `canvas/keyboard.ts` (⇧↑/⇧↓, ⌥↑/⌥↓, ⌘G, ⌘D/⌘C on a range, Esc clears the range), `canvas/step-card.tsx` (`data-in-range`), `canvas/context-menu.tsx` (range menu), `labels.ts`, `styles.css`
+- Modify: `canvas/workflow-canvas.tsx` (shift-click), `canvas/canvas-context.ts` (`renamingSection`), `canvas/actions.ts` (`rangeActions`), `canvas/keyboard.ts` (⇧↑/⇧↓, ⌥↑/⌥↓, ⌘G, ⌘D/⌘C on a range, Esc clears the range), `canvas/step-card.tsx` (`data-in-range`), `canvas/context-menu.tsx` (range menu), `labels.ts`, `styles.css`
 - Test: `packages/react/src/canvas/range.test.tsx` (new), `labels.test.ts`
 
 **Interfaces**
@@ -1456,7 +1489,7 @@ Produces:
 ```ts
 // actions.ts
 export interface RangeActions { group(): void; remove(): void; copy(): void; duplicate(): void; moveUp(): void; moveDown(): void; clear(): void }
-/** undefined without a range (or read-only). */
+/** undefined only without a range. In read-only mode group/remove/duplicate/moveUp/moveDown are no-ops; copy and clear work. */
 export function rangeActions(store: EditorStore, ui: CanvasUiStore, root: () => HTMLElement | null): RangeActions | undefined;
 // canvas-context.ts UI state
 renamingSection: string | null;   // set by group(); Task 14 renders the input
@@ -1489,7 +1522,8 @@ Behaviour:
 - ⇧↓ twice from a focused card selects three steps; Esc clears them.
 - ⌘G on a range creates a section titled "Section" and sets `renamingSection`. ⌘G overlapping an existing section shows a toast and changes nothing.
 - Range Duplicate, Copy + Paste, Move up and Move down produce the expected docs, and each is one undo step.
-- ⌥↑ on an interior section member keeps it in the section (Review Focus 1), shown by the region's `aria-label` group still containing it.
+- ⌥↑ on an interior section member keeps it in the section (Review Focus 1). Assert both ways: `sectionRun(store.getState().doc, s).ids` contains the moved ID, and the rendered region's rect (from `layoutTree`) contains the moved card's rect.
+- Read-only: with a range, the RangeBar shows only Copy and Clear, and `rangeActions(...).remove()` leaves the doc unchanged.
 - Label override: rendering with `labels={{ groupIntoSection: "Grouper" }}` shows "Grouper".
 
 - [ ] **Step 1:** Failing tests. **Step 2:** Implement. **Step 3:** Gates including e2e. Commit `feat(react): range selection, range toolbar and move keys`.
@@ -1570,11 +1604,10 @@ Behaviour:
 **Files:**
 - Create: `packages/react/src/canvas/delete-key.ts`
 - Modify:
-  - `canvas/keyboard.ts`: Delete/Backspace no longer blocked by `ownsKey` on non-text controls; range delete
+  - `canvas/keyboard.ts`: `ownsKey` no longer blocks Delete/Backspace on the card "…" trigger and the "+" insert buttons. Toast buttons and menus keep `ownsKey`. Also range delete.
   - `canvas/workflow-canvas.tsx`: register the editor-scope handler
   - `editor/workflow-editor.tsx`: `EditorBody` provides its body element through `DeleteScopeContext`
   - `canvas/section-node.tsx`, `canvas/note-node.tsx`: Delete/Backspace on a focused chip or note
-  - `labels.ts`: `sectionDeleted` and `noteDeleted` already exist from Task 14
 - Test: `packages/react/src/editor/delete-key.test.tsx` (new), `canvas/keyboard.test.ts` or `canvas/canvas.test.tsx` (add one new `describe` for the deliberate change; existing cases unchanged)
 
 **Interfaces**
@@ -1606,7 +1639,12 @@ Where it applies:
 - keydowns inside the editor body but outside the canvas: the config panel header, tabs, buttons and other non-text controls
 - keydowns whose target is `document.body`, when the last `pointerdown` in the document was inside this editor
 
-**Deliberate change (S15):** Backspace/Delete on the canvas's own non-text buttons, the card "…" menu trigger and the "+" insert button, now deletes the selected step. Today `ownsKey` ignores it. Other plain keys on those buttons (Enter, Space) still belong to the button. In read-only mode, nothing is deleted.
+**Deliberate change (S15), and its limits:**
+- Backspace/Delete now deletes the selected step on exactly these: the card "…" menu trigger, the "+" insert buttons, and non-text controls in the editor body outside the canvas.
+- Today `ownsKey` ignores Delete/Backspace on those buttons.
+- Toast buttons, such as Undo, and open menus keep `ownsKey`, so Backspace there deletes nothing.
+- Other plain keys on these buttons (Enter, Space) still belong to the button.
+- In read-only mode, nothing is deleted.
 
 **Tests must pin**
 - **Step 1 reproduces the reported bug first.**
@@ -1635,7 +1673,10 @@ Where it applies:
   | read-only editor | nothing |
   | `document.body`, after clicking in the editor | deletes |
   | `document.body`, after clicking outside the editor | nothing |
-- The deliberate change, as a new `describe` in the canvas tests: with a step selected, Backspace on its "…" trigger button deletes it, and so does Backspace on a "+" button. Enter on "+" still opens the picker.
+- The deliberate change, as a new `describe` in the canvas tests:
+  - With a step selected, Backspace on its "…" trigger button deletes it, and so does Backspace on a "+" button.
+  - Enter on "+" still opens the picker.
+- Must stay green, unchanged: `canvas.test.tsx` "Backspace on the toast's Undo button doesn't delete the selected step" (line ~518).
 - Exactly one deletion per keypress, with no double handling between the canvas root and the scope handler: after one Backspace, the undo history grows by exactly one.
 - The existing canvas keyboard tests pass unchanged.
 
@@ -1669,13 +1710,13 @@ These IDs are the real top-level IDs of `deal-stuck.ts`, and both runs are conti
 - `app.test.ts`: after seeding, `GET /flowline/workflows/<DEAL_STUCK_WORKFLOW_ID>` returns the doc with both sections and both notes, and publishing it has no errors.
 - `e2e/annotations.spec.ts`:
   1. "groups two steps into a section, colours it, adds a note, ungroups and deletes through the UI":
-     1. Open the deal-stuck workflow, click one card, shift-click the next, and press ⌘G/Ctrl+G.
+     1. Open the deal-stuck workflow. Click the `owner` card, shift-click `nudge` (both outside the seeded sections), and press ⌘G/Ctrl+G.
      2. Type "Owner loop" + Enter. Expect a group named "Owner loop".
      3. Open its chip menu → Color → Green. Expect the region's `data-color="green"`.
-     4. Open a step's "…" → Add note, type "Check the owner", and click the canvas. Expect a note "Note: Check the owner".
+     4. Open `owner`'s "…" → Add note (`owner` has no seeded note), type "Check the owner", and click the canvas. Expect a note "Note: Check the owner".
      5. Chip menu → Ungroup. Expect no group "Owner loop".
-     6. Select a step, click into the panel header, and press Backspace. Expect the step gone and the Undo toast.
-     7. Save, reload, and expect the note to persist.
+     6. Select `wait`, click into the panel header, and press Backspace. Expect the step gone and the Undo toast. Click Undo and expect `wait` back, so the saved doc keeps every seeded step.
+     7. Save (saving never publishes, so the published version `triggers.spec.ts` relies on is untouched), reload, and expect the note on `owner` to persist.
   2. "seeded sections and notes render in light and dark":
      1. Open the deal-stuck workflow and expect groups "Check the deal is still stuck" and "Escalate".
      2. Save `page.screenshot` to `test-results/annotations-light.png`.
@@ -1698,7 +1739,14 @@ These IDs are the real top-level IDs of `deal-stuck.ts`, and both runs are conti
 
 **Interfaces**
 
-Consumes: all public APIs. Produces docs whose TypeScript blocks typecheck under `examples/docs-check`, and this changeset:
+Consumes: all public APIs, and `createCrmRegistry()` from `examples/mini-crm/server/src/app.ts` (Task 8), which supplies the manifest for the scenario.
+
+**Precondition (check first):**
+- 0.2.0 is versioned and released on `main`: `.changeset/triggers-conditions.md` no longer exists, and every package's `package.json` reads `0.2.0`.
+- The controller has merged that release into the integration branch.
+- If either is false, stop and report to the controller. With the precondition met, this task's changeset is the only pending one, and `changeset version` yields `0.3.0`.
+
+Produces docs whose TypeScript blocks typecheck under `examples/docs-check`, and this changeset:
 ```md
 ---
 "@flowlinejs/core": minor
@@ -1726,8 +1774,9 @@ and "+" buttons deletes the selected step.
   2. One `apply` containing:
      - `setTrigger` (`crm.dealStuckInStage`, `{ stage: "proposal", days: 3 }`)
      - `renameWorkflow`
-     - one `insertSteps` that builds the whole flow of the 0.2.0 spec §7.5, with `ref`s used in `{{ steps.$deal… }}` templates and the `check_deal` section
-     - an `addSection` for `escalate_block`
+     - one `insertSteps` at `{ start: true }` that builds the whole flow of the 0.2.0 spec §7.5, with `ref`s used in `{{ steps.$deal… }}` templates and no `section`
+     - `addSection` for `check_deal` over `deal..still_there`, with its note
+     - `addSection` for `escalate_block` over `recheck..escalate`
      - two `setNote`s
   3. `getIssues`.
 
@@ -1737,7 +1786,7 @@ and "+" buttons deletes the selected step.
   - Every tool name used is in the catalog.
   - Every `apply` input parses with `commandSchema(manifest, { internal: false })`.
 - `examples/docs-check` passes: every new block is annotated and typechecks. The core README snippet runs `apply` and `overview` on a small doc.
-- The changeset lists all six packages as `minor`, and `pnpm changeset status` reports one release at the next minor for the group.
+- The changeset lists all six packages as `minor`. `pnpm changeset status` reports exactly one pending changeset, releasing the group at `0.3.0`.
 
 - [ ] **Step 1:** Write the agent scenario and run it. It should PASS against the finished code. If it needs more than four calls, fix the catalog or reads, not the test.
 - [ ] **Step 2:** Write the docs. Run `pnpm vitest run --project docs-check`.
@@ -1755,4 +1804,5 @@ and "+" buttons deletes the selected step.
   - Reads on 500 steps stay within budget, and their follow-ups return all hidden content (Tasks 2 and 3).
   - Docs from before 0.3.0 load and run unchanged (Task 1).
 - `editor-store.test.ts` is byte-identical to its state at `4ca8b18`.
-- The full gate sequence passes on `flowkit-v1`, and the only changeset is Task 17's.
+- The full gate sequence passes on `flowkit-v1`.
+- 0.2.0 was already released, so `.changeset/` holds only Task 17's changeset, and `changeset version` bumps all six packages from `0.2.0` to `0.3.0`.
