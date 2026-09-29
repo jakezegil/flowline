@@ -337,6 +337,28 @@ describe("WorkflowCanvas", () => {
     expect(summary2?.textContent).toBe("When any of: a, b, c, +1 more");
   });
 
+  test("a poll trigger's card caption uses labels.triggerPoll(interval)", () => {
+    const [created, ...rest] = manifest.triggers;
+    const poll = {
+      ...(created as NonNullable<typeof created>),
+      type: "crm.dealStuckInStage",
+      kind: "poll" as const,
+      event: undefined,
+      interval: 300_000,
+    };
+    const doc = fixtureDoc();
+    store = createEditorStore({
+      doc: { ...doc, trigger: { ...doc.trigger, type: "crm.dealStuckInStage", config: {} } },
+      manifest: { ...manifest, triggers: [poll, ...rest] },
+    });
+    render(<WorkflowCanvas store={store} />);
+    const summary = document.querySelector(
+      `.react-flow__node[data-id="trigger"] .fl-card__summary`,
+    );
+    expect(summary?.textContent).toBe(defaultLabels.triggerPoll(300_000));
+    expect(summary?.textContent).toBe("Checks every 5 minutes");
+  });
+
   test("L19: right-click with no panel open doesn't open one", () => {
     render(<WorkflowCanvas store={store} />);
     fireEvent.contextMenu(card("email").querySelector(".fl-card") as HTMLElement);

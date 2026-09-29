@@ -38,6 +38,8 @@ export interface FlowlineLabels {
   triggerManual: string;
   triggerSchedule(cron: string | undefined): string;
   triggerSubflow: string;
+  /** A poll trigger's caption and config-panel hint: "Checks every 5 minutes". */
+  triggerPoll(intervalMs: number): string;
 
   // Step cards
   /** Subtitle of a step whose type isn't in the manifest. */
@@ -443,6 +445,8 @@ export interface FlowlineLabels {
   started(relative: string): string;
   /** What started a run. */
   origin(origin: RunOrigin): string;
+  /** A poll run's origin, naming the item that started it: "Polled (item deal_123)". */
+  originPoll(itemKey: string): string;
   retryFromFailed: string;
   retryStarted: string;
   retryFailed(message: string): string;
@@ -556,6 +560,27 @@ export function formatDuration(ms: number): string {
   return pair(Math.floor(ms / 86_400_000), "d", Math.floor((ms % 86_400_000) / 3_600_000), "h");
 }
 
+/**
+ * Formats a poll interval as a natural-language phrase for "Checks every …": `"5 minutes"`,
+ * `"10 seconds"`, `"2 hours"`, `"3 days"` — singular for exactly one (`"every minute"`, not
+ * `"every 1 minute"`).
+ */
+export function formatPollInterval(ms: number): string {
+  const units: [number, string][] = [
+    [86_400_000, "day"],
+    [3_600_000, "hour"],
+    [60_000, "minute"],
+    [1000, "second"],
+  ];
+  for (const [size, name] of units) {
+    if (ms >= size) {
+      const n = Math.round(ms / size);
+      return n === 1 ? `every ${name}` : `every ${n} ${name}s`;
+    }
+  }
+  return "every second";
+}
+
 /** "Subject" → "No subject"; acronyms like "URL" keep their case. */
 function noValue(label: string): string {
   const second = label.charAt(1);
@@ -593,6 +618,7 @@ export const defaultLabels: FlowlineLabels = {
   triggerManual: "When run manually",
   triggerSchedule: (cron) => (cron ? `On schedule ${cron}` : "On a schedule"),
   triggerSubflow: "When called by another workflow",
+  triggerPoll: (intervalMs) => `Checks ${formatPollInterval(intervalMs)}`,
 
   unknownStep: (type) => `Unknown step type ${type}`,
   noConditions: "No conditions",
@@ -954,9 +980,10 @@ export const defaultLabels: FlowlineLabels = {
       case "subflow":
         return "Called by another workflow";
       case "poll":
-        return `Polled (item ${o.itemKey})`;
+        return defaultLabels.originPoll(o.itemKey);
     }
   },
+  originPoll: (itemKey) => `Polled (item ${itemKey})`,
   retryFromFailed: "Retry from failed step",
   retryStarted: "Retry started",
   retryFailed: (m) => `Couldn't retry. ${m}`,
@@ -1069,7 +1096,7 @@ function relativeTime(deltaMs: number): string {
 /** `defaultLabels` with `overrides` applied (record-valued labels merge key by key). */
 export function resolveLabels(overrides: Partial<FlowlineLabels> | undefined): FlowlineLabels {
   if (!overrides) return defaultLabels;
-  return {
+  const merged: FlowlineLabels = {
     ...defaultLabels,
     ...overrides,
     runStatus: { ...defaultLabels.runStatus, ...overrides.runStatus },
@@ -1084,4 +1111,13 @@ export function resolveLabels(overrides: Partial<FlowlineLabels> | undefined): F
     fieldTypes: { ...defaultLabels.fieldTypes, ...overrides.fieldTypes },
     testSignal: { ...defaultLabels.testSignal, ...overrides.testSignal },
   };
+  // The default `origin` renders a poll run's origin through `originPoll`. A host that overrides
+  // `origin` itself always wins outright (for every kind); one that overrides only `originPoll`
+  // still needs it to reach `origin`'s output, so re-derive `origin`'s poll case from the merged
+  // `originPoll` in that case.
+  if (overrides.origin === undefined) {
+    const { originPoll } = merged;
+    merged.origin = (o) => (o.kind === "poll" ? originPoll(o.itemKey) : defaultLabels.origin(o));
+  }
+  return merged;
 }

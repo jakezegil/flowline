@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultLabels, formatDuration } from "./labels";
+import { defaultLabels, formatDuration, resolveLabels } from "./labels";
 
 describe("formatDuration", () => {
   it("scales from milliseconds to days", () => {
@@ -43,5 +43,51 @@ describe("triggerEventsHint", () => {
     expect(hint).toContain("ai_call.ended");
     expect(hint).toContain("voip_call.ended");
     expect(hint).toMatch(/normalized/i);
+  });
+});
+
+describe("triggerPoll", () => {
+  it("reads naturally for seconds, minutes, hours and days", () => {
+    expect(defaultLabels.triggerPoll(300_000)).toBe("Checks every 5 minutes");
+    expect(defaultLabels.triggerPoll(10_000)).toBe("Checks every 10 seconds");
+    expect(defaultLabels.triggerPoll(3_600_000)).toBe("Checks every hour");
+    expect(defaultLabels.triggerPoll(2 * 3_600_000)).toBe("Checks every 2 hours");
+    expect(defaultLabels.triggerPoll(86_400_000)).toBe("Checks every day");
+    expect(defaultLabels.triggerPoll(2 * 86_400_000)).toBe("Checks every 2 days");
+  });
+
+  it("uses the singular for exactly one interval, not '1 minute'", () => {
+    expect(defaultLabels.triggerPoll(60_000)).toBe("Checks every minute");
+  });
+});
+
+describe("originPoll", () => {
+  it("names the item that started the run", () => {
+    expect(defaultLabels.originPoll("deal_123")).toBe("Polled (item deal_123)");
+  });
+});
+
+describe("origin", () => {
+  it("renders a poll origin through originPoll", () => {
+    const origin = { kind: "poll" as const, since: 0, until: 1, itemKey: "deal_123" };
+    expect(defaultLabels.origin(origin)).toBe(defaultLabels.originPoll("deal_123"));
+  });
+});
+
+describe("resolveLabels: Ruling 102", () => {
+  const pollOrigin = { kind: "poll" as const, since: 0, until: 1, itemKey: "deal_123" };
+
+  it("an originPoll-only override reaches origin's poll rendering", () => {
+    const labels = resolveLabels({ originPoll: (k) => `X ${k}` });
+    expect(labels.origin(pollOrigin)).toBe("X deal_123");
+  });
+
+  it("an origin override wins outright, for every kind, even with originPoll overridden too", () => {
+    const labels = resolveLabels({
+      origin: () => "custom",
+      originPoll: (k) => `X ${k}`,
+    });
+    expect(labels.origin(pollOrigin)).toBe("custom");
+    expect(labels.origin({ kind: "manual" })).toBe("custom");
   });
 });

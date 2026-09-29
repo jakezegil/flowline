@@ -72,3 +72,32 @@ describe("TriggerConfigure: multi-event triggers", () => {
     expect(option?.textContent).toContain("contact.created");
   });
 });
+
+const pollTrigger = {
+  ...(manifest.triggers[0] as NonNullable<(typeof manifest.triggers)[0]>),
+  type: "crm.dealStuckInStage",
+  name: "Deal stuck in stage",
+  kind: "poll" as const,
+  event: undefined,
+  interval: 300_000,
+  config: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    properties: { days: { type: "number", default: 3, "x-flowline": { label: "Days in stage" } } },
+  },
+};
+
+const withPoll: Manifest = {
+  ...manifest,
+  triggers: [pollTrigger, ...manifest.triggers.slice(1)],
+};
+
+describe("TriggerConfigure: poll triggers", () => {
+  test("shows the poll hint and the config form, not a webhook URL or event callout", () => {
+    setup(withPoll, "crm.dealStuckInStage");
+    expect(screen.getByText("Checks every 5 minutes")).toBeTruthy();
+    expect(screen.queryByText(/webhook/i)).toBeNull();
+    expect(screen.queryByText(/Runs every time the/)).toBeNull();
+    expect(screen.getByLabelText("Days in stage")).toBeTruthy();
+  });
+});

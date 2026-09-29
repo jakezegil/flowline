@@ -54,6 +54,42 @@ describe("RunList", () => {
     expect(onSelect).toHaveBeenCalledWith("r1");
   });
 
+  it("renders a poll run's origin with labels.originPoll(itemKey)", async () => {
+    const client = mockClient({
+      listRuns: vi.fn(async () => [
+        row("r1", "completed", {
+          startedBy: { kind: "poll", since: 0, until: 1, itemKey: "deal_123" },
+        }),
+      ]),
+    });
+    render(
+      <FlowlineProvider client={client}>
+        <RunList workflowId="welcome" onSelect={() => {}} />
+      </FlowlineProvider>,
+    );
+    const list = await screen.findByRole("list", { name: "Runs" });
+    const row1 = within(list).getByRole("button", { name: /Completed/ });
+    expect(row1.textContent).toContain("Polled (item deal_123)");
+  });
+
+  it("Ruling 102: a host overriding only originPoll sees it in the rendered origin", async () => {
+    const client = mockClient({
+      listRuns: vi.fn(async () => [
+        row("r1", "completed", {
+          startedBy: { kind: "poll", since: 0, until: 1, itemKey: "deal_123" },
+        }),
+      ]),
+    });
+    render(
+      <FlowlineProvider client={client} labels={{ originPoll: (k) => `X ${k}` }}>
+        <RunList workflowId="welcome" onSelect={() => {}} />
+      </FlowlineProvider>,
+    );
+    const list = await screen.findByRole("list", { name: "Runs" });
+    const row1 = within(list).getByRole("button", { name: /Completed/ });
+    expect(row1.textContent).toContain("X deal_123");
+  });
+
   it("filters by status", async () => {
     const client = mockClient({ listRuns: vi.fn(async () => []) });
     render(
