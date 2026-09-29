@@ -3,7 +3,7 @@ import { findStep } from "../tree";
 import type { Manifest, NodeManifest, Section, Step, WorkflowDoc } from "../types";
 import { apply } from "./apply";
 import { commandSchema } from "./command-schema";
-import type { ApplyResult, Command } from "./commands";
+import type { ApplyResult, Command, Fragment } from "./commands";
 import { richManifest } from "./fixtures";
 
 const countNode: NodeManifest = {
@@ -1027,5 +1027,195 @@ describe("schema", () => {
     const r = fail(apply(doc(), [{ op: "insertSteps", at: { start: true }, steps: [] }], m));
     expect(r.error.code).toBe("command.invalid");
     expect(r.error.path).toBe("commands[0].steps");
+  });
+});
+
+describe("fix round 1", () => {
+  const x = (id: string): Fragment => ({ id, type: "flow.delay", config: { duration: "1m" } });
+
+  test("I1: replaceSteps across a section boundary shrinks both sections", () => {
+    const r = ok(
+      apply(
+        flat([sec("s1", "a", "b"), sec("s2", "c", "d")]),
+        [{ op: "replaceSteps", first: "b", last: "c", steps: [x("x"), x("y")] }],
+        m,
+      ),
+    );
+    expect(top(r.doc)).toEqual(["a", "x", "y", "d"]);
+    expect(r.doc.sections).toEqual([sec("s1", "a", "a"), sec("s2", "d", "d")]);
+  });
+
+  test("I1: a section holding part of the run doesn't grow over the new steps", () => {
+    const r = ok(
+      apply(
+        flat([sec("s1", "a", "b")]),
+        [{ op: "replaceSteps", first: "b", last: "c", steps: [x("x"), x("y")] }],
+        m,
+      ),
+    );
+    expect(r.doc.sections).toEqual([sec("s1", "a", "a")]);
+  });
+
+  test("I1: a section wholly inside the run is removed", () => {
+    const r = ok(
+      apply(
+        flat([sec("s1", "b", "b")]),
+        [{ op: "replaceSteps", first: "b", last: "c", steps: [x("x")] }],
+        m,
+      ),
+    );
+    expect(r.doc.sections).toBeUndefined();
+  });
+
+  test("M3: a nested section doesn't come back when a new step reuses a member's ID", () => {
+    const d: WorkflowDoc = {
+      ...flat(),
+      steps: [
+        {
+          id: "c1",
+          type: "flow.if",
+          config: { value: true },
+          // biome-ignore lint/suspicious/noThenProperty: a branch ID, not a thenable
+          branches: { then: [delay("p"), delay("q")], else: [] },
+        },
+        delay("z"),
+      ],
+      sections: [sec("inner", "p", "q")],
+    };
+    const r = ok(apply(d, [{ op: "replaceSteps", first: "c1", last: "c1", steps: [x("p")] }], m));
+    expect(top(r.doc)).toEqual(["p", "z"]);
+    expect(r.doc.sections).toBeUndefined();
+  });
+
+  test("M4: a replaceSteps that changes nothing returns the input doc", () => {
+    const d = flat([sec("s", "a", "b")]);
+    const r = ok(apply(d, [{ op: "replaceSteps", first: "a", last: "a", steps: [x("a")] }], m));
+    expect(r.doc).toBe(d);
+    expect(r.ids).toEqual({ $1: "a" });
+  });
+
+  test.each([false, true])("M1: a __proto__ config key stays an own key (verbatim %s)", (v) => {
+    const cmd = JSON.parse(
+      `{"op":"insertSteps","at":{"start":true},${v ? '"verbatim":true,' : ""}"steps":[{"id":"s","type":"crm.sendEmail","config":{"__proto__":{"to":"x@y"},"subject":"s"}}]}`,
+    ) as Command;
+    const r = ok(apply(doc(), [cmd], m, { trusted: true }));
+    const config = r.doc.steps[0]?.config as Record<string, unknown>;
+    expect(Object.keys(config)).toEqual(["__proto__", "subject"]);
+    expect(Object.getPrototypeOf(config)).toBe(Object.prototype);
+    expect(config.to).toBeUndefined();
+  });
+
+  test.each([
+    ["a disabled fragment", { at: { start: true } as const, disabled: true }],
+    [
+      "a fragment in a disabled block",
+      { at: { in: { stepId: "check", branch: "then" } } as const, disabled: false },
+    ],
+  ])("M7: %s is still rejected by code", (_, { at, disabled }) => {
+    const d = doc();
+    (d.steps[1] as Step).disabled = !disabled;
+    const r = fail(
+      apply(
+        d,
+        [
+          {
+            op: "insertSteps",
+            at,
+            steps: [{ type: "flow.delay", disabled, config: { duration: 5 } }],
+          },
+        ],
+        m,
+      ),
+    );
+    expect(r.error.code).toBe("config.invalid");
+    expect(r.error.path).toBe("commands[0].steps[0].config.duration");
+  });
+
+  test.each([
+    ["color", { color: "red" }],
+    ["note", { note: "x".repeat(4001) }],
+  ])("M8: a bad fragment %s fails in trusted mode too", (field, extra) => {
+    const r = fail(
+      apply(
+        doc(),
+        [
+          {
+            op: "insertSteps",
+            at: { start: true },
+            steps: [{ type: "flow.if", branches: { else: [{ type: "flow.stop", ...extra }] } }],
+          } as unknown as Command,
+        ],
+        m,
+        { trusted: true },
+      ),
+    );
+    expect(r.error.code).toBe("command.invalid");
+    expect(r.error.path).toBe(`commands[0].steps[0].branches.else[0].${field}`);
+  });
+
+  test("M6: a nested config key holding a dot maps back whole", () => {
+    const node: NodeManifest = {
+      ...countNode,
+      type: "util.headers",
+      input: {
+        type: "object",
+        properties: {
+          headers: { type: "object", additionalProperties: { type: "string" } },
+        },
+      },
+    };
+    const mm: Manifest = { ...m, nodes: [...m.nodes, node] };
+    const r = fail(
+      apply(
+        doc(),
+        [
+          {
+            op: "insertSteps",
+            at: { start: true },
+            steps: [{ type: "util.headers", config: { headers: { "x.y": 5 } } }],
+          },
+        ],
+        mm,
+      ),
+    );
+    expect(r.error.code).toBe("config.invalid");
+    expect(r.error.path).toBe('commands[0].steps[0].config.headers["x.y"]');
+  });
+
+  test("M2: the hint for a field under $defs is its schema", () => {
+    const r = fail(
+      apply(
+        doc(),
+        [
+          {
+            op: "insertSteps",
+            at: { start: true },
+            steps: [
+              {
+                type: "flow.condition",
+                config: { rules: { combinator: "and", rules: [{ left: "x", op: "bad" }] } },
+              },
+            ],
+          },
+        ],
+        m,
+      ),
+    );
+    expect(r.error.code).toBe("config.invalid");
+    expect(r.error.path).toBe("commands[0].steps[0].config.rules.rules[0].op");
+    const expected = (r.error.hint as { expected: { enum?: unknown } }).expected;
+    expect(expected.enum).toEqual(["eq", "isUnassigned"]);
+  });
+
+  test("M5: a 2000-step run inserts in one pass", () => {
+    const steps = Array.from({ length: 2000 }, (_, i) => x(`n${i}`));
+    const r = ok(
+      apply(doc(), [{ op: "insertSteps", at: { start: true }, steps }], m, {
+        trusted: true,
+        report: false,
+      }),
+    );
+    expect(r.doc.steps).toHaveLength(2003);
+    expect(r.doc.steps[1999]?.id).toBe("n1999");
   });
 });

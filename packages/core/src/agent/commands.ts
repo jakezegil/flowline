@@ -166,12 +166,15 @@ export interface Fragment {
  * - `insertSteps` inserts a run of new steps (with nested branches) at `at`. The whole fragment
  *   is validated at once: an unknown node type or branch, an invalid config value, or a ref that
  *   is unknown, malformed or out of scope at its position fails the batch; a missing required
- *   field and warnings are only reported. `section` wraps the inserted top-level run in a new
+ *   field and warnings are only reported. The reject list goes by code, not severity: a
+ *   disabled fragment (or one inside a disabled block) with such a problem fails too, although
+ *   the validator reports it there as a warning. `section` wraps the inserted top-level run in a new
  *   section (`section.overlap` if that overlaps one in the same list). `$n` is the first
  *   top-level inserted step.
  * - `replaceSteps` removes the run `first`…`last` (one list, in order; `run.invalid` otherwise)
- *   and inserts `steps` in its place, validated as in `insertSteps`. A section holding the run
- *   holds the new steps. Refs elsewhere to the removed steps are reported, not rejected. `$n`
+ *   and inserts `steps` in its place, validated as in `insertSteps`. A section holding the whole
+ *   run holds the new steps; a section holding part of it shrinks to its remaining members, and
+ *   one inside the replaced steps is removed. Replacing a run with identical steps changes nothing. Refs elsewhere to the removed steps are reported, not rejected. `$n`
  *   is the first new top-level step.
  *
  * @example

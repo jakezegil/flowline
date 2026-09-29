@@ -180,6 +180,32 @@ export function insertStep(doc: WorkflowDoc, loc: StepLocation, step: Step): Wor
   return replaceList(doc, loc.parentId, loc.branch, newList);
 }
 
+/**
+ * @internal Inserts `steps` as one run starting at `loc` (one list copy), as {@link insertStep}
+ * would one by one: throws {@link FlowlineTreeError} for a missing list, an out-of-range index,
+ * or a top-level ID already used (in the doc or earlier in `steps`).
+ */
+export function insertStepRun(doc: WorkflowDoc, loc: StepLocation, steps: Step[]): WorkflowDoc {
+  const taken = allStepIds(doc);
+  for (const step of steps) {
+    if (taken.has(step.id)) {
+      throw new FlowlineTreeError(`Step id "${step.id}" already exists in the workflow`);
+    }
+    taken.add(step.id);
+  }
+  const list = getList(doc, loc.parentId, loc.branch);
+  if (!list) {
+    throw new FlowlineTreeError(
+      `Cannot insert into parent "${loc.parentId ?? "<root>"}" branch "${loc.branch ?? ""}": not found`,
+    );
+  }
+  if (loc.index < 0 || loc.index > list.length) {
+    throw new FlowlineTreeError(`Insert index ${loc.index} out of range [0, ${list.length}]`);
+  }
+  const newList = [...list.slice(0, loc.index), ...steps, ...list.slice(loc.index)];
+  return replaceList(doc, loc.parentId, loc.branch, newList);
+}
+
 /** {@link removeStep} without section upkeep. */
 function removeRaw(doc: WorkflowDoc, id: string): { doc: WorkflowDoc; found: FoundStep } {
   const found = findStep(doc, id);

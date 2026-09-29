@@ -3,26 +3,27 @@
  * built whole, inserted, and the candidate doc validated once; a problem on an inserted step
  * whose code is on the fragment reject list fails the command at the fragment's path.
  *
- * Section upkeep: `replaceSteps` removes the run and then upkeeps the sections once, from the
- * input doc, with every replaced member standing for the new top-level steps (`subst`), so a
- * section holding the run holds the new steps.
+ * Section upkeep: `replaceSteps` removes the run and then upkeeps each section once, from the
+ * input doc: in a section holding the whole run the replaced members stand for the new top-level
+ * steps (`subst`), so it holds the new steps; every other section just loses the removed steps
+ * (see `replacedSections`).
  *
  * @module
  */
-import { upkeepSections } from "../annotations";
+import { sectionRun, upkeepSections } from "../annotations";
 import { isValidStepId, RESERVED_STEP_IDS, STEP_ID_PATTERN } from "../ids";
-import { branchesFor, configValueAt, schemaAtPath } from "../json-schema";
-import { createStep, syncBranches } from "../step-factory";
+import { branchesFor, carryDefs, configValueAt, derefSchema, schemaAtPath } from "../json-schema";
+import { createStep, jsonEqual, syncBranches } from "../step-factory";
 import {
   allStepIds,
   branchList,
   findStep,
   freshStepId,
-  insertStep,
+  insertStepRun,
   removeStep,
   type StepLocation,
 } from "../tree";
-import type { NodeManifest, Section, Step, ValueExpr, WorkflowDoc } from "../types";
+import type { JSONSchema, NodeManifest, Section, Step, ValueExpr, WorkflowDoc } from "../types";
 import { type IssueCode, validateWorkflow } from "../validate";
 import { fitSchemaHint, formatPath } from "./command-schema";
 import {
@@ -182,6 +183,9 @@ function plan(b: Build, frags: unknown, path: Path, top = false): Pending[] {
         formatPath([...here, "config"]),
       );
     }
+    // Checked here too for trusted callers, which skip the shape check (as `section` is).
+    if (frag.color !== undefined) checkColor(frag.color, formatPath([...here, "color"]));
+    checkNote(frag.note, formatPath([...here, "note"]));
     const pending: Pending = { frag, id, node, path: here };
     if (frag.branches === undefined) return pending;
     if (!isObject(frag.branches)) {
@@ -230,6 +234,11 @@ function checkBranchKeys(
   }
 }
 
+/** Sets `obj[key]` as an own property, so `__proto__` is a plain key, never the prototype. */
+function ownSet<T>(obj: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(obj, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
 /** Pass 2: the steps, with placeholders resolved now that every ID of the batch exists. */
 function materialize(b: Build, pending: Pending[]): Step[] {
   return pending.map((p) => {
@@ -237,9 +246,10 @@ function materialize(b: Build, pending: Pending[]): Step[] {
     const config: Record<string, ValueExpr> = {};
     for (const [key, v] of Object.entries(frag.config ?? {})) {
       // A paste never fails: a `steps.$x` no placeholder defines stays as is, for the validator.
-      config[key] = b.verbatim
+      const value = b.verbatim
         ? resolveValuePlaceholders(v, b.ctx.placeholders, b.ctx.used).value
         : resolvedValue(b.ctx, v, formatPath([...p.path, "config", key]));
+      ownSet(config, key, value);
     }
     let step: Step;
     if (b.verbatim || !p.node) {
@@ -250,18 +260,11 @@ function materialize(b: Build, pending: Pending[]): Step[] {
     }
     if (frag.name !== undefined) step = { ...step, name: frag.name };
     if (frag.disabled === true) step = { ...step, disabled: true };
-    if (frag.note !== undefined) step = { ...step, note: frag.note };
+    if (typeof frag.note === "string" && frag.note !== "") step = { ...step, note: frag.note };
     if (frag.color !== undefined) step = { ...step, color: frag.color };
     if (p.branches) {
       const branches: Record<string, Step[]> = {};
-      for (const [key, list] of p.branches) {
-        Object.defineProperty(branches, key, {
-          value: materialize(b, list),
-          enumerable: true,
-          writable: true,
-          configurable: true,
-        });
-      }
+      for (const [key, list] of p.branches) ownSet(branches, key, materialize(b, list));
       step = { ...step, branches: { ...(step.branches ?? {}), ...branches } };
     }
     return b.verbatim || !p.node ? step : syncBranches(step, p.node);
@@ -280,32 +283,77 @@ function build(
   return { steps: materialize(b, pending), paths: b.paths };
 }
 
-/** `doc` with `steps` inserted one after another from `loc`. */
-function insertRun(doc: WorkflowDoc, loc: StepLocation, steps: Step[]): WorkflowDoc {
-  let out = doc;
-  steps.forEach((step, k) => {
-    out = insertStep(out, { ...loc, index: loc.index + k }, step);
-  });
-  return out;
-}
-
-/** A validator field path (`to`, `headers.replyTo`, `cc[1]`) as path segments. */
+/**
+ * A validator field path (`to`, `headers.replyTo`, `cc[1]`) as path segments. The field string
+ * joins keys with `.` unescaped, so it is read against the config value itself: at each level
+ * the longest own key the rest starts with wins, so keys holding `.` or `[` map back whole.
+ */
 function fieldSegments(field: string, config: Record<string, ValueExpr>): Path {
-  // A config key may itself hold `.` or `[`: prefer the longest key the field starts with.
-  const keys = Object.keys(config).filter(
-    (k) => field === k || field.startsWith(`${k}.`) || field.startsWith(`${k}[`),
-  );
-  keys.sort((a, z) => z.length - a.length);
-  const head = keys[0] ?? /^[^.[]*/.exec(field)?.[0] ?? field;
-  const segs: Path = [head];
-  const re = /\.([^.[]+)|\[(\d+)\]/y;
-  re.lastIndex = head.length;
-  while (re.lastIndex < field.length) {
-    const m = re.exec(field);
-    if (!m) break;
-    segs.push(m[1] !== undefined ? m[1] : Number(m[2]));
+  const segs: Path = [];
+  let cur: unknown = config;
+  let i = 0;
+  while (i < field.length) {
+    if (segs.length > 0) {
+      const index = /^\[(\d+)\]/.exec(field.slice(i));
+      if (index) {
+        const n = Number(index[1]);
+        segs.push(n);
+        cur = Array.isArray(cur) ? cur[n] : undefined;
+        i += index[0].length;
+        continue;
+      }
+      if (field.charAt(i) !== ".") break;
+      i++;
+    }
+    const rest = field.slice(i);
+    const keys = isObject(cur)
+      ? Object.keys(cur).filter(
+          (k) => rest === k || rest.startsWith(`${k}.`) || rest.startsWith(`${k}[`),
+        )
+      : [];
+    keys.sort((a, z) => z.length - a.length);
+    const key = keys[0] ?? /^[^.[]*/.exec(rest)?.[0] ?? rest;
+    if (key === "") break;
+    segs.push(key);
+    cur = isObject(cur) && Object.hasOwn(cur, key) ? cur[key] : undefined;
+    i += key.length;
   }
   return segs;
+}
+
+/**
+ * The schema of the config field at `field` in `input` (refs into `$defs` resolved and the defs
+ * carried along), or the whole input schema when the field isn't found.
+ */
+function fieldSchema(input: JSONSchema, field: Path | undefined): JSONSchema {
+  /** The schema at `path`, or `undefined` when missing or empty (any). */
+  const at = (path: Path): JSONSchema | undefined => {
+    const sub = schemaAtPath(input, path);
+    if (!sub) return undefined;
+    const resolved = derefSchema(input, sub);
+    const { $defs: _, definitions: __, ...own } = resolved;
+    return Object.keys(own).length === 0 ? undefined : carryDefs(input, resolved);
+  };
+  if (!field || field.length === 0) return input;
+  const direct = at(field);
+  if (direct) return direct;
+  // Under a union (`anyOf` of objects), a property path gives any: use the one member schema
+  // declaring the property, else the deepest ancestor with a schema.
+  for (let n = field.length - 1; n >= 0; n--) {
+    const parent = n === 0 ? input : at(field.slice(0, n));
+    if (!parent) continue;
+    const seg = field[n];
+    const members = (parent.anyOf ?? parent.oneOf) as unknown;
+    if (n === field.length - 1 && typeof seg === "string" && Array.isArray(members)) {
+      const props = members.flatMap((m) => {
+        const s = derefSchema(input, m as JSONSchema).properties as Record<string, unknown>;
+        return s && Object.hasOwn(s, seg) ? [s[seg] as JSONSchema] : [];
+      });
+      if (props.length === 1) return carryDefs(input, derefSchema(input, props[0] as JSONSchema));
+    }
+    return parent;
+  }
+  return input;
 }
 
 /**
@@ -322,21 +370,19 @@ function gate(cand: WorkflowDoc, ctx: HandlerContext, paths: Map<string, Path>):
     let path: Path = at;
     let hint: unknown;
     const field = issue.field !== undefined ? fieldSegments(issue.field, step.config) : undefined;
+    const node = ctx.nodes.get(step.type);
     if (code === "node.unknown") path = [...at, "type"];
     else if (code === "step.invalidId" || code === "step.duplicateId") path = [...at, "id"];
-    else if (code === "branch.unknown") path = [...at, "branches"];
-    else if (field) path = [...at, "config", ...field];
+    else if (code === "branch.unknown") {
+      const declared = node ? branchesFor(node, step).map((x) => x.id) : [];
+      const key = Object.keys(step.branches ?? {}).find((k) => !declared.includes(k));
+      path = key === undefined ? [...at, "branches"] : [...at, "branches", key];
+      hint = { branches: declared };
+    } else if (field) path = [...at, "config", ...field];
     if (code.startsWith("ref.")) {
       hint = { refs: availableRefs(cand, ctx.manifest, { stepId: step.id }).refs };
-    } else if (code === "config.invalid") {
-      const input = ctx.nodes.get(step.type)?.input;
-      if (input) {
-        const sub = (field && schemaAtPath(input, field)) || input;
-        hint = { expected: fitSchemaHint(compactSchema(sub)) };
-      }
-    } else if (code === "branch.unknown") {
-      const node = ctx.nodes.get(step.type);
-      hint = { branches: node ? branchesFor(node, step).map((x) => x.id) : [] };
+    } else if (code === "config.invalid" && node) {
+      hint = { expected: fitSchemaHint(compactSchema(fieldSchema(node.input, field))) };
     }
     throw new CommandFailure(code, issue.message, formatPath(path), hint);
   }
@@ -373,7 +419,7 @@ const insertSteps: Handler = (doc, command, ctx) => {
   }
   const { doc: placed, loc } = locate(doc, ctx, cmd.at, "at");
   const { steps, paths } = build(placed, ctx, cmd.steps, verbatim);
-  let cand = insertRun(placed, loc, steps);
+  let cand = insertStepRun(placed, loc, steps);
   if (!verbatim) gate(cand, ctx, paths);
   if (cmd.section !== undefined) {
     cand = wrapInSection(
@@ -393,23 +439,89 @@ const replaceSteps: Handler = (doc, command, ctx) => {
     parentId === null
       ? doc.steps
       : (branchList(findStep(doc, parentId)?.step as Step, branch as string) ?? []);
-  const replaced = list.slice(index, run.end + 1).map((s) => s.id);
+  const replacedSteps = list.slice(index, run.end + 1);
+  const replaced = replacedSteps.map((s) => s.id);
+  /** Every step inside the replaced steps' subtrees (not the replaced steps themselves). */
+  const inner = new Set<string>();
+  const collect = (s: Step) => {
+    for (const l of Object.values(s.branches ?? {})) {
+      for (const c of l) {
+        inner.add(c.id);
+        collect(c);
+      }
+    }
+  };
+  for (const s of replacedSteps) collect(s);
   let cut = doc;
   for (const id of replaced) cut = removeStep(cut, id);
-  // Upkeep runs once below, from `doc` with `subst`: undo what each removal's upkeep did.
+  // Sections are upkept once below, from `doc`: undo what each removal's upkeep did.
   const { sections: _, ...rest } = cut;
   const removed: WorkflowDoc =
     doc.sections !== undefined ? { ...rest, sections: doc.sections } : rest;
   const { steps, paths } = build(removed, ctx, cmd.steps, false);
   const loc: StepLocation = { parentId, ...(branch !== undefined ? { branch } : {}), index };
-  const inserted = insertRun(removed, loc, steps);
+  const inserted = insertStepRun(removed, loc, steps);
   const top = steps.map((s) => s.id);
-  const cand = upkeepSections(doc, inserted, {
-    subst: new Map(replaced.map((id) => [id, top])),
+  const cand = replacedSections(doc, inserted, {
+    run: { parentId, branch, start: index, end: run.end },
+    replaced,
+    inner,
+    top,
   });
   gate(cand, ctx, paths);
+  if (jsonEqual(cand, doc)) return { doc, created: top[0] as string };
   return { doc: cand, created: top[0] as string };
 };
+
+/**
+ * `after`'s sections for a `replaceSteps` of `doc`, each upkept on its own from `doc`:
+ * - a section holding the whole run holds the new top-level steps in its place;
+ * - any other section loses the replaced steps (a section that held part of the run shrinks to
+ *   its remaining members), so it never grows over the new steps;
+ * - steps inside the replaced subtrees count as gone for every section, even when a new step
+ *   reuses one's ID (a section nested in the run is removed).
+ */
+function replacedSections(
+  doc: WorkflowDoc,
+  after: WorkflowDoc,
+  edit: {
+    run: { parentId: string | null; branch: string | undefined; start: number; end: number };
+    replaced: string[];
+    inner: Set<string>;
+    top: string[];
+  },
+): WorkflowDoc {
+  const sections = doc.sections;
+  if (!sections?.length) return after;
+  const none: readonly string[] = [];
+  const gone = new Map<string, readonly string[]>(
+    [...edit.replaced, ...edit.inner].map((id) => [id, none]),
+  );
+  const holding = new Map(gone);
+  for (const id of edit.replaced) holding.set(id, edit.top);
+  const { run } = edit;
+  let changed = false;
+  const next: Section[] = [];
+  for (const section of sections) {
+    const r = sectionRun(doc, section);
+    const holds =
+      !!r &&
+      r.parentId === run.parentId &&
+      r.branch === run.branch &&
+      r.start <= run.start &&
+      r.end >= run.end;
+    // `after.sections` is `doc.sections`: upkeep returns the section itself when it stays.
+    const one = upkeepSections(
+      { ...doc, sections: [section] },
+      { ...after, sections: [section] },
+      { subst: holds ? holding : gone },
+    );
+    const kept = one.sections?.[0];
+    if (kept !== section) changed = true;
+    if (kept) next.push(kept);
+  }
+  return changed ? withSections(after, next) : after;
+}
 
 /** @internal The bulk-add handlers by op. */
 export const fragmentHandlers: Record<string, Handler> = { insertSteps, replaceSteps };
