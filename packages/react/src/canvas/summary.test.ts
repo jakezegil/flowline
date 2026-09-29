@@ -1,5 +1,6 @@
 import type { JSONSchema, Step } from "@flowlinejs/core";
 import { describe, expect, test } from "vitest";
+import builtin from "../../playground/builtin-manifest.json";
 import { renderSummary, summaryStepRefs } from "./summary";
 
 const schema: JSONSchema = {
@@ -99,6 +100,17 @@ describe("renderSummary", () => {
       "Team · Trigger › team",
     );
   });
+  test("the builtin delay reads as one choice, never both halves run together", () => {
+    const delay = builtin.nodes.find((n) => n.type === "core.delay");
+    if (!delay) throw new Error("core.delay missing from the builtin manifest");
+    const text = (config: Step["config"]) =>
+      renderSummary(delay.summary as string, step(config), noNames, delay.input as JSONSchema)
+        .parts.map((p) => ("text" in p ? p.text : p.label))
+        .join("");
+    expect(text({ duration: "2d" })).toBe("Wait 2d");
+    expect(text({ until: "2026-10-01T09:00:00Z" })).toBe("Wait until 2026-10-01T09:00:00Z");
+  });
+
   test("L13: a condition's rules read as its first comparison, then how many more", () => {
     const cond: JSONSchema = {
       type: "object",

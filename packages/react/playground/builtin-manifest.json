@@ -414,7 +414,7 @@
       "icon": "timer",
       "category": "Timing",
       "keywords": ["wait", "sleep", "pause", "timer"],
-      "summary": "Wait {{duration}}{{until}}",
+      "summary": "Wait {{#duration}}{{duration}}{{/duration}}{{#until}}until {{until}}{{/until}}",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
