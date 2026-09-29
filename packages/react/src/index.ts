@@ -28,10 +28,20 @@ export {
   JOIN_SIZE,
   LABEL_H,
   LOOP_GUTTER,
+  NOTE_GAP,
+  NOTE_W,
   PLACEHOLDER_H,
+  SECTION_HEADER_H,
+  SECTION_PAD,
   V_GAP,
 } from "./layout/constants";
-export { type LayoutEdge, type LayoutNode, layoutTree } from "./layout/layout-tree";
+export {
+  type LayoutEdge,
+  type LayoutNode,
+  type LayoutNote,
+  type LayoutSection,
+  layoutTree,
+} from "./layout/layout-tree";
 export {
   CodeEditor,
   ConfigPanel,

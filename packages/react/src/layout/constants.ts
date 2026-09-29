@@ -24,3 +24,11 @@ export const LABEL_H = 24;
  * `loopReturn` edge so it never crosses a neighbouring column.
  */
 export const LOOP_GUTTER = BRANCH_GAP / 2;
+/** Width of a sticky-note card pinned to the right of its step card. */
+export const NOTE_W = 180;
+/** Horizontal gap between a step card and its sticky note. */
+export const NOTE_GAP = 12;
+/** Padding inside a section region, on its sides and below its last member. */
+export const SECTION_PAD = 16;
+/** Height of a section region's header band, above its first member. */
+export const SECTION_HEADER_H = 32;
