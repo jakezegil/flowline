@@ -16,7 +16,6 @@ import { branchesFor, carryDefs, configValueAt, derefSchema, schemaAtPath } from
 import { createStep, jsonEqual, syncBranches } from "../step-factory";
 import {
   allStepIds,
-  branchList,
   findStep,
   freshStepId,
   insertStepRun,
@@ -44,10 +43,10 @@ import {
   newSectionId,
   overlapFailure,
   overlapping,
-  stepRun,
+  runSteps,
   withSections,
 } from "./sections";
-import { locate, nodeOf, resolvedValue } from "./single";
+import { isObject, locate, nodeOf, resolvedValue } from "./single";
 
 type Cmd<Op extends Command["op"]> = Extract<Command, { op: Op }>;
 type Path = (string | number)[];
@@ -63,10 +62,6 @@ const REJECTED = new Set<IssueCode>([
   "step.invalidId",
   "step.duplicateId",
 ]);
-
-function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
 
 /** A fragment step after pass 1: its ID and node known, its branches' fragments too. */
 interface Pending {
@@ -433,14 +428,10 @@ const insertSteps: Handler = (doc, command, ctx) => {
 
 const replaceSteps: Handler = (doc, command, ctx) => {
   const cmd = command as Cmd<"replaceSteps">;
-  const run = stepRun(doc, ctx, cmd.first, cmd.last, { first: "first", last: "last" });
+  const run = runSteps(doc, ctx, cmd.first, cmd.last, { first: "first", last: "last" });
   const { parentId, branch, index } = run.location;
-  const list =
-    parentId === null
-      ? doc.steps
-      : (branchList(findStep(doc, parentId)?.step as Step, branch as string) ?? []);
-  const replacedSteps = list.slice(index, run.end + 1);
-  const replaced = replacedSteps.map((s) => s.id);
+  const replacedSteps = run.steps;
+  const replaced = run.ids;
   /** Every step inside the replaced steps' subtrees (not the replaced steps themselves). */
   const inner = new Set<string>();
   const collect = (s: Step) => {

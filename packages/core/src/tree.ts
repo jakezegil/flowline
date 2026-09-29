@@ -312,6 +312,11 @@ export function freshStepId(taken: Set<string>, nodeType: string): string {
   return nextAvailableId(taken, sanitizeBase(nodeType));
 }
 
+/** Sets `obj[key]` as an own property, so `__proto__` is a plain key, never the prototype. */
+function ownSet<T>(obj: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(obj, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
 function rewriteRefs(expr: ValueExpr, idMap: Map<string, string>): ValueExpr {
   if (Array.isArray(expr)) return expr.map((e) => rewriteRefs(e, idMap));
   if (isRef(expr)) {
@@ -338,7 +343,7 @@ function rewriteRefs(expr: ValueExpr, idMap: Map<string, string>): ValueExpr {
   }
   if (expr !== null && typeof expr === "object") {
     const out: Record<string, ValueExpr> = {};
-    for (const [k, v] of Object.entries(expr)) out[k] = rewriteRefs(v, idMap);
+    for (const [k, v] of Object.entries(expr)) ownSet(out, k, rewriteRefs(v, idMap));
     return out;
   }
   return expr;
@@ -352,7 +357,11 @@ function assignFreshIds(step: Step, taken: Set<string>, idMap: Map<string, strin
   if (step.branches) {
     const branches: Record<string, Step[]> = {};
     for (const [branchKey, branchSteps] of Object.entries(step.branches)) {
-      branches[branchKey] = branchSteps.map((s) => assignFreshIds(s, taken, idMap));
+      ownSet(
+        branches,
+        branchKey,
+        branchSteps.map((s) => assignFreshIds(s, taken, idMap)),
+      );
     }
     newStep.branches = branches;
   }
@@ -367,11 +376,37 @@ function rewriteSubtreeConfigs(step: Step, idMap: Map<string, string>): Step {
   if (step.branches) {
     const branches: Record<string, Step[]> = {};
     for (const [branchKey, branchSteps] of Object.entries(step.branches)) {
-      branches[branchKey] = branchSteps.map((s) => rewriteSubtreeConfigs(s, idMap));
+      ownSet(
+        branches,
+        branchKey,
+        branchSteps.map((s) => rewriteSubtreeConfigs(s, idMap)),
+      );
     }
     newStep.branches = branches;
   }
   return newStep;
+}
+
+/**
+ * Copies a run of steps (with subtrees) with fresh IDs unique in `doc`, remapping refs inside the copy
+ * that point at steps of the run to their copies. Refs to steps outside the run are kept.
+ *
+ * `ids` maps every copied step's ID (subtrees included, pre-order) to its copy's. Fresh IDs come
+ * from each step's node type, as {@link generateStepId}'s. Neither `doc` nor `steps` is changed,
+ * and the copies aren't inserted anywhere.
+ *
+ * @example
+ * const { steps, ids } = cloneRunWithFreshIds(doc, [load, email]);
+ * // email's copy reads `steps.<load's copy>…`; ids.get("load") is load's copy's ID
+ */
+export function cloneRunWithFreshIds(
+  doc: WorkflowDoc,
+  steps: readonly Step[],
+): { steps: Step[]; ids: Map<string, string> } {
+  const ids = new Map<string, string>();
+  const taken = allStepIds(doc);
+  const structural = steps.map((s) => assignFreshIds(s, taken, ids));
+  return { steps: structural.map((s) => rewriteSubtreeConfigs(s, ids)), ids };
 }
 
 /**
@@ -467,7 +502,7 @@ export function renameStepId(
       const renamed = rename(step);
       if (!step.branches) return renamed;
       const branches: Record<string, Step[]> = {};
-      for (const [k, v] of Object.entries(step.branches)) branches[k] = walk(v);
+      for (const [k, v] of Object.entries(step.branches)) ownSet(branches, k, walk(v));
       return { ...renamed, branches };
     });
   const next: WorkflowDoc = {
@@ -494,10 +529,10 @@ export function duplicateStep(doc: WorkflowDoc, id: string): { doc: WorkflowDoc;
   const found = findStep(doc, id);
   if (!found) throw new FlowlineTreeError(`Step "${id}" not found`);
 
-  const idMap = new Map<string, string>();
-  const taken = allStepIds(doc);
-  const structural = assignFreshIds(found.step, taken, idMap);
-  const copy = rewriteSubtreeConfigs(structural, idMap);
+  const {
+    steps: [copy],
+    ids: idMap,
+  } = cloneRunWithFreshIds(doc, [found.step]);
 
   const newDoc = insertStep(
     doc,
@@ -506,7 +541,7 @@ export function duplicateStep(doc: WorkflowDoc, id: string): { doc: WorkflowDoc;
       branch: found.location.branch,
       index: found.location.index + 1,
     },
-    copy,
+    copy as Step,
   );
   const newId = idMap.get(id) as string;
   // A copy of a member joins its section; a copy of `last` extends it.

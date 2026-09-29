@@ -22,6 +22,7 @@ export type {
   SectionInput,
   SingleCommand,
   StepRef,
+  StepUpdate,
 } from "./agent/commands";
 export { compactSchema } from "./agent/compact-schema";
 export { cutString, formatCall, resultSize, stepLine } from "./agent/format";
@@ -191,6 +192,7 @@ export {
 } from "./step-factory";
 export {
   allStepIds,
+  cloneRunWithFreshIds,
   codeBlocksRename,
   duplicateStep,
   FlowlineTreeError,
