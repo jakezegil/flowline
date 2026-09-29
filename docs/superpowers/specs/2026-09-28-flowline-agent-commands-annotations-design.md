@@ -299,3 +299,43 @@ interface ToolDefinition { name: string; description: string; inputSchema: JSONS
 - `note`, `color` and `sections` are optional. Older docs load unchanged.
 - The engine ignores the new fields, and a 0.2.0 engine running a 0.3.0 doc behaves identically.
 - A changeset with a `minor` bump goes in with the final task of the batch, following ruling 87's pattern.
+
+## 10. Decisions recorded from the implementation plan
+
+The plan (`docs/superpowers/plans/2026-09-28-flowline-agent-commands-annotations.md`) closes these gaps. They are binding alongside §§1–9.
+
+- **`setType { id, type }`** is added to the single-step commands (§4.2). It is the editor's Replace: config resets, children are kept, and generated IDs are regenerated. Without it, `EditorActions.replaceStep` would have no command, and §5's "one code path" would be impossible.
+- **`setTrigger`**:
+  - Same type with no config: a no-op.
+  - Same type with `config`: merges it.
+  - Different type: resets to the defaults, then merges.
+- **Placeholders** are 1-based: `$n` is the result of `commands[n-1]`. A fragment `ref` is addressed as `$<ref>`. Section-ID arguments accept placeholders too.
+- **`null` in `setConfig`** removes a key. An internal `nullIsValue` flag stores a literal `null`; it is left out of the catalog.
+- **Internal command fields.** `insertSteps { verbatim: true }` is internal, used by paste. It inserts steps as given (no default config merged, undeclared branches kept) and only reports issues.
+- **Rejection rules.** `apply` rejects structural problems. For non-verbatim fragments, it also rejects the validation codes `node.unknown`, `branch.unknown`, `config.invalid`, `ref.*`, `step.invalidId` and `step.duplicateId`. Missing required fields and warnings are reported, not rejected. `setConfig` never rejects a value.
+- **Trusted mode.** `apply` accepts `{ trusted, report }` options, so the editor can skip the shape parse and the report on every keystroke.
+- **`ApplyResult` additions**, all additive:
+  - `renamed` (old → new step IDs)
+  - `issues.more`: `added` is capped at 20, with a `getIssues` follow-up
+  - `more` on failure: further shape errors, up to 9
+  - The `command.invalid` hint is the compact schema at the failing path, at most 1500 chars.
+- **Reads** are all `(doc, manifest, args, opts?)`, where `args` is exactly the tool input. This changes `getSteps`, which needs the manifest. Additions:
+  - `outline` takes an optional `stepId` and `after` for paging.
+  - `getSteps` also takes `{ where, after?, limit? }`, and returns `next`.
+  - `budget` covers the whole result: `text` plus the serialized `omitted`.
+  - The notes follow-up uses `full: true`.
+- **Host glue:**
+  - `runTool(state, name, args)` in core.
+  - `createAgentBridge(store)` and `useWorkflowAgentBridge(store?)` in React. Bridge reads are bound to the live store, and bridge `apply` goes through the store.
+  - `<WorkflowEditor onStoreReady>` fires for every store the editor creates, and its cleanup runs when that store is replaced.
+- **Read-only.** The editor store's `readOnly` flag is the single source of truth for read-only mode, and `<WorkflowCanvas readOnly>` sets it.
+- **Errors.** `FlowlineCommandError` extends `FlowlineTreeError`.
+- **Section upkeep:** a moved member stays in its section when it lands within the section's span, so ⌥↑ on an interior member keeps it.
+- **Canvas:**
+  - A section with an unknown colour draws as gray. Broken sections have no region, and are repaired from the issues pill's Fix.
+  - The section header chip shows a one-line excerpt of the section note (60 chars), with the full note as a tooltip.
+  - `--fl-changed` and `fl-flash` are new; no change-highlight token existed before.
+  - Ranges and steps move with Move up/Move down (⌥↑/⌥↓).
+- **Clipboard.** `EditorState.clipboard` stays `Step | null`, and a new `clipboardRun` holds a copied run.
+- **Branch enums in the catalog** (§4.4) apply only when no node in the manifest has `fromConfig` branches. Otherwise `branch` fields are free text. Shared enums sit once under `$defs`.
+- **Backspace/Delete** on the canvas's "…" and "+" buttons deletes the selected step. This is a deliberate change.
