@@ -333,6 +333,8 @@ export const SectionHeader = memo(function SectionHeader({
             sideOffset={6}
             collisionPadding={8}
             aria-label={labels.sectionMenu(title)}
+            // Radix names the menu after its trigger (the chip); name it with our label instead.
+            aria-labelledby={undefined}
             onClick={(e) => e.stopPropagation()}
             onCloseAutoFocus={keepEditorFocus}
           >

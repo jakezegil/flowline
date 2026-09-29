@@ -27,8 +27,9 @@ async function restoreSeededDraft(request: APIRequestContext): Promise<void> {
 }
 
 /**
- * Waits for the canvas viewport to stop moving (fit view animates it) and for running CSS
- * transitions (a theme switch's) to end.
+ * Waits for the canvas viewport to stop moving and for running finite animations and transitions
+ * to end. With reduced motion (test 2 sets it) fit view is instant and the theme switch has no
+ * transition, so this is a safeguard; infinite animations (spinners, pulses) are skipped.
  */
 async function settle(page: Page): Promise<void> {
   const viewport = page.locator(".react-flow__viewport");
@@ -40,7 +41,12 @@ async function settle(page: Page): Promise<void> {
     expect(same).toBe(true);
   }).toPass({ intervals: [100] });
   await page.evaluate(() =>
-    Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))),
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
+        .map((a) => a.finished.catch(() => {})),
+    ),
   );
 }
 
@@ -79,8 +85,7 @@ test("groups two steps into a section, colours it, adds a note, ungroups and del
   // Chip menu → Color → Green.
   const chip = canvas.getByRole("button", { name: "Owner loop", exact: true });
   await chip.click();
-  // Radix names the menu after its trigger (aria-labelledby wins over its aria-label).
-  const menu = page.getByRole("menu", { name: "Owner loop" });
+  const menu = page.getByRole("menu", { name: "Section actions: Owner loop" });
   await menu.getByRole("menuitem", { name: "Color" }).click();
   await page.getByRole("menuitem", { name: "Green" }).click();
   await expect(region).toHaveAttribute("data-color", "green");
@@ -107,11 +112,13 @@ test("groups two steps into a section, colours it, adds a note, ungroups and del
   await expect(owner).toBeVisible();
   await expect(nudge).toBeVisible();
 
-  // Select wait, click into the panel header (not a text field), and Backspace deletes the step.
+  // Select wait, click the panel header's type label (plain text, not a field), and Backspace
+  // deletes the step: focus is on the body, not on the canvas or a text field.
   const wait = canvas.getByRole("group", { name: /^Wait a minute/ });
   await wait.click();
   const panel = main.getByRole("complementary", { name: "Step settings" });
-  await panel.locator(".fl-cp__icon").click();
+  await panel.getByText("Delay", { exact: true }).click();
+  await expect(page.locator("body")).toBeFocused();
   await page.keyboard.press("Backspace");
   await expect(wait).toHaveCount(0);
   const toast = page.getByRole("status").filter({ hasText: "Deleted “Wait a minute”" });
@@ -147,6 +154,9 @@ test("groups two steps into a section, colours it, adds a note, ungroups and del
 });
 
 test("seeded sections and notes render in light and dark", async ({ page }) => {
+  // Tall enough for the whole flow at fit view's minimum zoom; no motion to wait for.
+  await page.setViewportSize({ width: 1440, height: 1600 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
   const { canvas } = await openEditor(page);
   await expect(
     canvas.getByRole("group", { name: "Section: Check the deal is still stuck" }),
@@ -162,6 +172,16 @@ test("seeded sections and notes render in light and dark", async ({ page }) => {
   // Artifacts for review, not pixel comparisons: the whole flow, once transitions have settled.
   await canvas.getByRole("button", { name: "Fit workflow to view" }).click();
   await settle(page);
+  // Everything is in view, down to the pink escalate card at the bottom of Escalate.
+  const escalate = canvas.getByRole("group", { name: /^Escalate to manager/ });
+  await expect(escalate.locator('[data-color="pink"]')).toHaveCount(1);
+  await expect(escalate).toBeInViewport({ ratio: 1 });
+  await expect(canvas.getByRole("group", { name: "Section: Escalate" })).toBeInViewport({
+    ratio: 1,
+  });
+  await expect(
+    canvas.getByRole("group", { name: "Section: Check the deal is still stuck" }),
+  ).toBeInViewport({ ratio: 1 });
   await page.screenshot({ path: "test-results/annotations-light.png" });
   await page.emulateMedia({ colorScheme: "dark" });
   await settle(page);

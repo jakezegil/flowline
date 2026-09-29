@@ -6,6 +6,10 @@
  * that wakes after the deal moved on stops instead of nudging. The host also cancels a waiting
  * run when its deal's stage changes (see `createMiniCrm`); the workflow stays correct without it.
  *
+ * The seeded doc is annotated for the editor (see `annotate`): two sections, "Check the deal is
+ * still stuck" and "Escalate", sticky notes on `nudge` and `wait`, and a pink `escalate` card.
+ * Annotations are visual only; the engine ignores them.
+ *
  * @module
  */
 import { ref, type Step, tpl, type WorkflowDoc, workflow } from "@flowlinejs/core";
