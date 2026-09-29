@@ -140,6 +140,13 @@ describe("opJsonSchema", () => {
       "removeSection",
       "insertSteps",
       "replaceSteps",
+      "duplicateSteps",
+      "updateSteps",
+      "replaceInConfig",
+      "moveSteps",
+      "removeSteps",
+      "wrapSteps",
+      "unwrapStep",
     ]);
   });
 

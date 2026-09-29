@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   allStepIds,
+  cloneRunWithFreshIds,
   codeBlocksRename,
   duplicateStep,
   FlowlineTreeError,
@@ -281,6 +282,62 @@ describe("duplicateStep", () => {
   test("throws for unknown id", () => {
     const doc = frozenClone(baseDoc());
     expect(() => duplicateStep(doc, "nope")).toThrow(FlowlineTreeError);
+  });
+});
+
+describe("cloneRunWithFreshIds", () => {
+  const run = (): WorkflowDoc => ({
+    id: "wf",
+    name: "W",
+    trigger: { type: "crm.dealUpdated", config: {} },
+    steps: [
+      { id: "outside", type: "crm.getDeal", config: {} },
+      { id: "load", type: "crm.getDeal", config: { dealId: { $ref: "steps.outside.id" } } },
+      {
+        id: "email",
+        type: "email.send",
+        config: {
+          subject: { $tpl: "Deal {{steps.load.x}} from {{steps.outside.name}}" },
+          to: { $ref: "steps.load.ownerId" },
+        },
+      },
+    ],
+  });
+
+  test("copies refer to the copies inside the run and keep refs outside it", () => {
+    const doc = frozenClone(run());
+    const { steps, ids } = cloneRunWithFreshIds(doc, doc.steps.slice(1));
+    expect([...ids]).toEqual([
+      ["load", "getDeal"],
+      ["email", "send"],
+    ]);
+    expect(steps.map((s) => s.id)).toEqual(["getDeal", "send"]);
+    expect(steps[0]?.config.dealId).toEqual({ $ref: "steps.outside.id" });
+    expect(steps[1]?.config.to).toEqual({ $ref: "steps.getDeal.ownerId" });
+    expect(steps[1]?.config.subject).toEqual({
+      $tpl: "Deal {{ steps.getDeal.x }} from {{ steps.outside.name }}",
+    });
+    // The input doc and steps are untouched.
+    expect(doc).toEqual(run());
+  });
+
+  test("fresh IDs are unique in the doc and across the run, subtrees included", () => {
+    const doc = frozenClone(baseDoc());
+    const { steps, ids } = cloneRunWithFreshIds(doc, doc.steps);
+    const taken = allStepIds(doc);
+    const fresh = [...ids.values()];
+    expect(new Set(fresh).size).toBe(fresh.length);
+    for (const id of fresh) expect(taken.has(id)).toBe(false);
+    expect([...ids.keys()]).toEqual([
+      "loadContact",
+      "checkVip",
+      "sendVipEmail",
+      "sendRegularEmail",
+    ]);
+    const copyVip = steps[1] as Step;
+    const vipEmail = copyVip.branches?.ifTrue?.[0] as Step;
+    expect(vipEmail.config.to).toEqual({ $ref: `steps.${ids.get("loadContact")}.email` });
+    expect(vipEmail.config.note).toEqual({ $ref: `steps.${copyVip.id}.tier` });
   });
 });
 

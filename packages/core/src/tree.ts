@@ -375,6 +375,28 @@ function rewriteSubtreeConfigs(step: Step, idMap: Map<string, string>): Step {
 }
 
 /**
+ * Copies a run of steps (with subtrees) with fresh IDs unique in `doc`, remapping refs inside the copy
+ * that point at steps of the run to their copies. Refs to steps outside the run are kept.
+ *
+ * `ids` maps every copied step's ID (subtrees included, pre-order) to its copy's. Fresh IDs come
+ * from each step's node type, as {@link generateStepId}'s. Neither `doc` nor `steps` is changed,
+ * and the copies aren't inserted anywhere.
+ *
+ * @example
+ * const { steps, ids } = cloneRunWithFreshIds(doc, [load, email]);
+ * // email's copy reads `steps.<load's copy>…`; ids.get("load") is load's copy's ID
+ */
+export function cloneRunWithFreshIds(
+  doc: WorkflowDoc,
+  steps: readonly Step[],
+): { steps: Step[]; ids: Map<string, string> } {
+  const ids = new Map<string, string>();
+  const taken = allStepIds(doc);
+  const structural = steps.map((s) => assignFreshIds(s, taken, ids));
+  return { steps: structural.map((s) => rewriteSubtreeConfigs(s, ids)), ids };
+}
+
+/**
  * Whether `id` is one {@link generateStepId} would give a step of `nodeType` (`"httpRequest"`,
  * `"httpRequest_2"`), rather than one a person chose.
  */
@@ -494,10 +516,10 @@ export function duplicateStep(doc: WorkflowDoc, id: string): { doc: WorkflowDoc;
   const found = findStep(doc, id);
   if (!found) throw new FlowlineTreeError(`Step "${id}" not found`);
 
-  const idMap = new Map<string, string>();
-  const taken = allStepIds(doc);
-  const structural = assignFreshIds(found.step, taken, idMap);
-  const copy = rewriteSubtreeConfigs(structural, idMap);
+  const {
+    steps: [copy],
+    ids: idMap,
+  } = cloneRunWithFreshIds(doc, [found.step]);
 
   const newDoc = insertStep(
     doc,
@@ -506,7 +528,7 @@ export function duplicateStep(doc: WorkflowDoc, id: string): { doc: WorkflowDoc;
       branch: found.location.branch,
       index: found.location.index + 1,
     },
-    copy,
+    copy as Step,
   );
   const newId = idMap.get(id) as string;
   // A copy of a member joins its section; a copy of `last` extends it.
