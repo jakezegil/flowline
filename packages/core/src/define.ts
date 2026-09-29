@@ -496,6 +496,76 @@ export interface TriggerDefinition<C extends z.ZodObject = z.ZodObject, P = unkn
    * the first starts a run; the others resolve that run's ID.
    */
   dedupe?: TriggerDedupe<C, P>;
+  /**
+   * For `poll` triggers (required there, invalid on other kinds): select the items that became
+   * due in `(since, until]`. Each item starts one run, deduped per workflow by its `key`
+   * (`poll:<workflowId>:<key>`, within the trigger's `dedupe.window`, else the engine default).
+   * Called by `engine.tickPolls()` over contiguous, non-overlapping intervals of at most
+   * `maxInterval`. Throwing (or the lease being lost) leaves the interval to be polled again.
+   */
+  poll?(args: PollArgs<z.infer<C>>): Promise<PollResult<P>> | PollResult<P>;
+  /**
+   * For `poll` triggers: minimum time between polls of one workflow, as ms or a duration such as
+   * `"5m"` (1 ms to 365 days). Default: the engine's `poll.defaultInterval` (`"1m"`).
+   */
+  interval?: DurationInput;
+  /**
+   * For `poll` triggers: the longest interval one `poll` call covers (`until - since`), as ms or
+   * a duration (1 ms to 365 days, not shorter than `interval`). A longer backlog (after
+   * downtime) is caught up in successive calls. Default: the engine's `poll.defaultMaxInterval`
+   * (`"24h"`).
+   */
+  maxInterval?: DurationInput;
+}
+
+/** One item a poll found; it starts one run with `payload` as the trigger payload. */
+export interface PollItem<P> {
+  /** Identifies the item within the workflow; dedupe key `poll:<wf>:<key>`. Must not be empty. */
+  key: string;
+  /** The trigger payload, validated against the trigger's payload schema. */
+  payload: P;
+}
+
+/** What a trigger's `poll` returns. */
+export interface PollResult<P> {
+  /** The items that became due in the interval, started in array order. */
+  items: PollItem<P>[];
+  /** Stored and handed back on the next poll. Must be JSON. Omitted: `null`. */
+  cursor?: unknown;
+}
+
+/** What a trigger's `poll` can use besides its config and interval. */
+export interface PollContext {
+  /** Tenant of the polled workflow. */
+  tenantId: string;
+  /** ID of the polled workflow. */
+  workflowId: string;
+  /** Host services (see {@link FlowlineServices}). */
+  services: FlowlineServices;
+  /** The engine's logger, if any. */
+  logger?: Logger;
+  /** Aborted when the poll lease is lost; the result is then discarded. */
+  signal: AbortSignal;
+}
+
+/** The arguments of a trigger's `poll`. */
+export interface PollArgs<C> {
+  /** The workflow's trigger config. */
+  config: C;
+  /**
+   * Start of the interval (exclusive, epoch ms): the previous interval's `until`, or the time the
+   * workflow was published for the first poll.
+   */
+  since: number;
+  /**
+   * End of the interval (inclusive, epoch ms): the engine's clock, capped at
+   * `since + maxInterval`.
+   */
+  until: number;
+  /** The cursor returned by the previous successful poll, or `null`. */
+  cursor: unknown;
+  /** Tenant, workflow, services and abort signal. */
+  ctx: PollContext;
 }
 
 /**
@@ -524,20 +594,56 @@ const DURATION_UNIT_MS = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 } as 
 const MAX_WINDOW_MS = 365 * DURATION_UNIT_MS.d;
 
 /**
- * Whether `window` is a valid dedupe window: a whole number of ms, or duration text in the
- * grammar of `parseDuration` from `@flowlinejs/nodes-builtin` (which `core` must not import),
- * from 1 ms to {@link MAX_WINDOW_MS}. The engine re-parses it with `parseDuration` itself.
+ * @internal A duration in ms when valid, else `undefined`: a whole number of ms, or duration text
+ * in the grammar of `parseDuration` from `@flowlinejs/nodes-builtin` (which `core` must not
+ * import), from 1 ms to {@link MAX_WINDOW_MS}. The engine re-parses it with `parseDuration`.
  */
-function isValidWindow(window: DurationInput): boolean {
+export function durationMs(input: DurationInput): number | undefined {
   let ms: number;
-  if (typeof window === "number") {
-    ms = window;
+  if (typeof input === "number") {
+    ms = input;
   } else {
-    const match = /^([1-9][0-9]*)([smhd])$/.exec(window);
-    if (!match) return false;
+    const match = typeof input === "string" ? /^([1-9][0-9]*)([smhd])$/.exec(input) : null;
+    if (!match) return undefined;
     ms = Number(match[1]) * DURATION_UNIT_MS[match[2] as keyof typeof DURATION_UNIT_MS];
   }
-  return Number.isInteger(ms) && ms >= 1 && ms <= MAX_WINDOW_MS;
+  return Number.isInteger(ms) && ms >= 1 && ms <= MAX_WINDOW_MS ? ms : undefined;
+}
+
+/** Throws unless a poll trigger's `poll`, `interval` and `maxInterval` are consistent. */
+// biome-ignore lint/suspicious/noExplicitAny: definitions of any config/payload types
+function checkPoll(def: TriggerDefinition<any, any>): void {
+  const declared =
+    def.poll !== undefined || def.interval !== undefined || def.maxInterval !== undefined;
+  if (def.kind !== "poll") {
+    if (declared) {
+      throw new FlowlineDefinitionError(
+        `Trigger "${def.type}" is kind "${def.kind}"; poll, interval and maxInterval require kind "poll"`,
+      );
+    }
+    return;
+  }
+  if (typeof def.poll !== "function") {
+    throw new FlowlineDefinitionError(`Trigger "${def.type}" is kind "poll" and requires poll`);
+  }
+  const ms = (what: "interval" | "maxInterval"): number | undefined => {
+    const input = def[what];
+    if (input === undefined) return undefined;
+    const value = durationMs(input);
+    if (value === undefined) {
+      throw new FlowlineDefinitionError(
+        `Trigger "${def.type}" has an invalid ${what} ${JSON.stringify(input)}: use 1 ms to 365 days, e.g. 60000 or "5m"`,
+      );
+    }
+    return value;
+  };
+  const interval = ms("interval");
+  const maxInterval = ms("maxInterval");
+  if (interval !== undefined && maxInterval !== undefined && maxInterval < interval) {
+    throw new FlowlineDefinitionError(
+      `Trigger "${def.type}" has a maxInterval (${maxInterval} ms) shorter than its interval (${interval} ms)`,
+    );
+  }
 }
 
 /**
@@ -546,7 +652,28 @@ function isValidWindow(window: DurationInput): boolean {
  * @throws {@link FlowlineDefinitionError} if `type` has no namespace, both `payload` and
  * `dynamicPayload` are given, `dedupe.window` is not a whole number of ms or a duration from
  * 1 ms to 365 days, both `event` and `events` are set, `events` is empty or has duplicates,
- * `events` is set without `normalize`, or `events`/`normalize` are set on a non-`event` kind.
+ * `events` is set without `normalize`, `events`/`normalize` are set on a non-`event` kind,
+ * kind `poll` lacks `poll`, `poll`/`interval`/`maxInterval` are set on another kind, `interval` or
+ * `maxInterval` is not a whole number of ms or a duration from 1 ms to 365 days, or
+ * `maxInterval < interval`.
+ *
+ * @example
+ * ```ts
+ * export const overdueInvoice = defineTrigger({
+ *   type: "billing.invoiceOverdue",
+ *   name: "Invoice overdue",
+ *   kind: "poll",
+ *   interval: "5m",
+ *   config: z.object({}),
+ *   payload: z.object({ invoiceId: z.string() }),
+ *   poll: async ({ since, until, ctx }) => ({
+ *     items: (await ctx.services.billing.dueBetween(since, until)).map((inv) => ({
+ *       key: inv.id,
+ *       payload: { invoiceId: inv.id },
+ *     })),
+ *   }),
+ * });
+ * ```
  */
 export function defineTrigger<C extends z.ZodObject, P>(
   def: TriggerDefinition<C, P>,
@@ -578,8 +705,9 @@ export function defineTrigger<C extends z.ZodObject, P>(
       `Trigger "${def.type}" is kind "${def.kind}"; events and normalize require kind "event"`,
     );
   }
+  checkPoll(def);
   const window = def.dedupe?.window;
-  if (window !== undefined && !isValidWindow(window)) {
+  if (window !== undefined && durationMs(window) === undefined) {
     throw new FlowlineDefinitionError(
       `Trigger "${def.type}" has an invalid dedupe window ${JSON.stringify(window)}: use 1 ms to 365 days, e.g. 60000 or "30m"`,
     );

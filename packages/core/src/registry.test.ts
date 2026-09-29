@@ -145,6 +145,36 @@ test("manifest carries events for a multi-event trigger, event for a single-even
   expect(configured.events).toBeUndefined();
 });
 
+test("manifest carries a poll trigger's interval and maxInterval in ms", () => {
+  const stuck = defineTrigger({
+    type: "p.stuck",
+    name: "Stuck",
+    kind: "poll",
+    interval: "10s",
+    maxInterval: "2d",
+    config: z.object({}),
+    poll: () => ({ items: [] }),
+  });
+  const bare = defineTrigger({
+    type: "p.bare",
+    name: "Bare",
+    kind: "poll",
+    interval: 90_000,
+    config: z.object({}),
+    poll: () => ({ items: [] }),
+  });
+  const m = createRegistry([
+    definePlugin({ id: "p", name: "P", triggers: [stuck, bare] }),
+  ]).manifest();
+  const [s, b] = m.triggers;
+  expect(s).toMatchObject({ kind: "poll", interval: 10_000, maxInterval: 172_800_000 });
+  expect(b?.interval).toBe(90_000);
+  // Undeclared: the engine default applies, which the manifest doesn't know.
+  expect(b).not.toHaveProperty("maxInterval");
+  expect(m.triggers.find((t) => t.type === "p.stuck")).not.toHaveProperty("poll");
+  expect(createRegistry([crm]).manifest().triggers[0]).not.toHaveProperty("interval");
+});
+
 test("defaults for output, payload, dynamic specs and branches", () => {
   const cond = defineNode({
     type: "logic.condition",

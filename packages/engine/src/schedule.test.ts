@@ -2,6 +2,9 @@ import {
   createRegistry,
   defineNode,
   definePlugin,
+  defineTrigger,
+  type PollArgs,
+  type PollResult,
   suspend,
   type WorkflowDoc,
 } from "@flowlinejs/core";
@@ -165,6 +168,71 @@ describe("startWorker", () => {
     await expect.poll(async () => (await storage.listRuns("t1", {}))[0]?.status).toBe("running");
     await worker.stop();
     expect(finished).toBe(true);
+  });
+
+  /** An engine whose one published workflow polls with `poll`; the fake clock stays put. */
+  async function pollingEngine(poll: (args: PollArgs<unknown>) => Promise<PollResult<unknown>>) {
+    const trigger = defineTrigger({
+      type: "q.poll",
+      name: "Poll",
+      kind: "poll",
+      interval: 1,
+      config: z.object({}),
+      poll,
+    });
+    const e = createEngine({
+      registry: createRegistry([
+        definePlugin({ id: "q", name: "Q", nodes: [], triggers: [trigger] }),
+      ]),
+      storage,
+      clock: () => now,
+    });
+    const v = await e.saveWorkflow(
+      "t1",
+      { id: "p", name: "p", trigger: { type: "q.poll", config: {} }, steps: [] },
+      "u",
+    );
+    await e.publish("t1", "p", v.version, "u");
+    now += 1_000; // the first interval is due
+    return e;
+  }
+
+  it("ticks polls every pollEveryMs, on the first loop only", async () => {
+    const owners: (string | undefined)[] = [];
+    const e = await pollingEngine(async () => {
+      owners.push((await storage.getPollState("t1", "p"))?.leaseOwner);
+      now += 1_000; // make the next poll due
+      return { items: [] };
+    });
+    const worker = e.startWorker({
+      concurrency: 3,
+      pollMs: 5,
+      pollEveryMs: 10,
+      workerId: "w",
+      scheduleEveryMs: 60_000,
+    });
+    try {
+      await expect.poll(() => owners.length, { timeout: 3_000 }).toBeGreaterThanOrEqual(3);
+    } finally {
+      await worker.stop();
+    }
+    expect(new Set(owners)).toEqual(new Set(["w-0"]));
+  });
+
+  it("stop() waits for an in-flight poll tick", async () => {
+    let started = false;
+    let finished = false;
+    const e = await pollingEngine(async () => {
+      started = true;
+      await new Promise((r) => setTimeout(r, 100));
+      finished = true;
+      return { items: [] };
+    });
+    const worker = e.startWorker({ pollMs: 5, pollEveryMs: 10 });
+    await expect.poll(() => started).toBe(true);
+    await worker.stop();
+    expect(finished).toBe(true);
+    expect((await storage.getPollState("t1", "p"))?.leaseOwner).toBeUndefined();
   });
 
   it("stop() aborts an in-flight afterCommit hook", async () => {

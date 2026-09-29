@@ -162,7 +162,9 @@ export type RunOrigin =
   | { kind: "webhook" }
   | { kind: "manual"; userId?: string }
   | { kind: "schedule"; fireAt: number }
-  | { kind: "subflow"; parentRunId: string; parentStepPath: string };
+  | { kind: "subflow"; parentRunId: string; parentStepPath: string }
+  /** One item of a poll trigger, found in the interval `(since, until]` (epoch ms). */
+  | { kind: "poll"; since: number; until: number; itemKey: string };
 
 /** One row of `GET /runs`. */
 export interface RunSummary {

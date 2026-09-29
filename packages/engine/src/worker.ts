@@ -15,13 +15,19 @@ export interface WorkerOptions {
   workerId?: string;
   /** How often the first loop calls `tickSchedules`, in ms. Default `15_000`. */
   scheduleEveryMs?: number;
+  /**
+   * How often the first loop calls `tickPolls`, in ms. Default `15_000`. A poll trigger's
+   * `interval` shorter than this effectively becomes this.
+   */
+  pollEveryMs?: number;
 }
 
 /** A started worker. */
 export interface Worker {
   /**
    * Stop claiming new runs and abort in-flight `afterCommit` hooks (recorded as
-   * `step.afterCommitFailed`); resolves once in-flight claims and schedule ticks have finished.
+   * `step.afterCommitFailed`); resolves once in-flight claims, schedule ticks and poll ticks have
+   * finished.
    */
   stop(): Promise<void>;
 }
@@ -31,15 +37,18 @@ export interface WorkerDeps {
   /** Claim and advance one run; `stop` aborts when the worker stops. */
   runOnce(workerId: string, stop: AbortSignal): Promise<boolean>;
   tickSchedules(): Promise<number>;
+  /** Poll due poll workflows, leasing as `workerId`. */
+  tickPolls(workerId: string): Promise<number>;
   defaultWorkerId: string;
   logger?: Logger;
 }
 
-/** @internal Start `concurrency` claim loops; the first also ticks schedules. */
+/** @internal Start `concurrency` claim loops; the first also ticks schedules and polls. */
 export function startWorker(deps: WorkerDeps, opts: WorkerOptions = {}): Worker {
   const concurrency = Math.max(1, Math.floor(opts.concurrency ?? 1));
   const pollMs = Math.max(0, opts.pollMs ?? 500);
   const scheduleEveryMs = Math.max(1, opts.scheduleEveryMs ?? 15_000);
+  const pollEveryMs = Math.max(1, opts.pollEveryMs ?? 15_000);
   const base = opts.workerId ?? deps.defaultWorkerId;
   let stopped = false;
   /** Aborted by `stop()`: cuts in-flight `afterCommit` hooks short. */
@@ -64,14 +73,23 @@ export function startWorker(deps: WorkerDeps, opts: WorkerOptions = {}): Worker 
 
   const loop = async (index: number) => {
     const workerId = `${base}-${index}`;
-    let nextTick = index === 0 ? 0 : Number.POSITIVE_INFINITY;
+    let nextSchedule = index === 0 ? 0 : Number.POSITIVE_INFINITY;
+    let nextPoll = nextSchedule;
     while (!stopped) {
-      if (performance.now() >= nextTick) {
-        nextTick = performance.now() + scheduleEveryMs;
+      if (performance.now() >= nextSchedule) {
+        nextSchedule = performance.now() + scheduleEveryMs;
         try {
           await deps.tickSchedules();
         } catch (err) {
           report("schedule tick failed", err);
+        }
+      }
+      if (!stopped && performance.now() >= nextPoll) {
+        nextPoll = performance.now() + pollEveryMs;
+        try {
+          await deps.tickPolls(workerId);
+        } catch (err) {
+          report("poll tick failed", err);
         }
       }
       let claimed = false;
@@ -82,7 +100,10 @@ export function startWorker(deps: WorkerDeps, opts: WorkerOptions = {}): Worker 
       }
       if (!claimed && !stopped) {
         let wait = pollMs * (0.8 + Math.random() * 0.4);
-        if (index === 0) wait = Math.min(wait, Math.max(0, nextTick - performance.now()));
+        if (index === 0) {
+          const nextTick = Math.min(nextSchedule, nextPoll);
+          wait = Math.min(wait, Math.max(0, nextTick - performance.now()));
+        }
         await sleep(wait);
       }
     }

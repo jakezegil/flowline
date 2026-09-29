@@ -369,6 +369,94 @@ describe("defineTrigger", () => {
       ).toThrow(/Trigger "a\.c".*kind "manual".*events and normalize/);
     });
   });
+
+  describe("poll triggers", () => {
+    const base = { name: "P", config: z.object({}) } as const;
+    const poll = () => ({ items: [] });
+
+    test("accepts a poll trigger with poll, interval and maxInterval", () => {
+      const t = defineTrigger({
+        ...base,
+        type: "a.poll",
+        kind: "poll",
+        interval: "1m",
+        maxInterval: "24h",
+        payload: z.object({ id: z.string() }),
+        poll: ({ since, until }) => ({
+          items: [{ key: `${since}-${until}`, payload: { id: "x" } }],
+        }),
+      });
+      expect(t.kind).toBe("poll");
+      expect(() => defineTrigger({ ...base, type: "a.bare", kind: "poll", poll })).not.toThrow();
+      // Equal interval and maxInterval are fine.
+      expect(() =>
+        defineTrigger({
+          ...base,
+          type: "a.eq",
+          kind: "poll",
+          poll,
+          interval: 60_000,
+          maxInterval: "1m",
+        }),
+      ).not.toThrow();
+    });
+
+    test('rejects kind "poll" without poll', () => {
+      expect(() => defineTrigger({ ...base, type: "a.b", kind: "poll" })).toThrow(
+        FlowlineDefinitionError,
+      );
+      expect(() => defineTrigger({ ...base, type: "a.b", kind: "poll" })).toThrow(
+        /Trigger "a\.b".*kind "poll".*requires poll/,
+      );
+    });
+
+    test("rejects poll, interval or maxInterval on another kind", () => {
+      for (const extra of [{ poll }, { interval: "1m" }, { maxInterval: "24h" }]) {
+        expect(() =>
+          defineTrigger({ ...base, type: "a.b", kind: "event", event: "x", ...extra }),
+        ).toThrow(
+          /Trigger "a\.b".*kind "event".*poll, interval and maxInterval require kind "poll"/,
+        );
+      }
+      expect(() => defineTrigger({ ...base, type: "a.c", kind: "schedule", poll })).toThrow(
+        FlowlineDefinitionError,
+      );
+    });
+
+    test("rejects maxInterval < interval", () => {
+      expect(() =>
+        defineTrigger({
+          ...base,
+          type: "a.b",
+          kind: "poll",
+          poll,
+          interval: "2h",
+          maxInterval: "1h",
+        }),
+      ).toThrow(/Trigger "a\.b".*maxInterval.*shorter than.*interval/);
+    });
+
+    test("rejects invalid interval and maxInterval durations", () => {
+      for (const extra of [
+        { interval: 0 },
+        { interval: "soon" },
+        { interval: 1.5 },
+        { maxInterval: 0 },
+        { maxInterval: "366d" },
+        { maxInterval: -1 },
+      ]) {
+        expect(() => defineTrigger({ ...base, type: "a.b", kind: "poll", poll, ...extra })).toThrow(
+          FlowlineDefinitionError,
+        );
+      }
+    });
+
+    test("rejects events or normalize on a poll trigger", () => {
+      expect(() =>
+        defineTrigger({ ...base, type: "a.b", kind: "poll", poll, normalize: () => undefined }),
+      ).toThrow(/events and normalize require kind "event"/);
+    });
+  });
 });
 
 describe("definePlugin", () => {
