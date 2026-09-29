@@ -563,7 +563,10 @@ export function formatDuration(ms: number): string {
 /**
  * Formats a poll interval as a natural-language phrase for "Checks every …": `"5 minutes"`,
  * `"10 seconds"`, `"2 hours"`, `"3 days"` — singular for exactly one (`"every minute"`, not
- * `"every 1 minute"`).
+ * `"every 1 minute"`). Picks the largest unit that divides `ms` exactly (so `36h` reads "every
+ * 36 hours", not "every 1 day" or a rounded-off "every day"); an interval that isn't a whole
+ * number of any larger unit falls back to seconds ("every 90 seconds" for 90 000 ms), including
+ * fractional seconds for sub-second intervals ("every 1.5 seconds").
  */
 export function formatPollInterval(ms: number): string {
   const units: [number, string][] = [
@@ -573,12 +576,13 @@ export function formatPollInterval(ms: number): string {
     [1000, "second"],
   ];
   for (const [size, name] of units) {
-    if (ms >= size) {
-      const n = Math.round(ms / size);
+    if (ms >= size && ms % size === 0) {
+      const n = ms / size;
       return n === 1 ? `every ${name}` : `every ${n} ${name}s`;
     }
   }
-  return "every second";
+  const n = Number((ms / 1000).toFixed(3));
+  return n === 1 ? "every second" : `every ${n} seconds`;
 }
 
 /** "Subject" → "No subject"; acronyms like "URL" keep their case. */

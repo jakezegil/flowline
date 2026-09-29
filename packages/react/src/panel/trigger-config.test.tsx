@@ -71,6 +71,27 @@ describe("TriggerConfigure: multi-event triggers", () => {
     const option = Array.from(select.options).find((o) => o.value === "crm.contactCreated");
     expect(option?.textContent).toContain("contact.created");
   });
+
+  test("truncates option text past 60 characters with an ellipsis", () => {
+    const longEventsTrigger = {
+      ...(singleEvent as NonNullable<typeof singleEvent>),
+      type: "crm.longEvents",
+      name: "A trigger with a rather long name for this test",
+      event: undefined,
+      events: ["some_long_event_name.happened", "another_long_event_name.happened"],
+    };
+    const withLongEvents: Manifest = {
+      ...manifest,
+      triggers: [longEventsTrigger, ...restTriggers],
+    };
+    setup(withLongEvents, "crm.longEvents");
+    const select = screen.getByRole("combobox", { name: "Trigger type" }) as HTMLSelectElement;
+    const option = Array.from(select.options).find((o) => o.value === "crm.longEvents");
+    const full = `${longEventsTrigger.name} — ${longEventsTrigger.events.join(", ")}`;
+    expect(full.length).toBeGreaterThan(60);
+    expect(option?.textContent).toHaveLength(60);
+    expect(option?.textContent).toBe(`${full.slice(0, 59)}…`);
+  });
 });
 
 const pollTrigger = {

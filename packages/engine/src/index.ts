@@ -1,5 +1,10 @@
-/** Package version. */
-export const VERSION = "0.1.0";
+// A named import (no `with { type: "json" }`) lets esbuild/Rollup tree-shake the JSON module
+// down to this one property, so the bundled dist doesn't ship the rest of package.json
+// (scripts, devDependencies, ...). See packages/engine/src/index.test.ts.
+import { version } from "../package.json";
+
+/** Package version, read from `package.json` so it can never drift from the published version. */
+export const VERSION: string = version;
 
 export {
   type CancelRunOptions,

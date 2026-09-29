@@ -1,8 +1,15 @@
 import { runStorageConformance } from "@flowlinejs/engine/conformance";
 import { describe, expect, it } from "vitest";
-import { createMemoryStorage } from "./index";
+import { version } from "../package.json";
+import { createMemoryStorage, VERSION } from "./index";
 
 runStorageConformance("memory", async () => ({ storage: createMemoryStorage() }));
+
+describe("VERSION", () => {
+  it("matches package.json", () => {
+    expect(VERSION).toBe(version);
+  });
+});
 
 describe("createMemoryStorage", () => {
   it("creates independent instances", async () => {

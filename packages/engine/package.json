@@ -1,6 +1,6 @@
 {
   "name": "@flowlinejs/engine",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "license": "MIT",
   "description": "Durable workflow engine for Flowline: interprets workflow documents over a pluggable StorageAdapter, with retries, suspension, schedules and an audit trail.",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultLabels, formatDuration, resolveLabels } from "./labels";
+import { defaultLabels, formatDuration, formatPollInterval, resolveLabels } from "./labels";
 
 describe("formatDuration", () => {
   it("scales from milliseconds to days", () => {
@@ -43,6 +43,24 @@ describe("triggerEventsHint", () => {
     expect(hint).toContain("ai_call.ended");
     expect(hint).toContain("voip_call.ended");
     expect(hint).toMatch(/normalized/i);
+  });
+});
+
+describe("formatPollInterval", () => {
+  it("describes an interval that isn't a whole minute in seconds, not rounded minutes", () => {
+    expect(formatPollInterval(90_000)).toBe("every 90 seconds");
+  });
+
+  it("uses the singular minute for exactly 60 seconds", () => {
+    expect(formatPollInterval(60_000)).toBe("every minute");
+  });
+
+  it("uses the singular hour for exactly one hour", () => {
+    expect(formatPollInterval(3_600_000)).toBe("every hour");
+  });
+
+  it("prefers hours over an inexact day for 36 hours", () => {
+    expect(formatPollInterval(36 * 3_600_000)).toBe("every 36 hours");
   });
 });
 

@@ -27,9 +27,13 @@ import {
   stoppedAtOf,
   type WorkflowAuditEntry,
 } from "@flowlinejs/engine";
+// A named import (no `with { type: "json" }`) lets esbuild/Rollup tree-shake the JSON module
+// down to this one property, so the bundled dist doesn't ship the rest of package.json
+// (scripts, devDependencies, ...). See packages/storage-memory/src/memory.test.ts.
+import { version } from "../package.json";
 
-/** Package version. */
-export const VERSION = "0.1.0";
+/** Package version, read from `package.json` so it can never drift from the published version. */
+export const VERSION: string = version;
 
 interface StoredRun {
   run: Run;
