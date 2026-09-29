@@ -299,7 +299,10 @@ function run(doc: WorkflowDoc, f: FollowUp): unknown {
   return reads[f.tool](doc, m, f.args as never);
 }
 
-/** Runs a `getSteps` follow-up and every `next` page after it; the details of each page, in order. */
+/**
+ * Runs a `getSteps` follow-up and every page after it (its `next`, or the `omitted` steps left
+ * out by the size budget); the details of each page, in order.
+ */
 function pages(doc: WorkflowDoc, f: FollowUp): StepDetail[] {
   const out: StepDetail[] = [];
   let cur: FollowUp | undefined = f;
@@ -307,8 +310,9 @@ function pages(doc: WorkflowDoc, f: FollowUp): StepDetail[] {
     expect(cur.tool).toBe("getSteps");
     const r = run(doc, cur) as ReadResults["getSteps"];
     expect(r.missing).toEqual([]);
+    expect(JSON.stringify(r).length).toBeLessThanOrEqual(8000);
     out.push(...r.steps);
-    cur = r.next;
+    cur = r.next ?? r.omitted?.find((o) => o.what === "steps")?.fetch;
   }
   return out;
 }
@@ -360,6 +364,7 @@ describe("budget follow-ups return the omitted content", () => {
           }
           push(r.next);
           push(r.full);
+          for (const o of r.omitted ?? []) push(o.fetch);
         }
       }
       expect(seen).toEqual(ids);
@@ -371,6 +376,8 @@ describe("budget follow-ups return the omitted content", () => {
       }
       expect(details.some((d) => d.config?.dealId === "y".repeat(20_000))).toBe(true);
     },
+    // Some hundreds of 1-step pages: 4000-char notes leave room for one step per 8000 budget.
+    30_000,
   );
 
   it("config, where form: pages return every step's config", () => {
@@ -509,16 +516,40 @@ describe("budget follow-ups return the omitted content", () => {
     expect(ids.size).toBe(30);
   });
 
-  it("branch and steps: outline follow-ups return the hidden steps", () => {
-    const doc = deepDoc(12);
-    const r = overview(doc, m, { budget: 800 });
-    const kinds = new Set(r.omitted.map((o) => o.what));
-    expect(kinds.has("branch") || kinds.has("steps")).toBe(true);
-    for (const o of r.omitted.filter((x) => x.what === "branch" || x.what === "steps")) {
-      const next = run(doc, o.fetch) as OutlineResult;
-      expect(shownIds(next, allIds(doc)).length).toBeGreaterThan(0);
-    }
-  });
+  it.each([
+    ["branch", "12-deep", () => deepDoc(12)],
+    ["branch", "12-deep, 200 steps", () => deepDoc(12, 200)],
+    ["steps", "60 flat", () => flatDoc(60)],
+  ] as ["branch" | "steps", string, () => WorkflowDoc][])(
+    "%s omissions (%s): each follow-up, followed to the end, shows exactly the steps it counts",
+    (kind, _, make) => {
+      const doc = make();
+      const ids = allIds(doc);
+      const r = overview(doc, m, { budget: 800 });
+      const hidden = (o: Omission) => o.what === "branch" || o.what === "steps";
+      // Every step shown by an omission's follow-up and, in turn, by theirs.
+      const reach = (o: Omission, out: Set<string>): Set<string> => {
+        const next = run(doc, o.fetch) as OutlineResult;
+        expect(resultSize(next)).toBeLessThanOrEqual(4000);
+        for (const id of shownIds(next, ids)) out.add(id);
+        for (const x of next.omitted.filter(hidden)) reach(x, out);
+        return out;
+      };
+      const of = r.omitted.filter((o) => o.what === kind);
+      expect(of.length).toBeGreaterThan(0);
+      for (const o of of) {
+        const got = reach(o, new Set());
+        // A branch outline also shows its owning step, and a tail outline its anchor: not counted.
+        if (o.fetch.tool === "outline" && o.fetch.args.stepId !== undefined) {
+          got.delete(o.fetch.args.stepId);
+        }
+        if (o.fetch.tool === "outline" && o.fetch.args.after !== undefined) {
+          got.delete(o.fetch.args.after);
+        }
+        expect(got.size, JSON.stringify(o.fetch.args)).toBe(o.count);
+      }
+    },
+  );
 });
 
 function findIn(steps: Step[], id: string): Step | undefined {

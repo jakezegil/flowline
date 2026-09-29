@@ -5,17 +5,24 @@
  *
  * @module
  */
-import { sectionOf } from "../annotations";
+import { sectionRun } from "../annotations";
 import { branchesFor, derefSchema, describeType, schemaAtPath } from "../json-schema";
 import { formatRefPath, isRef, isTpl, parseRefPath, type RefPath } from "../refs";
-import { availableScope, indexManifest, resolveRefSchema, type ScopeEntry } from "../scope";
-import { FlowlineTreeError, type FoundStep, findStep, walkSteps } from "../tree";
+import {
+  availableScope,
+  indexManifest,
+  resolveRefSchema,
+  type ScopeEntry,
+  walkScope,
+} from "../scope";
+import { FlowlineTreeError, findStep, type StepLocation, walkSteps } from "../tree";
 import type {
   JSONSchema,
   Manifest,
   NodeManifest,
   RuleOperatorMeta,
   Section,
+  Step,
   ValueExpr,
   WorkflowDoc,
 } from "../types";
@@ -27,6 +34,7 @@ import { outline, overview } from "./outline";
 import type {
   FollowUp,
   Include,
+  Omission,
   ReadArgs,
   ReadFn,
   ReadOptions,
@@ -43,6 +51,13 @@ const CUT_MAX = 500;
 /** Default and largest page size of `getSteps({ where })`. */
 const PAGE_DEFAULT = 50;
 const PAGE_MAX = 200;
+/** Default and largest page size of `findSteps`. */
+const FIND_DEFAULT = 100;
+const FIND_MAX = 500;
+/** Default budget of `focus` and `getSteps`, in characters of the JSON result. */
+const BUDGET_DEFAULT = 8000;
+/** Most refs a step read lists per step. */
+const REFS_MAX = 30;
 /** Notes are shown to this length in `findSteps` lines, as in the outline. */
 const LINE_NOTE_MAX = 120;
 
@@ -74,22 +89,87 @@ class Cutter {
   }
 }
 
-/** What every step read of one call shares: the node index and the doc's issues. */
+/** A step and where it sits. */
+interface Located {
+  step: Step;
+  location: StepLocation;
+}
+
+/**
+ * What every step read of one call shares, each computed once: the node index, issues by step,
+ * step locations, sections by step, and the scope at each step whose refs are wanted.
+ */
 interface ReadContext {
   doc: WorkflowDoc;
   manifest: Manifest;
   nodes: Map<string, NodeManifest>;
-  issues: Issue[];
-  opts: ReadOptions;
+  issues: Map<string, Omit<Issue, "stepId">[]>;
+  located: Map<string, Located>;
+  /** The innermost section each member step belongs to (as `sectionOf`). */
+  sectionOf: Map<string, Section>;
+  /** The sections whose `first` is each step. */
+  heads: Map<string, Section[]>;
+  /** The scope visible at each step asked for with `refs`. */
+  scopes: Map<string, readonly ScopeEntry[]>;
 }
 
-function readContext(doc: WorkflowDoc, manifest: Manifest, opts: ReadOptions): ReadContext {
+function readContext(
+  doc: WorkflowDoc,
+  manifest: Manifest,
+  opts: ReadOptions,
+  scopeIds: Iterable<string> = [],
+): ReadContext {
+  const issues = new Map<string, Omit<Issue, "stepId">[]>();
+  for (const { stepId, ...rest } of validateWorkflow(doc, manifest, opts.ctx)) {
+    if (stepId === undefined) continue;
+    const list = issues.get(stepId) ?? [];
+    list.push(rest);
+    issues.set(stepId, list);
+  }
+
+  const located = new Map<string, Located>();
+  walkSteps(doc, (step, location) => {
+    if (!located.has(step.id)) located.set(step.id, { step, location });
+  });
+
+  const sectionOf = new Map<string, Section>();
+  const size = new Map<string, number>();
+  const heads = new Map<string, Section[]>();
+  const sections = Array.isArray(doc.sections) ? doc.sections : [];
+  for (const section of sections) {
+    const run = sectionRun(doc, section);
+    if (run) {
+      const n = run.end - run.start;
+      for (const id of run.ids) {
+        if (!sectionOf.has(id) || n < (size.get(id) as number)) {
+          sectionOf.set(id, section);
+          size.set(id, n);
+        }
+      }
+    }
+    if (typeof section.first === "string") {
+      heads.set(section.first, [...(heads.get(section.first) ?? []), section]);
+    }
+  }
+
+  const scopes = new Map<string, readonly ScopeEntry[]>();
+  const wanted = new Set(scopeIds);
+  if (wanted.size > 0) {
+    walkScope(doc, manifest, opts.ctx, (step, visible) => {
+      if (wanted.has(step.id) && !scopes.has(step.id)) scopes.set(step.id, visible);
+      return undefined;
+    });
+  }
+
   return {
     doc,
     manifest,
     nodes: indexManifest(manifest).nodes,
-    issues: validateWorkflow(doc, manifest, opts.ctx),
-    opts,
+    issues,
+    located,
+    sectionOf,
+    heads,
+    scopes,
   };
 }
 
@@ -104,15 +184,23 @@ function sectionInfo(section: Section, cutter: Cutter, path: string): SectionInf
   };
 }
 
+/** `RefInfo`s by scope entry: entries are shared by the scopes of one walk. */
+const refInfos = new WeakMap<ScopeEntry, RefInfo>();
+
 function refInfo(entry: ScopeEntry): RefInfo {
-  const children = childSchemas(entry.schema).length;
-  return {
-    ref: entry.refBase,
-    type: describeType(entry.schema),
-    label: entry.label,
-    ...(entry.disabled ? { disabled: true } : {}),
-    ...(children > 0 ? { children } : {}),
-  };
+  let info = refInfos.get(entry);
+  if (!info) {
+    const children = childSchemas(entry.schema).length;
+    info = {
+      ref: entry.refBase,
+      type: describeType(entry.schema),
+      label: entry.label,
+      ...(entry.disabled ? { disabled: true } : {}),
+      ...(children > 0 ? { children } : {}),
+    };
+    refInfos.set(entry, info);
+  }
+  return { ...info };
 }
 
 /** Property names of an object schema, looking through refs, nullable unions and `allOf`. */
@@ -145,20 +233,18 @@ function childSchemas(schema: JSONSchema): [(string | number)[], JSONSchema][] {
   return out;
 }
 
-/** The refs in scope at `stepId`, top level. */
-function topRefs(ctx: ReadContext, stepId: string): RefInfo[] {
-  return availableScope(ctx.doc, stepId, ctx.manifest, ctx.opts.ctx).map(refInfo);
+/** The refs follow-up for a step. */
+function refsOmission(stepId: string, count: number): Omission {
+  return { what: "refs", stepId, count, fetch: { tool: "availableRefs", args: { stepId } } };
 }
 
-/** Builds a step's detail. `fullCall` is the call that returns it uncut. */
+/** Builds a step's detail. Refs past {@link REFS_MAX} are left out, with an `omitted` entry. */
 function stepDetail(
   ctx: ReadContext,
-  found: FoundStep,
+  { step, location }: Located,
   include: ReadonlySet<Include>,
   full: boolean,
-  fullCall: FollowUp,
 ): StepDetail {
-  const { step, location } = found;
   const cutter = new Cutter(full);
   const node = ctx.nodes.get(step.type);
   const detail: StepDetail = {
@@ -170,7 +256,7 @@ function stepDetail(
       ...(location.branch !== undefined ? { branch: location.branch } : {}),
       index: location.index,
     },
-    issues: ctx.issues.filter((i) => i.stepId === step.id),
+    issues: ctx.issues.get(step.id) ?? [],
   };
   if (typeof step.name === "string" && step.name !== "") {
     detail.name = cutter.str(step.name, "name");
@@ -181,10 +267,9 @@ function stepDetail(
   }
   if (step.color !== undefined) detail.color = shownColor(step.color);
 
-  const section = sectionOf(ctx.doc, step.id);
+  const section = ctx.sectionOf.get(step.id);
   if (section) detail.section = sectionInfo(section, cutter, "section");
-  const sections = Array.isArray(ctx.doc.sections) ? ctx.doc.sections : [];
-  const heads = sections.filter((s) => s !== section && s.first === step.id);
+  const heads = (ctx.heads.get(step.id) ?? []).filter((s) => s !== section);
   if (heads.length > 0) {
     detail.heads = heads.map((s, i) => sectionInfo(s, cutter, `heads[${i}]`));
   }
@@ -194,7 +279,14 @@ function stepDetail(
     detail.config = cutter.value(config, "config") as Record<string, ValueExpr>;
   }
   if (include.has("schema") && node) detail.schema = compactSchema(node.input);
-  if (include.has("refs")) detail.refs = topRefs(ctx, step.id);
+  if (include.has("refs")) {
+    const all = (ctx.scopes.get(step.id) ?? []).map(refInfo);
+    if (all.length > REFS_MAX) {
+      // The trigger, then the nearest earlier refs.
+      detail.refs = [...all.slice(0, 1), ...all.slice(all.length - (REFS_MAX - 1))];
+      detail.omitted = [refsOmission(step.id, all.length - REFS_MAX)];
+    } else detail.refs = all;
+  }
 
   const declared = node ? branchesFor(node, step) : [];
   const all = [...declared];
@@ -209,18 +301,28 @@ function stepDetail(
     }));
   }
 
-  if (cutter.paths.length > 0) {
-    detail.cut = cutter.paths;
-    detail.full = fullCall;
-  }
+  if (cutter.paths.length > 0) detail.cut = cutter.paths;
   return detail;
+}
+
+function budgetOf(budget: unknown): number {
+  return typeof budget === "number" && !Number.isNaN(budget) ? budget : BUDGET_DEFAULT;
+}
+
+function jsonSize(v: unknown): number {
+  return JSON.stringify(v).length;
 }
 
 /**
  * Everything needed to edit one step: its name, note, colour and containing section, its config,
- * the node's compact input schema, the refs in scope, its issues, and its branches with step
- * counts. Strings over 500 chars are cut with `…(+N chars)` and listed in `cut`, unless `full`
- * is set (`full` in the result is that call). Throws a `FlowlineTreeError` for an unknown step.
+ * the node's compact input schema, the refs in scope (the trigger and the 29 nearest, with a
+ * `refs` omission past 30), its issues, and its branches with step counts.
+ *
+ * Strings over 500 chars are cut with `…(+N chars)` and listed in `cut`, unless `full` is set
+ * (`full` in the result is that call). `budget` (characters of the JSON result, default 8000):
+ * when the step doesn't fit, its refs and then its schema are left out, each with an `omitted`
+ * entry (`availableRefs`, `describeNodeTypes`); what is left is returned even when over.
+ * Throws a `FlowlineTreeError` for an unknown step.
  *
  * @example
  * focus(doc, manifest, { stepId: "notifyOwner" }).refs // [{ ref: "trigger", … }, …]
@@ -231,19 +333,33 @@ export function focus(
   args: ReadArgs["focus"],
   opts: ReadOptions = {},
 ): StepDetail {
-  const found = findStep(doc, args.stepId);
-  if (!found) throw new FlowlineTreeError(`focus: unknown step "${args.stepId}"`);
-  const ctx = readContext(doc, manifest, opts);
-  return stepDetail(
-    ctx,
-    found,
-    new Set<Include>(["config", "schema", "refs"]),
-    args.full === true,
-    {
-      tool: "focus",
-      args: { stepId: args.stepId, full: true },
-    },
-  );
+  if (!findStep(doc, args.stepId)) {
+    throw new FlowlineTreeError(`focus: unknown step "${args.stepId}"`);
+  }
+  const ctx = readContext(doc, manifest, opts, [args.stepId]);
+  const at = ctx.located.get(args.stepId) as Located;
+  const include = new Set<Include>(["config", "schema", "refs"]);
+  const d = stepDetail(ctx, at, include, args.full === true);
+  if (d.cut) d.full = { tool: "focus", args: { stepId: args.stepId, full: true } };
+  const budget = budgetOf(args.budget);
+  if (jsonSize(d) > budget && d.refs) {
+    const total = ctx.scopes.get(args.stepId)?.length ?? d.refs.length;
+    delete d.refs;
+    d.omitted = [refsOmission(args.stepId, total)];
+  }
+  if (jsonSize(d) > budget && d.schema) {
+    delete d.schema;
+    d.omitted = [
+      ...(d.omitted ?? []),
+      {
+        what: "schema",
+        stepId: args.stepId,
+        count: 1,
+        fetch: { tool: "describeNodeTypes", args: { types: [at.step.type] } },
+      },
+    ];
+  }
+  return d;
 }
 
 /** Pre-order position of every step. */
@@ -255,9 +371,17 @@ function preorder(doc: WorkflowDoc): Map<string, number> {
   return at;
 }
 
-function pageSize(limit: unknown): number {
-  if (typeof limit !== "number" || !Number.isFinite(limit)) return PAGE_DEFAULT;
-  return Math.min(PAGE_MAX, Math.max(1, Math.floor(limit)));
+function pageSize(limit: unknown, byDefault: number, max: number): number {
+  if (typeof limit !== "number" || !Number.isFinite(limit)) return byDefault;
+  return Math.min(max, Math.max(1, Math.floor(limit)));
+}
+
+/** `ids` without the steps up to and including `after` (by pre-order position). */
+function startAfter(doc: WorkflowDoc, ids: string[], after: string, read: string): string[] {
+  const order = preorder(doc);
+  const from = order.get(after);
+  if (from === undefined) throw new FlowlineTreeError(`${read}: unknown step "${after}"`);
+  return ids.filter((id) => (order.get(id) ?? -1) > from);
 }
 
 /**
@@ -265,11 +389,20 @@ function pageSize(limit: unknown): number {
  * - `{ ids }`: those steps, in the given order; IDs that aren't in the doc go to `missing`.
  * - `{ where, after?, limit? }`: the steps the selector matches, in pre-order, starting after the
  *   step `after`. `limit` defaults to 50 and is capped at 200; `next` is the call for the next
- *   page when more steps match. Throws a `FlowlineTreeError` when `after` isn't a step.
+ *   page when more steps match.
  *
- * `include` (default `["config"]`) adds config, the compact schema and the refs in scope.
+ * `include` (default `["config"]`) adds config, the compact schema and the refs in scope (at
+ * most 30 per step, with a `refs` omission for the rest). Issues are always included.
  * Strings over 500 chars are cut with `…(+N chars)` unless `full: true`; each step lists its
  * cut paths in `cut`, and `full` in the result is the call that returns every cut step uncut.
+ *
+ * `budget` (characters of the JSON result, default 8000): only the leading steps that fit are
+ * returned, and always at least one. The rest are left out: for `ids`, as a `steps` omission
+ * whose follow-up is `getSteps({ ids: <rest>, … })` with the same other arguments; for `where`,
+ * `next` resumes after the last step returned.
+ *
+ * Throws a `FlowlineTreeError` when `ids` isn't an array, neither `ids` nor `where` is given, the
+ * selector is invalid (see `matchSteps`) or `after` isn't a step.
  *
  * @example
  * getSteps(doc, manifest, { where: { type: "crm.sendEmail" }, include: [] })
@@ -283,53 +416,79 @@ export function getSteps(
   const includeList: Include[] = [...(args.include ?? ["config"])];
   const include = new Set(includeList);
   const full = args.full === true;
-  const found: FoundStep[] = [];
+  const budget = budgetOf(args.budget);
+  const byIds = "ids" in args;
+  const wanted: string[] = [];
   const missing: string[] = [];
-  let next: FollowUp | undefined;
+  /** The `where` form's page is followed by more matches. */
+  let more = false;
 
-  if ("ids" in args && Array.isArray(args.ids)) {
-    for (const id of args.ids) {
-      const f = findStep(doc, id);
-      if (f) found.push(f);
-      else missing.push(id);
+  if (byIds) {
+    if (!Array.isArray(args.ids)) {
+      throw new FlowlineTreeError("getSteps: `ids` must be an array of step IDs");
     }
+    wanted.push(...args.ids);
   } else {
-    const a = args as Extract<ReadArgs["getSteps"], { where: unknown }>;
-    let ids = matchSteps(doc, manifest, a.where ?? {});
-    if (a.after !== undefined) {
-      const order = preorder(doc);
-      const from = order.get(a.after);
-      if (from === undefined) throw new FlowlineTreeError(`getSteps: unknown step "${a.after}"`);
-      ids = ids.filter((id) => (order.get(id) ?? -1) > from);
-    }
-    const size = pageSize(a.limit);
-    const page = ids.slice(0, size);
-    for (const id of page) {
-      const f = findStep(doc, id);
-      if (f) found.push(f);
-    }
-    const last = page[page.length - 1];
-    if (ids.length > size && last !== undefined) {
-      next = { tool: "getSteps", args: { ...a, after: last } };
-    }
+    if (!("where" in args)) throw new FlowlineTreeError("getSteps: pass `ids` or `where`");
+    let ids = matchSteps(doc, manifest, args.where);
+    if (args.after !== undefined) ids = startAfter(doc, ids, args.after, "getSteps");
+    const size = pageSize(args.limit, PAGE_DEFAULT, PAGE_MAX);
+    wanted.push(...ids.slice(0, size));
+    more = ids.length > size;
   }
 
-  const ctx = readContext(doc, manifest, opts);
-  const steps = found.map((f) =>
-    stepDetail(ctx, f, include, full, {
-      tool: "getSteps",
-      args: { ids: [f.step.id], include: includeList, full: true },
-    }),
-  );
-  const cutIds = [...new Set(steps.filter((s) => s.cut).map((s) => s.id))];
-  return {
-    steps,
-    missing,
-    ...(next ? { next } : {}),
-    ...(cutIds.length > 0
-      ? { full: { tool: "getSteps", args: { ids: cutIds, include: includeList, full: true } } }
-      : {}),
+  const ctx = readContext(doc, manifest, opts, include.has("refs") ? wanted : []);
+  const found: Located[] = [];
+  for (const id of wanted) {
+    const at = ctx.located.get(id);
+    if (at) found.push(at);
+    else missing.push(id);
+  }
+
+  // Details of the leading steps, until they alone pass the budget.
+  const details: StepDetail[] = [];
+  let used = 0;
+  for (const at of found) {
+    if (details.length > 0 && used > budget) break;
+    const d = stepDetail(ctx, at, include, full);
+    details.push(d);
+    used += jsonSize(d) + 1;
+  }
+
+  const assemble = (k: number): ReadResults["getSteps"] => {
+    const steps = details.slice(0, k);
+    const rest = found.slice(k).map((f) => f.step.id);
+    const last = steps[steps.length - 1]?.id;
+    let next: FollowUp | undefined;
+    const omitted: Omission[] = [];
+    if (!byIds && last !== undefined && (more || rest.length > 0)) {
+      next = { tool: "getSteps", args: { ...args, after: last } };
+    } else if (byIds && rest.length > 0) {
+      omitted.push({
+        what: "steps",
+        count: rest.length,
+        fetch: { tool: "getSteps", args: { ...args, ids: rest } },
+      });
+    }
+    const cutIds = [...new Set(steps.filter((s) => s.cut).map((s) => s.id))];
+    return {
+      steps,
+      missing,
+      ...(next ? { next } : {}),
+      ...(cutIds.length > 0
+        ? { full: { tool: "getSteps", args: { ids: cutIds, include: includeList, full: true } } }
+        : {}),
+      ...(omitted.length > 0 ? { omitted } : {}),
+    };
   };
+
+  let k = details.length;
+  let result = assemble(k);
+  while (k > 1 && jsonSize(result) > budget) {
+    k--;
+    result = assemble(k);
+  }
+  return result;
 }
 
 /** Per-step issue counts, as the outline shows them (section issues left out). */
@@ -344,8 +503,11 @@ function issueCounts(issues: Issue[]): Map<string, number> {
 }
 
 /**
- * The steps a selector matches, in pre-order: their count, and each one's ID and outline line
- * (as `stepLine` draws it), so an agent can preview a bulk edit.
+ * The steps a selector matches, in pre-order, from after the step `after`: how many there are,
+ * and a page of `limit` (default 100, at most 500) with each one's ID and outline line (as
+ * `stepLine` draws it), so an agent can preview a bulk edit. When more match, `omitted` has a
+ * `steps` entry with the call for the next page. Throws a `FlowlineTreeError` for an invalid
+ * selector (see `matchSteps`) or an `after` that isn't a step.
  *
  * @example
  * findSteps(doc, manifest, { where: { section: "check" } }).count // 4
@@ -356,16 +518,30 @@ export function findSteps(
   args: ReadArgs["findSteps"],
   opts: ReadOptions = {},
 ): ReadResults["findSteps"] {
-  const ids = matchSteps(doc, manifest, args.where ?? {});
+  let ids = matchSteps(doc, manifest, args.where);
+  if (args.after !== undefined) ids = startAfter(doc, ids, args.after, "findSteps");
+  const size = pageSize(args.limit, FIND_DEFAULT, FIND_MAX);
+  const page = ids.slice(0, size);
   const nodes = indexManifest(manifest).nodes;
   const counts = issueCounts(validateWorkflow(doc, manifest, opts.ctx));
-  const matches = ids.flatMap((id) => {
+  const matches = page.flatMap((id) => {
     const f = findStep(doc, id);
     if (!f) return [];
     const line = stepLine(f.step, nodes.get(f.step.type), counts.get(id) ?? 0, LINE_NOTE_MAX);
     return [{ id, line }];
   });
-  return { count: matches.length, matches };
+  const last = page[page.length - 1];
+  const omitted: Omission[] =
+    ids.length > size && last !== undefined
+      ? [
+          {
+            what: "steps",
+            count: ids.length - size,
+            fetch: { tool: "findSteps", args: { ...args, after: last } },
+          },
+        ]
+      : [];
+  return { count: ids.length, matches, ...(omitted.length > 0 ? { omitted } : {}) };
 }
 
 /**
@@ -583,7 +759,7 @@ export function describeNodeTypes(
 
 /**
  * The doc's validation issues, or one step's (`stepId`: the issues whose `stepId` is that step),
- * with counts by severity.
+ * with counts by severity. Throws a `FlowlineTreeError` when `stepId` isn't a step.
  *
  * @example
  * getIssues(doc, manifest, { stepId: "recheck" }) // { issues: [...], errors: 1, warnings: 0 }
@@ -594,6 +770,9 @@ export function getIssues(
   args: ReadArgs["getIssues"],
   opts: ReadOptions = {},
 ): ReadResults["getIssues"] {
+  if (args.stepId !== undefined && !findStep(doc, args.stepId)) {
+    throw new FlowlineTreeError(`getIssues: unknown step "${args.stepId}"`);
+  }
   const all = validateWorkflow(doc, manifest, opts.ctx);
   const issues = args.stepId === undefined ? all : all.filter((i) => i.stepId === args.stepId);
   const errors = issues.filter((i) => i.severity === "error").length;

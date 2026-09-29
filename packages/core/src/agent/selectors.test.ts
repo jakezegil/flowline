@@ -50,7 +50,6 @@ describe("matchSteps", () => {
       "notifyOwner",
       "stopMoved",
     ]);
-    expect(matchSteps(doc(), m, { section: "missing" })).toEqual([]);
   });
 
   it("within: descendants of a step, optionally of one branch", () => {
@@ -62,7 +61,6 @@ describe("matchSteps", () => {
       "stopMoved",
     ]);
     expect(matchSteps(doc(), m, { within: { stepId: "getDeal" } })).toEqual([]);
-    expect(matchSteps(doc(), m, { within: { stepId: "nope" } })).toEqual([]);
   });
 
   it("nameContains: case-insensitive on name, else node label, else ID", () => {

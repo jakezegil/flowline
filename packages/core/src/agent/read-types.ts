@@ -46,14 +46,30 @@ export interface ReadArgs {
    * outline format. `after` pages the listed list: only steps after that step are shown.
    */
   outline: { stepId?: string; branch?: string; after?: string; budget?: number };
-  /** Everything needed to edit one step. */
-  focus: { stepId: string; full?: boolean };
-  /** Several steps, by ID or by selector (paged with `after`/`limit`). */
+  /**
+   * Everything needed to edit one step. `budget` (characters of the JSON result, default 8000):
+   * over it, refs and then the schema are left out, each with its follow-up.
+   */
+  focus: { stepId: string; full?: boolean; budget?: number };
+  /**
+   * Several steps, by ID or by selector (paged with `after`/`limit`). `budget` (characters of the
+   * JSON result, default 8000): only the leading steps that fit are returned (at least one).
+   */
   getSteps:
-    | { ids: string[]; include?: Include[]; full?: boolean }
-    | { where: Where; after?: string; limit?: number; include?: Include[]; full?: boolean };
-  /** IDs and one-line summaries of the steps a selector matches. */
-  findSteps: { where: Where };
+    | { ids: string[]; include?: Include[]; full?: boolean; budget?: number }
+    | {
+        where: Where;
+        after?: string;
+        limit?: number;
+        include?: Include[];
+        full?: boolean;
+        budget?: number;
+      };
+  /**
+   * IDs and one-line summaries of the steps a selector matches, in pages of `limit` (default
+   * 100, at most 500) starting after the step `after`.
+   */
+  findSteps: { where: Where; after?: string; limit?: number };
   /** The `{{ }}` refs in scope at a step, top level unless `path` drills in. */
   availableRefs: { stepId: string; path?: string };
   /** Node types, by search query and category. */
@@ -79,9 +95,17 @@ export interface Omission {
    * - `branch`: a collapsed branch
    * - `steps`: a list's tail
    * - `sections`: sections whose steps are all missing, folded into one line (their issues)
+   * - `refs`: (step reads) the refs past the 30 shown for step `stepId`, or all of them when
+   *   they didn't fit `focus`'s budget
+   * - `schema`: (`focus`) the compact input schema, when it didn't fit the budget
+   *
+   * In `getSteps`/`findSteps`, `steps` is the steps that didn't fit the budget or the page.
    */
-  what: "config" | "notes" | "branch" | "steps" | "sections";
-  /** For `branch` and `steps` in a branch: the step that owns the branch. */
+  what: "config" | "notes" | "branch" | "steps" | "sections" | "refs" | "schema";
+  /**
+   * For `branch` and `steps` in a branch: the step that owns the branch. For `refs`/`schema`:
+   * the step.
+   */
   stepId?: string;
   /** For `branch` and `steps` in a branch: the branch ID. */
   branch?: string;
@@ -170,13 +194,18 @@ export interface StepDetail {
   /** The refs in scope at the step, top level (with `include: ["refs"]`). */
   refs?: RefInfo[];
   /** The step's validation issues (section issues included, where it is the section's `first`). */
-  issues: Issue[];
+  issues: Omit<Issue, "stepId">[];
   /** The step's branches, declared ones first, with the number of steps directly in each. */
   branches?: { id: string; label: string; steps: number }[];
   /** Paths whose strings were cut (pass full: true for the whole text), e.g. "config.body", "note". */
   cut?: string[];
-  /** When something was cut: the call that returns this step uncut. */
+  /**
+   * `focus` only, when something was cut: the call that returns this step uncut (`getSteps` has
+   * one `full` for the whole page).
+   */
   full?: FollowUp;
+  /** What was left out of this step: refs past 30, and for `focus` what didn't fit the budget. */
+  omitted?: Omission[];
 }
 
 /** What each read returns, by tool name. */
@@ -191,9 +220,23 @@ export interface ReadResults {
    * Steps by ID (unknown IDs in `missing`) or by selector. `next` pages on when more steps
    * match; `full` returns every step of this page that had a string cut, uncut.
    */
-  getSteps: { steps: StepDetail[]; missing: string[]; next?: FollowUp; full?: FollowUp };
+  getSteps: {
+    steps: StepDetail[];
+    missing: string[];
+    next?: FollowUp;
+    full?: FollowUp;
+    /** Requested steps that didn't fit the budget (`steps`), with the `getSteps` call for them. */
+    omitted?: Omission[];
+  };
   /** How many steps a selector matches, with each one's outline line. */
-  findSteps: { count: number; matches: { id: string; line: string }[] };
+  findSteps: {
+    /** How many steps the selector matches after `after` (all of them, not only this page). */
+    count: number;
+    /** This page of matches: each step's ID and outline line. */
+    matches: { id: string; line: string }[];
+    /** The matches past `limit` (`steps`), with the call for the next page. */
+    omitted?: Omission[];
+  };
   /** The refs in scope at a step. */
   availableRefs: { refs: RefInfo[] };
   /** Node types matching a query and category, best match first. */

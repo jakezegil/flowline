@@ -348,3 +348,17 @@ The plan (`docs/superpowers/plans/2026-09-28-flowline-agent-commands-annotations
 - **Strict command schemas.** Unknown keys in a command fail with `command.invalid`, and the error names the key.
 - **`runTool("apply")`** checks only the `{ commands: [...] }` envelope. Command errors come back inside the `ApplyResult`, with hints.
 - **Duplicate names** follow the editor's `(copy)`, `(copy 2)`… sequence, through core's `copyName`.
+- **Step-read budget.** `getSteps` and `focus` take an optional `budget`, in characters of the JSON result, with a default of 8000.
+  - `getSteps` returns the leading steps that fit, and always at least one, even when that one is over budget.
+  - In the `ids` form, the rest come back through `omitted: [{ what: "steps", count, fetch: getSteps({ ...sameArgs, ids: rest }) }]`. In the `where` form, the rest come back through `next`, whose `after` is the last step returned.
+  - Each step shows at most 30 refs: the trigger and the 29 nearest. The step then carries `omitted: [{ what: "refs", stepId, count, fetch: availableRefs({ stepId }) }]`. `availableRefs` itself is not capped.
+  - When a `focus` result is over budget, it first drops all refs (a `refs` omission) and then the schema (a `schema` omission, fetched with `describeNodeTypes({ types: [type] })`).
+  - `findSteps` takes `after` and `limit` (default 100, at most 500). Further matches come back through a `steps` omission whose fetch is `findSteps({ ...sameArgs, after: last })`.
+  - A per-step detail carries no `full` of its own; the page-level `full` covers it. Its issues leave out the `stepId` the detail already has.
+- **Read input errors.** A read throws a `FlowlineTreeError` for any of these:
+  - an unknown `where` key, or a field of the wrong type
+  - an unknown `within.stepId`, or a `within.branch` that step has neither declared nor holds
+  - a `section` that no section has
+  - a non-array `ids`
+  - an unknown `getIssues` `stepId`
+- **Compact schemas.** A cycle is shown as `{"$ref":"#recursive:<def>"}`, or `#recursive:root` for `#`. A draft-07 tuple becomes `prefixItems`. Past 20 000 characters, subtrees below the deepest level that fits become `{"$ref":"#truncated"}`.

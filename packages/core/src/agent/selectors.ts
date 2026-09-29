@@ -4,9 +4,9 @@
  * @module
  */
 import { sectionRun } from "../annotations";
-import { configValueAt } from "../json-schema";
+import { branchesFor, configValueAt } from "../json-schema";
 import { indexManifest } from "../scope";
-import { findStep } from "../tree";
+import { FlowlineTreeError, findStep } from "../tree";
 import type { Manifest, Step, WorkflowDoc } from "../types";
 import type { Where } from "./read-types";
 
@@ -46,21 +46,79 @@ function withinSteps(doc: WorkflowDoc, within: NonNullable<Where["within"]>): Se
   return out;
 }
 
+const WHERE_KEYS = ["type", "section", "within", "nameContains", "configHas"];
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** Throws a `FlowlineTreeError` for a malformed selector or one naming a missing step, branch or section. */
+function checkWhere(doc: WorkflowDoc, manifest: Manifest, where: unknown): asserts where is Where {
+  if (!isObject(where)) throw new FlowlineTreeError("where: expected an object");
+  for (const key of Object.keys(where)) {
+    if (!WHERE_KEYS.includes(key)) {
+      throw new FlowlineTreeError(
+        `where: unknown key "${key}" (expected one of ${WHERE_KEYS.join(", ")})`,
+      );
+    }
+  }
+  for (const key of ["type", "section", "nameContains", "configHas"]) {
+    if (where[key] !== undefined && typeof where[key] !== "string") {
+      throw new FlowlineTreeError(`where.${key}: expected a string`);
+    }
+  }
+  const within = where.within;
+  if (within !== undefined) {
+    if (!isObject(within) || typeof within.stepId !== "string") {
+      throw new FlowlineTreeError("where.within: expected { stepId, branch? }");
+    }
+    for (const key of Object.keys(within)) {
+      if (key !== "stepId" && key !== "branch") {
+        throw new FlowlineTreeError(`where.within: unknown key "${key}" (expected stepId, branch)`);
+      }
+    }
+    const found = findStep(doc, within.stepId);
+    if (!found) throw new FlowlineTreeError(`where.within: unknown step "${within.stepId}"`);
+    const branch = within.branch;
+    if (branch !== undefined) {
+      const node = indexManifest(manifest).nodes.get(found.step.type);
+      const declared = node ? branchesFor(node, found.step).map((b) => b.id) : [];
+      if (
+        typeof branch !== "string" ||
+        (!declared.includes(branch) && !Object.hasOwn(found.step.branches ?? {}, branch))
+      ) {
+        throw new FlowlineTreeError(
+          `where.within: step "${within.stepId}" has no branch "${String(branch)}"`,
+        );
+      }
+    }
+  }
+  if (where.section !== undefined) {
+    const sections = Array.isArray(doc.sections) ? doc.sections : [];
+    if (!sections.some((s) => s.id === where.section)) {
+      throw new FlowlineTreeError(`where.section: unknown section "${String(where.section)}"`);
+    }
+  }
+}
+
 /**
  * The IDs of the steps `where` matches, in pre-order (a step before its branch children). Fields
  * are ANDed, and `{}` matches every step:
  * - `type`: the exact node type;
- * - `section`: the section's members and their subtrees (a broken or unknown section matches
- *   nothing);
+ * - `section`: the section's members and their subtrees (a broken section matches nothing);
  * - `within`: every step under `stepId` (any depth), or under one of its branches;
  * - `nameContains`: a case-insensitive match on the display name (the step's `name`, else the
  *   node label, else the step ID);
  * - `configHas`: the config path is present (`configValueAt(config, path) !== undefined`).
  *
+ * Throws a `FlowlineTreeError` for an unknown key, a field of the wrong type, an unknown
+ * `within.stepId`, a `within.branch` the step doesn't have, or a `section` no section has.
+ *
  * @example
  * matchSteps(doc, manifest, { type: "crm.sendEmail", section: "check" }) // ["notifyOwner"]
  */
 export function matchSteps(doc: WorkflowDoc, manifest: Manifest, where: Where): string[] {
+  checkWhere(doc, manifest, where);
   const nodes = indexManifest(manifest).nodes;
   const inSection = where.section !== undefined ? sectionSteps(doc, where.section) : undefined;
   const inWithin = where.within !== undefined ? withinSteps(doc, where.within) : undefined;

@@ -130,7 +130,8 @@ describe("focus", () => {
     const later = focus(doc(), m, { stepId: "later" });
     expect(later.disabled).toBe(true);
     expect(later.issues.map((i) => i.code)).toContain("config.required");
-    expect(later.issues.every((i) => i.stepId === "later")).toBe(true);
+    // Its own issues don't repeat its ID.
+    expect(later.issues.every((i) => !("stepId" in i))).toBe(true);
   });
 
   it("throws a FlowlineTreeError for an unknown step", () => {
@@ -177,11 +178,23 @@ describe("getSteps", () => {
       tool: "getSteps",
       args: { ids: ["deal", "mail"], include: ["config"], full: true },
     });
+    // The page-level `full` covers the steps; they carry no follow-up of their own.
+    expect(r.steps.some((x) => x.full !== undefined)).toBe(false);
     const f = r.full as Extract<FollowUp, { tool: "getSteps" }>;
-    const whole = getSteps(d, m, f.args);
+    const whole = getSteps(d, m, { ...f.args, budget: 100_000 });
     expect(whole.steps[0]?.note).toBe(note);
     expect(whole.steps[1]?.config?.body).toBe(BODY);
     expect(whole.full).toBeUndefined();
+    // Within the default budget, the 20k body doesn't fit next to the first step.
+    const tight = getSteps(d, m, f.args);
+    expect(tight.steps.map((x) => x.id)).toEqual(["deal"]);
+    expect(tight.omitted).toEqual([
+      {
+        what: "steps",
+        count: 1,
+        fetch: { tool: "getSteps", args: { ids: ["mail"], include: ["config"], full: true } },
+      },
+    ]);
   });
 
   it("cuts nested config strings and names each path", () => {
@@ -201,15 +214,19 @@ describe("getSteps", () => {
 
   it("the where form pages in pre-order with after, limit and next", () => {
     const d = flatDoc(120);
-    const first = getSteps(d, m, { where: {} });
+    const budget = 1_000_000;
+    const first = getSteps(d, m, { where: {}, budget });
     expect(first.steps).toHaveLength(50);
     expect(first.steps[0]?.id).toBe("step_1");
-    expect(first.next).toEqual({ tool: "getSteps", args: { where: {}, after: "step_50" } });
-    const second = getSteps(d, m, (first.next as { args: { where: object; after: string } }).args);
+    expect(first.next).toEqual({
+      tool: "getSteps",
+      args: { where: {}, budget, after: "step_50" },
+    });
+    const second = getSteps(d, m, (first.next as Extract<FollowUp, { tool: "getSteps" }>).args);
     expect(second.steps.map((s) => s.id)).toEqual(
       Array.from({ length: 50 }, (_, i) => `step_${i + 51}`),
     );
-    const third = getSteps(d, m, { where: {}, after: "step_100", limit: 30 });
+    const third = getSteps(d, m, { where: {}, after: "step_100", limit: 30, budget });
     expect(third.steps.map((s) => s.id)).toEqual(
       Array.from({ length: 20 }, (_, i) => `step_${i + 101}`),
     );
@@ -224,7 +241,7 @@ describe("getSteps", () => {
   });
 
   it("limit is capped at 200", () => {
-    const r = getSteps(flatDoc(500), m, { where: {}, limit: 1000, include: [] });
+    const r = getSteps(flatDoc(500), m, { where: {}, limit: 1000, include: [], budget: 1e6 });
     expect(r.steps).toHaveLength(200);
     expect(r.next?.args).toMatchObject({ after: "step_200" });
   });
@@ -460,7 +477,264 @@ describe("getIssues", () => {
     const one = getIssues(d, m, { stepId: "later" });
     expect(one.issues.length).toBeGreaterThan(0);
     expect(one.issues.every((i) => i.stepId === "later")).toBe(true);
-    expect(getIssues(d, m, { stepId: "nope" })).toEqual({ issues: [], errors: 0, warnings: 0 });
+    expect(() => getIssues(d, m, { stepId: "nope" })).toThrow(FlowlineTreeError);
+  });
+});
+
+describe("input errors", () => {
+  it("an unknown within.stepId, within.branch or section throws, as focus does", () => {
+    const d = doc();
+    for (const where of [
+      { within: { stepId: "nope" } },
+      { within: { stepId: "recheck", branch: "maybe" } },
+      { section: "nope" },
+    ]) {
+      expect(() => findSteps(d, m, { where })).toThrow(FlowlineTreeError);
+      expect(() => getSteps(d, m, { where })).toThrow(FlowlineTreeError);
+    }
+    expect(() => findSteps(d, m, { where: { section: "nope" } })).toThrow(
+      'where.section: unknown section "nope"',
+    );
+    // A declared branch with no steps yet is fine.
+    const empty = doc();
+    (empty.steps[1] as { branches?: unknown }).branches = {};
+    expect(
+      findSteps(empty, m, { where: { within: { stepId: "recheck", branch: "else" } } }).count,
+    ).toBe(0);
+  });
+
+  it("an unknown Where key or a wrong field type throws", () => {
+    const d = doc();
+    expect(() => findSteps(d, m, { where: { nameContain: "x" } as never })).toThrow(
+      'where: unknown key "nameContain"',
+    );
+    expect(() => findSteps(d, m, { where: { type: 3 } as never })).toThrow(FlowlineTreeError);
+    expect(() => findSteps(d, m, { where: "all" as never })).toThrow(FlowlineTreeError);
+    expect(() =>
+      findSteps(d, m, { where: { within: { stepId: "recheck", x: 1 } } as never }),
+    ).toThrow(FlowlineTreeError);
+  });
+
+  it("getSteps rejects a non-array ids, and args with neither ids nor where", () => {
+    expect(() => getSteps(doc(), m, { ids: "deal" as never })).toThrow(
+      "getSteps: `ids` must be an array of step IDs",
+    );
+    expect(() => getSteps(doc(), m, {} as never)).toThrow(FlowlineTreeError);
+  });
+});
+
+describe("findSteps paging", () => {
+  it("limit defaults to 100, with an omitted follow-up for the next page", () => {
+    const d = flatDoc(250);
+    const first = findSteps(d, m, { where: {} });
+    expect(first.count).toBe(250);
+    expect(first.matches).toHaveLength(100);
+    expect(first.omitted).toEqual([
+      {
+        what: "steps",
+        count: 150,
+        fetch: { tool: "findSteps", args: { where: {}, after: "step_100" } },
+      },
+    ]);
+    const seen = first.matches.map((x) => x.id);
+    let o = first.omitted?.[0];
+    while (o) {
+      const r = reads[o.fetch.tool](d, m, o.fetch.args as never) as ReadResults["findSteps"];
+      seen.push(...r.matches.map((x) => x.id));
+      o = r.omitted?.[0];
+    }
+    expect(seen).toEqual(Array.from({ length: 250 }, (_, i) => `step_${i + 1}`));
+    const small = findSteps(d, m, { where: { type: "crm.getDeal" }, limit: 2 });
+    expect(small.matches.map((x) => x.id)).toEqual(["step_1", "step_3"]);
+    expect(small.count).toBe(125);
+    expect(findSteps(d, m, { where: {}, limit: 5000 }).matches).toHaveLength(250);
+  });
+});
+
+describe("edge cases", () => {
+  it("a step whose node type isn't in the manifest", () => {
+    const d = doc();
+    d.steps.push({
+      id: "odd",
+      type: "x.gone",
+      config: { a: 1 },
+      branches: { left: [{ id: "inner", type: "flow.stop", config: {} }] },
+    });
+    const f = focus(d, m, { stepId: "odd" });
+    expect(f.nodeLabel).toBe("x.gone");
+    expect(f.schema).toBeUndefined();
+    expect(f.config).toEqual({ a: 1 });
+    expect(f.branches).toEqual([{ id: "left", label: "left", steps: 1 }]);
+    expect(f.issues.map((i) => i.code)).toContain("node.unknown");
+    const [g] = getSteps(d, m, { ids: ["odd"], include: ["config", "schema", "refs"] }).steps;
+    expect(g?.schema).toBeUndefined();
+    expect(g?.refs?.length).toBeGreaterThan(0);
+    expect(findSteps(d, m, { where: { type: "x.gone" } }).matches[0]?.line).toBe(
+      "odd  x.gone · 1 issue",
+    );
+    expect(describeNodeTypes(d, m, { types: ["x.gone"] })).toEqual({
+      types: [],
+      unknown: ["x.gone"],
+    });
+  });
+
+  it("an empty doc through every detail read", () => {
+    const d: WorkflowDoc = { ...doc(), steps: [], sections: [] };
+    expect(getSteps(d, m, { where: {} })).toEqual({ steps: [], missing: [] });
+    expect(getSteps(d, m, { ids: ["a"] })).toEqual({ steps: [], missing: ["a"] });
+    expect(findSteps(d, m, { where: {} })).toEqual({ count: 0, matches: [] });
+    const issues = getIssues(d, m, {});
+    expect(issues.issues.map((i) => i.code)).toEqual(["doc.empty"]);
+    expect(issues.warnings).toBe(1);
+    expect(() => focus(d, m, { stepId: "a" })).toThrow(FlowlineTreeError);
+    expect(() => availableRefs(d, m, { stepId: "a" })).toThrow(FlowlineTreeError);
+    expect(listNodeTypes(d, m, {}).types.length).toBe(m.nodes.length);
+  });
+});
+
+/** Every step ID of a doc, in pre-order. */
+function preorderIds(d: WorkflowDoc): string[] {
+  const ids: string[] = [];
+  walkSteps(d, (s) => ids.push(s.id));
+  return ids;
+}
+
+describe("step read budgets", () => {
+  it("getSteps with 200 ids and refs stays within budget; its omissions recover everything", () => {
+    const d = flatDoc(500);
+    const ids = preorderIds(d).slice(300);
+    const include: ("config" | "refs")[] = ["config", "refs"];
+    const got = new Map<string, StepDetail>();
+    const refsFollowUps = new Map<string, FollowUp>();
+    let f: FollowUp | undefined = { tool: "getSteps", args: { ids, include } };
+    let calls = 0;
+    while (f) {
+      const r = reads[f.tool](d, m, f.args as never) as ReadResults["getSteps"];
+      calls++;
+      expect(JSON.stringify(r).length).toBeLessThanOrEqual(8000);
+      expect(r.steps.length).toBeGreaterThan(0);
+      for (const s of r.steps) {
+        got.set(s.id, s);
+        expect(s.refs?.length).toBeLessThanOrEqual(30);
+        for (const o of s.omitted ?? []) {
+          expect(o).toMatchObject({ what: "refs", stepId: s.id });
+          refsFollowUps.set(s.id, o.fetch);
+        }
+      }
+      f = r.omitted?.find((o) => o.what === "steps")?.fetch;
+    }
+    expect(calls).toBeGreaterThan(1);
+    expect([...got.keys()]).toEqual(ids);
+    for (const id of ids) {
+      const s = got.get(id) as StepDetail;
+      expect(s.config).toEqual(d.steps.find((x) => x.id === id)?.config);
+      const all = availableRefs(d, m, { stepId: id }).refs;
+      const follow = refsFollowUps.get(id) as FollowUp;
+      expect(follow).toEqual({ tool: "availableRefs", args: { stepId: id } });
+      const recovered = (
+        reads[follow.tool](d, m, follow.args as never) as ReadResults["availableRefs"]
+      ).refs;
+      expect(recovered).toEqual(all);
+      // The shown refs are the trigger and the 29 nearest.
+      expect(s.refs).toEqual([...all.slice(0, 1), ...all.slice(-29)]);
+      expect(s.omitted?.[0]?.count).toBe(all.length - 30);
+    }
+  });
+
+  it("at least one step comes back, even over budget", () => {
+    const r = getSteps(doc(), m, { ids: ["mail", "deal"], full: true, budget: 100 });
+    expect(r.steps.map((s) => s.id)).toEqual(["mail"]);
+    expect(r.steps[0]?.config?.body).toBe(BODY);
+    expect(r.omitted?.[0]?.fetch).toEqual({
+      tool: "getSteps",
+      args: { ids: ["deal"], full: true, budget: 100 },
+    });
+  });
+
+  it("the where form resumes with next after the last step that fit", () => {
+    const d = flatDoc(60, { noteChars: 4000 });
+    const r = getSteps(d, m, { where: {}, include: [], full: true });
+    expect(JSON.stringify(r).length).toBeLessThanOrEqual(8000);
+    const last = r.steps[r.steps.length - 1]?.id;
+    expect(r.next).toEqual({
+      tool: "getSteps",
+      args: { where: {}, include: [], full: true, after: last },
+    });
+    expect(r.omitted).toBeUndefined();
+  });
+
+  it("focus leaves out refs, then the schema, when over budget", () => {
+    const d = flatDoc(500);
+    const big = focus(d, m, { stepId: "step_500", budget: 1e6 });
+    expect(big.refs).toHaveLength(30);
+    expect(big.omitted).toEqual([
+      {
+        what: "refs",
+        stepId: "step_500",
+        count: 470,
+        fetch: { tool: "availableRefs", args: { stepId: "step_500" } },
+      },
+    ]);
+    const tight = focus(d, m, { stepId: "step_500", budget: 150 });
+    expect(tight.refs).toBeUndefined();
+    expect(tight.schema).toBeUndefined();
+    expect(tight.omitted).toEqual([
+      {
+        what: "refs",
+        stepId: "step_500",
+        count: 500,
+        fetch: { tool: "availableRefs", args: { stepId: "step_500" } },
+      },
+      {
+        what: "schema",
+        stepId: "step_500",
+        count: 1,
+        fetch: { tool: "describeNodeTypes", args: { types: ["crm.sendEmail"] } },
+      },
+    ]);
+    expect(focus(d, m, { stepId: "step_500" }).schema).toBeDefined();
+    expect(JSON.stringify(focus(d, m, { stepId: "step_500" })).length).toBeLessThanOrEqual(8000);
+  });
+});
+
+describe("step read cost", () => {
+  function median(fn: () => unknown): number {
+    fn();
+    const ts: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const t = performance.now();
+      fn();
+      ts.push(performance.now() - t);
+    }
+    return ts.sort((a, b) => a - b)[2] as number;
+  }
+
+  it("getSteps with 200 ids and refs is linear in the doc (500 and 2000 steps)", () => {
+    const include = ["refs", "issues", "config"] as never;
+    const d500 = flatDoc(500);
+    const ids500 = preorderIds(d500).slice(300);
+    const t500 = median(() => getSteps(d500, m, { ids: ids500, include, budget: 1e9 }));
+    const d2k = flatDoc(2000);
+    const ids2k = preorderIds(d2k).slice(1800);
+    const t2k = median(() => getSteps(d2k, m, { ids: ids2k, include, budget: 1e9 }));
+    // Generous CI margins (measured locally: see the task report).
+    expect(t500).toBeLessThan(250);
+    expect(t2k).toBeLessThan(250);
+  });
+
+  it("step reads with 100 sections don't scan sections per step", () => {
+    const d = flatDoc(500);
+    d.sections = Array.from({ length: 100 }, (_, i) => ({
+      id: `s${i}`,
+      title: `S${i}`,
+      color: "blue" as const,
+      first: `step_${i * 5 + 1}`,
+      last: `step_${i * 5 + 5}`,
+    }));
+    const ids = preorderIds(d).slice(300);
+    expect(median(() => getSteps(d, m, { ids, budget: 1e9 }))).toBeLessThan(250);
+    const [s] = getSteps(d, m, { ids: ["step_498"] }).steps;
+    expect(s?.section?.id).toBe("s99");
   });
 });
 
