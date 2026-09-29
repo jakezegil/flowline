@@ -95,8 +95,8 @@ const node = (id: string): HTMLElement => {
 const card = (id: string) => node(`step:${id}`);
 
 /** Clicks the card of `id` (selecting it and opening the panel), then focuses `.fl-cp__name-btn`. */
-async function selectAndFocusPanel(user: User, id: string) {
-  await user.click(card(id).querySelector(".fl-card") as HTMLElement);
+async function selectAndFocusPanel(_user: User, id: string) {
+  fireEvent.click(card(id).querySelector(".fl-card") as HTMLElement);
   const nameBtn = await waitFor(() => {
     const el = document.querySelector<HTMLElement>(".fl-cp__name-btn");
     if (!el) throw new Error("no panel");
@@ -246,7 +246,7 @@ describe("Backspace/Delete in the editor", () => {
   test("note textarea: does not delete", async () => {
     const { user, store, ids } = await setup(threeSteps({ note: "hello" }));
     act(() => store.getState().select("email"));
-    await user.click(node("note:email").querySelector(".fl-note") as HTMLElement);
+    fireEvent.click(node("note:email").querySelector(".fl-note") as HTMLElement);
     const textarea = await waitFor(() => {
       const el = node("note:email").querySelector("textarea");
       if (!el) throw new Error("no editor");
@@ -357,7 +357,7 @@ describe("Backspace/Delete in the editor", () => {
 
   test("trigger selected: nothing", async () => {
     const { user, store, ids } = await setup();
-    await user.click(node("trigger").querySelector(".fl-card") as HTMLElement);
+    fireEvent.click(node("trigger").querySelector(".fl-card") as HTMLElement);
     expect(store.getState().selection).toBe(TRIGGER_KEY);
     const heading = await waitFor(() => {
       const el = document.querySelector<HTMLElement>(".fl-panel [data-autofocus]");
@@ -442,6 +442,242 @@ describe("Backspace/Delete in the editor", () => {
     expect(errors).toEqual([]);
     expect(ids()).toEqual(["load", "email", "email2"]);
     expect(await screen.findByText("The editor is read-only")).toBeTruthy();
+  });
+});
+
+describe("review round 1", () => {
+  const nameBtn = () => document.querySelector(".fl-cp__name-btn") as HTMLElement;
+  const toBody = () => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+  };
+
+  test("I1 (Ruling 33): Backspace/Delete on a RangeBar button delete the range", async () => {
+    const { user, store, ids } = await setup();
+    act(() => {
+      store.getState().selectRange("email", "email2");
+    });
+    const bar = () => document.querySelectorAll<HTMLElement>(".fl-range-bar__button");
+    (bar()[0] as HTMLElement).focus();
+    await user.keyboard("{Backspace}");
+    expect(ids()).toEqual(["load"]);
+    await waitFor(() => expect(document.activeElement).toBe(card("load")));
+    act(() => store.getState().undo());
+    expect(ids()).toEqual(["load", "email", "email2"]);
+    expect(store.getState().canUndo).toBe(false);
+    act(() => {
+      store.getState().selectRange("email", "email2");
+    });
+    (bar()[bar().length - 1] as HTMLElement).focus();
+    await user.keyboard("{Delete}");
+    expect(ids()).toEqual(["load"]);
+  });
+
+  test("I1: on a read-only store, a RangeBar button deletes nothing", async () => {
+    const { user, store, ids } = await setup();
+    act(() => {
+      store.getState().selectRange("email", "email2");
+      store.getState().setReadOnly(true);
+    });
+    const button = document.querySelector<HTMLElement>(".fl-range-bar__button");
+    expect(button).not.toBeNull();
+    button?.focus();
+    const errors = await windowErrors(async () => {
+      await user.keyboard("{Backspace}{Delete}");
+    });
+    expect(errors).toEqual([]);
+    expect(ids()).toEqual(["load", "email", "email2"]);
+    act(() => store.getState().setReadOnly(false));
+    (document.querySelector(".fl-range-bar__button") as HTMLElement).focus();
+    await user.keyboard("{Backspace}");
+    expect(ids()).toEqual(["load"]);
+  });
+
+  test.each([
+    ["an aria-modal dialog", () => Object.assign(document.createElement("div"), {}), true],
+    ["an open <dialog>", () => document.createElement("dialog"), false],
+  ])("M1: <body> keys delete nothing while %s is open", async (_, make, aria) => {
+    const { store, ids } = await setup();
+    act(() => store.getState().select("email"));
+    fireEvent.pointerDown(card("email"));
+    const modal = make();
+    if (aria) {
+      modal.setAttribute("role", "dialog");
+      modal.setAttribute("aria-modal", "true");
+    } else {
+      modal.setAttribute("open", "");
+    }
+    document.body.append(modal);
+    toBody();
+    fireEvent.keyDown(document.body, { key: "Backspace" });
+    expect(ids()).toEqual(["load", "email", "email2"]);
+    modal.remove();
+    fireEvent.keyDown(document.body, { key: "Backspace" });
+    expect(ids()).toEqual(["load", "email2"]);
+  });
+
+  test("M1: a click on a control that keeps the key doesn't arm <body> keys", async () => {
+    const { user, store, ids } = await setup();
+    act(() => store.getState().select("email"));
+    card("email").focus();
+    await user.keyboard("{Delete}");
+    expect(ids()).toEqual(["load", "email2"]);
+    // The toast's Undo, a header button and a canvas zoom control.
+    const undo = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>(".fl-toast .fl-toast__action");
+      if (!el) throw new Error("no toast");
+      return el;
+    });
+    await waitFor(() => expect(document.activeElement).toBe(card("email2")));
+    const header = document.querySelector(".fl-header") as HTMLElement;
+    const keepers = [
+      undo,
+      header.querySelector("button") as HTMLElement,
+      screen.getByRole("button", { name: "Zoom in" }),
+    ];
+    for (const el of keepers) {
+      fireEvent.pointerDown(el);
+      toBody();
+      fireEvent.keyDown(document.body, { key: "Backspace" });
+      expect(ids()).toEqual(["load", "email2"]);
+    }
+    fireEvent.pointerDown(document.querySelector(".fl-panel") as HTMLElement);
+    fireEvent.keyDown(document.body, { key: "Backspace" });
+    expect(ids()).toEqual(["load"]);
+  });
+
+  test("M2: auto-repeat deletes nothing (panel, card and <body>)", async () => {
+    const { store, ids } = await setup();
+    await selectAndFocusPanel(userEvent.setup(), "email");
+    fireEvent.keyDown(nameBtn(), { key: "Backspace", repeat: true });
+    expect(ids()).toEqual(["load", "email", "email2"]);
+    card("email").focus();
+    fireEvent.keyDown(card("email"), { key: "Delete", repeat: true });
+    expect(ids()).toEqual(["load", "email", "email2"]);
+    fireEvent.pointerDown(document.querySelector(".fl-panel") as HTMLElement);
+    toBody();
+    fireEvent.keyDown(document.body, { key: "Backspace", repeat: true });
+    expect(ids()).toEqual(["load", "email", "email2"]);
+    expect(store.getState().canUndo).toBe(false);
+    // The first (non-repeat) press does delete.
+    fireEvent.keyDown(document.body, { key: "Backspace" });
+    expect(ids()).toEqual(["load", "email2"]);
+  });
+
+  test("M3 (Ruling 34): Shift+Backspace and Shift+Delete delete nothing", async () => {
+    const { user, ids } = await setup();
+    await selectAndFocusPanel(user, "email");
+    await user.keyboard("{Shift>}{Backspace}{Delete}{/Shift}");
+    expect(ids()).toEqual(["load", "email", "email2"]);
+    card("email").focus();
+    await user.keyboard("{Shift>}{Backspace}{Delete}{/Shift}");
+    expect(ids()).toEqual(["load", "email", "email2"]);
+    await deletesFromPanel(user, ids);
+  });
+
+  test("IME: a composing keydown deletes nothing", async () => {
+    const { user, ids } = await setup();
+    await selectAndFocusPanel(user, "email");
+    fireEvent.keyDown(nameBtn(), { key: "Backspace", isComposing: true });
+    fireEvent.keyDown(nameBtn(), { key: "Backspace", keyCode: 229 });
+    card("email").focus();
+    fireEvent.keyDown(card("email"), { key: "Backspace", isComposing: true });
+    fireEvent.keyDown(card("email"), { key: "Delete", keyCode: 229 });
+    expect(ids()).toEqual(["load", "email", "email2"]);
+    await deletesFromPanel(user, ids);
+  });
+
+  test("M5: Meta, Ctrl and Alt with Backspace on a card delete nothing", async () => {
+    const { user, store, ids } = await setup();
+    act(() => store.getState().select("email"));
+    card("email").focus();
+    for (const mod of ["metaKey", "ctrlKey", "altKey"] as const) {
+      fireEvent.keyDown(card("email"), { key: "Backspace", [mod]: true });
+      fireEvent.keyDown(card("email"), { key: "Delete", [mod]: true });
+    }
+    expect(ids()).toEqual(["load", "email", "email2"]);
+    await user.keyboard("{Backspace}");
+    expect(ids()).toEqual(["load", "email2"]);
+  });
+
+  test("M4: the <body> path adds exactly one undo entry", async () => {
+    const { store, ids } = await setup();
+    act(() => store.getState().select("email"));
+    fireEvent.pointerDown(card("email"));
+    toBody();
+    expect(store.getState().canUndo).toBe(false);
+    fireEvent.keyDown(document.body, { key: "Backspace" });
+    expect(ids()).toEqual(["load", "email2"]);
+    act(() => store.getState().undo());
+    expect(ids()).toEqual(["load", "email", "email2"]);
+    expect(store.getState().canUndo).toBe(false);
+  });
+
+  test("M4: a canvas card in the editor adds exactly one undo entry", async () => {
+    const { user, store, ids } = await setup();
+    const removeStep = store.getState().removeStep;
+    let calls = 0;
+    store.setState({
+      removeStep: (...args: Parameters<typeof removeStep>) => {
+        calls++;
+        return removeStep(...args);
+      },
+    });
+    act(() => store.getState().select("email"));
+    card("email").focus();
+    await user.keyboard("{Backspace}");
+    expect(calls).toBe(1);
+    expect(ids()).toEqual(["load", "email2"]);
+    act(() => store.getState().undo());
+    expect(store.getState().canUndo).toBe(false);
+  });
+
+  test("M4: two editors on one page stay independent", async () => {
+    const docA = { ...threeSteps(), id: "a" };
+    const docB = { ...threeSteps(), id: "b" };
+    const docs: Record<string, WorkflowDoc> = { a: docA, b: docB };
+    const client = mockClient({
+      getManifest: async () => testManifest,
+      listSubflows: async () => [],
+      listSecrets: async () => [],
+      getWorkflow: async (id: string) => detail(docs[id] as WorkflowDoc),
+    });
+    const stores: Record<string, EditorStore> = {};
+    const user = userEvent.setup();
+    render(
+      <FlowlineProvider client={client}>
+        {["a", "b"].map((id) => (
+          <div key={id} style={{ height: 800 }}>
+            <WorkflowEditor
+              workflowId={id}
+              onStoreReady={(s) => {
+                stores[id] = s;
+              }}
+            />
+          </div>
+        ))}
+      </FlowlineProvider>,
+    );
+    await waitFor(() => expect(screen.getAllByText("Draft · v3")).toHaveLength(2));
+    const a = stores.a as EditorStore;
+    const b = stores.b as EditorStore;
+    const idsOf = (s: EditorStore) => s.getState().doc.steps.map((x) => x.id);
+    act(() => {
+      a.getState().select("email");
+      b.getState().select("email");
+    });
+    const [edA] = Array.from(document.querySelectorAll<HTMLElement>(".fl-editor"));
+    const panelA = edA?.querySelector(".fl-panel") as HTMLElement;
+    (panelA.querySelector(".fl-cp__name-btn") as HTMLElement).focus();
+    await user.keyboard("{Backspace}");
+    expect(idsOf(a)).toEqual(["load", "email2"]);
+    expect(idsOf(b)).toEqual(["load", "email", "email2"]);
+    fireEvent.pointerDown(panelA);
+    toBody();
+    fireEvent.keyDown(document.body, { key: "Backspace" });
+    expect(idsOf(a)).toEqual(["load"]);
+    expect(idsOf(b)).toEqual(["load", "email", "email2"]);
+    expect(b.getState().canUndo).toBe(false);
   });
 });
 

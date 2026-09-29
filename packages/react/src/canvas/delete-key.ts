@@ -54,8 +54,9 @@ export type DeleteTarget =
 
 /**
  * Canvas buttons on which Backspace/Delete delete the selection (S15): the card's "…" menu
- * trigger and the "+" insert buttons. Every other button in the canvas (toast actions, the
- * RangeBar, zoom controls, a note's Shorten) keeps the key.
+ * trigger and the "+" insert buttons. On the RangeBar's buttons they delete the range (Ruling
+ * 33). Every other button in the canvas (toast actions, zoom controls, a note's Shorten) keeps
+ * the key.
  */
 const DELETING_BUTTONS = ".fl-card__kebab, .fl-add, .fl-placeholder";
 
@@ -65,13 +66,31 @@ function nodeIdOf(target: Element): string {
 }
 
 /**
+ * Whether Backspace/Delete belong to the control `el` is in rather than deleting: toasts, the
+ * editor header, and canvas buttons other than "…", "+" and the RangeBar's. A click on one
+ * of them doesn't arm Backspace on `<body>` either (Safari doesn't focus a clicked button).
+ */
+export function keepsDeleteKey(el: Element): boolean {
+  if (el.closest(".fl-toasts, .fl-header")) return true;
+  if (el.closest(".fl-range-bar")) return false;
+  const control = el.closest('button, a[href], [role="tab"], [role="menuitem"]');
+  return (
+    !!control?.closest(".fl-canvas") &&
+    !control.classList.contains("react-flow__node") &&
+    !control.matches(DELETING_BUTTONS)
+  );
+}
+
+/**
  * What a Delete/Backspace keydown should delete, or null when the key belongs to a text control
- * or nothing applies. In order: only Delete or Backspace without ⌘/Ctrl/⌥ count; never from an
- * editable target (inputs, textareas, selects, contenteditable, CodeMirror, open menus, dialogs,
- * listboxes, the step picker) or on a read-only store; a section's header chip deletes that
- * section; toast buttons and canvas buttons other than "…" and "+" keep the key; a note deletes
- * that note; then the range, when focus is on one of its cards or on no card (else the focused
- * card); then the focused card, else the selected step. The trigger is never deleted.
+ * or nothing applies. In order: only Delete or Backspace without ⌘/Ctrl/⌥/⇧ count (Ruling 34),
+ * and not an auto-repeat or an IME composition; never from an editable target (inputs,
+ * textareas, selects, contenteditable, CodeMirror, open menus, dialogs, listboxes, the step
+ * picker) or on a read-only store; a section's header chip deletes that section; a RangeBar
+ * button deletes the range (Ruling 33); toast buttons, the header and canvas buttons other than
+ * "…" and "+" keep the key (see {@link keepsDeleteKey}); a note deletes that note; then the
+ * range, when focus is on one of its cards or on no card (else the focused card); then the
+ * focused card, else the selected step. The trigger is never deleted.
  *
  * `state.members` are the range's step IDs (`rangeIds`); without them only the range's ends
  * count as its cards.
@@ -83,6 +102,10 @@ export function deleteTarget(
     metaKey: boolean;
     ctrlKey: boolean;
     altKey: boolean;
+    shiftKey?: boolean;
+    repeat?: boolean;
+    isComposing?: boolean;
+    keyCode?: number;
   },
   state: {
     selection: string | null;
@@ -92,22 +115,18 @@ export function deleteTarget(
   },
 ): DeleteTarget | null {
   if (e.key !== "Delete" && e.key !== "Backspace") return null;
-  if (e.metaKey || e.ctrlKey || e.altKey) return null;
+  if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return null;
+  if (e.repeat || e.isComposing || e.keyCode === 229) return null;
   if (isEditableTarget(e.target) || state.readOnly) return null;
   const el = e.target instanceof Element ? e.target : null;
   const nodeId = el ? nodeIdOf(el) : "";
   if (nodeId.startsWith("sectionHeader:")) {
     return { kind: "section", id: nodeId.slice("sectionHeader:".length) };
   }
-  if (el?.closest(".fl-toasts")) return null;
-  const control = el?.closest('button, a[href], [role="tab"], [role="menuitem"]');
-  if (
-    control?.closest(".fl-canvas") &&
-    !control.classList.contains("react-flow__node") &&
-    !control.matches(DELETING_BUTTONS)
-  ) {
-    return null;
+  if (state.range !== null && el?.closest(".fl-range-bar")) {
+    return { kind: "range", first: state.range.first, last: state.range.last };
   }
+  if (el && keepsDeleteKey(el)) return null;
   if (nodeId.startsWith("note:")) return { kind: "note", stepId: nodeId.slice("note:".length) };
   const focused = focusedKey(el);
   const { range } = state;

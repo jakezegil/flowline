@@ -54,7 +54,13 @@ import {
   useCanvasUiApi,
   useLabels,
 } from "./canvas-context";
-import { DeleteScopeContext, deleteTarget, runDelete } from "./delete-key";
+import {
+  DeleteScopeContext,
+  deleteTarget,
+  isEditableTarget,
+  keepsDeleteKey,
+  runDelete,
+} from "./delete-key";
 import { edgeTypes, type FlowEdgeData } from "./edges";
 import { fitViewport, motionDuration, revealViewport } from "./fit";
 import { settleFlash } from "./flash";
@@ -653,7 +659,9 @@ export function WorkflowCanvas(props: {
   // Backspace/Delete from outside the canvas root: from the editor body around it (the side
   // panel's non-text controls) and from <body> once the last click was in the editor. Listened
   // for on the document, after React's own handlers (so a control that handles the key and
-  // prevents its default keeps it); keys inside the root are the root handler's.
+  // prevents its default keeps it); keys inside the root are the root handler's. A click on a
+  // control that keeps the key (a text field, a toast, the header, a zoom control) doesn't arm
+  // <body>, and nothing is deleted from here while a modal dialog is open.
   const scope = useContext(DeleteScopeContext);
   useEffect(() => {
     const rootEl = rootRef.current;
@@ -662,13 +670,16 @@ export function WorkflowCanvas(props: {
     const editor = scope?.closest<HTMLElement>(".fl-root") ?? scope ?? rootEl;
     let clickedInside = false;
     const onPointerDown = (e: Event) => {
-      clickedInside = e.target instanceof Node && editor.contains(e.target);
+      const t = e.target;
+      clickedInside =
+        t instanceof Element && editor.contains(t) && !isEditableTarget(t) && !keepsDeleteKey(t);
     };
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
       const t = e.target;
       if (e.defaultPrevented || !(t instanceof Node) || rootEl.contains(t)) return;
       const inScope = scope?.contains(t) === true;
       if (!inScope && !(t === doc.body && clickedInside)) return;
+      if (doc.querySelector('[aria-modal="true"], dialog[open]')) return;
       const s = store.getState();
       const target = deleteTarget(e, {
         selection: s.selection,

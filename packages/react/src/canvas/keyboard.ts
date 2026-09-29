@@ -143,23 +143,34 @@ export interface KeyboardDeps {
  * Keys act on the focused card, else the selection. With a range, ⌘C/⌘D/⌘G and ⌥↑/⌥↓ act on the
  * whole range instead, but only while focus is on one of its cards, on the RangeBar or on no
  * card: from a card outside the range they act on that card, so browsing away with the arrows
- * never edits steps out of view. Delete/Backspace follow the same rule (the RangeBar's buttons
- * keep them). Read-only canvases only navigate, select ranges and copy them.
+ * never edits steps out of view. Delete/Backspace follow the same rule, and on a RangeBar button
+ * delete the range (Ruling 33). Read-only canvases only navigate, select ranges and copy them.
  */
 export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   if (e.defaultPrevented || isEditableTarget(e.target)) return false;
   const mod = isMac() ? e.metaKey : e.ctrlKey;
   // Backspace/Delete: a focused section chip or note deletes itself; else the range or the
-  // focused (else selected) step, also from the card's "…" and the "+" buttons (see
-  // deleteTarget). Other buttons (toast actions, the RangeBar) keep the key.
-  if ((e.key === "Delete" || e.key === "Backspace") && !e.metaKey && !e.ctrlKey && !e.altKey) {
+  // focused (else selected) step, also from the card's "…" and the "+" buttons; a RangeBar
+  // button deletes the range. Other buttons (toast actions, zoom controls) keep the key. With a
+  // modifier, on auto-repeat or mid-composition they do nothing (see deleteTarget).
+  if (e.key === "Delete" || e.key === "Backspace") {
     const s = deps.store.getState();
     const rootEl = deps.root();
     const active = rootEl?.ownerDocument.activeElement ?? null;
     // A key sent to the root itself acts on the card in focus, as the other keys do.
     const at = e.target === rootEl && active && rootEl?.contains(active) ? active : e.target;
     const target = deleteTarget(
-      { key: e.key, target: at, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey },
+      {
+        key: e.key,
+        target: at,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+        repeat: e.repeat,
+        isComposing: e.nativeEvent.isComposing,
+        keyCode: e.keyCode,
+      },
       {
         selection: s.selection,
         range: s.range,
