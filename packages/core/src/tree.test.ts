@@ -712,6 +712,33 @@ describe("section upkeep in tree operations", () => {
     expect(out.sections?.[1]).toBe(d.sections?.[1]);
   });
 
+  describe("moving a one-step section into a multi-step section keeps the multi-step one", () => {
+    const one = sec("one", "b", "b");
+    const host: Section = { ...sec("host", "c", "d"), title: "Host", note: "Keep this note" };
+    for (const [label, sections] of [
+      ["one first", [one, host]],
+      ["host first", [host, one]],
+    ] as const) {
+      test(`⌥↓ (${label})`, () => {
+        const d = sdoc(["a", "b", "c", "d"], [...sections]);
+        const out = moveStep(d, "b", top(2));
+        expect(ids(out)).toEqual(["a", "c", "b", "d"]);
+        expect(out.sections).toEqual([host]);
+        expect(out.sections?.[0]).toBe(d.sections?.find((x) => x.id === "host"));
+      });
+
+      test(`⌥↑ (${label})`, () => {
+        const e = sec("one", "e", "e");
+        const withE = sections.map((x) => (x === one ? e : x));
+        const d = sdoc(["a", "b", "c", "d", "e"], withE);
+        const out = moveStep(d, "e", top(3));
+        expect(ids(out)).toEqual(["a", "b", "c", "e", "d"]);
+        expect(out.sections).toEqual([host]);
+        expect(out.sections?.[0]).toMatchObject({ title: "Host", note: "Keep this note" });
+      });
+    }
+  });
+
   test("identity: an edit that doesn't touch sections keeps the sections array", () => {
     const d = sdoc(["a", "b", "c", "d"], [sec("s", "b", "c")]);
     expect(removeStep(d, "d").sections).toBe(d.sections);

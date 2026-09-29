@@ -1,3 +1,6 @@
+// Import cycle: annotations.ts imports findStep/walkSteps from here. Neither module may use the
+// other at top level (only inside functions), or one entry order sees it uninitialized. For
+// example, annotations.ts must never `extends FlowlineTreeError` at top level.
 import { upkeepSections } from "./annotations";
 import { codeReadsStepOpaquely, rewriteCodeStepRefs } from "./code-refs";
 import { isValidStepId, RESERVED_STEP_IDS } from "./ids";

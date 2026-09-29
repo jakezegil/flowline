@@ -5,6 +5,9 @@
  * @module
  */
 import { isValidStepId } from "./ids";
+// Import cycle: tree.ts imports upkeepSections from here. Neither module may use the other at top
+// level (only inside functions), or one entry order sees it uninitialized. For example, never
+// write `class X extends FlowlineTreeError` in this file.
 import { findStep, walkSteps } from "./tree";
 import type { AnnotationColor, Section, Step, WorkflowDoc } from "./types";
 import type { Issue } from "./validate";
@@ -134,13 +137,16 @@ function staysNear(i: number, f: number, z: number, list: string[], movedMembers
   return true;
 }
 
-/** The section's new `[first, last]` in `after`, or `undefined` if nothing is left. */
+/**
+ * The section's new `[first, last]` in `after` (`undefined` if nothing is left), and whether its
+ * whole run moved in the edit (every survivor is in `effect.moved`).
+ */
 function upkeepOne(
   members: string[],
   places: Map<string, Place>,
   lists: Map<string, string[]>,
   effect: SectionEffect,
-): [string, string] | undefined {
+): { span: [string, string] | undefined; runMoved: boolean } {
   const survivors: string[] = [];
   const seen = new Set<string>();
   for (const id of members) {
@@ -151,11 +157,12 @@ function upkeepOne(
       }
     }
   }
-  if (survivors.length === 0) return undefined;
+  if (survivors.length === 0) return { span: undefined, runMoved: false };
 
   const moved = effect.moved;
+  const runMoved = !!moved && survivors.every((id) => moved.has(id));
   let kept = survivors;
-  if (moved && survivors.some((id) => moved.has(id)) && !survivors.every((id) => moved.has(id))) {
+  if (moved && !runMoved && survivors.some((id) => moved.has(id))) {
     const anchors = survivors.filter((id) => !moved.has(id));
     const movedMembers = new Set(survivors.filter((id) => moved.has(id)));
     const key = (places.get(anchors[0] as string) as Place).key;
@@ -179,7 +186,10 @@ function upkeepOne(
     .filter((p) => p.key === key)
     .map((p) => p.index);
   const list = lists.get(key) ?? [];
-  return [list[Math.min(...indices)] as string, list[Math.max(...indices)] as string];
+  return {
+    span: [list[Math.min(...indices)] as string, list[Math.max(...indices)] as string],
+    runMoved,
+  };
 }
 
 /** Whether two runs (by place) share a list and intersect. */
@@ -188,8 +198,10 @@ function overlaps(a: [Place, Place], b: [Place, Place]): boolean {
 }
 
 /**
- * `after` with its `sections` updated for an edit from `before`; returns `after` itself when
- * nothing changes. The sections are read from `before`:
+ * `after` with its `sections` updated for an edit from `before`.
+ *
+ * The sections are rebuilt from `before.sections`: `after.sections` is never read when something
+ * changes, so callers must not pre-edit `after.sections` (edit sections after upkeep instead).
  *
  * 1. A section's members are its run in `before`. A section already broken there is kept as is.
  * 2. Each member is replaced by `effect.subst.get(id) ?? [id]`, and IDs gone from `after` are
@@ -198,8 +210,13 @@ function overlaps(a: [Place, Place], b: [Place, Place]): boolean {
  * 3. The new `first`/`last` are the lowest and highest index of the survivors in the list of the
  *    first survivor; steps between them are members by contiguity. No survivor: the section is
  *    removed.
- * 4. If two sections now overlap in one list, the later one in `sections` is dropped.
+ * 4. If the edit makes two sections overlap in one list, one is dropped: the section whose whole
+ *    run moved, keeping the one whose anchors stayed put. If both moved, or neither did, the later
+ *    one in `sections` is dropped. Pairs that already overlapped in `before`, or that involve a
+ *    section broken there, are left alone for the validator (`section.overlap`) to report.
  * 5. `sections` is removed from the doc when it becomes empty (an empty `[]` stays `[]`).
+ * 6. Identity: when no section changes, `after` itself is returned, so its `sections` array is
+ *    the old one (`toBe`).
  */
 export function upkeepSections(
   before: WorkflowDoc,
@@ -212,11 +229,16 @@ export function upkeepSections(
 
   let changed = false;
   const runs = sections.map((section) => sectionRun(before, section));
+  /** Whether each section's whole run moved in this edit. */
+  const runMoved: boolean[] = [];
   /** Each section after upkeep, or `null` when removed. */
   const next: (Section | null)[] = sections.map((section, i) => {
     const run = runs[i];
+    runMoved[i] = false;
     if (!run) return section;
-    const span = upkeepOne(run.ids, places, lists, effect);
+    const result = upkeepOne(run.ids, places, lists, effect);
+    runMoved[i] = result.runMoved;
+    const span = result.span;
     if (!span) {
       changed = true;
       return null;
@@ -227,8 +249,8 @@ export function upkeepSections(
     return { ...section, first, last };
   });
 
-  // Drop a section that now overlaps an earlier one. Pairs that already overlapped in `before`, or
-  // with a section broken there, are left to the validator, so a hand-edited doc isn't silently
+  // Resolve overlaps the edit created (rule 4). Pairs that already overlapped in `before`, or with
+  // a section broken there, are left to the validator, so a hand-edited doc isn't silently
   // repaired.
   const overlappedBefore = (i: number, j: number) => {
     const [ri, rj] = [runs[i], runs[j]];
@@ -253,10 +275,12 @@ export function upkeepSections(
       const si = spans[i];
       if (!next[i] || !si || !overlaps(si, sj)) continue;
       if (overlappedBefore(i, j)) continue;
-      next[j] = null;
-      spans[j] = undefined;
+      // Drop the section that moved onto the other; else the later one.
+      const victim = runMoved[i] && !runMoved[j] ? i : j;
+      next[victim] = null;
+      spans[victim] = undefined;
       changed = true;
-      break;
+      if (victim === j) break;
     }
   }
 

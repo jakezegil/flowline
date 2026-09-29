@@ -174,14 +174,52 @@ describe("upkeepSections", () => {
     expect(out.sections).toEqual([section("s", "b", "c")]);
   });
 
-  it("drops the later of two sections that now overlap", () => {
+  it("drops the moved section when a whole-run move lands inside another", () => {
     const one = section("one", "b", "b");
-    const two = section("two", "d", "e");
+    const two = section("two", "d", "e", { note: "keep me" });
     const before = doc([s("a"), s("b"), s("c"), s("d"), s("e")], [one, two]);
     // b moved alone between d and e.
     const after = { ...before, steps: [s("a"), s("c"), s("d"), s("b"), s("e")] };
     const out = upkeepSections(before, after, { moved: new Set(["b"]) });
-    expect(out.sections).toEqual([one]);
+    expect(out.sections).toEqual([two]);
+    expect(out.sections?.[0]).toBe(two);
+  });
+
+  it("mirror: a moved multi-step section overlapping a one-step section that stays is dropped", () => {
+    for (const order of ["movedFirst", "movedLast"] as const) {
+      const multi = section("multi", "b", "c", { note: "moves" });
+      const single = section("single", "e", "e", { title: "Stays", note: "stay" });
+      const sections = order === "movedFirst" ? [multi, single] : [single, multi];
+      const before = doc([s("a"), s("b"), s("c"), s("d"), s("e")], sections);
+      // b and c moved together onto e: [a, d, b, e, c] puts e inside b..c.
+      const after = { ...before, steps: [s("a"), s("d"), s("b"), s("e"), s("c")] };
+      const out = upkeepSections(before, after, { moved: new Set(["b", "c"]) });
+      expect(out.sections).toEqual([single]);
+      expect(out.sections?.[0]).toBe(single);
+    }
+  });
+
+  it("drops the later section when both or neither moved", () => {
+    const one = section("one", "a", "a");
+    const two = section("two", "b", "b");
+    const before = doc([s("a"), s("b"), s("c")], [one, two]);
+    // Neither moved: a subst makes both cover the same step.
+    const after = { ...before, steps: [s("m"), s("c")] };
+    const out = upkeepSections(before, after, {
+      subst: new Map([
+        ["a", ["m"]],
+        ["b", ["m"]],
+      ]),
+    });
+    expect(out.sections).toEqual([section("one", "m", "m")]);
+    // Both moved: [c, a, d, b] puts d inside a..b.
+    const both = doc(
+      [s("a"), s("b"), s("c"), s("d")],
+      [section("one", "a", "b"), section("two", "d", "d")],
+    );
+    const after2 = { ...both, steps: [s("c"), s("a"), s("d"), s("b")] };
+    const out2 = upkeepSections(both, after2, { moved: new Set(["a", "b", "d"]) });
+    expect(out2.sections).toEqual([section("one", "a", "b")]);
   });
 
   it("leaves an overlap that was already there to the validator", () => {
