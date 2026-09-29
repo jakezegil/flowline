@@ -349,10 +349,33 @@ type ConfigEdit =
   | { config: Record<string, ValueExpr | null> };
 
 /**
- * @internal `config` with `edit` applied (placeholders resolved), or `undefined` when nothing
- * changes. The key form sets one key: `null` removes it unless `nullIsValue`, and `undefined`
- * (only reachable in trusted mode) removes it, as the editor's setters do. The `config` form
- * merges, and `null` removes.
+ * @internal Whether the batch runs in trusted mode (`apply(…, { trusted: true })`), which `apply`
+ * records as `trusted` on the handler context.
+ */
+export function isTrustedBatch(ctx: HandlerContext): boolean {
+  return ctx.trusted === true;
+}
+
+/**
+ * @internal A config, trigger-config or output value with its placeholders resolved. In trusted
+ * mode (the editor's setters) a `steps.$x` that no placeholder of the batch defines stays as it
+ * is, as a verbatim paste keeps it, so these setters accept any value; otherwise it fails with
+ * `placeholder.unknown`. A section's placeholder in a step reference fails in both modes.
+ */
+function configValue(ctx: HandlerContext, v: ValueExpr, path: string): ValueExpr {
+  if (!isTrustedBatch(ctx)) return resolvedValue(ctx, v, path);
+  const r = resolveValuePlaceholders(v, ctx.placeholders, ctx.used);
+  if (r.unknown !== undefined && ctx.sectionPlaceholders.has(r.unknown)) {
+    throw wrongKind(r.unknown, "section", "step", path);
+  }
+  return r.value;
+}
+
+/**
+ * @internal `config` with `edit` applied (placeholders resolved, see {@link configValue}), or
+ * `undefined` when nothing changes. The key form sets one key: `null` removes it unless
+ * `nullIsValue`, and `undefined` (only reachable in trusted mode) removes it, as the editor's
+ * setters do. The `config` form merges, and `null` removes.
  */
 export function patchConfig(
   ctx: HandlerContext,
@@ -368,7 +391,7 @@ export function patchConfig(
       next = rest;
       return;
     }
-    const v = resolvedValue(ctx, value as ValueExpr, path);
+    const v = configValue(ctx, value as ValueExpr, path);
     if (Object.hasOwn(cur, key) && jsonEqual(cur[key], v)) return;
     next = { ...cur, [key]: v };
   };

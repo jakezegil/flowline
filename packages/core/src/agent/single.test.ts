@@ -4,8 +4,9 @@ import type { Manifest, NodeManifest, Step, TriggerManifest, WorkflowDoc } from 
 import { UI_META_KEY } from "../ui";
 import { apply } from "./apply";
 import { commandSchema } from "./command-schema";
-import type { ApplyResult, Command } from "./commands";
-import { richManifest } from "./fixtures";
+import type { ApplyResult, Command, Handler, HandlerContext } from "./commands";
+import { flatDoc, richManifest } from "./fixtures";
+import { isTrustedBatch, singleHandlers } from "./single";
 
 const countNode: NodeManifest = {
   type: "util.count",
@@ -759,5 +760,82 @@ describe("schema", () => {
         nullIsValue: true,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("trusted config values", () => {
+  const m = richManifest();
+  const doc = flatDoc(2);
+  /** A handler context as `apply` builds it, with `trusted` as `apply(…, { trusted })` records it. */
+  const ctxFor = (trusted: boolean): HandlerContext & { trusted: boolean } => ({
+    manifest: m,
+    nodes: new Map(m.nodes.map((n) => [n.type, n])),
+    index: 0,
+    placeholders: new Map(),
+    sectionPlaceholders: new Map(),
+    used: new Map(),
+    renamed: new Map(),
+    trusted,
+  });
+  const tpl = { $tpl: "Price {{ steps.$price.total }}" };
+  const ref = { $ref: "steps.$1.x" };
+  const run = (op: string, cmd: Command, ctx: HandlerContext) =>
+    (singleHandlers[op] as Handler)(doc, cmd, ctx).doc;
+
+  test("keep unknown steps.$x placeholders as they are in trusted mode", () => {
+    const ctx = ctxFor(true);
+    expect(isTrustedBatch(ctx)).toBe(true);
+    const a = run("setConfig", { op: "setConfig", id: "step_1", key: "k", value: tpl }, ctx);
+    expect(findStep(a, "step_1")?.step.config.k).toEqual(tpl);
+    const t = run("setTriggerConfig", { op: "setTriggerConfig", key: "k", value: ref }, ctx);
+    expect(t.trigger.config.k).toEqual(ref);
+    const o = run("setOutput", { op: "setOutput", config: { k: ref } }, ctx);
+    expect(o.output).toEqual({ k: ref });
+  });
+
+  test("still resolve placeholders the batch defined, and reject a section's", () => {
+    const ctx = ctxFor(true);
+    ctx.placeholders.set("$1", "step_2");
+    const value = { $tpl: "{{ steps.$1.x }} {{ steps.$q }}" };
+    const a = run("setConfig", { op: "setConfig", id: "step_1", key: "k", value }, ctx);
+    expect(findStep(a, "step_1")?.step.config.k).toEqual({
+      $tpl: "{{ steps.step_2.x }} {{ steps.$q }}",
+    });
+    ctx.sectionPlaceholders.set("$2", "intro");
+    const bad = { op: "setConfig", id: "step_1", key: "k", value: { $ref: "steps.$2.x" } } as const;
+    expect(() => run("setConfig", bad, ctx)).toThrow(/names a section/);
+  });
+
+  test("an untrusted batch still rejects an unknown placeholder", () => {
+    const cmd: Command = { op: "setConfig", id: "step_1", key: "k", value: tpl };
+    const r = apply(doc, [cmd], m);
+    expect(r.ok === false && r.error.code).toBe("placeholder.unknown");
+    expect(() => run("setConfig", cmd, ctxFor(false))).toThrow(/Unknown placeholder "\$price"/);
+  });
+
+  test("apply: trusted mode keeps an unknown steps.$x in setConfig, untrusted rejects it", () => {
+    const cmds: Command[] = [
+      { op: "addStep", at: { start: true }, type: "crm.getDeal" },
+      {
+        op: "setConfig",
+        id: "step_1",
+        key: "k",
+        value: { $tpl: "{{ steps.$1.deal }} {{ steps.$price.total }}" },
+      },
+    ];
+    const trusted = apply(doc, cmds, m, { trusted: true, report: false });
+    if (!trusted.ok) throw new Error(trusted.error.message);
+    const id = trusted.ids.$1;
+    expect(findStep(trusted.doc, "step_1")?.step.config.k).toEqual({
+      $tpl: `{{ steps.${id}.deal }} {{ steps.$price.total }}`,
+    });
+    const untrusted = apply(doc, cmds, m);
+    expect(untrusted.ok).toBe(false);
+    if (untrusted.ok) return;
+    expect(untrusted.error).toMatchObject({
+      index: 1,
+      code: "placeholder.unknown",
+      path: "commands[1].value",
+    });
   });
 });

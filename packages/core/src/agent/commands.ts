@@ -403,6 +403,8 @@ export interface HandlerContext {
   used: Map<string, string>;
   /** Old → new step IDs so far (the result's `renamed`). */
   renamed: Map<string, string>;
+  /** Whether the batch runs in trusted mode (`ApplyOptions.trusted`). */
+  trusted?: boolean;
 }
 
 /** @internal A handler's result: the new doc (the input doc when nothing changed) and the step it created. */

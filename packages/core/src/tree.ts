@@ -38,7 +38,7 @@ export interface FoundStep {
 }
 
 /**
- * @internal The step list of `step`'s branch `branch`, if the step holds it. Own keys only, so a
+ * The step list of `step`'s branch `branch`, if the step holds it. Own keys only, so a
  * branch named `constructor` or `__proto__` is never an inherited property.
  */
 export function branchList(step: Step, branch: string): Step[] | undefined {
