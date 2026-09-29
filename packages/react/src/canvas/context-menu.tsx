@@ -14,11 +14,17 @@ import {
   Replace,
   Trash2,
 } from "lucide-react";
-import { type ComponentType, type ReactNode, useContext } from "react";
-import { useEditorStore } from "../hooks";
-import type { StepActions } from "./actions";
-import { PortalContainerContext, useLabels } from "./canvas-context";
+import { type ComponentType, Fragment, type ReactNode, useContext, useMemo } from "react";
+import { useEditorStore, useEditorStoreApi } from "../hooks";
+import { rangeActions, type StepActions } from "./actions";
+import {
+  PortalContainerContext,
+  RootElementContext,
+  useCanvasUiApi,
+  useLabels,
+} from "./canvas-context";
 import { isMac } from "./keyboard";
+import { rangeItems } from "./range-bar";
 
 const mod = () => (isMac() ? "⌘" : "Ctrl+");
 
@@ -155,21 +161,69 @@ function StepMenuItems({
   );
 }
 
+/** Menu entries of the store's range: the range toolbar's actions (see `rangeItems`). */
+function RangeMenuItems({ kit: M }: { kit: MenuKit }) {
+  const store = useEditorStoreApi();
+  const ui = useCanvasUiApi();
+  const root = useContext(RootElementContext);
+  const labels = useLabels();
+  const range = useEditorStore((s) => s.range);
+  const readOnly = useEditorStore((s) => s.readOnly);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rebinds when the range changes.
+  const actions = useMemo(() => rangeActions(store, ui, root), [store, ui, root, range]);
+  if (!actions) return null;
+  return (
+    <>
+      {rangeItems(labels, actions, readOnly).map((item) => (
+        <Fragment key={item.id}>
+          {item.id === "remove" && <M.Separator className="fl-menu__sep" />}
+          <M.Item
+            className="fl-menu__item"
+            onSelect={item.run}
+            {...(item.danger ? { "data-danger": true } : {})}
+          >
+            <Row icon={item.icon} label={item.label} {...(item.kbd ? { kbd: item.kbd } : {})} />
+          </M.Item>
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
 interface StepMenuProps {
   step: Step;
   manifest: NodeManifest | undefined;
   actions: StepActions;
 }
 
-/** Wraps a card so right-clicking it opens the step menu. */
-export function StepContextMenu({ children, ...props }: StepMenuProps & { children: ReactNode }) {
+/**
+ * Wraps a card so right-clicking it opens the step menu, or the range menu when the card is in
+ * the store's range (`inRange`).
+ */
+export function StepContextMenu({
+  children,
+  inRange = false,
+  ...props
+}: StepMenuProps & { children: ReactNode; inRange?: boolean }) {
   const container = useContext(PortalContainerContext);
+  const labels = useLabels();
   return (
-    <ContextMenu.Root modal={false} onOpenChange={(open) => open && props.actions.target()}>
+    <ContextMenu.Root
+      modal={false}
+      onOpenChange={(open) => open && !inRange && props.actions.target()}
+    >
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal container={container}>
-        <ContextMenu.Content className="fl-menu" collisionPadding={8} aria-label="Step actions">
-          <StepMenuItems kit={contextKit} {...props} />
+        <ContextMenu.Content
+          className="fl-menu"
+          collisionPadding={8}
+          aria-label={inRange ? labels.rangeActions : "Step actions"}
+        >
+          {inRange ? (
+            <RangeMenuItems kit={contextKit} />
+          ) : (
+            <StepMenuItems kit={contextKit} {...props} />
+          )}
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>

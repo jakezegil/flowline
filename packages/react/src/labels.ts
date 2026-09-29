@@ -80,6 +80,33 @@ export interface FlowlineLabels {
   noteLabel(text: string): string;
   /** Accessible name of a step card with a note: "<name>. Note: <first 120 chars>". */
   stepWithNote(name: string, note: string): string;
+
+  // Ranges: a run of steps in one list, selected with shift-click or ⇧↑/⇧↓
+  /** The range's "Group into section" action (⌘G). */
+  groupIntoSection: string;
+  /** Title of a section made with {@link FlowlineLabels.groupIntoSection}: "Section". */
+  defaultSectionTitle: string;
+  /** Accessible name and caption of the range toolbar: "3 steps selected". */
+  rangeSelected(n: number): string;
+  /** Toast when a shift-click would span two lists. */
+  rangeOtherList: string;
+  /** Toast after deleting a range: "Deleted 3 steps". */
+  stepsDeleted(n: number): string;
+  /** Toast after copying a range: "3 steps copied". */
+  stepsCopied(n: number): string;
+  /** Announced to screen readers when the range is cleared. */
+  rangeCleared: string;
+  /** Accessible name of a card in the range: "Send email, in selection". */
+  stepInRange(name: string): string;
+  /** Toast when grouping would overlap the section titled `title` (its shown title). */
+  sectionOverlap(title: string): string;
+  /** Toast when grouping fails for another reason (e.g. the range went stale). */
+  groupFailed: string;
+  /** Clears the range (Esc). */
+  clearRange: string;
+  /** Accessible name of a range's right-click menu. */
+  rangeActions: string;
+
   /** Accessible name of the inline rename field. */
   stepName: string;
   /** Invalid badge: the count and messages of a step's issues. */
@@ -331,7 +358,9 @@ export interface FlowlineLabels {
   editAsText: string;
   addItem: string;
   remove: string;
+  /** Moves a list item, or the canvas range (⌥↑), one place up. */
   moveUp: string;
+  /** Moves a list item, or the canvas range (⌥↓), one place down. */
   moveDown: string;
   /** Heading of an item in a list of objects: "Case 2". */
   itemTitle(label: string, n: number): string;
@@ -672,6 +701,19 @@ export const defaultLabels: FlowlineLabels = {
   },
   noteLabel: (text) => `Note: ${text}`,
   stepWithNote: (name, note) => `${name}. Note: ${note.slice(0, 120)}`,
+  groupIntoSection: "Group into section",
+  defaultSectionTitle: "Section",
+  rangeSelected: (n) => `${n} ${n === 1 ? "step" : "steps"} selected`,
+  rangeOtherList: "A range must stay in one branch. Shift-click a step in the same list.",
+  stepsDeleted: (n) => `Deleted ${n} ${n === 1 ? "step" : "steps"}`,
+  stepsCopied: (n) => `${n} ${n === 1 ? "step" : "steps"} copied`,
+  rangeCleared: "Selection cleared",
+  stepInRange: (name) => `${name}, in selection`,
+  sectionOverlap: (title) =>
+    `These steps overlap the “${title}” section. Sections can't overlap: pick steps outside it.`,
+  groupFailed: "Couldn't group these steps.",
+  clearRange: "Clear selection",
+  rangeActions: "Range actions",
   stepName: "Step name",
   issues: (messages) =>
     `${messages.length} ${messages.length === 1 ? "issue" : "issues"}: ${messages.join("; ")}`,

@@ -8,8 +8,14 @@ export function Toasts() {
   const dismiss = useCanvasUi((s) => s.dismissToast);
   const labels = useLabels();
   const readOnly = useEditorStore((s) => s.readOnly);
+  const announcement = useCanvasUi((s) => s.announcement);
   return (
     <div className="fl-toasts" role="status" aria-live="polite">
+      {announcement && (
+        <span key={announcement.id} className="fl-sr-only" data-announcement>
+          {announcement.message}
+        </span>
+      )}
       {toasts.map((t) => (
         <div key={t.id} className="fl-toast">
           <span>{t.message}</span>

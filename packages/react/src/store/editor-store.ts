@@ -486,11 +486,16 @@ export function createEditorStore(init: {
       if (next === prev) return;
       const depth = history.past.length;
       const last = history.past[depth - 1];
-      history = recordEdit(history, { doc: prev, renamed }, coalesceKey, Date.now());
+      history = recordEdit(
+        history,
+        { doc: prev, renamed, range: get().range },
+        coalesceKey,
+        Date.now(),
+      );
       if (history.past.length === depth && last) {
         // Joined the previous undo step: its renames now run through this edit's too.
         const past = history.past.slice();
-        past[depth - 1] = { doc: last.doc, renamed: composeRenames(last.renamed, renamed) };
+        past[depth - 1] = { ...last, renamed: composeRenames(last.renamed, renamed) };
         history = { ...history, past };
       }
       const selection = "selection" in patch ? (patch.selection ?? null) : get().selection;
@@ -544,7 +549,7 @@ export function createEditorStore(init: {
       if (!source) return;
       const renamed = source.renamed;
       const step = dir === "undo" ? undoEdit : redoEdit;
-      const result = step(history, { doc: get().doc, renamed });
+      const result = step(history, { doc: get().doc, renamed, range: get().range });
       if (!result) return;
       history = result.history;
       const next = result.value.doc;
@@ -557,7 +562,7 @@ export function createEditorStore(init: {
       set({
         ...derived(next),
         selection: validSelection(next, mapped),
-        range: pruneRange(get().doc, next, get().range, map),
+        range: travelRange(get().doc, next, get().range, map, result.value.range),
       });
       syncTestState();
     };
@@ -1003,6 +1008,11 @@ export function holdReadOnly(store: EditorStore): () => void {
 interface HistoryEntry {
   doc: WorkflowDoc;
   renamed: Record<string, string>;
+  /**
+   * The range when this snapshot was left (null: none). Undo and redo bring it back when the
+   * range was lost on the way (e.g. undoing a duplicate removes the copies it moved to).
+   */
+  range?: { first: string; last: string } | null;
 }
 
 /** `a` then `b`, as one old → new map; identities are dropped. */
@@ -1096,6 +1106,23 @@ function runOf(doc: WorkflowDoc, first: string, last: string): Step[] | undefine
   if (!a || !z || !sameList(a.location, z.location)) return undefined;
   if (a.location.index > z.location.index) return undefined;
   return listOf(doc, a.location)?.slice(a.location.index, z.location.index + 1);
+}
+
+/**
+ * The range after an undo or redo from `before` to `after`: the current range carried over (see
+ * {@link pruneRange}), else, when that is lost, the range `saved` with the snapshot if it is a
+ * run of `after` again.
+ */
+function travelRange(
+  before: WorkflowDoc,
+  after: WorkflowDoc,
+  range: { first: string; last: string } | null,
+  renamed: Record<string, string>,
+  saved: { first: string; last: string } | null | undefined,
+): { first: string; last: string } | null {
+  const carried = pruneRange(before, after, range, renamed);
+  if (carried !== null || !saved) return carried;
+  return runOf(after, saved.first, saved.last) ? saved : null;
 }
 
 /**
