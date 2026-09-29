@@ -1,10 +1,25 @@
-import type { Logger, RunDetail, RunSummary, Step, WorkflowDoc } from "@flowlinejs/core";
+import {
+  type Logger,
+  type RunDetail,
+  type RunSummary,
+  type Step,
+  validateWorkflow,
+  type WorkflowDoc,
+  type WorkflowVersion,
+} from "@flowlinejs/core";
 import type { StorageAdapter } from "@flowlinejs/engine";
 import { createMemoryStorage } from "@flowlinejs/storage-memory";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createMiniCrm, type MiniCrm, type MiniCrmOptions, TENANT_ID } from "./app";
+import {
+  createCrmRegistry,
+  createMiniCrm,
+  type MiniCrm,
+  type MiniCrmOptions,
+  TENANT_ID,
+} from "./app";
 import type { Approval, Call, Contact, Deal, OutboxMessage } from "./crm-store";
 import { demoFlows } from "./flows";
+import { DEAL_STUCK_WORKFLOW_ID } from "./flows/deal-stuck";
 
 let now: number;
 let crm: MiniCrm;
@@ -685,6 +700,54 @@ describe("deal stuck in stage", () => {
   type StuckTrigger = { deal: Deal; days: number };
   const stuckDealIds = async () =>
     (await triggersOf<StuckTrigger>("deal-stuck-in-stage")).map((r) => r.trigger.deal.id);
+
+  it("keeps the seeded sections and notes through load, save and publish", async () => {
+    type Loaded = { latest: WorkflowVersion; published: WorkflowVersion | null };
+    const path = `/flowline/workflows/${DEAL_STUCK_WORKFLOW_ID}`;
+    const annotations = (doc: WorkflowDoc) => ({
+      sections: doc.sections,
+      notes: Object.fromEntries(doc.steps.filter((s) => s.note).map((s) => [s.id, s.note])),
+      colors: Object.fromEntries(doc.steps.filter((s) => s.color).map((s) => [s.id, s.color])),
+    });
+    const expected = {
+      sections: [
+        {
+          id: "check_deal",
+          title: "Check the deal is still stuck",
+          color: "blue",
+          note: "Every side effect is preceded by a fresh load",
+          first: "deal",
+          last: "still_there",
+        },
+        {
+          id: "escalate_block",
+          title: "Escalate",
+          color: "pink",
+          first: "recheck",
+          last: "escalate",
+        },
+      ],
+      notes: { nudge: "Owner, not assignee", wait: "1m in the demo, 1d in production" },
+      colors: { escalate: "pink" },
+    };
+
+    const seeded = await get<Loaded>(path);
+    expect(annotations(seeded.latest.doc)).toEqual(expected);
+    expect(seeded.published && annotations(seeded.published.doc)).toEqual(expected);
+    expect(validateWorkflow(seeded.latest.doc, createCrmRegistry().manifest())).toEqual([]);
+
+    const saved = await call("PUT", path, seeded.latest.doc);
+    expect(saved.status).toBe(200);
+    const { version } = (await saved.json()) as WorkflowVersion;
+    const published = await call("POST", `${path}/publish`, { version });
+    expect(published.status).toBe(200);
+    expect(await published.json()).toEqual({ version });
+
+    const reloaded = await get<Loaded>(path);
+    expect(reloaded.published?.version).toBe(version);
+    expect(annotations(reloaded.latest.doc)).toEqual(expected);
+    expect(reloaded.published && annotations(reloaded.published.doc)).toEqual(expected);
+  });
 
   it("records when a deal entered its stage", async () => {
     const seeded = await get<Deal[]>("/api/deals");
