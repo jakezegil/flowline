@@ -6,6 +6,7 @@ import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { createPostgresStorage, migrate, type PgStorageOptions } from "./index";
 import { withTransaction } from "./migrate";
+import { migrations, quoteSchema } from "./schema";
 import { pgliteQueryable } from "./testing";
 
 // One PGlite instance per test file; every conformance case gets its own schema, so each starts
@@ -173,6 +174,30 @@ describe("migrate", () => {
     });
   });
 
+  it("v4 is idempotent: re-running its statements on an already-migrated database changes nothing", async () => {
+    await migrate(litePool, "v4idem");
+    const s = createPostgresStorage({ pool: litePool, schema: "v4idem" });
+    await s.claimDedupeKey("t", "k", "run_a", 0, 1000);
+    const lease = await s.claimPoll("t", "wf", { workerId: "w1", leaseMs: 1000, now: 0 });
+    await s.commitPoll(lease!, { since: 1, cursor: { a: 1 }, nextAt: 100 }, 1);
+
+    const before = {
+      dedupe: (await litePool.query("SELECT * FROM v4idem.dedupe_keys ORDER BY key")).rows,
+      poll: (await litePool.query("SELECT * FROM v4idem.poll_states ORDER BY workflow_id")).rows,
+    };
+
+    // Re-run v4's own statements directly (migrate() itself would skip them, since version 4 is
+    // already recorded): every statement is `IF NOT EXISTS`/idempotent, so nothing changes.
+    const v4 = migrations(quoteSchema("v4idem")).find((m) => m.version === 4);
+    for (const sql of v4?.statements ?? []) await litePool.query(sql);
+
+    const after = {
+      dedupe: (await litePool.query("SELECT * FROM v4idem.dedupe_keys ORDER BY key")).rows,
+      poll: (await litePool.query("SELECT * FROM v4idem.poll_states ORDER BY workflow_id")).rows,
+    };
+    expect(after).toEqual(before);
+  });
+
   it("rejects unsafe schema names", async () => {
     await expect(migrate(litePool, 'x"; DROP TABLE y; --')).rejects.toThrow(/schema/i);
     expect(() => createPostgresStorage({ pool: litePool, schema: "a b" })).toThrow(/schema/i);
@@ -283,6 +308,34 @@ describe("createPostgresStorage", () => {
         expect(Object.keys(step.config)).toEqual(["longerKey", "b", "a"]);
         expect(Object.keys(step.branches!)).toEqual(["z", "a", "middle"]);
       }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("poll state cursor round-trips as jsonb", async () => {
+    const { storage: s, cleanup } = await freshStorage(litePool, "pollcursor");
+    try {
+      const lease = await s.claimPoll("t", "wf", { workerId: "w1", leaseMs: 1000, now: 0 });
+      expect(lease).not.toBeNull();
+      expect(await s.commitPoll(lease!, { cursor: { a: [1, null] }, nextAt: 10 }, 5)).toBe(true);
+      const state = await s.getPollState("t", "wf");
+      expect(state?.cursor).toEqual({ a: [1, null] });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("commitPoll with a non-JSON cursor rejects with FlowlineStorageError and changes nothing", async () => {
+    const { storage: s, cleanup } = await freshStorage(litePool, "pollbadcursor");
+    try {
+      const lease = await s.claimPoll("t", "wf", { workerId: "w1", leaseMs: 1000, now: 0 });
+      expect(lease).not.toBeNull();
+      const before = await s.getPollState("t", "wf");
+      await expect(s.commitPoll(lease!, { cursor: { bad: 1n }, nextAt: 10 }, 5)).rejects.toThrow(
+        FlowlineStorageError,
+      );
+      expect(await s.getPollState("t", "wf")).toEqual(before);
     } finally {
       await cleanup();
     }
