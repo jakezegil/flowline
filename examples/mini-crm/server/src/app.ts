@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { createRegistry, type Logger } from "@flowlinejs/core";
+import { createRegistry, type Logger, type Registry } from "@flowlinejs/core";
 import {
   createEngine,
   type Engine,
@@ -154,6 +154,18 @@ async function readBody<T>(req: Request, schema: z.ZodType<T>): Promise<T> {
 }
 
 /**
+ * The mini CRM's registry: the built-in plugin and the `crm` plugin. The host registers the
+ * built-in plugin itself to choose its defaults: conditions and switches compare strictly (same
+ * types only, case-sensitive), and conditions get the CRM's "is unassigned" operator.
+ */
+export function createCrmRegistry(): Registry {
+  return createRegistry([
+    createBuiltinPlugin({ compare: "strict", operators: [isUnassigned] }),
+    crmPlugin,
+  ]);
+}
+
+/**
  * Create the mini CRM: the CRM store, an engine with the `crm` plugin, the demo workflows
  * (saved and published for tenant `acme`) and the HTTP app.
  */
@@ -164,13 +176,8 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
   /** The latest trigger events, newest first (see `GET /api/demo/trigger-events`). */
   const triggerEvents: TriggerEvent[] = [];
   const engine = createEngine({
-    // The host registers the built-in plugin itself to choose its defaults: conditions and
-    // switches compare strictly (same types only, case-sensitive), and conditions get the CRM's
-    // "is unassigned" operator. The editor manifest comes from the same registry.
-    registry: createRegistry([
-      createBuiltinPlugin({ compare: "strict", operators: [isUnassigned] }),
-      crmPlugin,
-    ]),
+    // The editor manifest comes from the same registry (see createCrmRegistry).
+    registry: createCrmRegistry(),
     storage: opts.storage ?? createMemoryStorage(),
     services: { crm },
     clock,

@@ -13,15 +13,23 @@ import { compactSchema } from "./compact-schema";
 import type { Where } from "./read-types";
 
 /**
+ * @internal The `Where` fields that name a node type and a branch, by schema identity, so the
+ * catalog can turn them into the manifest's enums.
+ */
+export const whereFields = { type: z.string(), branch: z.string() } as const;
+
+/**
  * Strict Zod schema of `Where`, shared by the selector commands and the read argument schemas.
  *
  * @example
  * whereSchema.safeParse({ type: "crm.sendEmail", within: { stepId: "check" } }).success // true
  */
 export const whereSchema: z.ZodType<Where> = z.strictObject({
-  type: z.string().optional(),
+  type: whereFields.type.optional(),
   section: z.string().optional(),
-  within: z.strictObject({ stepId: z.string().min(1), branch: z.string().optional() }).optional(),
+  within: z
+    .strictObject({ stepId: z.string().min(1), branch: whereFields.branch.optional() })
+    .optional(),
   nameContains: z.string().optional(),
   configHas: z.string().optional(),
 });
@@ -73,10 +81,37 @@ interface Built {
   fragment: z.ZodType;
   /** Its compact JSON Schema, built on first use: what a `#recursive:` ref stands for. */
   fragmentJson?: JSONSchema;
+  /** The shared pieces, by schema identity, for the catalog's `$defs` and enums. */
+  parts: CommandParts;
+}
+
+/**
+ * @internal The schemas the command schemas share, by identity: the catalog names them in
+ * `$defs` and swaps manifest enums in for the branch fields.
+ */
+export interface CommandParts {
+  /** Every command's schema by op (an op with two forms has two). */
+  members: Map<string, z.ZodType[]>;
+  /** A step argument (an ID or a placeholder). */
+  stepRef: z.ZodType;
+  at: z.ZodType;
+  nodeType: z.ZodType;
+  fragment: z.ZodType;
+  json: z.ZodType;
+  color: z.ZodType;
+  /** A branch ID value (`at.in.branch`, `wrapSteps.in.branch`, `unwrapStep.keep`). */
+  branch: z.ZodType;
+  /** The key of a fragment's `branches`. */
+  branchKey: z.ZodType;
 }
 
 /** A fragment schema: `type` as given, and `branches` holding fragments of the same schema. */
-function fragmentSchema(type: z.ZodType, color: z.ZodType, json: z.ZodType): z.ZodType {
+function fragmentSchema(
+  type: z.ZodType,
+  color: z.ZodType,
+  json: z.ZodType,
+  branchKey: z.ZodType<string> = z.string(),
+): z.ZodType {
   const fragment: z.ZodType = z.strictObject({
     ref: z
       .string()
@@ -92,7 +127,7 @@ function fragmentSchema(type: z.ZodType, color: z.ZodType, json: z.ZodType): z.Z
     color: color.optional(),
     disabled: z.boolean().optional(),
     get branches() {
-      return z.record(z.string(), z.array(fragment)).optional();
+      return z.record(branchKey, z.array(fragment)).optional();
     },
   });
   return fragment;
@@ -100,11 +135,13 @@ function fragmentSchema(type: z.ZodType, color: z.ZodType, json: z.ZodType): z.Z
 
 function build(manifest: Manifest | undefined, internal: boolean): Built {
   const stepRef = z.string().min(1);
+  const branch = z.string().min(1);
+  const branchKey = z.string();
   const at = z.union([
     z.strictObject({ after: stepRef }),
     z.strictObject({ before: stepRef }),
     z.strictObject({
-      in: z.strictObject({ stepId: stepRef, branch: z.string().min(1) }),
+      in: z.strictObject({ stepId: stepRef, branch }),
       index: z.number().int().min(0).optional(),
     }),
     z.strictObject({ start: z.literal(true) }),
@@ -242,7 +279,7 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
     ],
     ["removeSection", [z.strictObject({ op: z.literal("removeSection"), id: stepRef })]],
   ]);
-  const fragment = fragmentSchema(nodeType, color, json);
+  const fragment = fragmentSchema(nodeType, color, json, branchKey);
   const steps = z.array(fragment).min(1);
   const section = z.strictObject({
     title: z.string(),
@@ -331,17 +368,23 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
       last: stepRef,
       in: z.strictObject({
         type: nodeType,
-        branch: z.string().min(1),
+        branch,
         config: patch.optional(),
       }),
     }),
   ]);
   members.set("unwrapStep", [
-    z.strictObject({ op: z.literal("unwrapStep"), id: stepRef, keep: z.string().min(1) }),
+    z.strictObject({ op: z.literal("unwrapStep"), id: stepRef, keep: branch }),
   ]);
   const all = [...members.values()].flat();
   const union = z.union(all as [z.ZodType, z.ZodType, ...z.ZodType[]]) as z.ZodType<Command>;
-  return { members, union, json: new Map(), fragment };
+  return {
+    members,
+    union,
+    json: new Map(),
+    fragment,
+    parts: { members, stepRef, at, nodeType, fragment, json, color, branch, branchKey },
+  };
 }
 
 /** The member of a multi-form op that `cmd` is checked against. */
@@ -392,6 +435,11 @@ export function commandSchema(
   opts: { internal?: boolean } = {},
 ): z.ZodType<Command> {
   return built(manifest, opts.internal ?? true).union;
+}
+
+/** @internal The shared pieces of the external command schemas for `manifest` (cached). */
+export function commandParts(manifest?: Manifest): CommandParts {
+  return built(manifest, false).parts;
 }
 
 /** @internal Every op name, in declaration order. */
@@ -641,15 +689,16 @@ function toError(
 }
 
 /**
- * @internal The shape errors of `commands[index]` against the internal command schema, in path
- * order (none when it is well-formed).
+ * @internal The shape errors of `commands[index]` against the command schema (the internal one
+ * unless `internal: false`), in path order (none when it is well-formed).
  */
 export function shapeErrors(
   manifest: Manifest | undefined,
   cmd: unknown,
   index: number,
+  internal = true,
 ): ApplyError[] {
-  const b = built(manifest, true);
+  const b = built(manifest, internal);
   if (!isObject(cmd)) {
     return [
       {

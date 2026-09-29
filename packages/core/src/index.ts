@@ -7,6 +7,13 @@ import { version } from "../package.json";
 export const VERSION: string = version;
 
 export { apply, changedStepIds, FlowlineCommandError } from "./agent/apply";
+export {
+  commandCatalog,
+  readArgSchemas,
+  runTool,
+  type ToolDefinition,
+  type ToolState,
+} from "./agent/catalog";
 export { commandSchema, opJsonSchema } from "./agent/command-schema";
 export type {
   ApplyError,

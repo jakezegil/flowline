@@ -1,0 +1,1607 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the mini-crm tool catalog > snapshot 1`] = `
+[
+  {
+    "description": "Edit the workflow: run a batch of commands atomically. If any command fails, nothing is applied and \`error\` names it (path like commands[2].config.to) with a hint: the expected schema, or the closest valid names. Put all related edits in one call.
+Placeholders: $n is the result of commands[n-1] (1-based): the step (or section) it created. A fragment step with "ref": "a" becomes $<ref>, here "$a". Use them as step IDs and inside refs and templates: { "$ref": "steps.$1.<field>" }, "{{ steps.$a.<field> }}". Unknown placeholders are rejected. result.ids maps each placeholder to its real ID.
+Values: a JSON literal, a ref { "$ref": "trigger.<field>" }, or a template { "$tpl": "Hi {{ trigger.contact.name }}" }. In config patches, null removes a key.
+Bulk: insertSteps adds many new steps with nested branches in one command; replaceSteps, duplicateSteps, updateSteps, replaceInConfig, moveSteps, removeSteps, wrapSteps and unwrapStep act on runs (first…last, one list in order) or selectors. Every \`where\` form needs expect, the number of steps you expect it to match: another count fails with expect.mismatch and lists the matches.
+New steps with an unknown type or branch, an invalid config value or a bad ref are rejected; a missing required field is only reported in issues.
+On success, the result includes the changed outline and issue delta, so there's no need to re-read after success. changed has one line per step or section touched (+ added, ~ updated, - removed, "- ▣ <id>" for a removed section, "~ old →" for a new ID), plus "~ workflow", "~ trigger" and "~ output" ("- output" when removed) lines when those changed. issues.added and issues.cleared are the validation delta; issues.more has a getIssues call when more than 20 were added.
+Example: {"commands":[{"op":"insertSteps","at":{"start":true},"steps":[{"ref":"a","type":"crm.findContactByEmail","config":{"email":"Hi"}},{"ref":"b","type":"core.condition","branches":{"if":[{"type":"crm.findContactByEmail","config":{"email":{"$tpl":"Re: {{ steps.$a.contact.id }}"}}}]}}]},{"op":"addSection","first":"$1","last":"$b","title":"Get started","color":"blue"}]}
+Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmail"},"set":{"disabled":true},"expect":2}]}",
+    "inputSchema": {
+      "$defs": {
+        "At": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "after": {
+                  "$ref": "#/$defs/StepRef",
+                },
+              },
+              "required": [
+                "after",
+              ],
+              "type": "object",
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "before": {
+                  "$ref": "#/$defs/StepRef",
+                },
+              },
+              "required": [
+                "before",
+              ],
+              "type": "object",
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "in": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "branch": {
+                      "$ref": "#/$defs/Branch",
+                    },
+                    "stepId": {
+                      "$ref": "#/$defs/StepRef",
+                    },
+                  },
+                  "required": [
+                    "stepId",
+                    "branch",
+                  ],
+                  "type": "object",
+                },
+                "index": {
+                  "minimum": 0,
+                  "type": "integer",
+                },
+              },
+              "required": [
+                "in",
+              ],
+              "type": "object",
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "start": {
+                  "const": true,
+                  "type": "boolean",
+                },
+              },
+              "required": [
+                "start",
+              ],
+              "type": "object",
+            },
+          ],
+          "description": "Where steps go: after or before a step, into a branch (index: position, default the end) or at the start of the top-level list. For moves, the anchor is resolved after the moved steps are taken out.",
+        },
+        "Branch": {
+          "description": "A branch ID. The valid IDs depend on the node: see branches in describeNodeTypes",
+          "minLength": 1,
+          "type": "string",
+        },
+        "Color": {
+          "enum": [
+            "yellow",
+            "blue",
+            "green",
+            "pink",
+            "purple",
+            "gray",
+          ],
+          "type": "string",
+        },
+        "Fragment": {
+          "additionalProperties": false,
+          "description": "A new step. ref names it "$<ref>" for later fragments and commands; id is generated from type unless given; config merges over the node's defaults; branches holds nested steps by branch ID.",
+          "properties": {
+            "branches": {
+              "additionalProperties": {
+                "items": {
+                  "$ref": "#/$defs/Fragment",
+                },
+                "type": "array",
+              },
+              "propertyNames": {
+                "$ref": "#/$defs/Branch",
+              },
+              "type": "object",
+            },
+            "color": {
+              "$ref": "#/$defs/Color",
+            },
+            "config": {
+              "additionalProperties": {
+                "$ref": "#/$defs/ValueExpr",
+              },
+              "type": "object",
+            },
+            "disabled": {
+              "type": "boolean",
+            },
+            "id": {
+              "type": "string",
+            },
+            "name": {
+              "type": "string",
+            },
+            "note": {
+              "maxLength": 4000,
+              "type": "string",
+            },
+            "ref": {
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+              "type": "string",
+            },
+            "type": {
+              "$ref": "#/$defs/NodeType",
+            },
+          },
+          "required": [
+            "type",
+          ],
+          "type": "object",
+        },
+        "NodeType": {
+          "description": "A node type of this app (describeNodeTypes gives its config)",
+          "enum": [
+            "core.condition",
+            "core.switch",
+            "core.forEach",
+            "core.stop",
+            "core.delay",
+            "core.waitForCallback",
+            "core.callSubflow",
+            "core.httpRequest",
+            "core.transform",
+            "crm.findContactByEmail",
+            "crm.getContact",
+            "crm.createContact",
+            "crm.updateContact",
+            "crm.assignOwner",
+            "crm.getDeal",
+            "crm.updateDeal",
+            "crm.getUser",
+            "crm.sendEmail",
+            "crm.requestApproval",
+          ],
+          "type": "string",
+        },
+        "StepRef": {
+          "description": "A step ID, or a placeholder: "$1" (the step commands[0] made), "$deal" (a ref)",
+          "minLength": 1,
+          "type": "string",
+        },
+        "ValueExpr": {
+          "description": "A config value: a JSON literal, a ref { "$ref": "steps.<id>.<path>" } (or "trigger.<path>"), or a template { "$tpl": "text {{ steps.<id>.<path> }}" }. In a patch, null removes the key.",
+        },
+        "Where": {
+          "additionalProperties": false,
+          "description": "A step selector; fields are ANDed and {} matches every step. within: descendants of a step (optionally of one branch); section: a section's steps; configHas: a config path that is set.",
+          "properties": {
+            "configHas": {
+              "type": "string",
+            },
+            "nameContains": {
+              "type": "string",
+            },
+            "section": {
+              "type": "string",
+            },
+            "type": {
+              "$ref": "#/$defs/NodeType",
+            },
+            "within": {
+              "additionalProperties": false,
+              "properties": {
+                "branch": {
+                  "$ref": "#/$defs/Branch",
+                },
+                "stepId": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+              },
+              "required": [
+                "stepId",
+              ],
+              "type": "object",
+            },
+          },
+          "type": "object",
+        },
+      },
+      "additionalProperties": false,
+      "properties": {
+        "commands": {
+          "items": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "description": "Add one step at \`at\`; config merges over the node's defaults. $n is the new step.",
+                "properties": {
+                  "at": {
+                    "$ref": "#/$defs/At",
+                  },
+                  "color": {
+                    "$ref": "#/$defs/Color",
+                  },
+                  "config": {
+                    "additionalProperties": {
+                      "$ref": "#/$defs/ValueExpr",
+                    },
+                    "type": "object",
+                  },
+                  "disabled": {
+                    "type": "boolean",
+                  },
+                  "id": {
+                    "type": "string",
+                  },
+                  "name": {
+                    "type": "string",
+                  },
+                  "note": {
+                    "type": "string",
+                  },
+                  "op": {
+                    "const": "addStep",
+                    "type": "string",
+                  },
+                  "type": {
+                    "$ref": "#/$defs/NodeType",
+                  },
+                },
+                "required": [
+                  "op",
+                  "at",
+                  "type",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Move a step (with its subtree) to \`to\`.",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "op": {
+                    "const": "moveStep",
+                    "type": "string",
+                  },
+                  "to": {
+                    "$ref": "#/$defs/At",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                  "to",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Remove a step and its subtree.",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "op": {
+                    "const": "removeStep",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Set one config key (value null removes it), or merge a config patch.",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "key": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "op": {
+                    "const": "setConfig",
+                    "type": "string",
+                  },
+                  "value": {
+                    "$ref": "#/$defs/ValueExpr",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                  "key",
+                  "value",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Set one config key (value null removes it), or merge a config patch.",
+                "properties": {
+                  "config": {
+                    "additionalProperties": {
+                      "$ref": "#/$defs/ValueExpr",
+                    },
+                    "type": "object",
+                  },
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "op": {
+                    "const": "setConfig",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                  "config",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Copy a step and its subtree right after it. $n is the copy.",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "op": {
+                    "const": "duplicateStep",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Set the display name; "" clears it.",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "name": {
+                    "type": "string",
+                  },
+                  "op": {
+                    "const": "renameStep",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                  "name",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Change a step's ID and rewrite every reference to it. $n is the new ID.",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "newId": {
+                    "type": "string",
+                  },
+                  "op": {
+                    "const": "renameStepId",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                  "newId",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Change a step's node type: config resets to the new node's defaults, children stay.",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "op": {
+                    "const": "setType",
+                    "type": "string",
+                  },
+                  "type": {
+                    "$ref": "#/$defs/NodeType",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                  "type",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Disable or enable a step.",
+                "properties": {
+                  "disabled": {
+                    "type": "boolean",
+                  },
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "op": {
+                    "const": "setDisabled",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                  "disabled",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Set the step's note; null removes it.",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "note": {
+                    "anyOf": [
+                      {
+                        "maxLength": 4000,
+                        "type": "string",
+                      },
+                      {
+                        "type": "null",
+                      },
+                    ],
+                  },
+                  "op": {
+                    "const": "setNote",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                  "note",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Set the step's accent colour; null removes it.",
+                "properties": {
+                  "color": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/Color",
+                      },
+                      {
+                        "type": "null",
+                      },
+                    ],
+                  },
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "op": {
+                    "const": "setColor",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                  "color",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Set the trigger. Same type: merges config. Another type: resets config to its defaults, then merges.",
+                "properties": {
+                  "config": {
+                    "additionalProperties": {
+                      "$ref": "#/$defs/ValueExpr",
+                    },
+                    "type": "object",
+                  },
+                  "op": {
+                    "const": "setTrigger",
+                    "type": "string",
+                  },
+                  "type": {
+                    "enum": [
+                      "core.event",
+                      "core.webhook",
+                      "core.manual",
+                      "core.schedule",
+                      "core.subflow",
+                      "crm.contactCreated",
+                      "crm.dealUpdated",
+                      "crm.callEnded",
+                      "crm.dealStuckInStage",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "type",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Set one trigger config key (null removes it), or merge a patch.",
+                "properties": {
+                  "key": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "op": {
+                    "const": "setTriggerConfig",
+                    "type": "string",
+                  },
+                  "value": {
+                    "$ref": "#/$defs/ValueExpr",
+                  },
+                },
+                "required": [
+                  "op",
+                  "key",
+                  "value",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Set one trigger config key (null removes it), or merge a patch.",
+                "properties": {
+                  "config": {
+                    "additionalProperties": {
+                      "$ref": "#/$defs/ValueExpr",
+                    },
+                    "type": "object",
+                  },
+                  "op": {
+                    "const": "setTriggerConfig",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "config",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Set one key of the workflow's output mapping (null removes it), or merge a patch.",
+                "properties": {
+                  "key": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "op": {
+                    "const": "setOutput",
+                    "type": "string",
+                  },
+                  "value": {
+                    "$ref": "#/$defs/ValueExpr",
+                  },
+                },
+                "required": [
+                  "op",
+                  "key",
+                  "value",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Set one key of the workflow's output mapping (null removes it), or merge a patch.",
+                "properties": {
+                  "config": {
+                    "additionalProperties": {
+                      "$ref": "#/$defs/ValueExpr",
+                    },
+                    "type": "object",
+                  },
+                  "op": {
+                    "const": "setOutput",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "config",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Rename the workflow.",
+                "properties": {
+                  "name": {
+                    "pattern": "\\S",
+                    "type": "string",
+                  },
+                  "op": {
+                    "const": "renameWorkflow",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "name",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Group the run first…last (one list, in order) in a titled, coloured section. $n is the section.",
+                "properties": {
+                  "color": {
+                    "$ref": "#/$defs/Color",
+                  },
+                  "first": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "id": {
+                    "type": "string",
+                  },
+                  "last": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "note": {
+                    "maxLength": 4000,
+                    "type": "string",
+                  },
+                  "op": {
+                    "const": "addSection",
+                    "type": "string",
+                  },
+                  "title": {
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "first",
+                  "last",
+                  "title",
+                  "color",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Change a section's title, colour, note (null removes it) or first/last step.",
+                "properties": {
+                  "color": {
+                    "$ref": "#/$defs/Color",
+                  },
+                  "first": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "last": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "note": {
+                    "anyOf": [
+                      {
+                        "maxLength": 4000,
+                        "type": "string",
+                      },
+                      {
+                        "type": "null",
+                      },
+                    ],
+                  },
+                  "op": {
+                    "const": "updateSection",
+                    "type": "string",
+                  },
+                  "title": {
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Remove a section; its steps stay.",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "op": {
+                    "const": "removeSection",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Insert new steps (fragments, with nested branches) at \`at\`, optionally in a new section. $n is the first inserted step.",
+                "properties": {
+                  "at": {
+                    "$ref": "#/$defs/At",
+                  },
+                  "op": {
+                    "const": "insertSteps",
+                    "type": "string",
+                  },
+                  "section": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "color": {
+                        "$ref": "#/$defs/Color",
+                      },
+                      "id": {
+                        "type": "string",
+                      },
+                      "note": {
+                        "maxLength": 4000,
+                        "type": "string",
+                      },
+                      "title": {
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "title",
+                      "color",
+                    ],
+                    "type": "object",
+                  },
+                  "steps": {
+                    "items": {
+                      "$ref": "#/$defs/Fragment",
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "op",
+                  "at",
+                  "steps",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Replace the run first…last with new steps. $n is the first new step.",
+                "properties": {
+                  "first": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "last": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "op": {
+                    "const": "replaceSteps",
+                    "type": "string",
+                  },
+                  "steps": {
+                    "items": {
+                      "$ref": "#/$defs/Fragment",
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "op",
+                  "first",
+                  "last",
+                  "steps",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Copy the run first…last, after last or at \`at\`. $n is the first copy.",
+                "properties": {
+                  "at": {
+                    "$ref": "#/$defs/At",
+                  },
+                  "first": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "last": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "op": {
+                    "const": "duplicateSteps",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "first",
+                  "last",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Edit many steps: a list of updates, or one set/config for every \`where\` match.",
+                "properties": {
+                  "op": {
+                    "const": "updateSteps",
+                    "type": "string",
+                  },
+                  "updates": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "config": {
+                          "additionalProperties": {
+                            "$ref": "#/$defs/ValueExpr",
+                          },
+                          "type": "object",
+                        },
+                        "id": {
+                          "$ref": "#/$defs/StepRef",
+                        },
+                        "set": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "color": {
+                              "anyOf": [
+                                {
+                                  "$ref": "#/$defs/Color",
+                                },
+                                {
+                                  "type": "null",
+                                },
+                              ],
+                            },
+                            "disabled": {
+                              "type": "boolean",
+                            },
+                            "name": {
+                              "type": "string",
+                            },
+                            "note": {
+                              "anyOf": [
+                                {
+                                  "maxLength": 4000,
+                                  "type": "string",
+                                },
+                                {
+                                  "type": "null",
+                                },
+                              ],
+                            },
+                          },
+                          "type": "object",
+                        },
+                      },
+                      "required": [
+                        "id",
+                      ],
+                      "type": "object",
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                  },
+                },
+                "required": [
+                  "op",
+                  "updates",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Edit many steps: a list of updates, or one set/config for every \`where\` match.",
+                "properties": {
+                  "config": {
+                    "additionalProperties": {
+                      "$ref": "#/$defs/ValueExpr",
+                    },
+                    "type": "object",
+                  },
+                  "expect": {
+                    "minimum": 0,
+                    "type": "integer",
+                  },
+                  "op": {
+                    "const": "updateSteps",
+                    "type": "string",
+                  },
+                  "set": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "color": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/Color",
+                          },
+                          {
+                            "type": "null",
+                          },
+                        ],
+                      },
+                      "disabled": {
+                        "type": "boolean",
+                      },
+                      "name": {
+                        "type": "string",
+                      },
+                      "note": {
+                        "anyOf": [
+                          {
+                            "maxLength": 4000,
+                            "type": "string",
+                          },
+                          {
+                            "type": "null",
+                          },
+                        ],
+                      },
+                    },
+                    "type": "object",
+                  },
+                  "where": {
+                    "$ref": "#/$defs/Where",
+                  },
+                },
+                "required": [
+                  "op",
+                  "where",
+                  "expect",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Replace text in string config values and templates of every step, or of the \`where\` matches; expect counts the steps changed.",
+                "properties": {
+                  "expect": {
+                    "minimum": 0,
+                    "type": "integer",
+                  },
+                  "find": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "op": {
+                    "const": "replaceInConfig",
+                    "type": "string",
+                  },
+                  "replace": {
+                    "type": "string",
+                  },
+                  "where": {
+                    "$ref": "#/$defs/Where",
+                  },
+                },
+                "required": [
+                  "op",
+                  "find",
+                  "replace",
+                  "expect",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Move the run first…last as a block to \`to\`.",
+                "properties": {
+                  "first": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "last": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "op": {
+                    "const": "moveSteps",
+                    "type": "string",
+                  },
+                  "to": {
+                    "$ref": "#/$defs/At",
+                  },
+                },
+                "required": [
+                  "op",
+                  "first",
+                  "last",
+                  "to",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Remove steps: by ids, the run first…last, or the \`where\` matches.",
+                "properties": {
+                  "ids": {
+                    "items": {
+                      "$ref": "#/$defs/StepRef",
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                  },
+                  "op": {
+                    "const": "removeSteps",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "ids",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Remove steps: by ids, the run first…last, or the \`where\` matches.",
+                "properties": {
+                  "first": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "last": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "op": {
+                    "const": "removeSteps",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "first",
+                  "last",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Remove steps: by ids, the run first…last, or the \`where\` matches.",
+                "properties": {
+                  "expect": {
+                    "minimum": 0,
+                    "type": "integer",
+                  },
+                  "op": {
+                    "const": "removeSteps",
+                    "type": "string",
+                  },
+                  "where": {
+                    "$ref": "#/$defs/Where",
+                  },
+                },
+                "required": [
+                  "op",
+                  "where",
+                  "expect",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Put the run first…last in branch in.branch of a new in.type step. $n is the wrapper.",
+                "properties": {
+                  "first": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "in": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "branch": {
+                        "$ref": "#/$defs/Branch",
+                      },
+                      "config": {
+                        "additionalProperties": {
+                          "$ref": "#/$defs/ValueExpr",
+                        },
+                        "type": "object",
+                      },
+                      "type": {
+                        "$ref": "#/$defs/NodeType",
+                      },
+                    },
+                    "required": [
+                      "type",
+                      "branch",
+                    ],
+                    "type": "object",
+                  },
+                  "last": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "op": {
+                    "const": "wrapSteps",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "first",
+                  "last",
+                  "in",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "description": "Replace a branching step with the steps of its branch \`keep\`; other branches go.",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/StepRef",
+                  },
+                  "keep": {
+                    "$ref": "#/$defs/Branch",
+                  },
+                  "op": {
+                    "const": "unwrapStep",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "op",
+                  "id",
+                  "keep",
+                ],
+                "type": "object",
+              },
+            ],
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "commands",
+      ],
+      "type": "object",
+    },
+    "name": "apply",
+  },
+  {
+    "description": "Start here. Then describeNodeTypes for any node type you'll add.
+The whole workflow as a compact outline: the trigger, then one line per step (ID, type, name, short config), sections (▣) and notes, nested by branch, with issue counts. A big workflow is cut to fit budget (characters, default 4000): omitted lists what was left out, each with the exact call (tool and args) that fetches it.
+Example: {}",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "description": "Size limit in characters of the result",
+          "minimum": 1,
+          "type": "integer",
+        },
+      },
+      "type": "object",
+    },
+    "name": "overview",
+  },
+  {
+    "description": "Part of the workflow in overview's format: one step's subtree (stepId), one of its branches (stepId and branch) or the top-level list (neither). after pages a list: only the steps after that step. Use it, or the calls in omitted, to expand what overview collapsed.
+Example: {"stepId":"<stepId>","branch":"if"}",
+    "inputSchema": {
+      "$defs": {
+        "Branch": {
+          "description": "A branch ID. The valid IDs depend on the node: see branches in describeNodeTypes",
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "type": "string",
+        },
+        "branch": {
+          "$ref": "#/$defs/Branch",
+        },
+        "budget": {
+          "description": "Size limit in characters of the result",
+          "minimum": 1,
+          "type": "integer",
+        },
+        "stepId": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "outline",
+  },
+  {
+    "description": "Everything needed to edit one step: config, its compact input schema, the refs in scope, issues, branches, its note and its section (section: title, colour and note; heads: other sections that start here, with their notes).
+Strings over 500 chars are cut, ending in a fixed marker "…(+N chars)" that is not part of the value; the step's cut lists the cut paths, and full is the call that returns them uncut.
+Over budget (characters, default 8000), refs and then the schema are left out, each listed in omitted with its call.
+Example: {"stepId":"<stepId>"}",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "description": "Size limit in characters of the result",
+          "minimum": 1,
+          "type": "integer",
+        },
+        "full": {
+          "type": "boolean",
+        },
+        "stepId": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "stepId",
+      ],
+      "type": "object",
+    },
+    "name": "focus",
+  },
+  {
+    "description": "Several steps in focus's detail: pass exactly one of ids or where (a selector, paged with after and limit: default 50, at most 200). include picks the extras: "config" (the default), "schema", "refs". Unknown IDs are in missing.
+Only the leading steps that fit budget (characters, default 8000) are returned; next is the call for more and remaining counts the steps left: follow next until remaining is 0; if next.ids is a slice, re-request the rest of your list.
+Strings over 500 chars are cut, ending in a fixed marker "…(+N chars)" that is not part of the value; the step's cut lists the cut paths, and full is the call that returns them uncut. Here full is one call for every cut step of the page.
+Example: {"ids":["<stepId>","<otherStepId>"],"include":["config"]}",
+    "inputSchema": {
+      "$defs": {
+        "Branch": {
+          "description": "A branch ID. The valid IDs depend on the node: see branches in describeNodeTypes",
+          "minLength": 1,
+          "type": "string",
+        },
+        "NodeType": {
+          "description": "A node type of this app (describeNodeTypes gives its config)",
+          "enum": [
+            "core.condition",
+            "core.switch",
+            "core.forEach",
+            "core.stop",
+            "core.delay",
+            "core.waitForCallback",
+            "core.callSubflow",
+            "core.httpRequest",
+            "core.transform",
+            "crm.findContactByEmail",
+            "crm.getContact",
+            "crm.createContact",
+            "crm.updateContact",
+            "crm.assignOwner",
+            "crm.getDeal",
+            "crm.updateDeal",
+            "crm.getUser",
+            "crm.sendEmail",
+            "crm.requestApproval",
+          ],
+          "type": "string",
+        },
+        "Where": {
+          "additionalProperties": false,
+          "description": "A step selector; fields are ANDed and {} matches every step. within: descendants of a step (optionally of one branch); section: a section's steps; configHas: a config path that is set.",
+          "properties": {
+            "configHas": {
+              "type": "string",
+            },
+            "nameContains": {
+              "type": "string",
+            },
+            "section": {
+              "type": "string",
+            },
+            "type": {
+              "$ref": "#/$defs/NodeType",
+            },
+            "within": {
+              "additionalProperties": false,
+              "properties": {
+                "branch": {
+                  "$ref": "#/$defs/Branch",
+                },
+                "stepId": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+              },
+              "required": [
+                "stepId",
+              ],
+              "type": "object",
+            },
+          },
+          "type": "object",
+        },
+      },
+      "additionalProperties": false,
+      "description": "Pass exactly one of ids or where; after and limit page a where selector.",
+      "properties": {
+        "after": {
+          "type": "string",
+        },
+        "budget": {
+          "description": "Size limit in characters of the result",
+          "minimum": 1,
+          "type": "integer",
+        },
+        "full": {
+          "type": "boolean",
+        },
+        "ids": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "include": {
+          "description": "Extras per step: "config" (the default), "schema", "refs"",
+          "items": {
+            "enum": [
+              "config",
+              "schema",
+              "refs",
+            ],
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "limit": {
+          "description": "Page size",
+          "minimum": 1,
+          "type": "integer",
+        },
+        "where": {
+          "$ref": "#/$defs/Where",
+        },
+      },
+      "type": "object",
+    },
+    "name": "getSteps",
+  },
+  {
+    "description": "The IDs and outline lines of the steps a where selector matches (fields ANDed; {} matches all), and count, the number of matches. Pages of limit (default 100, at most 500) after the step after; omitted has the call for the next page. Check a selector here before a command with where and expect.
+Example: {"where":{"type":"crm.findContactByEmail"}}",
+    "inputSchema": {
+      "$defs": {
+        "Branch": {
+          "description": "A branch ID. The valid IDs depend on the node: see branches in describeNodeTypes",
+          "minLength": 1,
+          "type": "string",
+        },
+        "NodeType": {
+          "description": "A node type of this app (describeNodeTypes gives its config)",
+          "enum": [
+            "core.condition",
+            "core.switch",
+            "core.forEach",
+            "core.stop",
+            "core.delay",
+            "core.waitForCallback",
+            "core.callSubflow",
+            "core.httpRequest",
+            "core.transform",
+            "crm.findContactByEmail",
+            "crm.getContact",
+            "crm.createContact",
+            "crm.updateContact",
+            "crm.assignOwner",
+            "crm.getDeal",
+            "crm.updateDeal",
+            "crm.getUser",
+            "crm.sendEmail",
+            "crm.requestApproval",
+          ],
+          "type": "string",
+        },
+        "Where": {
+          "additionalProperties": false,
+          "description": "A step selector; fields are ANDed and {} matches every step. within: descendants of a step (optionally of one branch); section: a section's steps; configHas: a config path that is set.",
+          "properties": {
+            "configHas": {
+              "type": "string",
+            },
+            "nameContains": {
+              "type": "string",
+            },
+            "section": {
+              "type": "string",
+            },
+            "type": {
+              "$ref": "#/$defs/NodeType",
+            },
+            "within": {
+              "additionalProperties": false,
+              "properties": {
+                "branch": {
+                  "$ref": "#/$defs/Branch",
+                },
+                "stepId": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+              },
+              "required": [
+                "stepId",
+              ],
+              "type": "object",
+            },
+          },
+          "type": "object",
+        },
+      },
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "type": "string",
+        },
+        "limit": {
+          "description": "Page size",
+          "minimum": 1,
+          "type": "integer",
+        },
+        "where": {
+          "$ref": "#/$defs/Where",
+        },
+      },
+      "required": [
+        "where",
+      ],
+      "type": "object",
+    },
+    "name": "findSteps",
+  },
+  {
+    "description": "The refs in scope at a step, with their types: trigger, earlier steps' outputs (steps.<id>) and loop items. Top level unless path drills in, e.g. "steps.<id>" or "trigger"; children counts the properties to drill into. Use the paths in { "$ref": … } values and {{ }} templates.
+Example: {"stepId":"<stepId>","path":"trigger"}",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+        },
+        "stepId": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "stepId",
+      ],
+      "type": "object",
+    },
+    "name": "availableRefs",
+  },
+  {
+    "description": "The node types you can add: type, label, one-line description and category, best match first for query. No schemas: use describeNodeTypes.
+Example: {"query":"email"}",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "enum": [
+            "Logic",
+            "Timing",
+            "Sub-flows",
+            "Integrations",
+            "Data",
+            "Contacts",
+            "Deals",
+            "Users",
+            "Email",
+            "Approvals",
+          ],
+          "type": "string",
+        },
+        "query": {
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "listNodeTypes",
+  },
+  {
+    "description": "Full descriptions of node types, read before adding them: the compact input schema (config keys, required fields), branches (fixed IDs, or the config path that defines them, e.g. cases[].id), the output schema (what steps.<id>… refs can read) and any rule operators. Types not in the app are listed in unknown.
+Example: {"types":["crm.findContactByEmail"]}",
+    "inputSchema": {
+      "$defs": {
+        "NodeType": {
+          "description": "A node type of this app (describeNodeTypes gives its config)",
+          "enum": [
+            "core.condition",
+            "core.switch",
+            "core.forEach",
+            "core.stop",
+            "core.delay",
+            "core.waitForCallback",
+            "core.callSubflow",
+            "core.httpRequest",
+            "core.transform",
+            "crm.findContactByEmail",
+            "crm.getContact",
+            "crm.createContact",
+            "crm.updateContact",
+            "crm.assignOwner",
+            "crm.getDeal",
+            "crm.updateDeal",
+            "crm.getUser",
+            "crm.sendEmail",
+            "crm.requestApproval",
+          ],
+          "type": "string",
+        },
+      },
+      "additionalProperties": false,
+      "properties": {
+        "types": {
+          "items": {
+            "$ref": "#/$defs/NodeType",
+          },
+          "minItems": 1,
+          "type": "array",
+        },
+      },
+      "required": [
+        "types",
+      ],
+      "type": "object",
+    },
+    "name": "describeNodeTypes",
+  },
+  {
+    "description": "Validation issues (errors and warnings) of the workflow, or of one step (stepId), with counts. apply already returns the delta; call this for the full list.
+Example: {}",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "stepId": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "getIssues",
+  },
+]
+`;
