@@ -20,6 +20,7 @@ import {
   type JSX,
   type RefObject,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -53,6 +54,7 @@ import {
   useCanvasUiApi,
   useLabels,
 } from "./canvas-context";
+import { DeleteScopeContext, deleteTarget, runDelete } from "./delete-key";
 import { edgeTypes, type FlowEdgeData } from "./edges";
 import { fitViewport, motionDuration, revealViewport } from "./fit";
 import { settleFlash } from "./flash";
@@ -647,6 +649,44 @@ export function WorkflowCanvas(props: {
   useEffect(() => {
     store.getState().hydrateLocal();
   }, [store]);
+
+  // Backspace/Delete from outside the canvas root: from the editor body around it (the side
+  // panel's non-text controls) and from <body> once the last click was in the editor. Listened
+  // for on the document, after React's own handlers (so a control that handles the key and
+  // prevents its default keeps it); keys inside the root are the root handler's.
+  const scope = useContext(DeleteScopeContext);
+  useEffect(() => {
+    const rootEl = rootRef.current;
+    if (!rootEl) return;
+    const doc = rootEl.ownerDocument;
+    const editor = scope?.closest<HTMLElement>(".fl-root") ?? scope ?? rootEl;
+    let clickedInside = false;
+    const onPointerDown = (e: Event) => {
+      clickedInside = e.target instanceof Node && editor.contains(e.target);
+    };
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      const t = e.target;
+      if (e.defaultPrevented || !(t instanceof Node) || rootEl.contains(t)) return;
+      const inScope = scope?.contains(t) === true;
+      if (!inScope && !(t === doc.body && clickedInside)) return;
+      const s = store.getState();
+      const target = deleteTarget(e, {
+        selection: s.selection,
+        range: s.range,
+        readOnly: s.readOnly,
+        members: rangeIds(s.doc, s.range),
+      });
+      if (target === null) return;
+      e.preventDefault();
+      runDelete(target, { store, ui, root: getRoot });
+    };
+    doc.addEventListener("pointerdown", onPointerDown, true);
+    doc.addEventListener("keydown", onKeyDown);
+    return () => {
+      doc.removeEventListener("pointerdown", onPointerDown, true);
+      doc.removeEventListener("keydown", onKeyDown);
+    };
+  }, [scope, store, ui, getRoot]);
 
   const style = useMemo(() => themeStyle(theme.tokens), [theme.tokens]);
 

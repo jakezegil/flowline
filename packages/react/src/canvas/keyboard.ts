@@ -25,6 +25,7 @@ import {
   stepActions,
 } from "./actions";
 import type { CanvasUiStore } from "./canvas-context";
+import { deleteTarget, focusedKey, isEditableTarget, runDelete } from "./delete-key";
 
 /** Whether the platform uses ⌘ (rather than Ctrl) for shortcuts. */
 export function isMac(): boolean {
@@ -35,19 +36,7 @@ export function isMac(): boolean {
   return /mac|iphone|ipad/i.test(platform);
 }
 
-/**
- * Whether a key event comes from somewhere keys mean text or menu navigation: form fields,
- * contenteditable, CodeMirror, and open menus, dialogs or the step picker.
- */
-export function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  if (target instanceof HTMLElement && target.isContentEditable) return true;
-  return (
-    target.closest(
-      'input, textarea, select, [contenteditable]:not([contenteditable="false"]), .cm-editor, [role="menu"], [role="dialog"], [role="listbox"], [cmdk-root]',
-    ) !== null
-  );
-}
+export { focusedKey, isEditableTarget };
 
 const ARROWS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
 
@@ -63,17 +52,6 @@ function ownsKey(target: EventTarget | null, key: string): boolean {
   if (control === null || control.classList.contains("react-flow__node")) return false;
   if (!ARROWS.has(key)) return true;
   return control.hasAttribute("aria-haspopup") || control.getAttribute("role") !== null;
-}
-
-/**
- * The selection key ({@link TRIGGER_KEY} or a step ID) of the canvas card an event comes from, or
- * `undefined` when it doesn't come from a card.
- */
-export function focusedKey(target: EventTarget | null): string | undefined {
-  if (!(target instanceof Element)) return undefined;
-  const id = target.closest(".react-flow__node")?.getAttribute("data-id");
-  if (id === "trigger") return TRIGGER_KEY;
-  return id?.startsWith("step:") ? id.slice(5) : undefined;
 }
 
 /**
@@ -156,7 +134,8 @@ export interface KeyboardDeps {
  * Handles a keydown on the canvas root. Returns `true` when the key was a canvas shortcut.
  *
  * ↑/↓ focus previous/next in tree order · ←/→ neighbouring branch column · Enter or Space open the
- * focused card · Delete/Backspace delete (with an undo toast) · ⌘Z/⇧⌘Z undo/redo · ⌘C/⌘V
+ * focused card · Delete/Backspace delete (with an undo toast; a focused section chip or note
+ * deletes itself, see {@link deleteTarget}) · ⌘Z/⇧⌘Z undo/redo · ⌘C/⌘V
  * copy/paste after · ⌘D duplicate · ⌘K add step after (⇧⌘K before) · F2 rename · Esc deselect.
  * ⇧↑/⇧↓ extend the range in the focused card's list · ⌥↑/⌥↓ move the focused step one place ·
  * ⌘G groups the focused step into a section · Esc clears the range first.
@@ -164,11 +143,34 @@ export interface KeyboardDeps {
  * Keys act on the focused card, else the selection. With a range, ⌘C/⌘D/⌘G and ⌥↑/⌥↓ act on the
  * whole range instead, but only while focus is on one of its cards, on the RangeBar or on no
  * card: from a card outside the range they act on that card, so browsing away with the arrows
- * never edits steps out of view. Read-only canvases only navigate, select ranges and copy them.
+ * never edits steps out of view. Delete/Backspace follow the same rule (the RangeBar's buttons
+ * keep them). Read-only canvases only navigate, select ranges and copy them.
  */
 export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   if (e.defaultPrevented || isEditableTarget(e.target)) return false;
   const mod = isMac() ? e.metaKey : e.ctrlKey;
+  // Backspace/Delete: a focused section chip or note deletes itself; else the range or the
+  // focused (else selected) step, also from the card's "…" and the "+" buttons (see
+  // deleteTarget). Other buttons (toast actions, the RangeBar) keep the key.
+  if ((e.key === "Delete" || e.key === "Backspace") && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const s = deps.store.getState();
+    const rootEl = deps.root();
+    const active = rootEl?.ownerDocument.activeElement ?? null;
+    // A key sent to the root itself acts on the card in focus, as the other keys do.
+    const at = e.target === rootEl && active && rootEl?.contains(active) ? active : e.target;
+    const target = deleteTarget(
+      { key: e.key, target: at, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey },
+      {
+        selection: s.selection,
+        range: s.range,
+        readOnly: s.readOnly,
+        members: rangeIds(s.doc, s.range),
+      },
+    );
+    if (target === null) return false;
+    runDelete(target, deps);
+    return true;
+  }
   // Plain keys on a focused control ("+", "…", Undo, tabs) belong to that control.
   if (!mod && ownsKey(e.target, e.key)) return false;
   // On a note or section header only navigation keys (↑/↓ from the selection, Esc) and the
@@ -266,10 +268,6 @@ export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   }
 
   const actions = stepSelected ? stepActions(store, ui, deps.root, selection) : undefined;
-  if ((key === "Delete" || key === "Backspace") && !mod && actions) {
-    actions.remove();
-    return true;
-  }
   if (key === "F2" && actions) {
     actions.rename();
     return true;
