@@ -402,6 +402,10 @@ describe("runTool", () => {
       ],
     });
     expect(evil.ok && evil.result).toMatchObject({ ok: false });
+    // The internal field is the root cause, so it is reported first, not the fragment's node type.
+    expect(evil.ok && evil.result).toMatchObject({
+      error: { code: "command.invalid", message: expect.stringContaining("verbatim") },
+    });
     expect(evil.ok && evil.doc).toBeFalsy();
     const verbatim = runTool(state, "apply", {
       commands: [

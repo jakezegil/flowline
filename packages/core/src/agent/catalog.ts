@@ -602,7 +602,11 @@ const MORE_ERRORS = 9;
 function externalShapeErrors(manifest: Manifest, commands: unknown[]): ApplyResult | undefined {
   const errors: ApplyError[] = [];
   for (let i = 0; i < commands.length && errors.length <= MORE_ERRORS; i++) {
-    errors.push(...shapeErrors(manifest, commands[i], i, false));
+    // A key the public schema doesn't have (such as `verbatim`) is the root cause: report it
+    // before the nested errors it may cause, so the agent removes it first.
+    const own = shapeErrors(manifest, commands[i], i, false);
+    const unknownKey = (e: ApplyError) => e.message.startsWith("Unrecognized key");
+    errors.push(...own.filter(unknownKey), ...own.filter((e) => !unknownKey(e)));
   }
   const [first, ...rest] = errors;
   if (!first) return undefined;
