@@ -288,6 +288,13 @@ describe("section header", () => {
     expect(store.getState().doc).toEqual(before);
   });
 
+  test("the chip menu is named by sectionMenu(title), not after its trigger", async () => {
+    render(<WorkflowCanvas store={storeOf(docOf({ sections: [intro({ note: "Hi" })] }))} />);
+    const menu = await chipMenu("intro");
+    expect(await screen.findByRole("menu", { name: L.sectionMenu("Welcome") })).toBe(menu);
+    expect(menu.hasAttribute("aria-labelledby")).toBe(false);
+  });
+
   test("a healthy section's menu has no Fix", async () => {
     render(<WorkflowCanvas store={storeOf(docOf({ sections: [intro()] }))} />);
     expect(within(await chipMenu("intro")).queryByText(L.fixIssue)).toBeNull();

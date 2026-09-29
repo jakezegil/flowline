@@ -298,6 +298,16 @@ curl -X POST "localhost:8787/api/approvals/$ID/decision" \
     shows who cancelled the run and why. Without the hook, the re-check stops the run instead.
   - Try it with the fake clock: advance 3 days, look at Outbox and Runs, then change the deal's
     stage on Deals.
+  - The seeded doc is the annotated demo. Two sections, "Check the deal is still stuck" (blue, from
+    `deal` to `still_there`, with a note) and "Escalate" (pink, from `recheck` to `escalate`), frame
+    the checks and the escalation. Sticky notes sit on `nudge` ("Owner, not assignee") and `wait`
+    ("1m in the demo, 1d in production"), and the `escalate` card is pink. Annotations are visual
+    only: the engine ignores them, and they survive save, publish and load.
+  - Try the annotation tools in the editor:
+    - Click a card, shift-click another in the same list, and press ⌘G (Ctrl+G) to group them.
+    - The section's chip menu can rename, recolour, annotate or ungroup it.
+    - A card's "…" menu has Add note and Color.
+    - `e2e/annotations.spec.ts` walks through this flow. It saves drafts but never publishes.
 
 Steps run at least once, so the side-effecting nodes pass `ctx.idempotencyKey` to the store:
 
