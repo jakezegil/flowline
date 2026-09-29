@@ -296,6 +296,41 @@ If `poll` throws, nothing advances and the same interval is polled again after `
 optional `cursor` in the result is handed back to the next call. `ctx.signal` aborts if the
 engine loses the poll's lease; pass it to `fetch`.
 
+### Registering a custom rule operator
+
+`core.condition` and `core.switch` compare in `"loose"` or `"strict"` mode (`compare` on the rule
+group or the switch config). Loose is the historical behaviour: numeric/boolean text parsed,
+case-insensitive by default, and non-string operands stringified for `contains` (so `12345
+contains "23"` is `true`). Strict matches only values already of the same type. To add a rule
+operator your host or plugin needs beyond the built-ins (`eq`, `contains`, `in`, …), build the
+`core` plugin yourself with `createBuiltinPlugin` instead of using the default `builtinPlugin`:
+
+```ts file=custom-operator.ts
+import { createRegistry } from "@flowlinejs/core";
+import { type CustomOperator, createBuiltinPlugin } from "@flowlinejs/nodes-builtin";
+import { crm } from "./plugin";
+
+const isUnassigned: CustomOperator = {
+  id: "isUnassigned",
+  label: "is unassigned",
+  arity: "unary", // "unary" | "binary"
+  types: ["string", "object", "any"], // left-value types it's offered for; default: every type
+  evaluate: (left, _right, { compare }) =>
+    left === null || left === undefined || (compare === "loose" && left === ""),
+};
+
+export const registry = createRegistry([
+  createBuiltinPlugin({ compare: "strict", operators: [isUnassigned] }), // in place of `builtinPlugin`
+  crm,
+]);
+```
+
+`createBuiltinPlugin` throws `FlowlineDefinitionError` for a duplicate or built-in operator id. The
+operator is published to the editor's manifest (`UiMeta.operators`, filtered by `types`) so the
+rules widget lists it, and it's evaluated with `ctx.compare` set to the rule group's resolved
+mode — `core.condition` only; `core.switch` cases always use `eq` semantics. Use it in code with
+`custom("isUnassigned", ref("trigger.deal.ownerId"))`.
+
 ## UI metadata
 
 The editor builds the config form from the input's JSON Schema. You can refine it with these
