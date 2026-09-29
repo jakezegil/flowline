@@ -38,7 +38,7 @@ Breaking changes are acceptable before 1.0 and are listed in §11.
 | Poll storage | One `PollState` row per `(tenantId, workflowId)` with `since`, `cursor`, `nextAt` and a lease; `claimPoll` / `commitPoll` are atomic and lease-guarded so intervals never overlap, even across processes. |
 | Poll items | `{ key, payload }[]`; each starts a run with dedupe key `poll:<workflowId>:<key>`; invalid items are rejected individually (same isolation rule as `emit`). |
 | Poll catch-up cap | One `poll` call covers at most `maxInterval` (per trigger; engine default `"24h"`); a backlog is caught up in successive calls within a tick, at most `maxCallsPerTick` (default 10) per workflow per tick, then resumes on the next tick from the saved `since`/`cursor`. |
-| Postgres v4 dedupe rows | Pre-1.0, nothing deployed: v4 adds `run_id` and deletes rows that have none. Dedupe history is reset once; no backfill. |
+| Postgres v4 dedupe rows | Pre-1.0, so no backward-compat guarantee: v4 adds `run_id` and deletes rows that have none. Existing 0.1.0 deployments reset their dedupe history once on upgrade; no backfill. |
 | Poll run origin | `RunOrigin` gains `{ kind: "poll"; since; until; itemKey }`. |
 
 ## 3. Emit failure isolation
@@ -180,8 +180,9 @@ RETURNING run_id
 
 ```sql
 ALTER TABLE dedupe_keys ADD COLUMN IF NOT EXISTS run_id text;
--- Pre-1.0, nothing is deployed: rows written before v4 have no run id, so dedupe history is
--- reset once rather than reconstructed from the old derived-id scheme.
+-- Pre-1.0, so no backward-compat guarantee: rows written before v4 (by an existing 0.1.0
+-- deployment) have no run id, so dedupe history is reset once rather than reconstructed from
+-- the old derived-id scheme.
 DELETE FROM dedupe_keys WHERE run_id IS NULL;
 ALTER TABLE dedupe_keys ALTER COLUMN run_id SET NOT NULL;
 ```
@@ -767,7 +768,7 @@ Adapter rules (isolation, tenancy, atomicity, times, lease tokens never returned
 | `defineTrigger({ dedupeKey })` | `defineTrigger({ dedupe: { key, window? } })` | Rename; `key` now also receives `event`. |
 | Run IDs derived from dedupe keys (reusing a key returned the original run forever) | random IDs; keys expire after the window (default 7 days) | Hosts that relied on permanent suppression set a long window per trigger. Hosts that relied on `run_<hash>` IDs being predictable must stop. |
 | `StorageAdapter.recordDedupeKey` | `claimDedupeKey`, plus poll methods | Third-party adapters implement the new methods and re-run the conformance suite. |
-| Postgres schema v3 | v4 (`migrate()` is idempotent): adds `dedupe_keys.run_id` and **deletes every existing dedupe row**, adds `poll_states` | Dedupe history is reset once: a delivery whose key was recorded before the migration is not suppressed after it (pre-1.0, nothing is deployed, so no backfill). Stop workers, run `migrate()`, start upgraded workers. |
+| Postgres schema v3 | v4 (`migrate()` is idempotent): adds `dedupe_keys.run_id` and **deletes every existing dedupe row**, adds `poll_states` | Dedupe history is reset once: a delivery whose key was recorded before the migration is not suppressed after it (pre-1.0, so no backward-compat guarantee and no backfill for existing 0.1.0 deployments). Stop workers, run `migrate()`, start upgraded workers. |
 | Rule literals stored as text | unchanged in loose mode | Nothing for loose hosts. Hosts switching the default to strict re-save conditions in the editor (typed literals) or rebuild them with typed values in code; a numeric-string literal under strict raises the `rule.literalType` warning. |
 | `builtinPlugin` only | `createBuiltinPlugin(opts)` | Only hosts wanting strict defaults or custom operators change anything. |
 | `core.event` / plugin event triggers listen to one event | `events` available | Additive. |
