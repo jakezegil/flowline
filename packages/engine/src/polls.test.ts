@@ -531,9 +531,11 @@ describe("tickPolls", () => {
     expect(failed).toMatchObject([{ since: T0, until: now, message: "poll lease lost" }]);
     expect(failed[0]).not.toHaveProperty("nextAt");
     expect(ofType("poll.completed")).toEqual([]);
+    // One warn for the lease loss (from publishTriggerEvent's poll.failed handling), not two.
+    expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      "poll lease lost before commit",
-      expect.objectContaining({ workflowId: "wf" }),
+      "poll failed",
+      expect.objectContaining({ workflowId: "wf", message: "poll lease lost" }),
     );
     expect(await state()).toMatchObject({ since: null, leaseOwner: "thief" });
   });
