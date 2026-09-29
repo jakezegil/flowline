@@ -1,13 +1,22 @@
 import {
+  type AnnotationColor,
+  type ApplyError,
   type ApplyResult,
+  type At,
   apply,
+  branchList,
   type Command,
+  changedStepIds,
+  cloneRunWithFreshIds,
   removeStep as coreRemoveStep,
+  runTool as coreRunTool,
   FlowlineCommandError,
   findStep,
   type Issue,
   jsonEqual,
   type Manifest,
+  type Section,
+  type SectionInput,
   type Step,
   type StepLocation,
   type ValidationContext,
@@ -17,7 +26,7 @@ import {
   walkSteps,
 } from "@flowlinejs/core";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { atFromLocation, cloneWithFreshIds, stepToFragment, subtreeIds } from "./commands";
+import { atFromLocation, stepToFragment, subtreeIds } from "./commands";
 import { emptyHistory, type History, recordEdit, redoEdit, undoEdit } from "./history";
 
 /** Selection / sample key standing for the workflow's trigger. */
@@ -65,8 +74,27 @@ export interface EditorState {
   savedVersion: number | null;
   /** Version number currently published, if any. */
   publishedVersion: number | null;
-  /** The last copied step (with its subtree). */
+  /** The last copied step (with its subtree); the first step of {@link EditorState.clipboardRun}. */
   clipboard: Step | null;
+  /** The whole copied run (each step with its subtree), pasted as a block. */
+  clipboardRun: Step[] | null;
+  /**
+   * A contiguous run of steps in one list (`first` at or before `last`), or `null`. Pruned on
+   * every doc change like `selection`: an endpoint that goes away shrinks the range to the
+   * members left in its list, and a range with none left is cleared.
+   */
+  range: { first: string; last: string } | null;
+  /**
+   * The single source of truth for read-only mode: doc-changing actions throw
+   * `FlowlineCommandError` (`error.code === "readOnly"`) and {@link EditorActions.apply} returns
+   * code `"readOnly"`. `<WorkflowCanvas readOnly>` sets it while mounted.
+   */
+  readOnly: boolean;
+  /**
+   * Steps and sections changed by the last {@link EditorActions.apply}, for a brief canvas
+   * highlight: step IDs, section IDs, and a `token` that is new on every flash.
+   */
+  flash: { ids: string[]; sections: string[]; token: number } | null;
   /** Whether {@link EditorActions.undo} would do anything. */
   canUndo: boolean;
   /** Whether {@link EditorActions.redo} would do anything. */
@@ -81,6 +109,64 @@ export interface EditorState {
  * `FlowlineTreeError` (which `FlowlineCommandError` extends); the state is left unchanged.
  */
 export interface EditorActions {
+  /**
+   * Runs `commands` through core's `apply` (untrusted, with the full report) as one undo step.
+   * Never throws: a failed batch (or a read-only store, code `"readOnly"`) comes back as
+   * `ok: false` and changes nothing. A burst with the same `coalesceKey` joins the previous undo
+   * step. The selection, the range and local data (samples, test state, sample types) follow
+   * `renamed`; removed steps drop out of the selection and the range, and steps the batch adds
+   * start without leftover local data. Sets {@link EditorState.flash} unless `flash: false`.
+   *
+   * @example
+   * const r = store.getState().apply([
+   *   { op: "addStep", at: { after: "load" }, type: "crm.sendEmail" },
+   *   { op: "setConfig", id: "$1", key: "to", value: { $ref: "steps.load.email" } },
+   * ]);
+   * if (!r.ok) console.warn(r.error.message);
+   */
+  apply(commands: Command[], opts?: { coalesceKey?: string; flash?: boolean }): ApplyResult;
+  /**
+   * Selects the run between two steps of one list (in list order, whichever is given first).
+   * Returns `false`, changing nothing, when they are in different lists or one doesn't exist.
+   */
+  selectRange(first: string, last: string): boolean;
+  /** Clears the range. */
+  clearRange(): void;
+  /** Turns read-only mode on or off (see {@link EditorState.readOnly}). */
+  setReadOnly(readOnly: boolean): void;
+  /**
+   * Copies the run `first`…`last` (with subtrees): `clipboardRun` is the run, `clipboard` its
+   * first step. A run that isn't one list, in order, is ignored.
+   */
+  copyRange(first: string, last: string): void;
+  /** Deletes the run `first`…`last` (with subtrees) as one undo step. */
+  removeRange(first: string, last: string): void;
+  /**
+   * Duplicates the run `first`…`last` right after it, with fresh IDs.
+   * @returns The first copy's ID.
+   */
+  duplicateRange(first: string, last: string): string;
+  /**
+   * Moves the run `first`…`last` one place up (`-1`) or down (`1`) in its list; a no-op at the
+   * list's edge. Members keep their section when they land inside its span.
+   */
+  moveBy(first: string, last: string, delta: -1 | 1): void;
+  /**
+   * Wraps the run `first`…`last` in a new section.
+   * @returns The section's ID.
+   */
+  addSection(first: string, last: string, input: SectionInput): string;
+  /** Changes a section's title, colour or note (`note: null` removes it). */
+  updateSection(
+    id: string,
+    patch: { title?: string; color?: AnnotationColor; note?: string | null },
+  ): void;
+  /** Removes a section, keeping its steps. */
+  removeSection(id: string): void;
+  /** Sets a step's note (`null` or `""` removes it). Bursts of edits coalesce. */
+  setNote(id: string, note: string | null): void;
+  /** Sets a step's colour (`null` removes it). */
+  setColor(id: string, color: AnnotationColor | null): void;
   /**
    * Inserts a new step of `nodeType` at `loc`, with config defaults from the node's input schema
    * and an empty list per declared branch. Selects it unless `opts.select` is `false`.
@@ -152,11 +238,16 @@ export interface EditorActions {
    * judged. Saving or publishing again asks the server afresh.
    */
   setServerIssues(issues: Issue[]): void;
-  /** Copies a step (with its subtree) to the editor clipboard. Unknown IDs are ignored. */
+  /**
+   * Copies a step (with its subtree) to the editor clipboard (`clipboardRun` is `[step]`).
+   * Unknown IDs are ignored.
+   */
   copy(id: string): void;
   /**
-   * Inserts a fresh-ID copy of the clipboard at `loc`. Selects it unless `opts.select` is `false`.
-   * @returns The pasted step's ID, or `null` when the clipboard is empty.
+   * Inserts a fresh-ID copy of the copied run at `loc` (as copied: config and branches as they
+   * were, refs between copied steps pointing at the copies). Selects the first pasted step
+   * unless `opts.select` is `false`.
+   * @returns The first pasted step's ID, or `null` when the clipboard is empty.
    */
   paste(loc: StepLocation, opts?: InsertOptions): string | null;
   /**
@@ -173,7 +264,7 @@ export interface EditorActions {
    * calls `hydrateLocal()` in an effect after mounting.
    */
   hydrateLocal(): void;
-  /** Reverts the last doc change. */
+  /** Reverts the last doc change. Throws in read-only mode, like every doc-changing action. */
   undo(): void;
   /** Re-applies the last undone change. */
   redo(): void;
@@ -340,10 +431,12 @@ export function createEditorStore(init: {
   doc: WorkflowDoc;
   manifest: Manifest;
   ctx?: ValidationContext;
+  /** Start in read-only mode (see {@link EditorState.readOnly}). */
+  readOnly?: boolean;
 }): EditorStore {
   const { manifest } = init;
   const ctx = init.ctx ?? {};
-  let history: History<WorkflowDoc> = emptyHistory();
+  let history: History<HistoryEntry> = emptyHistory();
   let savedDoc = init.doc;
   const local: LocalData =
     typeof window === "undefined"
@@ -353,8 +446,11 @@ export function createEditorStore(init: {
   /** Issues the server reported, for the doc `serverBase` (see `setServerIssues`). */
   let serverIssues: Issue[] = [];
   let serverBase: WorkflowDoc | null = null;
+  let flashToken = 0;
+  /** The host's read-only value (`setReadOnly`), and how many holders keep the store read-only. */
+  const lock = { base: init.readOnly === true, holders: 0 };
 
-  return createStore<EditorState & EditorActions>()((set, get) => {
+  const store = createStore<EditorState & EditorActions>()((set, get) => {
     const derived = (doc: WorkflowDoc) => {
       const own = validateWorkflow(doc, manifest, ctx);
       if (serverBase !== null) {
@@ -384,13 +480,29 @@ export function createEditorStore(init: {
       next: WorkflowDoc,
       patch: Partial<EditorState> = {},
       coalesceKey?: string,
+      renamed: Record<string, string> = {},
     ): void => {
       const prev = get().doc;
       if (next === prev) return;
-      history = recordEdit(history, prev, coalesceKey, Date.now());
+      const depth = history.past.length;
+      const last = history.past[depth - 1];
+      history = recordEdit(history, { doc: prev, renamed }, coalesceKey, Date.now());
+      if (history.past.length === depth && last) {
+        // Joined the previous undo step: its renames now run through this edit's too.
+        const past = history.past.slice();
+        past[depth - 1] = { doc: last.doc, renamed: composeRenames(last.renamed, renamed) };
+        history = { ...history, past };
+      }
       const selection = "selection" in patch ? (patch.selection ?? null) : get().selection;
-      set({ ...derived(next), ...patch, selection: validSelection(next, selection) });
+      const kept = "range" in patch ? (patch.range ?? null) : get().range;
+      const range = pruneRange(prev, next, kept, renamed);
+      set({ ...derived(next), ...patch, selection: validSelection(next, selection), range });
       syncTestState();
+    };
+
+    /** Throws the read-only error when the store is read-only. */
+    const guard = (): void => {
+      if (get().readOnly) throw new FlowlineCommandError(READ_ONLY);
     };
 
     /** Re-derives test state against the current doc (see {@link reconcile}), persisting it. */
@@ -423,11 +535,30 @@ export function createEditorStore(init: {
         ? setLocal({ testState: { ...get().testState, [id]: "needs-test" } })
         : {};
 
-    const travel = (step: typeof undoEdit): void => {
-      const result = step(history, get().doc);
+    /**
+     * Undo or redo. Each history entry carries the renames of the edit that followed it, so the
+     * selection and the range follow step IDs back (inverted) on undo and forward on redo.
+     */
+    const travel = (dir: "undo" | "redo"): void => {
+      const source = dir === "undo" ? history.past.at(-1) : history.future.at(-1);
+      if (!source) return;
+      const renamed = source.renamed;
+      const step = dir === "undo" ? undoEdit : redoEdit;
+      const result = step(history, { doc: get().doc, renamed });
       if (!result) return;
       history = result.history;
-      set({ ...derived(result.value), selection: validSelection(result.value, get().selection) });
+      const next = result.value.doc;
+      const map = dir === "undo" ? invertRenames(renamed) : renamed;
+      const selection = get().selection;
+      const mapped =
+        selection !== null && Object.hasOwn(map, selection)
+          ? (map[selection] as string)
+          : selection;
+      set({
+        ...derived(next),
+        selection: validSelection(next, mapped),
+        range: pruneRange(get().doc, next, get().range, map),
+      });
       syncTestState();
     };
 
@@ -437,6 +568,7 @@ export function createEditorStore(init: {
      * no-op identity rule), so callers skip the commit and its side effects.
      */
     const run = (commands: Command[]): Applied | undefined => {
+      guard();
       const doc = get().doc;
       const r = apply(doc, commands, manifest, { ctx, trusted: true, report: false });
       if (!r.ok) throw new FlowlineCommandError(r.error);
@@ -454,7 +586,7 @@ export function createEditorStore(init: {
         selection !== null && Object.hasOwn(r.renamed, selection)
           ? (r.renamed[selection] as string)
           : selection;
-      commit(r.doc, { ...patch, selection: mapped }, coalesceKey);
+      commit(r.doc, { ...patch, selection: mapped }, coalesceKey, r.renamed);
     };
 
     /** Local data (samples, test state) with the entries under `ids` dropped. */
@@ -471,15 +603,48 @@ export function createEditorStore(init: {
      * Commits a batch that added step `$1`: resets local data left over under its subtree's IDs
      * and selects it.
      */
-    const commitNew = (r: Applied | undefined, opts: InsertOptions | undefined): string => {
+    const commitNew = (
+      r: Applied | undefined,
+      opts: InsertOptions | undefined,
+      added: readonly Step[] = [],
+    ): string => {
       const id = r?.ids.$1;
       const step = r && id !== undefined ? findStep(r.doc, id)?.step : undefined;
       if (!r || !step) throw new Error("A step-adding command added no step");
+      const fresh = added.length > 0 ? added.flatMap(subtreeIds) : subtreeIds(step);
       commitApplied(r, {
-        ...resetLocal(subtreeIds(step)),
+        ...resetLocal(fresh),
         ...(opts?.select === false ? {} : { selection: step.id }),
       });
       return step.id;
+    };
+
+    /**
+     * Local data copied over renamed steps (old → new, for steps that existed before), with the
+     * leftovers under IDs the batch added dropped. The old entries stay, so undo finds them.
+     */
+    const remapLocal = (before: WorkflowDoc, r: Applied): Partial<EditorState> => {
+      const { samples, testState, sampleTypes } = get();
+      const existed = new Set<string>();
+      walkSteps(before, (s) => existed.add(s.id));
+      const moves = Object.entries(r.renamed).filter(([old]) => existed.has(old));
+      const targets = new Set(moves.map(([, now]) => now));
+      const added = changedStepIds(before, r.doc).added.filter((id) => !targets.has(id));
+      if (moves.length === 0 && added.length === 0) return {};
+      const move = <T>(record: Record<string, T>): Record<string, T> => {
+        const next = { ...without(record, added) };
+        // Values come from `record`, so swaps (a → b, b → a) copy the pre-batch entries.
+        for (const [old, now] of moves) {
+          if (Object.hasOwn(record, old)) next[now] = record[old] as T;
+          else delete next[now];
+        }
+        return next;
+      };
+      return setLocal({
+        samples: move(samples),
+        testState: move(testState),
+        sampleTypes: move(sampleTypes),
+      });
     };
 
     /** A `{ key, value }` config edit: `undefined` removes the key, `null` is stored. */
@@ -501,8 +666,131 @@ export function createEditorStore(init: {
       savedVersion: null,
       publishedVersion: null,
       clipboard: null,
+      clipboardRun: null,
+      range: null,
+      readOnly: init.readOnly === true,
+      flash: null,
+
+      apply(commands, opts) {
+        if (get().readOnly) return { ok: false, error: READ_ONLY };
+        const before = get().doc;
+        let r: ApplyResult;
+        try {
+          r = apply(before, commands, manifest, { ctx });
+        } catch (err) {
+          // A batch nested thousands deep overflows the recursive checks: core's catalog has the
+          // error for it. Anything else is a bug, and surfaces.
+          if (!(err instanceof RangeError)) throw err;
+          const reported = coreRunTool({ doc: before, manifest, ctx }, "apply", { commands });
+          if (reported.ok && isFailure(reported.result)) return reported.result;
+          throw err;
+        }
+        if (!r.ok || r.doc === before) return r;
+        const selection = get().selection;
+        const patch: Partial<EditorState> = {
+          ...remapLocal(before, r),
+          selection:
+            selection !== null && Object.hasOwn(r.renamed, selection)
+              ? (r.renamed[selection] as string)
+              : selection,
+        };
+        if (opts?.flash !== false) {
+          const delta = changedStepIds(before, r.doc);
+          patch.flash = {
+            ids: [...delta.added, ...delta.updated],
+            sections: changedSections(before.sections ?? [], r.doc.sections ?? []),
+            token: ++flashToken,
+          };
+        }
+        commit(r.doc, patch, opts?.coalesceKey, r.renamed);
+        return r;
+      },
+
+      selectRange(first, last) {
+        const { doc, range } = get();
+        const a = findStep(doc, first);
+        const z = findStep(doc, last);
+        if (!a || !z || !sameList(a.location, z.location)) return false;
+        const next =
+          a.location.index <= z.location.index ? { first, last } : { first: last, last: first };
+        if (range?.first !== next.first || range.last !== next.last) set({ range: next });
+        return true;
+      },
+
+      clearRange() {
+        if (get().range !== null) set({ range: null });
+      },
+
+      setReadOnly(readOnly) {
+        lock.base = readOnly;
+        const next = readOnly || lock.holders > 0;
+        if (get().readOnly !== next) set({ readOnly: next });
+      },
+
+      copyRange(first, last) {
+        const steps = runOf(get().doc, first, last);
+        if (steps && steps.length > 0) set({ clipboard: steps[0] as Step, clipboardRun: steps });
+      },
+
+      removeRange(first, last) {
+        const r = run([{ op: "removeSteps", first, last }]);
+        if (r) commitApplied(r);
+      },
+
+      duplicateRange(first, last) {
+        return commitNew(run([{ op: "duplicateSteps", first, last }]), { select: false });
+      },
+
+      moveBy(first, last, delta) {
+        guard();
+        const { doc } = get();
+        const steps = runOf(doc, first, last);
+        const found = findStep(doc, first);
+        const list = found ? listOf(doc, found.location) : undefined;
+        if (!steps || !found || !list) {
+          // Not a run: the command reports why.
+          const r = run([{ op: "moveSteps", first, last, to: { start: true } }]);
+          if (r) commitApplied(r);
+          return;
+        }
+        const start = found.location.index;
+        const neighbour = delta < 0 ? list[start - 1] : list[start + steps.length];
+        if (!neighbour) return;
+        const to: At = delta < 0 ? { before: neighbour.id } : { after: neighbour.id };
+        const r = run([{ op: "moveSteps", first, last, to }]);
+        if (r) commitApplied(r);
+      },
+
+      addSection(first, last, input) {
+        const r = run([{ op: "addSection", first, last, ...input }]);
+        const id = r?.ids.$1;
+        if (!r || id === undefined) throw new Error("addSection added no section");
+        commitApplied(r);
+        return id;
+      },
+
+      updateSection(id, patch) {
+        const r = run([{ op: "updateSection", id, ...patch }]);
+        if (r) commitApplied(r);
+      },
+
+      removeSection(id) {
+        const r = run([{ op: "removeSection", id }]);
+        if (r) commitApplied(r);
+      },
+
+      setNote(id, note) {
+        const r = run([{ op: "setNote", id, note }]);
+        if (r) commitApplied(r, {}, `note\u0000${id}`);
+      },
+
+      setColor(id, color) {
+        const r = run([{ op: "setColor", id, color }]);
+        if (r) commitApplied(r);
+      },
 
       insertStep(loc, nodeType, opts) {
+        guard();
         const at = atFromLocation(get().doc, loc);
         return commitNew(run([{ op: "addStep", at, type: nodeType }]), opts);
       },
@@ -517,6 +805,7 @@ export function createEditorStore(init: {
       },
 
       removeStep(id) {
+        guard();
         const found = findStep(get().doc, id);
         const r = run([{ op: "removeStep", id }]);
         if (!r) return;
@@ -530,6 +819,7 @@ export function createEditorStore(init: {
       },
 
       moveStep(id, to) {
+        guard();
         const { doc } = get();
         // `to` counts positions after the step's removal, as the command's anchor does.
         const at = findStep(doc, id)
@@ -551,6 +841,7 @@ export function createEditorStore(init: {
       },
 
       setConfig(id, key, value) {
+        guard();
         const found = findStep(get().doc, id);
         if (found && jsonEqual(found.step.config[key], value)) return;
         const r = run([{ op: "setConfig", id, ...keyValue(key, value) }]);
@@ -563,12 +854,14 @@ export function createEditorStore(init: {
       },
 
       setTriggerConfig(key, value) {
+        guard();
         if (jsonEqual(get().doc.trigger.config[key], value)) return;
         const r = run([{ op: "setTriggerConfig", ...keyValue(key, value) }]);
         if (r) commitApplied(r, needsTest(TRIGGER_KEY), `trigger\u0000${key}`);
       },
 
       setOutput(key, value) {
+        guard();
         if (jsonEqual(get().doc.output?.[key], value)) return;
         const r = run([{ op: "setOutput", ...keyValue(key, value) }]);
         if (r) commitApplied(r, {}, `output\u0000${key}`);
@@ -587,15 +880,22 @@ export function createEditorStore(init: {
 
       copy(id) {
         const found = findStep(get().doc, id);
-        if (found) set({ clipboard: found.step });
+        if (found) set({ clipboard: found.step, clipboardRun: [found.step] });
       },
 
       paste(loc, opts) {
-        const { clipboard, doc } = get();
-        if (!clipboard) return null;
+        guard();
+        const { clipboard, clipboardRun, doc } = get();
+        const copied = clipboardRun ?? (clipboard ? [clipboard] : null);
+        if (!copied || copied.length === 0) return null;
         const at = atFromLocation(doc, loc);
-        const copy = stepToFragment(cloneWithFreshIds(doc, clipboard));
-        return commitNew(run([{ op: "insertSteps", at, verbatim: true, steps: [copy] }]), opts);
+        // Fresh relative to the doc and to the originals (which may have been deleted since).
+        const scratch: WorkflowDoc = { ...doc, steps: [...copied, ...doc.steps] };
+        const { steps } = cloneRunWithFreshIds(scratch, copied);
+        const r = run([
+          { op: "insertSteps", at, verbatim: true, steps: steps.map(stepToFragment) },
+        ]);
+        return commitNew(r, opts, steps);
       },
 
       setSample(id, output, producedBy) {
@@ -620,11 +920,13 @@ export function createEditorStore(init: {
       },
 
       undo() {
-        travel(undoEdit);
+        guard();
+        travel("undo");
       },
 
       redo() {
-        travel(redoEdit);
+        guard();
+        travel("redo");
       },
 
       renameWorkflow(name) {
@@ -655,10 +957,97 @@ export function createEditorStore(init: {
                 testState: reconcile(doc, pruneTo(doc, testState), sampleTypes),
                 sampleTypes: pruneTo(doc, sampleTypes),
               };
-        set({ ...derived(doc), ...local, selection: null });
+        set({ ...derived(doc), ...local, selection: null, range: null });
       },
     };
   });
+  readOnlyLocks.set(store, () => {
+    lock.holders++;
+    if (!store.getState().readOnly) store.setState({ readOnly: true });
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      lock.holders--;
+      const next = lock.base || lock.holders > 0;
+      if (store.getState().readOnly !== next) store.setState({ readOnly: next });
+    };
+  });
+  return store;
+}
+
+/** Each store's read-only hold (see {@link holdReadOnly}). */
+const readOnlyLocks = new WeakMap<EditorStore, () => () => void>();
+
+/**
+ * @internal Keeps `store` read-only until the returned release runs (at most once). Holds
+ * stack: the store is read-only while any hold is kept or the host's own
+ * {@link EditorActions.setReadOnly} value is `true`. `<WorkflowCanvas readOnly>` holds its store
+ * while mounted.
+ */
+export function holdReadOnly(store: EditorStore): () => void {
+  const hold = readOnlyLocks.get(store);
+  if (hold) return hold();
+  // A store made elsewhere: set the flag and restore the previous value.
+  const prev = store.getState().readOnly;
+  store.getState().setReadOnly(true);
+  let held = true;
+  return () => {
+    if (!held) return;
+    held = false;
+    store.getState().setReadOnly(prev);
+  };
+}
+
+/** A history snapshot: a doc, and the step renames of the edit that replaced it (old → new). */
+interface HistoryEntry {
+  doc: WorkflowDoc;
+  renamed: Record<string, string>;
+}
+
+/** `a` then `b`, as one old → new map; identities are dropped. */
+function composeRenames(
+  a: Record<string, string>,
+  b: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const put = (k: string, v: string) => {
+    if (k !== v)
+      Object.defineProperty(out, k, {
+        value: v,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+  };
+  const via = new Set<string>();
+  for (const [from, to] of Object.entries(a)) {
+    via.add(to);
+    put(from, Object.hasOwn(b, to) ? (b[to] as string) : to);
+  }
+  for (const [from, to] of Object.entries(b)) {
+    if (!via.has(from) && !Object.hasOwn(a, from)) put(from, to);
+  }
+  return out;
+}
+
+/** The new → old map of an old → new rename map. */
+function invertRenames(renamed: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [from, to] of Object.entries(renamed)) {
+    Object.defineProperty(out, to, {
+      value: from,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return out;
+}
+
+/** Whether a tool result is a failed ApplyResult. */
+function isFailure(v: unknown): v is Extract<ApplyResult, { ok: false }> {
+  return typeof v === "object" && v !== null && (v as { ok?: unknown }).ok === false;
 }
 
 /**
@@ -678,4 +1067,89 @@ function stillApplies(issue: Issue, base: WorkflowDoc, doc: WorkflowDoc): boolea
   if (issue.field?.startsWith("output.") || issue.field === "output")
     return doc.output === base.output;
   return false;
+}
+
+/** The error of a doc change attempted in read-only mode. */
+const READ_ONLY: ApplyError = {
+  index: 0,
+  path: "",
+  code: "readOnly",
+  message: "The editor is read-only",
+};
+
+/** Whether two step locations are in the same list. */
+function sameList(a: StepLocation, b: StepLocation): boolean {
+  return a.parentId === b.parentId && a.branch === b.branch;
+}
+
+/** The list a step location is in. */
+function listOf(doc: WorkflowDoc, loc: StepLocation): Step[] | undefined {
+  if (loc.parentId === null) return doc.steps;
+  const parent = findStep(doc, loc.parentId)?.step;
+  return parent && loc.branch !== undefined ? branchList(parent, loc.branch) : undefined;
+}
+
+/** The steps `first`…`last` of one list, in order, or `undefined` when they aren't a run. */
+function runOf(doc: WorkflowDoc, first: string, last: string): Step[] | undefined {
+  const a = findStep(doc, first);
+  const z = findStep(doc, last);
+  if (!a || !z || !sameList(a.location, z.location)) return undefined;
+  if (a.location.index > z.location.index) return undefined;
+  return listOf(doc, a.location)?.slice(a.location.index, z.location.index + 1);
+}
+
+/**
+ * `range` carried from `before` to `after`: its endpoints follow `renamed`, and when they no
+ * longer form a run, it shrinks to the members left in the first surviving member's list (or is
+ * cleared when none are left).
+ */
+function pruneRange(
+  before: WorkflowDoc,
+  after: WorkflowDoc,
+  range: { first: string; last: string } | null,
+  renamed: Record<string, string> = {},
+): { first: string; last: string } | null {
+  if (range === null) return null;
+  const map = (id: string) => (Object.hasOwn(renamed, id) ? (renamed[id] as string) : id);
+  const first = map(range.first);
+  const last = map(range.last);
+  if (runOf(after, first, last)) {
+    return first === range.first && last === range.last ? range : { first, last };
+  }
+  const members = runOf(before, range.first, range.last) ?? [];
+  let list: StepLocation | undefined;
+  let lo: { index: number; id: string } | undefined;
+  let hi: { index: number; id: string } | undefined;
+  for (const m of members) {
+    const id = map(m.id);
+    const loc = findStep(after, id)?.location;
+    if (!loc) continue;
+    list ??= loc;
+    if (!sameList(list, loc)) continue;
+    if (!lo || loc.index < lo.index) lo = { index: loc.index, id };
+    if (!hi || loc.index > hi.index) hi = { index: loc.index, id };
+  }
+  return lo && hi ? { first: lo.id, last: hi.id } : null;
+}
+
+/**
+ * IDs of the sections added or changed from `before` to `after`. Sections with the same ID are
+ * paired in the order they occur (duplicate IDs exist in invalid docs), not by array index.
+ */
+function changedSections(before: readonly Section[], after: readonly Section[]): string[] {
+  const was = new Map<string, Section[]>();
+  for (const s of before) {
+    const list = was.get(s.id);
+    if (list) list.push(s);
+    else was.set(s.id, [s]);
+  }
+  const seen = new Map<string, number>();
+  const out = new Set<string>();
+  for (const s of after) {
+    const n = seen.get(s.id) ?? 0;
+    seen.set(s.id, n + 1);
+    const old = was.get(s.id)?.[n];
+    if (!old || (old !== s && JSON.stringify(old) !== JSON.stringify(s))) out.add(s.id);
+  }
+  return [...out];
 }

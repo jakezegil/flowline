@@ -6,6 +6,12 @@ import { version } from "../package.json";
 /** Package version, read from `package.json` so it can never drift from the published version. */
 export const VERSION: string = version;
 
+export {
+  type BoundReads,
+  createAgentBridge,
+  useWorkflowAgentBridge,
+  type WorkflowAgentBridge,
+} from "./agent-bridge";
 export type { RunOverlay, RunStepStatus } from "./canvas/canvas-context";
 export { WorkflowCanvas } from "./canvas/workflow-canvas";
 export { WorkflowEditor } from "./editor/workflow-editor";

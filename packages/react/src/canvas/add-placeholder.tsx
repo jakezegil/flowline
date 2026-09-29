@@ -20,7 +20,7 @@ export type PlaceholderNode = Node<PlaceholderNodeData, "placeholder">;
  * read-only mode it only marks the branch as empty.
  */
 export const AddPlaceholder = memo(function AddPlaceholder({ data }: NodeProps<PlaceholderNode>) {
-  const readOnly = useCanvasUi((s) => s.readOnly);
+  const readOnly = useEditorStore((s) => s.readOnly);
   const openPicker = useCanvasUi((s) => s.openPicker);
   const labels = useLabels();
   const active = useCanvasUi(

@@ -16,13 +16,23 @@ import {
   useStoreApi,
 } from "@xyflow/react";
 import { Maximize, Minus, Plus } from "lucide-react";
-import { type JSX, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type JSX,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useStore } from "zustand";
 import { EditorContext, stepIndex, useEditorStore } from "../hooks";
 import type { FlowlineLabels } from "../labels";
 import { LOOP_GUTTER } from "../layout/constants";
 import { type LayoutEdge, type LayoutNode, layoutTree } from "../layout/layout-tree";
 import { useFlowlineAppearance } from "../provider";
-import { type EditorStore, TRIGGER_KEY } from "../store/editor-store";
+import { type EditorStore, holdReadOnly, TRIGGER_KEY } from "../store/editor-store";
 import { themeStyle } from "../theme";
 import { AddPlaceholder } from "./add-placeholder";
 import {
@@ -239,12 +249,12 @@ function Controls({ onFit }: { onFit(): void }) {
 interface FlowProps {
   layoutRef: RefObject<ReturnType<typeof layoutTree> | null>;
   rootRef: RefObject<HTMLDivElement | null>;
-  readOnly: boolean;
   colorMode: "light" | "dark" | "system";
   onStepClick?(id: string): void;
 }
 
-function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: FlowProps) {
+function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
+  const readOnly = useEditorStore((s) => s.readOnly);
   const doc = useEditorStore((s) => s.doc);
   const manifest = useEditorStore((s) => s.manifest);
   const selection = useEditorStore((s) => s.selection);
@@ -424,28 +434,35 @@ function CanvasFlow({ layoutRef, rootRef, readOnly, colorMode, onStepClick }: Fl
  */
 export function WorkflowCanvas(props: {
   store: EditorStore;
-  /** Hides "+" buttons and menus and disables editing shortcuts. */
+  /**
+   * Hides "+" buttons and menus and disables editing shortcuts. Sets the store's `readOnly` flag
+   * while mounted (restoring the previous value on unmount), so every edit through the store,
+   * an agent bridge's included, is rejected too. A store that is already read-only renders
+   * read-only without it.
+   */
   readOnly?: boolean;
   /** Run state to paint on the cards (run viewer). */
   overlay?: RunOverlay;
   /** Called when a step (or `"__trigger"`) is clicked or opened with Enter. */
   onStepClick?(id: string): void;
 }): JSX.Element {
-  const { store, readOnly = false, overlay, onStepClick } = props;
+  const { store, readOnly: readOnlyProp = false, overlay, onStepClick } = props;
   const { theme, labels, onNotify } = useFlowlineAppearance();
   const [ui] = useState(() =>
-    createCanvasUiStore({ readOnly, overlay, labels, ...(onNotify ? { notify: onNotify } : {}) }),
+    createCanvasUiStore({ overlay, labels, ...(onNotify ? { notify: onNotify } : {}) }),
   );
+  const readOnly = useStore(store, (s) => s.readOnly);
   const rootRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<ReturnType<typeof layoutTree> | null>(null);
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
   const getRoot = useCallback(() => rootRef.current, []);
   const colorMode = theme.colorMode ?? "system";
 
+  // Before paint, so a read-only canvas never shows a frame of edit controls. Holds stack, so
+  // two read-only canvases on one store (or a host's own setReadOnly) don't undo each other.
+  useLayoutEffect(() => (readOnlyProp ? holdReadOnly(store) : undefined), [store, readOnlyProp]);
   useEffect(() => {
-    ui.setState(
-      readOnly ? { readOnly, overlay, picker: null, renaming: null } : { readOnly, overlay },
-    );
+    ui.setState(readOnly ? { overlay, picker: null, renaming: null } : { overlay });
   }, [ui, readOnly, overlay]);
   useEffect(() => {
     if (ui.getState().labels !== labels) ui.setState({ labels });
@@ -489,7 +506,6 @@ export function WorkflowCanvas(props: {
                   <CanvasFlow
                     layoutRef={layoutRef}
                     rootRef={rootRef}
-                    readOnly={readOnly}
                     colorMode={colorMode}
                     {...(onStepClick ? { onStepClick } : {})}
                   />

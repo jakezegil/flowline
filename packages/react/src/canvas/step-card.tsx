@@ -302,7 +302,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
   const ui = useCanvasUiApi();
   const root = useContext(RootElementContext);
   const { resolveIcon } = useFlowlineAppearance();
-  const readOnly = useCanvasUi((s) => s.readOnly);
+  const readOnly = useEditorStore((s) => s.readOnly);
   const renaming = useCanvasUi((s) => s.renaming === stepId);
   const run = useCanvasUi((s) => s.overlay?.stepStatus[stepId]);
   const labels = useLabels();

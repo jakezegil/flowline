@@ -7,7 +7,7 @@
  */
 
 import type { Manifest, ValidationContext, WorkflowDetail, WorkflowDoc } from "@flowlinejs/core";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FlowlineLabels } from "../labels";
 import { useFlowline, useFlowlineAppearance } from "../provider";
 import { defaultConfig } from "../store/commands";
@@ -42,12 +42,17 @@ export type EditorLoadState =
  * - `network`: the engine's outbound policy, for URL fields' design-time warnings.
  * - Otherwise the workflow is loaded. If there is none (404) it starts from `initialDoc` when
  *   given, else the state is `notFound`; `startNew()` then switches to create mode.
+ * - `onStoreReady` is called for every store created (first load, a `workflowId` change,
+ *   `retry()`, `startNew()`); the cleanup it returns runs when that store is replaced (the next
+ *   load starts) or the component unmounts.
  */
 export function useEditorLoad(
   workflowId: string,
   initialDoc: WorkflowDoc | undefined,
   create = false,
   network?: ValidationContext["network"],
+  // biome-ignore lint/suspicious/noConfusingVoidType: `void` so a callback with no cleanup (no return) fits.
+  onStoreReady?: (store: EditorStore) => void | (() => void),
 ): { state: EditorLoadState; retry(): void; startNew(): void } {
   const { client } = useFlowline();
   const { labels } = useFlowlineAppearance();
@@ -98,6 +103,14 @@ export function useEditorLoad(
       active = false;
     };
   }, [client, workflowId, attempt, creating]);
+  const ready = useRef(onStoreReady);
+  ready.current = onStoreReady;
+  const store = state.status === "ready" ? state.store : null;
+  useEffect(() => {
+    if (!store) return;
+    const cleanup = ready.current?.(store);
+    return typeof cleanup === "function" ? cleanup : undefined;
+  }, [store]);
   return {
     state,
     retry: () => setAttempt((n) => n + 1),

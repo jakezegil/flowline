@@ -1,6 +1,6 @@
 /**
  * State shared by the canvas' nodes, edges and overlays that isn't part of the editor store:
- * read-only mode, the run overlay, the open step picker, inline rename and toasts. Kept in a small
+ * the run overlay, the open step picker, inline rename and toasts. Kept in a small
  * per-canvas Zustand store so a card re-renders only when its own slice changes.
  *
  * @module
@@ -73,7 +73,6 @@ export interface Toast {
 
 /** The canvas' UI state. */
 export interface CanvasUiState {
-  readOnly: boolean;
   /** The UI text (from `<FlowlineProvider labels>`, else English). */
   labels: FlowlineLabels;
   overlay: RunOverlay | undefined;
@@ -105,7 +104,6 @@ export const TOAST_MS = 5000;
 
 /** Creates the UI store of one canvas. */
 export function createCanvasUiStore(init: {
-  readOnly: boolean;
   overlay: RunOverlay | undefined;
   labels: FlowlineLabels;
   notify?: NotifyHandler;
