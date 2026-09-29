@@ -1,6 +1,6 @@
 {
   "name": "@flowlinejs/storage-memory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "license": "MIT",
   "description": "In-memory StorageAdapter for the Flowline engine, for tests and quick starts.",

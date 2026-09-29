@@ -1,6 +1,6 @@
 {
   "name": "@flowlinejs/react",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "license": "MIT",
   "description": "React Flow-based visual editor, run viewer and run list for Flowline workflows.",
