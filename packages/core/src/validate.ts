@@ -1,3 +1,4 @@
+import { annotationIssues } from "./annotations";
 import { blockedUrlProblem, emailProblem, unreachableSteps } from "./design-checks";
 import { isValidStepId, RESERVED_STEP_IDS } from "./ids";
 import {
@@ -66,7 +67,13 @@ export type IssueCode =
    * A rule compares with a literal of another type than its value in strict mode, so it never
    * matches. Raised by the editor's rules and cases widgets, never by {@link validateWorkflow}.
    */
-  | "rule.literalType";
+  | "rule.literalType"
+  /** A section's run is broken (missing endpoint, two lists, reversed), or its colour or ID is bad. */
+  | "section.broken"
+  /** Two sections in one step list overlap. Reported on the later one. */
+  | "section.overlap"
+  /** A step or section note is longer than 4000 characters. */
+  | "note.tooLong";
 
 /** One problem found by {@link validateWorkflow}. */
 export interface Issue {
@@ -83,6 +90,11 @@ export interface Issue {
    * fields are prefixed `"trigger."`, sub-flow output mappings `"output."`.
    */
   field?: string;
+  /**
+   * The section the issue belongs to (`section.*`, and `note.tooLong` on a section note). Such
+   * issues also carry `stepId` = the section's `first` when that step exists.
+   */
+  sectionId?: string;
 }
 
 /** Severity of each code outside disabled steps (inside them everything is a warning). */
@@ -95,6 +107,9 @@ const WARNING_CODES = new Set<IssueCode>([
   "config.format",
   "network.blocked",
   "step.unreachable",
+  "section.broken",
+  "section.overlap",
+  "note.tooLong",
 ]);
 
 const KIND_WORDS: Record<Kind, string> = {
@@ -961,6 +976,7 @@ export function validateWorkflow(
       guarded(r, f, () => checkValue(r, value, {}, f));
     }
   }
+  issues.push(...annotationIssues(doc));
   return issues;
 }
 
