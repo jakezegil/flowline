@@ -1,6 +1,12 @@
 import { describe, expect, test } from "vitest";
 import type { JSONSchema, Manifest, WorkflowDoc } from "../types";
-import { commandCatalog, readArgSchemas, runTool, type ToolDefinition } from "./catalog";
+import {
+  applyExamples,
+  commandCatalog,
+  readArgSchemas,
+  runTool,
+  type ToolDefinition,
+} from "./catalog";
 import { commandSchema } from "./command-schema";
 import { crmLikeManifest, deepDoc, flatDoc, richManifest, specExampleDoc } from "./fixtures";
 import type { FollowUp, ReadToolName } from "./read-types";
@@ -96,6 +102,11 @@ describe("commandCatalog", () => {
     expect(d).toContain("~ workflow");
     expect(d).toContain("~ trigger");
     expect(d).toContain("~ output");
+    expect(d).toContain('"- output" when removed');
+    expect(d).toContain("- ▣ <id>");
+    expect(tool(commandCatalog(crm), "focus").description).toMatch(
+      /section: title, colour and note/,
+    );
     expect(tool(commandCatalog(crm), "overview").description).toContain(
       "Start here. Then describeNodeTypes for any node type you'll add.",
     );
@@ -160,6 +171,46 @@ describe("commandCatalog", () => {
       expect.arrayContaining(["NodeType", "At", "Fragment", "ValueExpr", "Where", "Branch"]),
     );
     expect(JSON.stringify(commandCatalog(rich))).not.toContain("__schema");
+  });
+
+  test("every input schema is an object at the root (as tool APIs require)", () => {
+    for (const m of [crm, rich]) {
+      for (const t of commandCatalog(m)) {
+        expect(t.inputSchema.type, t.name).toBe("object");
+        for (const k of ["anyOf", "oneOf", "allOf"])
+          expect(t.inputSchema, t.name).not.toHaveProperty(k);
+      }
+    }
+  });
+
+  test("each call returns a fresh copy", () => {
+    const a = commandCatalog(crm);
+    (a[0] as ToolDefinition).inputSchema.strict = true;
+    (a[0] as ToolDefinition).description = "changed";
+    const b = commandCatalog(crm);
+    expect(b[0]?.inputSchema).not.toHaveProperty("strict");
+    expect(b[0]?.description).not.toBe("changed");
+  });
+
+  test.each([
+    ["crm", crm],
+    ["rich", rich],
+    ["noSwitch", noSwitch],
+  ])("the apply examples run on an empty workflow with the first trigger (%s)", (_, m) => {
+    const doc: WorkflowDoc = {
+      id: "w",
+      name: "W",
+      trigger: { type: m.triggers[0]?.type as string, config: {} },
+      steps: [],
+    };
+    let state = { doc, manifest: m };
+    for (const ex of applyExamples(m)) {
+      const r = runTool(state, "apply", ex);
+      expect(r.ok && r.result, JSON.stringify(r)).toMatchObject({ ok: true });
+      if (r.ok && r.doc) state = { ...state, doc: r.doc };
+    }
+    const d = tool(commandCatalog(m), "apply").description;
+    expect(d).not.toMatch(/"after":|"recheck"|"notify"/);
   });
 
   test("plain JSON Schema: no x-flowline, $schema or internal fields", () => {
@@ -275,9 +326,128 @@ describe("runTool", () => {
     expect(malformed.doc).toBeUndefined();
   });
 
-  test("a read that rejects its arguments fails with command.invalid", () => {
-    const r = runTool({ doc: specExampleDoc(), manifest: crm }, "focus", { stepId: "nope" });
-    expect(r).toMatchObject({ ok: false, error: { code: "command.invalid" } });
+  test("a read that rejects its arguments fails with command.invalid, a path and a hint", () => {
+    const state = { doc: specExampleDoc(), manifest: crm };
+    expect(runTool(state, "focus", { stepId: "getDael" })).toEqual({
+      ok: false,
+      error: {
+        code: "command.invalid",
+        message: 'focus: unknown step "getDael"',
+        path: "stepId",
+        hint: { closest: expect.arrayContaining(["getDeal"]) },
+      },
+    });
+    expect(runTool(state, "findSteps", { where: { within: { stepId: "nope" } } })).toMatchObject({
+      ok: false,
+      error: { code: "command.invalid", path: "where.within.stepId" },
+    });
+    expect(runTool(state, "getSteps", { where: { section: "chek" } })).toMatchObject({
+      ok: false,
+      error: { path: "where.section", hint: { closest: ["check"] } },
+    });
+    expect(runTool(state, "outline", { stepId: "recheck", branch: "nope" })).toMatchObject({
+      ok: false,
+      error: { code: "command.invalid", path: "branch" },
+    });
+    const refs = runTool(state, "availableRefs", { stepId: "notifyOwner", path: "not a path" });
+    expect(refs).toMatchObject({ ok: false, error: { path: "path" } });
+    const sel = runTool(state, "findSteps", {
+      where: { within: { stepId: "delay_1m", branch: "x" } },
+    });
+    expect(sel).toMatchObject({
+      ok: false,
+      error: { message: expect.stringMatching(/^findSteps: /) },
+    });
+  });
+
+  test("bad getSteps arguments name the field", () => {
+    const state = { doc: specExampleDoc(), manifest: crm };
+    const path = (args: unknown) => {
+      const r = runTool(state, "getSteps", args);
+      return r.ok ? "ok" : r.error.path;
+    };
+    expect(path({ ids: ["getDeal", 5] })).toBe("ids[1]");
+    expect(path({ ids: ["getDeal"], include: ["schemas"] })).toBe("include[0]");
+    expect(path({ ids: "getDeal" })).toBe("ids");
+    expect(path({})).toBe("ids");
+    expect(path({ ids: ["getDeal"], where: {} })).toBe("where");
+    expect(path({ ids: ["getDeal"], limit: 3 })).toBe("limit");
+    const both = runTool(state, "getSteps", { ids: [], where: {} });
+    expect(!both.ok && both.error.message).toContain("exactly one of ids or where");
+    expect(path({ where: {}, limit: 3 })).toBe("ok");
+    expect(path({ ids: ["getDeal"] })).toBe("ok");
+  });
+
+  test("the apply envelope is strict", () => {
+    const state = { doc: specExampleDoc(), manifest: crm };
+    const r = runTool(state, "apply", {
+      commands: [{ op: "renameWorkflow", name: "y" }],
+      dryRun: true,
+    });
+    expect(r).toMatchObject({ ok: false, error: { code: "command.invalid", path: "dryRun" } });
+    const schema = tool(commandCatalog(crm), "apply").inputSchema;
+    expect(schema.additionalProperties).toBe(false);
+  });
+
+  test("the store-only verbatim and nullIsValue are rejected", () => {
+    const state = { doc: specExampleDoc(), manifest: crm };
+    const evil = runTool(state, "apply", {
+      commands: [
+        {
+          op: "insertSteps",
+          at: { start: true },
+          verbatim: true,
+          steps: [{ id: "evil", type: "no.such.node", config: { x: 1 }, branches: { bogus: [] } }],
+        },
+      ],
+    });
+    expect(evil.ok && evil.result).toMatchObject({ ok: false });
+    expect(evil.ok && evil.doc).toBeFalsy();
+    const verbatim = runTool(state, "apply", {
+      commands: [
+        { op: "insertSteps", at: { start: true }, verbatim: true, steps: [{ type: "flow.stop" }] },
+      ],
+    });
+    expect(verbatim.ok).toBe(true);
+    expect(verbatim.ok && verbatim.result).toMatchObject({
+      ok: false,
+      error: { code: "command.invalid", message: expect.stringContaining("verbatim") },
+    });
+    expect(verbatim.ok && verbatim.doc).toBeFalsy();
+    const nullIsValue = runTool(state, "apply", {
+      commands: [{ op: "setConfig", id: "getDeal", key: "dealId", value: null, nullIsValue: true }],
+    });
+    expect(nullIsValue.ok && nullIsValue.result).toMatchObject({
+      ok: false,
+      error: { code: "command.invalid", message: expect.stringContaining("nullIsValue") },
+    });
+  });
+
+  test("a successful apply's result leaves the doc out; the doc comes back beside it", () => {
+    const state = { doc: specExampleDoc(), manifest: crm };
+    const r = runTool(state, "apply", { commands: [{ op: "renameWorkflow", name: "Renamed" }] });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.result).not.toHaveProperty("doc");
+    expect(r.result).toMatchObject({ ok: true, changed: expect.stringContaining("~ workflow") });
+    expect(r.doc?.name).toBe("Renamed");
+  });
+
+  test("a fragment nested too deep for the stack comes back as command.invalid", () => {
+    let step: Record<string, unknown> = { type: "flow.stop" };
+    for (let i = 0; i < 5000; i++) step = { type: "flow.if", branches: { else: [step] } };
+    const r = runTool({ doc: specExampleDoc(), manifest: crm }, "apply", {
+      commands: [{ op: "insertSteps", at: { start: true }, steps: [step] }],
+    });
+    expect(r.ok && r.result).toMatchObject({
+      ok: false,
+      error: { code: "command.invalid", message: "The commands are nested too deeply to check" },
+    });
+  });
+
+  test("a long unknown tool name is cut in the message", () => {
+    const r = runTool({ doc: specExampleDoc(), manifest: crm }, "x".repeat(100_000), {});
+    expect(!r.ok && r.error.message.length).toBeLessThan(400);
   });
 
   test("untrusted: unknown placeholders in config values are rejected", () => {

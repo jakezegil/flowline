@@ -4,12 +4,12 @@ exports[`the mini-crm tool catalog > snapshot 1`] = `
 [
   {
     "description": "Edit the workflow: run a batch of commands atomically. If any command fails, nothing is applied and \`error\` names it (path like commands[2].config.to) with a hint: the expected schema, or the closest valid names. Put all related edits in one call.
-Placeholders: $n is the result of commands[n-1] (1-based): the step (or section) it created. A fragment step with "ref": "a" becomes $<ref>, here "$a". Use them as step IDs and inside refs and templates: { "$ref": "steps.$1.deal.id" }, "{{ steps.$a.id }}". Unknown placeholders are rejected. result.ids maps each placeholder to its real ID.
-Values: a JSON literal, a ref { "$ref": "trigger.deal.id" }, or a template { "$tpl": "Hi {{ trigger.contact.name }}" }. In config patches, null removes a key.
+Placeholders: $n is the result of commands[n-1] (1-based): the step (or section) it created. A fragment step with "ref": "a" becomes $<ref>, here "$a". Use them as step IDs and inside refs and templates: { "$ref": "steps.$1.<field>" }, "{{ steps.$a.<field> }}". Unknown placeholders are rejected. result.ids maps each placeholder to its real ID.
+Values: a JSON literal, a ref { "$ref": "trigger.<field>" }, or a template { "$tpl": "Hi {{ trigger.contact.name }}" }. In config patches, null removes a key.
 Bulk: insertSteps adds many new steps with nested branches in one command; replaceSteps, duplicateSteps, updateSteps, replaceInConfig, moveSteps, removeSteps, wrapSteps and unwrapStep act on runs (first…last, one list in order) or selectors. Every \`where\` form needs expect, the number of steps you expect it to match: another count fails with expect.mismatch and lists the matches.
 New steps with an unknown type or branch, an invalid config value or a bad ref are rejected; a missing required field is only reported in issues.
-On success, the result includes the changed outline and issue delta, so there's no need to re-read after success. changed has one line per step touched (+ added, ~ updated, - removed, "~ old →" for a new ID), plus "~ workflow", "~ trigger" and "~ output" lines when those changed. issues.added and issues.cleared are the validation delta; issues.more has a getIssues call when more than 20 were added.
-Example: {"commands":[{"op":"insertSteps","at":{"after":"getDeal"},"steps":[{"ref":"a","type":"crm.findContactByEmail","config":{"email":{"$ref":"trigger.deal.id"}}},{"type":"core.condition","branches":{"if":[{"type":"crm.findContactByEmail","config":{"email":"done"}}]}}]},{"op":"setConfig","id":"$a","key":"email","value":{"$tpl":"Hi {{ trigger.contact.name }}"}},{"op":"addSection","first":"$1","last":"$1","title":"Notify","color":"blue"}]}
+On success, the result includes the changed outline and issue delta, so there's no need to re-read after success. changed has one line per step or section touched (+ added, ~ updated, - removed, "- ▣ <id>" for a removed section, "~ old →" for a new ID), plus "~ workflow", "~ trigger" and "~ output" ("- output" when removed) lines when those changed. issues.added and issues.cleared are the validation delta; issues.more has a getIssues call when more than 20 were added.
+Example: {"commands":[{"op":"insertSteps","at":{"start":true},"steps":[{"ref":"a","type":"crm.findContactByEmail","config":{"email":"Hi"}},{"ref":"b","type":"core.condition","branches":{"if":[{"type":"crm.findContactByEmail","config":{"email":{"$tpl":"Re: {{ steps.$a.contact.id }}"}}}]}}]},{"op":"addSection","first":"$1","last":"$b","title":"Get started","color":"blue"}]}
 Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmail"},"set":{"disabled":true},"expect":2}]}",
     "inputSchema": {
       "$defs": {
@@ -220,6 +220,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
           "type": "object",
         },
       },
+      "additionalProperties": false,
       "properties": {
         "commands": {
           "items": {
@@ -1220,7 +1221,7 @@ Example: {}",
   },
   {
     "description": "Part of the workflow in overview's format: one step's subtree (stepId), one of its branches (stepId and branch) or the top-level list (neither). after pages a list: only the steps after that step. Use it, or the calls in omitted, to expand what overview collapsed.
-Example: {"stepId":"recheck","branch":"else"}",
+Example: {"stepId":"<stepId>","branch":"if"}",
     "inputSchema": {
       "$defs": {
         "Branch": {
@@ -1252,10 +1253,10 @@ Example: {"stepId":"recheck","branch":"else"}",
     "name": "outline",
   },
   {
-    "description": "Everything needed to edit one step: config, its compact input schema, the refs in scope, issues, branches, its section (section; heads lists other sections that start here) and note.
+    "description": "Everything needed to edit one step: config, its compact input schema, the refs in scope, issues, branches, its note and its section (section: title, colour and note; heads: other sections that start here, with their notes).
 Strings over 500 chars are cut, ending in a fixed marker "…(+N chars)" that is not part of the value; the step's cut lists the cut paths, and full is the call that returns them uncut.
 Over budget (characters, default 8000), refs and then the schema are left out, each listed in omitted with its call.
-Example: {"stepId":"getDeal"}",
+Example: {"stepId":"<stepId>"}",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1280,10 +1281,10 @@ Example: {"stepId":"getDeal"}",
     "name": "focus",
   },
   {
-    "description": "Several steps in focus's detail, by ids, or by a where selector (paged with after and limit: default 50, at most 200). include picks the extras: "config" (the default), "schema", "refs". Unknown IDs are in missing.
+    "description": "Several steps in focus's detail: pass exactly one of ids or where (a selector, paged with after and limit: default 50, at most 200). include picks the extras: "config" (the default), "schema", "refs". Unknown IDs are in missing.
 Only the leading steps that fit budget (characters, default 8000) are returned; next is the call for more and remaining counts the steps left: follow next until remaining is 0; if next.ids is a slice, re-request the rest of your list.
 Strings over 500 chars are cut, ending in a fixed marker "…(+N chars)" that is not part of the value; the step's cut lists the cut paths, and full is the call that returns them uncut. Here full is one call for every cut step of the page.
-Example: {"ids":["getDeal","recheck"],"include":["config"]}",
+Example: {"ids":["<stepId>","<otherStepId>"],"include":["config"]}",
     "inputSchema": {
       "$defs": {
         "Branch": {
@@ -1352,83 +1353,48 @@ Example: {"ids":["getDeal","recheck"],"include":["config"]}",
           "type": "object",
         },
       },
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "budget": {
-              "description": "Size limit in characters of the result",
-              "minimum": 1,
-              "type": "integer",
-            },
-            "full": {
-              "type": "boolean",
-            },
-            "ids": {
-              "items": {
-                "type": "string",
-              },
-              "type": "array",
-            },
-            "include": {
-              "description": "Extras per step: "config" (the default), "schema", "refs"",
-              "items": {
-                "enum": [
-                  "config",
-                  "schema",
-                  "refs",
-                ],
-                "type": "string",
-              },
-              "type": "array",
-            },
-          },
-          "required": [
-            "ids",
-          ],
-          "type": "object",
+      "additionalProperties": false,
+      "description": "Pass exactly one of ids or where; after and limit page a where selector.",
+      "properties": {
+        "after": {
+          "type": "string",
         },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "after": {
-              "type": "string",
-            },
-            "budget": {
-              "description": "Size limit in characters of the result",
-              "minimum": 1,
-              "type": "integer",
-            },
-            "full": {
-              "type": "boolean",
-            },
-            "include": {
-              "description": "Extras per step: "config" (the default), "schema", "refs"",
-              "items": {
-                "enum": [
-                  "config",
-                  "schema",
-                  "refs",
-                ],
-                "type": "string",
-              },
-              "type": "array",
-            },
-            "limit": {
-              "description": "Page size",
-              "minimum": 1,
-              "type": "integer",
-            },
-            "where": {
-              "$ref": "#/$defs/Where",
-            },
-          },
-          "required": [
-            "where",
-          ],
-          "type": "object",
+        "budget": {
+          "description": "Size limit in characters of the result",
+          "minimum": 1,
+          "type": "integer",
         },
-      ],
+        "full": {
+          "type": "boolean",
+        },
+        "ids": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "include": {
+          "description": "Extras per step: "config" (the default), "schema", "refs"",
+          "items": {
+            "enum": [
+              "config",
+              "schema",
+              "refs",
+            ],
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "limit": {
+          "description": "Page size",
+          "minimum": 1,
+          "type": "integer",
+        },
+        "where": {
+          "$ref": "#/$defs/Where",
+        },
+      },
+      "type": "object",
     },
     "name": "getSteps",
   },
@@ -1525,8 +1491,8 @@ Example: {"where":{"type":"crm.findContactByEmail"}}",
     "name": "findSteps",
   },
   {
-    "description": "The refs in scope at a step, with their types: trigger, earlier steps' outputs (steps.<id>) and loop items. Top level unless path drills in, e.g. "steps.getDeal.deal"; children counts the properties to drill into. Use the paths in { "$ref": … } values and {{ }} templates.
-Example: {"stepId":"notify","path":"steps.getDeal"}",
+    "description": "The refs in scope at a step, with their types: trigger, earlier steps' outputs (steps.<id>) and loop items. Top level unless path drills in, e.g. "steps.<id>" or "trigger"; children counts the properties to drill into. Use the paths in { "$ref": … } values and {{ }} templates.
+Example: {"stepId":"<stepId>","path":"trigger"}",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

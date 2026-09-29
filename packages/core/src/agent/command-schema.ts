@@ -689,15 +689,16 @@ function toError(
 }
 
 /**
- * @internal The shape errors of `commands[index]` against the internal command schema, in path
- * order (none when it is well-formed).
+ * @internal The shape errors of `commands[index]` against the command schema (the internal one
+ * unless `internal: false`), in path order (none when it is well-formed).
  */
 export function shapeErrors(
   manifest: Manifest | undefined,
   cmd: unknown,
   index: number,
+  internal = true,
 ): ApplyError[] {
-  const b = built(manifest, true);
+  const b = built(manifest, internal);
   if (!isObject(cmd)) {
     return [
       {
