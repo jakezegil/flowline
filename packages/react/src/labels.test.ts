@@ -156,6 +156,9 @@ describe("range labels", () => {
     expect(defaultLabels.stepsDeleted(2)).toBe("Deleted 2 steps");
     expect(defaultLabels.stepsDeleted(1)).toBe("Deleted 1 step");
     expect(defaultLabels.groupIntoSection).toBe("Group into section");
+    expect(defaultLabels.stepInRange("Send email")).toBe("Send email, in selection");
+    expect(defaultLabels.rangeCleared).toBe("Selection cleared");
+    expect(defaultLabels.sectionOverlap("Intro")).toContain("“Intro”");
   });
 
   it("can be overridden", () => {

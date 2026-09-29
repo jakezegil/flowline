@@ -422,7 +422,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
   return (
     <>
       <NodeHandles />
-      {readOnly ? (
+      {readOnly && !inRange ? (
         card
       ) : (
         <StepContextMenu step={step} manifest={manifest} actions={actions} inRange={inRange}>

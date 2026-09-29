@@ -171,7 +171,202 @@ describe("grouping", () => {
     const before = store.getState().doc;
     fireEvent.keyDown(node("step:load"), { key: "g", ...mod });
     expect(store.getState().doc).toBe(before);
-    expect(await screen.findByText(/overlaps section "s"/)).toBeTruthy();
+    // M5: a localized message naming the section by its title, never by ID.
+    const toast = await screen.findByText(L.sectionOverlap("Existing"));
+    expect(toast.textContent).not.toMatch(/"s"|"load"/);
+  });
+
+  test("M5: the overlap toast is localized through labels, and an untitled section is named so", async () => {
+    const { FlowlineProvider } = await import("../provider");
+    const store = storeOf(
+      rangeDoc([{ id: "s", title: "", color: "green", first: "b", last: "c" }]),
+    );
+    render(
+      <FlowlineProvider
+        client={{} as never}
+        labels={{ sectionOverlap: (t) => `Chevauche « ${t} »`, untitledSection: "Sans titre" }}
+      >
+        <WorkflowCanvas store={store} />
+      </FlowlineProvider>,
+    );
+    act(() => void store.getState().selectRange("load", "b"));
+    fireEvent.keyDown(node("step:load"), { key: "g", ...mod });
+    expect(await screen.findByText("Chevauche « Sans titre »")).toBeTruthy();
+  });
+
+  test("I2: after Group from the toolbar, focus goes to the new section's header", async () => {
+    const store = storeOf(rangeDoc());
+    render(<WorkflowCanvas store={store} />);
+    act(() => void store.getState().selectRange("a", "b"));
+    const group = within(bar()).getByRole("button", { name: L.groupIntoSection });
+    group.focus();
+    fireEvent.click(group);
+    const id = store.getState().doc.sections?.[0]?.id as string;
+    await waitFor(() =>
+      expect(node(`sectionHeader:${id}`).contains(document.activeElement)).toBe(true),
+    );
+  });
+});
+
+describe("focus and range keys (I1)", () => {
+  test("from a card outside the range, ⌥↓, ⌘C and ⌘D act on that card", () => {
+    const store = storeOf(rangeDoc());
+    render(<WorkflowCanvas store={store} />);
+    act(() => void store.getState().selectRange("a", "b"));
+    node("step:load").focus();
+    fireEvent.keyDown(node("step:load"), { key: "ArrowDown", altKey: true });
+    expect(ids(store)).toEqual(["a", "load", "b", "c", "cond", "d"]);
+    fireEvent.keyDown(node("step:d"), { key: "c", ...mod });
+    expect(store.getState().clipboardRun?.map((s) => s.id)).toEqual(["d"]);
+    fireEvent.keyDown(node("step:d"), { key: "d", ...mod });
+    expect(ids(store)).toHaveLength(7);
+    expect(ids(store).slice(0, 6)).toEqual(["a", "load", "b", "c", "cond", "d"]);
+    // The range itself is untouched and still shown.
+    expect(store.getState().range).toEqual({ first: "a", last: "b" });
+  });
+
+  test("from a card in the range, or from the RangeBar, the keys act on the range", () => {
+    const store = storeOf(rangeDoc());
+    render(<WorkflowCanvas store={store} />);
+    act(() => void store.getState().selectRange("a", "b"));
+    fireEvent.keyDown(node("step:b"), { key: "ArrowDown", altKey: true });
+    expect(ids(store)).toEqual(["load", "c", "a", "b", "cond", "d"]);
+    const copy = within(bar()).getByRole("button", { name: L.copy });
+    copy.focus();
+    fireEvent.keyDown(copy, { key: "ArrowUp", altKey: true });
+    expect(ids(store)).toEqual(["load", "a", "b", "c", "cond", "d"]);
+  });
+});
+
+describe("accessibility (I2, M1, M6)", () => {
+  test("range changes are announced in the live region, and range cards say they're in it", () => {
+    const store = storeOf(rangeDoc());
+    render(<WorkflowCanvas store={store} />);
+    const live = () => screen.getByRole("status").textContent;
+    fireEvent.keyDown(node("step:a"), { key: "ArrowDown", shiftKey: true });
+    expect(live()).toContain(L.rangeSelected(2));
+    fireEvent.keyDown(node("step:b"), { key: "ArrowDown", shiftKey: true });
+    expect(live()).toContain(L.rangeSelected(3));
+    expect(node("step:b").getAttribute("aria-label")).toBe(L.stepInRange("Send email"));
+    expect(node("step:d").getAttribute("aria-label")).toBe("Send email");
+    fireEvent.keyDown(node("step:c"), { key: "Escape" });
+    expect(live()).toContain(L.rangeCleared);
+    expect(node("step:b").getAttribute("aria-label")).toBe("Send email");
+  });
+
+  test("Clear on the toolbar returns focus to the range's first card", async () => {
+    const store = storeOf(rangeDoc());
+    render(<WorkflowCanvas store={store} />);
+    act(() => void store.getState().selectRange("b", "c"));
+    const clear = within(bar()).getByRole("button", { name: L.clearRange });
+    clear.focus();
+    fireEvent.click(clear);
+    await waitFor(() => expect(document.activeElement).toBe(node("step:b")));
+  });
+
+  test("Esc on a RangeBar button clears the range", async () => {
+    const store = storeOf(rangeDoc());
+    render(<WorkflowCanvas store={store} />);
+    act(() => void store.getState().selectRange("t1", "t2"));
+    const copy = within(bar()).getByRole("button", { name: L.copy });
+    copy.focus();
+    fireEvent.keyDown(copy, { key: "Escape" });
+    expect(store.getState().range).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(node("step:t1")));
+  });
+
+  test("the toolbar is one tab stop; arrows, Home and End rove", () => {
+    const store = storeOf(rangeDoc());
+    render(<WorkflowCanvas store={store} />);
+    act(() => void store.getState().selectRange("a", "b"));
+    const buttons = () => within(bar()).getAllByRole("button");
+    expect(buttons().map((b) => b.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1]);
+    (buttons()[0] as HTMLElement).focus();
+    fireEvent.keyDown(buttons()[0] as HTMLElement, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(buttons()[1]);
+    expect(buttons().map((b) => b.tabIndex)).toEqual([-1, 0, -1, -1, -1, -1, -1]);
+    fireEvent.keyDown(buttons()[1] as HTMLElement, { key: "End" });
+    expect(document.activeElement).toBe(buttons()[6]);
+    fireEvent.keyDown(buttons()[6] as HTMLElement, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(buttons()[0]);
+    fireEvent.keyDown(buttons()[0] as HTMLElement, { key: "Home" });
+    expect(document.activeElement).toBe(buttons()[0]);
+  });
+
+  test("a read-only range card's right-click menu offers Copy and Clear", async () => {
+    const store = storeOf(rangeDoc(), true);
+    render(<WorkflowCanvas store={store} />);
+    act(() => void store.getState().selectRange("a", "b"));
+    fireEvent.contextMenu(card("a"));
+    const menu = await screen.findByRole("menu");
+    const items = within(menu)
+      .getAllByRole("menuitem")
+      .map((el) => el.querySelector(".fl-menu__label")?.textContent);
+    expect(items).toEqual([L.copy, L.clearRange]);
+    // A card outside the range still has no menu on a read-only canvas.
+    cleanup();
+    render(<WorkflowCanvas store={store} />);
+    fireEvent.contextMenu(card("d"));
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+});
+
+describe("anchoring (M2, M4)", () => {
+  test("M2: shift-click prefers a selection in the clicked list over a range elsewhere", () => {
+    const store = storeOf(rangeDoc());
+    render(<WorkflowCanvas store={store} />);
+    fireEvent.click(node("step:a"));
+    fireEvent.keyDown(node("step:t1"), { key: "ArrowDown", shiftKey: true });
+    expect(store.getState().range).toEqual({ first: "t1", last: "t2" });
+    fireEvent.click(node("step:c"), { shiftKey: true });
+    expect(store.getState().range).toEqual({ first: "a", last: "c" });
+    expect(screen.queryByText(L.rangeOtherList)).toBeNull();
+  });
+
+  test("M4: ⇧↓/⇧↑ from an interior range card grow the range from its far end", () => {
+    const store = storeOf(rangeDoc());
+    render(<WorkflowCanvas store={store} />);
+    act(() => void store.getState().selectRange("a", "c"));
+    fireEvent.keyDown(node("step:b"), { key: "ArrowDown", shiftKey: true });
+    expect(store.getState().range).toEqual({ first: "a", last: "cond" });
+    expect(document.activeElement).toBe(node("step:cond"));
+    fireEvent.keyDown(node("step:b"), { key: "ArrowUp", shiftKey: true });
+    expect(store.getState().range).toEqual({ first: "load", last: "cond" });
+  });
+});
+
+describe("undo restores the range (M3)", () => {
+  test("⌘D, toolbar Delete and ⌘G each undo back to the range", () => {
+    const store = storeOf(rangeDoc());
+    render(<WorkflowCanvas store={store} />);
+    act(() => void store.getState().selectRange("a", "b"));
+    fireEvent.keyDown(node("step:a"), { key: "d", ...mod });
+    expect(store.getState().range?.first).not.toBe("a");
+    act(() => store.getState().undo());
+    expect(store.getState().range).toEqual({ first: "a", last: "b" });
+
+    fireEvent.click(within(bar()).getByRole("button", { name: L.delete }));
+    expect(store.getState().range).toBeNull();
+    act(() => store.getState().undo());
+    expect(store.getState().range).toEqual({ first: "a", last: "b" });
+
+    fireEvent.keyDown(node("step:a"), { key: "g", ...mod });
+    expect(store.getState().range).toBeNull();
+    act(() => store.getState().undo());
+    expect(store.getState().doc.sections ?? []).toHaveLength(0);
+    expect(store.getState().range).toEqual({ first: "a", last: "b" });
+    // Redo of the group: the section is back; the range stays (nothing lost it).
+    act(() => store.getState().redo());
+    expect(store.getState().doc.sections).toHaveLength(1);
+  });
+
+  test("a range made after the edit wins over the saved one", () => {
+    const store = storeOf(rangeDoc());
+    store.getState().selectRange("a", "b");
+    store.getState().toggleDisabled("d");
+    store.getState().selectRange("c", "cond");
+    store.getState().undo();
+    expect(store.getState().range).toEqual({ first: "c", last: "cond" });
   });
 });
 

@@ -20,6 +20,7 @@ import {
   nodeElement,
   nodeIdOf,
   rangeActions,
+  rangeIds,
   stepActions,
 } from "./actions";
 import type { CanvasUiStore } from "./canvas-context";
@@ -149,10 +150,13 @@ export interface KeyboardDeps {
  * ↑/↓ focus previous/next in tree order · ←/→ neighbouring branch column · Enter or Space open the
  * focused card · Delete/Backspace delete (with an undo toast) · ⌘Z/⇧⌘Z undo/redo · ⌘C/⌘V
  * copy/paste after · ⌘D duplicate · ⌘K add step after (⇧⌘K before) · F2 rename · Esc deselect.
- * ⇧↑/⇧↓ extend the range in the focused card's list · ⌥↑/⌥↓ move the range (else the focused
- * step) one place · ⌘G groups the range (else the focused step) into a section · with a range,
- * ⌘C/⌘D copy/duplicate it and Esc clears it first. Keys act on the focused card, else the
- * selection. Read-only canvases only navigate, select ranges and copy them.
+ * ⇧↑/⇧↓ extend the range in the focused card's list · ⌥↑/⌥↓ move the focused step one place ·
+ * ⌘G groups the focused step into a section · Esc clears the range first.
+ *
+ * Keys act on the focused card, else the selection. With a range, ⌘C/⌘D/⌘G and ⌥↑/⌥↓ act on the
+ * whole range instead, but only while focus is on one of its cards, on the RangeBar or on no
+ * card: from a card outside the range they act on that card, so browsing away with the arrows
+ * never edits steps out of view. Read-only canvases only navigate, select ranges and copy them.
  */
 export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   if (e.defaultPrevented || isEditableTarget(e.target)) return false;
@@ -174,10 +178,9 @@ export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   const { readOnly } = state;
   // The card keys act on: the focused one (panel open or not), else the selected one.
   const active = deps.root()?.ownerDocument.activeElement ?? null;
-  const selection =
-    focusedKey(e.target) ??
-    (deps.root()?.contains(active) ? focusedKey(active) : undefined) ??
-    state.selection;
+  const focused =
+    focusedKey(e.target) ?? (deps.root()?.contains(active) ? focusedKey(active) : undefined);
+  const selection = focused ?? state.selection;
   const key = e.key.length === 1 && e.key !== " " ? e.key.toLowerCase() : e.key;
   const stepSelected = selection !== null && selection !== TRIGGER_KEY;
   /** Arrow keys: focus moves, the selection (and its open panel) stays; Enter opens. */
@@ -220,8 +223,13 @@ export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
     state.select(null);
     return true;
   }
-  // With a range, ⌘C/⌘D/⌘G and ⌥↑/⌥↓ act on it; copying works on read-only canvases too.
-  const range = rangeActions(store, ui, deps.root);
+  // ⌘C/⌘D/⌘G and ⌥↑/⌥↓ act on the range when focus is on one of its cards, on the RangeBar or on
+  // no card; from a card outside it they act on that card, like every other key. Copying works
+  // on read-only canvases too.
+  const range =
+    focused === undefined || rangeIds(state.doc, state.range).has(focused)
+      ? rangeActions(store, ui, deps.root)
+      : undefined;
   if (range && mod && key === "c" && !e.shiftKey && !e.altKey) {
     range.copy();
     return true;
@@ -234,7 +242,7 @@ export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   }
   if (mod && key === "g" && !e.shiftKey && !e.altKey) {
     if (range) range.group();
-    else if (stepSelected) groupSteps(store, ui, selection, selection);
+    else if (stepSelected) groupSteps(store, ui, deps.root, selection, selection);
     else return false;
     return true;
   }

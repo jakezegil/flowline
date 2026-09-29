@@ -168,12 +168,13 @@ function RangeMenuItems({ kit: M }: { kit: MenuKit }) {
   const root = useContext(RootElementContext);
   const labels = useLabels();
   const range = useEditorStore((s) => s.range);
+  const readOnly = useEditorStore((s) => s.readOnly);
   // biome-ignore lint/correctness/useExhaustiveDependencies: rebinds when the range changes.
   const actions = useMemo(() => rangeActions(store, ui, root), [store, ui, root, range]);
   if (!actions) return null;
   return (
     <>
-      {rangeItems(labels, actions, false).map((item) => (
+      {rangeItems(labels, actions, readOnly).map((item) => (
         <Fragment key={item.id}>
           {item.id === "remove" && <M.Separator className="fl-menu__sep" />}
           <M.Item

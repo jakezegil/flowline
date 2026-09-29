@@ -94,6 +94,14 @@ export interface FlowlineLabels {
   stepsDeleted(n: number): string;
   /** Toast after copying a range: "3 steps copied". */
   stepsCopied(n: number): string;
+  /** Announced to screen readers when the range is cleared. */
+  rangeCleared: string;
+  /** Accessible name of a card in the range: "Send email, in selection". */
+  stepInRange(name: string): string;
+  /** Toast when grouping would overlap the section titled `title` (its shown title). */
+  sectionOverlap(title: string): string;
+  /** Toast when grouping fails for another reason (e.g. the range went stale). */
+  groupFailed: string;
   /** Clears the range (Esc). */
   clearRange: string;
   /** Accessible name of a range's right-click menu. */
@@ -699,6 +707,11 @@ export const defaultLabels: FlowlineLabels = {
   rangeOtherList: "A range must stay in one branch. Shift-click a step in the same list.",
   stepsDeleted: (n) => `Deleted ${n} ${n === 1 ? "step" : "steps"}`,
   stepsCopied: (n) => `${n} ${n === 1 ? "step" : "steps"} copied`,
+  rangeCleared: "Selection cleared",
+  stepInRange: (name) => `${name}, in selection`,
+  sectionOverlap: (title) =>
+    `These steps overlap the “${title}” section. Sections can't overlap: pick steps outside it.`,
+  groupFailed: "Couldn't group these steps.",
   clearRange: "Clear selection",
   rangeActions: "Range actions",
   stepName: "Step name",

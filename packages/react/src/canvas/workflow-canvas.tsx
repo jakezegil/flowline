@@ -40,7 +40,7 @@ import {
 import { useFlowlineAppearance } from "../provider";
 import { type EditorStore, holdReadOnly, TRIGGER_KEY } from "../store/editor-store";
 import { themeStyle } from "../theme";
-import { shiftSelect } from "./actions";
+import { rangeIds, shiftSelect } from "./actions";
 import { AddPlaceholder } from "./add-placeholder";
 import {
   CanvasUiContext,
@@ -57,7 +57,7 @@ import { settleFlash } from "./flash";
 import { type CanvasRect, edgeGeometries } from "./geometry";
 import { handleCanvasKey } from "./keyboard";
 import { NoteCard } from "./note-node";
-import { RangeBar } from "./range-bar";
+import { RangeAnnouncer, RangeBar } from "./range-bar";
 import { EndNode, RejoinNode } from "./rejoin-node";
 import { excerpt, SectionHeader, SectionRegion, sectionOfNode, sectionTitle } from "./section-node";
 import { StepCard, stepDisplayName } from "./step-card";
@@ -354,6 +354,8 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
   const doc = useEditorStore((s) => s.doc);
   const manifest = useEditorStore((s) => s.manifest);
   const selection = useEditorStore((s) => s.selection);
+  const range = useEditorStore((s) => s.range);
+  const members = rangeIds(doc, range);
   const select = useEditorStore((s) => s.select);
   const store = useEditorStoreApi();
   const ui = useCanvasUiApi();
@@ -378,12 +380,13 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
         step,
         manifest.nodes.find((n) => n.type === step.type),
       );
-      const shown = step.disabled ? labels.disabledNode(name) : name;
+      const disabled = step.disabled ? labels.disabledNode(name) : name;
+      const shown = members.has(step.id) ? labels.stepInRange(disabled) : disabled;
       return typeof step.note === "string" && step.note !== ""
         ? labels.stepWithNote(shown, step.note)
         : shown;
     },
-    [doc, manifest, labels],
+    [doc, manifest, labels, members],
   );
   const rawNodes = useMemo(() => {
     // Regions first (they sit behind everything). Each header chip comes right before its
@@ -551,6 +554,7 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
       <Background variant={BackgroundVariant.Dots} gap={20} size={1.25} color="var(--fl-dot)" />
       <Controls onFit={() => fitTop(200, true)} />
       <RangeBar />
+      <RangeAnnouncer />
     </ReactFlow>
   );
 }

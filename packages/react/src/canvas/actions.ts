@@ -259,11 +259,18 @@ function focusedCard(root: HTMLElement | null): string | undefined {
   return id?.startsWith("step:") ? id.slice(5) : undefined;
 }
 
+/** Whether two steps are in the same list of `doc`. */
+function sameListOf(doc: WorkflowDoc, a: string, b: string): boolean {
+  const x = siblingsOf(doc, a);
+  return x !== undefined && x.list === siblingsOf(doc, b)?.list;
+}
+
 /**
- * Shift-click on `clicked`: selects the run from the anchor (the selected step, else the far end
- * of the current range) to it. Returns `false` when there is nothing to extend from (the click
- * is then a plain one). A step in another list is refused with the `rangeOtherList` toast,
- * leaving the selection and the range as they were.
+ * Shift-click on `clicked`: selects the run from the anchor to it. The anchor is the selected
+ * step when it is in the clicked step's list, else the far end of the current range, else the
+ * selected step. Returns `false` when there is nothing to extend from (the click is then a plain
+ * one). A step in another list is refused with the `rangeOtherList` toast, leaving the selection
+ * and the range as they were.
  */
 export function shiftSelect(store: EditorStore, ui: CanvasUiStore, clicked: string): boolean {
   const { doc, selection, range } = store.getState();
@@ -272,7 +279,7 @@ export function shiftSelect(store: EditorStore, ui: CanvasUiStore, clicked: stri
       ? selection
       : undefined;
   let anchor = selected;
-  if (range !== null && (anchor === undefined || !rangeIds(doc, range).has(anchor))) {
+  if (range !== null && (anchor === undefined || !sameListOf(doc, anchor, clicked))) {
     const at = siblingsOf(doc, clicked)?.index ?? 0;
     anchor = at < (siblingsOf(doc, range.first)?.index ?? 0) ? range.last : range.first;
   }
@@ -285,8 +292,9 @@ export function shiftSelect(store: EditorStore, ui: CanvasUiStore, clicked: stri
 
 /**
  * ⇧↑/⇧↓ from the card `from`: extends the range to the previous or next step of its list (a
- * block counts as one step), keeping its other end as the anchor, and focuses that step. With
- * no range ending at `from`, starts one there. Nothing happens at the list's edge.
+ * block counts as one step), keeping its other end as the anchor, and focuses that step. From a
+ * card inside the range (not an end), the range grows from its end in the key's direction. With
+ * no range through `from`, starts one there. Nothing happens at the list's edge.
  */
 export function extendRange(
   store: EditorStore,
@@ -295,25 +303,55 @@ export function extendRange(
   delta: -1 | 1,
 ): void {
   const { doc, range } = store.getState();
-  const here = siblingsOf(doc, from);
+  let moving = from;
+  let anchor = from;
+  if (range !== null && rangeIds(doc, range).has(from)) {
+    if (range.first === from && range.last !== from) {
+      anchor = range.last;
+    } else if (range.last === from && range.first !== from) {
+      anchor = range.first;
+    } else if (range.first !== from) {
+      // Interior: keep the end opposite the key's direction, grow from the other one.
+      anchor = delta > 0 ? range.first : range.last;
+      moving = delta > 0 ? range.last : range.first;
+    }
+  }
+  const here = siblingsOf(doc, moving);
   const target = here?.list[here.index + delta];
   if (!target) return;
-  let anchor = from;
-  if (range?.first === from) anchor = range.last;
-  else if (range?.last === from) anchor = range.first;
   if (store.getState().selectRange(anchor, target.id)) {
     nodeElement(root, nodeIdOf(target.id))?.focus({ preventScroll: true });
   }
 }
 
+/** Focuses the header chip of section `sectionId` once the next layout has rendered. */
+function focusSection(root: HTMLElement | null, sectionId: string): void {
+  requestAnimationFrame(() => {
+    const header = nodeElement(root, `sectionHeader:${sectionId}`);
+    (header?.querySelector<HTMLElement>("button") ?? header)?.focus({ preventScroll: true });
+  });
+}
+
+/** The toast of a failed group: the overlapped section by its shown title, never by ID. */
+function groupFailure(doc: WorkflowDoc, err: FlowlineCommandError, labels: FlowlineLabels) {
+  const hint = err.error.hint as { section?: unknown } | undefined;
+  if (err.error.code !== "section.overlap" || typeof hint?.section !== "string") {
+    return labels.groupFailed;
+  }
+  const section = doc.sections?.find((s) => s.id === hint.section);
+  const title = typeof section?.title === "string" ? section.title.trim() : "";
+  return labels.sectionOverlap(title || labels.untitledSection);
+}
+
 /**
  * Wraps the run `first`…`last` in a new section titled `labels.defaultSectionTitle`, clears the
- * range and starts editing the section's title (`renamingSection`). A run that overlaps a
- * section is refused with the command's message as a toast, changing nothing.
+ * range, focuses the section's header and starts editing its title (`renamingSection`). A run
+ * that overlaps a section is refused with a `labels.sectionOverlap` toast, changing nothing.
  */
 export function groupSteps(
   store: EditorStore,
   ui: CanvasUiStore,
+  root: () => HTMLElement | null,
   first: string,
   last: string,
 ): void {
@@ -326,11 +364,12 @@ export function groupSteps(
     });
   } catch (err) {
     if (!(err instanceof FlowlineCommandError)) throw err;
-    ui.getState().toast(err.message);
+    ui.getState().toast(groupFailure(store.getState().doc, err, labels));
     return;
   }
-  // The section now stands for the run.
+  // The section now stands for the run; focus goes to it until its title input takes it.
   store.getState().clearRange();
+  focusSection(root(), id);
   ui.getState().startSectionRename(id);
 }
 
@@ -392,7 +431,7 @@ export function rangeActions(
       if (focused) focusNode(root(), focused);
     });
   return {
-    group: edit(() => groupSteps(store, ui, first, last)),
+    group: edit(() => groupSteps(store, ui, root, first, last)),
     remove: edit(() => {
       const n = count();
       const next = neighbourOf(store, first, last);
@@ -425,6 +464,10 @@ export function rangeActions(
     }),
     moveUp: move(-1),
     moveDown: move(1),
-    clear: () => s().clearRange(),
+    clear() {
+      s().clearRange();
+      // The Clear button goes away with the range: focus returns to the run.
+      focusNode(root(), first);
+    },
   };
 }
