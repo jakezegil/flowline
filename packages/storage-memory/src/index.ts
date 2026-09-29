@@ -507,9 +507,22 @@ export function createMemoryStorage(): StorageAdapter {
     async commitPoll(lease, patch, now) {
       const stored = polls.get(wfKey(lease.state.tenantId, lease.state.workflowId));
       if (!stored || stored.token === undefined || stored.token !== lease.token) return false;
+      // Validate and clone the cursor before touching any state, so an uncloneable cursor
+      // (e.g. a function) rejects without a partial write.
+      let cursor: unknown;
+      if (patch.cursor !== undefined) {
+        try {
+          cursor = clone(patch.cursor);
+        } catch (err) {
+          throw new FlowlineStorageError(
+            `Poll cursor is not cloneable: ${err instanceof Error ? err.message : String(err)}`,
+            { cause: err },
+          );
+        }
+      }
       const st = stored.state;
       if (patch.since !== undefined) st.since = patch.since;
-      if (patch.cursor !== undefined) st.cursor = clone(patch.cursor);
+      if (patch.cursor !== undefined) st.cursor = cursor;
       st.nextAt = patch.nextAt;
       if (patch.lastError === null) delete st.lastError;
       else if (patch.lastError !== undefined) st.lastError = patch.lastError;

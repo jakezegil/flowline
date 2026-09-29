@@ -296,9 +296,10 @@ export interface PollPatch {
  * - **Tenancy:** every method taking a `tenantId` only sees that tenant's data; a record of another
  *   tenant behaves exactly as if it did not exist. Run IDs are nevertheless globally unique.
  * - **Atomicity:** each method is one atomic operation. Guarded writes (`commit`, `renewLease`,
- *   `resumeByToken`, `resumeRun`, `updateRunUnleased`, `claimRun`) check their condition and write
- *   in the same transaction, so concurrent callers (in any number of processes) can never both
- *   succeed on the same precondition. A write that returns `false`/`null` changes nothing.
+ *   `resumeByToken`, `resumeRun`, `updateRunUnleased`, `claimRun`, `claimPoll`, `renewPollLease`,
+ *   `commitPoll`) check their condition and write in the same transaction, so concurrent callers
+ *   (in any number of processes) can never both succeed on the same precondition. A write that
+ *   returns `false`/`null` changes nothing.
  * - **Events:** storage assigns each appended event a unique `id` and a `seq` that is strictly
  *   increasing per run (starting at 1 for the run's first event), across all methods that append.
  * - **Times:** storage never reads a clock; `updatedAt` is set to the `now` argument of the write.

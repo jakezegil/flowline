@@ -1447,6 +1447,10 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         const second = await claimPollOrFail(s, 1001, "w2");
         expect(second.token).not.toBe(first.token);
         expect(second.state.leaseOwner).toBe("w2");
+        // The superseded lease is fenced: it can neither commit nor renew any more.
+        expect(await s.commitPoll(first, { nextAt: 1 }, 1002)).toBe(false);
+        expect(await s.renewPollLease(first, 1000, 1002)).toBe(false);
+        expect((await s.getPollState(T1, "wf"))?.leaseOwner).toBe("w2");
       });
 
       test("commitPoll: a stale token writes nothing, the current token applies the patch and releases the lease", async (s) => {
@@ -1482,7 +1486,6 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         );
         const won = results.filter((r): r is PollLease => r !== null);
         expect(won).toHaveLength(1);
-        expect(new Set(results.filter((r) => r !== null).map((r) => r?.token)).size).toBe(1);
       });
 
       test("cursor round-trips JSON and is replaced, not merged; lastError null clears; since unset leaves the value", async (s) => {
@@ -1509,6 +1512,11 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect(state?.cursor).toEqual([1, null, "x"]);
         expect(state?.lastError).toBeUndefined();
         expect(state?.nextAt).toBe(30);
+
+        // A top-level null cursor replaces the previous (non-null) cursor and round-trips.
+        const lease3 = await claimPollOrFail(s, 30, "w3");
+        expect(await s.commitPoll(lease3, { cursor: null, nextAt: 40 }, 35)).toBe(true);
+        expect((await s.getPollState(T1, "wf"))?.cursor).toBeNull();
       });
 
       test("renewPollLease: true while current, false after commit, kept current by keepLease", async (s) => {
@@ -1530,9 +1538,21 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
         expect((await s.getPollState(T1, "wf"))?.leaseOwner).toBeUndefined();
       });
 
-      test("tenant isolation: getPollState of the other tenant is null", async (s) => {
+      test("tenant isolation: getPollState of the other tenant is null, and claims are independent", async (s) => {
         await claimPollOrFail(s, 0);
         expect(await s.getPollState(T2, "wf")).toBeNull();
+        // T1's poll is leased, but T2's poll of the same workflow id is claimable independently.
+        const t2 = await s.claimPoll(T2, "wf", { workerId: "w2", leaseMs: 1000, now: 0 });
+        expect(t2?.state).toMatchObject({ tenantId: T2, workflowId: "wf" });
+      });
+
+      test("a cursor that serializes to no JSON at all (e.g. a bare function) rejects with FlowlineStorageError and changes nothing", async (s) => {
+        const lease = await claimPollOrFail(s, 0);
+        const before = await s.getPollState(T1, "wf");
+        await expect(s.commitPoll(lease, { cursor: () => "nope", nextAt: 10 }, 5)).rejects.toThrow(
+          FlowlineStorageError,
+        );
+        expect(await s.getPollState(T1, "wf")).toEqual(before);
       });
     });
   });

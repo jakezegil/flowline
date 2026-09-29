@@ -68,14 +68,23 @@ const json = (value: unknown): string | null =>
  * @throws {FlowlineStorageError} if `value` is not JSON-serializable (e.g. contains a `BigInt`).
  */
 function jsonOrThrow(value: unknown): string {
+  let json: string | undefined;
   try {
-    return JSON.stringify(value) as string;
+    json = JSON.stringify(value);
   } catch (err) {
     throw new FlowlineStorageError(
       `Postgres cannot store this value: it is not JSON-serializable (${err instanceof Error ? err.message : String(err)})`,
       { cause: err },
     );
   }
+  // JSON.stringify returns undefined (rather than throwing) for a top-level function, symbol, or
+  // undefined — none of which are valid JSON.
+  if (json === undefined) {
+    throw new FlowlineStorageError(
+      "Postgres cannot store this value: it does not serialize to JSON (e.g. a function or symbol)",
+    );
+  }
+  return json;
 }
 
 /** `bigint` columns arrive as strings from `pg`; normalise every numeric column to `number`. */
