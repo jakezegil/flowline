@@ -1,6 +1,18 @@
 /** Package version. */
 export const VERSION = "0.1.0";
 
+export { cutString, formatCall, resultSize, stepLine } from "./agent/format";
+export { outline, overview } from "./agent/outline";
+export type {
+  FollowUp,
+  Include,
+  Omission,
+  OutlineResult,
+  ReadArgs,
+  ReadOptions,
+  ReadToolName,
+  Where,
+} from "./agent/read-types";
 export {
   ANNOTATION_COLORS,
   isAnnotationColor,
