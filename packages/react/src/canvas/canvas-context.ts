@@ -86,6 +86,11 @@ export interface CanvasUiState {
    * into a new section.
    */
   renamingSection: string | null;
+  /**
+   * The note being edited inline: a step ID, or `"section:<id>"` for a section's note (see
+   * {@link sectionNoteKey}).
+   */
+  editingNote: string | null;
   toasts: Toast[];
   /**
    * A screen-reader-only message in the toast region's live region (e.g. "3 steps selected").
@@ -105,6 +110,9 @@ export interface CanvasUiActions {
   /** Starts editing a section's title (see {@link CanvasUiState.renamingSection}). */
   startSectionRename(sectionId: string): void;
   stopSectionRename(): void;
+  /** Starts editing a note inline (see {@link CanvasUiState.editingNote}). */
+  startNoteEdit(key: string): void;
+  stopNoteEdit(): void;
   /** Shows a toast for 5 seconds. */
   toast(message: string, action?: Toast["action"]): void;
   dismissToast(id: number): void;
@@ -114,6 +122,9 @@ export interface CanvasUiActions {
 
 /** A canvas' UI store. */
 export type CanvasUiStore = StoreApi<CanvasUiState & CanvasUiActions>;
+
+/** The {@link CanvasUiState.editingNote} key of section `sectionId`'s note. */
+export const sectionNoteKey = (sectionId: string): string => `section:${sectionId}`;
 
 /** How long a toast stays up. */
 export const TOAST_MS = 5000;
@@ -131,6 +142,7 @@ export function createCanvasUiStore(init: {
     picker: null,
     renaming: null,
     renamingSection: null,
+    editingNote: null,
     toasts: [],
     announcement: null,
     openPicker: (request, anchor) => set({ picker: { request, anchor } }),
@@ -144,6 +156,10 @@ export function createCanvasUiStore(init: {
     startSectionRename: (sectionId) => set({ renamingSection: sectionId }),
     stopSectionRename: () => {
       if (get().renamingSection !== null) set({ renamingSection: null });
+    },
+    startNoteEdit: (key) => set({ editingNote: key }),
+    stopNoteEdit: () => {
+      if (get().editingNote !== null) set({ editingNote: null });
     },
     toast(message, action) {
       const notice: FlowlineNotice = {

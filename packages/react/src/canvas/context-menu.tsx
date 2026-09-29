@@ -1,4 +1,10 @@
-import { branchesFor, type NodeManifest, type Step } from "@flowlinejs/core";
+import {
+  ANNOTATION_COLORS,
+  type AnnotationColor,
+  branchesFor,
+  type NodeManifest,
+  type Step,
+} from "@flowlinejs/core";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
@@ -10,13 +16,15 @@ import {
   EyeOff,
   Link2,
   MoreHorizontal,
+  Palette,
   Pencil,
   Replace,
+  StickyNote,
   Trash2,
 } from "lucide-react";
 import { type ComponentType, Fragment, type ReactNode, useContext, useMemo } from "react";
 import { useEditorStore, useEditorStoreApi } from "../hooks";
-import { rangeActions, type StepActions } from "./actions";
+import { noteActions, rangeActions, type StepActions } from "./actions";
 import {
   PortalContainerContext,
   RootElementContext,
@@ -29,13 +37,14 @@ import { rangeItems } from "./range-bar";
 const mod = () => (isMac() ? "⌘" : "Ctrl+");
 
 /** The Radix primitives a step menu is rendered with (context menu or dropdown). */
-interface MenuKit {
+export interface MenuKit {
   Item: ComponentType<{
     className?: string;
     disabled?: boolean;
     onSelect?(e: Event): void;
     children?: ReactNode;
     "data-danger"?: boolean;
+    "data-current"?: boolean;
   }>;
   Separator: ComponentType<{ className?: string }>;
   Sub: ComponentType<{ children?: ReactNode }>;
@@ -50,9 +59,11 @@ interface MenuKit {
 }
 
 const contextKit = ContextMenu as unknown as MenuKit;
-const dropdownKit = DropdownMenu as unknown as MenuKit;
+/** The dropdown menu primitives (the "…" menu, a section's header menu). */
+export const dropdownKit = DropdownMenu as unknown as MenuKit;
 
-function Row({
+/** A menu item's icon, label and shortcut. */
+export function Row({
   icon: Icon,
   label,
   kbd,
@@ -76,6 +87,75 @@ function Row({
   );
 }
 
+/**
+ * The Color submenu: a swatch and name per palette colour, then No color when `onNone` is given.
+ * `current` (the colour set now) is marked.
+ */
+export function ColorSubmenu({
+  kit: M,
+  current,
+  onPick,
+  onNone,
+}: {
+  kit: MenuKit;
+  current: unknown;
+  onPick(c: AnnotationColor): void;
+  onNone?(): void;
+}) {
+  const container = useContext(PortalContainerContext);
+  const l = useLabels();
+  return (
+    <M.Sub>
+      <M.SubTrigger className="fl-menu__item">
+        <Row icon={Palette} label={l.color} />
+        <ChevronRight size={14} className="fl-menu__chevron" aria-hidden />
+      </M.SubTrigger>
+      <M.Portal container={container}>
+        <M.SubContent className="fl-menu" sideOffset={4} collisionPadding={8}>
+          {ANNOTATION_COLORS.map((c) => (
+            <M.Item
+              key={c}
+              className="fl-menu__item"
+              data-current={current === c || undefined}
+              onSelect={() => onPick(c)}
+            >
+              <span className="fl-menu__icon" aria-hidden>
+                <span className="fl-menu__swatch" data-color={c} />
+              </span>
+              <span className="fl-menu__label">{l.colorNames[c]}</span>
+            </M.Item>
+          ))}
+          {onNone && (
+            <>
+              <M.Separator className="fl-menu__sep" />
+              <M.Item className="fl-menu__item" disabled={current === undefined} onSelect={onNone}>
+                <span className="fl-menu__icon" aria-hidden>
+                  <span className="fl-menu__swatch" data-none="" />
+                </span>
+                <span className="fl-menu__label">{l.noColor}</span>
+              </M.Item>
+            </>
+          )}
+        </M.SubContent>
+      </M.Portal>
+    </M.Sub>
+  );
+}
+
+/**
+ * `onCloseAutoFocus` of a menu whose items can open an inline editor: focus stays in the editor
+ * instead of going back to the menu's trigger.
+ */
+export function useKeepEditorFocus(): (e: Event) => void {
+  const ui = useCanvasUiApi();
+  return (e) => {
+    const s = ui.getState();
+    if (s.editingNote !== null || s.renamingSection !== null || s.renaming !== null) {
+      e.preventDefault();
+    }
+  };
+}
+
 /** Menu entries of a step, shared by its right-click menu and its "…" button. */
 function StepMenuItems({
   kit: M,
@@ -95,6 +175,11 @@ function StepMenuItems({
   const branches = manifest && loopBody === undefined ? branchesFor(manifest, step) : [];
   const m = mod();
   const l = useLabels();
+  const store = useEditorStoreApi();
+  const ui = useCanvasUiApi();
+  const root = useContext(RootElementContext);
+  const notes = useMemo(() => noteActions(store, ui, root, step.id), [store, ui, root, step.id]);
+  const hasNote = typeof step.note === "string" && step.note !== "";
   return (
     <>
       <M.Item className="fl-menu__item" onSelect={actions.rename}>
@@ -116,6 +201,27 @@ function StepMenuItems({
           <Row icon={EyeOff} label={l.disable} />
         )}
       </M.Item>
+      <M.Separator className="fl-menu__sep" />
+      {hasNote ? (
+        <>
+          <M.Item className="fl-menu__item" onSelect={notes.edit}>
+            <Row icon={StickyNote} label={l.editNote} />
+          </M.Item>
+          <M.Item className="fl-menu__item" onSelect={notes.remove}>
+            <Row icon={Trash2} label={l.removeNote} />
+          </M.Item>
+        </>
+      ) : (
+        <M.Item className="fl-menu__item" onSelect={notes.edit}>
+          <Row icon={StickyNote} label={l.addNote} />
+        </M.Item>
+      )}
+      <ColorSubmenu
+        kit={M}
+        current={step.color}
+        onPick={(c) => store.getState().setColor(step.id, c)}
+        onNone={() => store.getState().setColor(step.id, null)}
+      />
       <M.Separator className="fl-menu__sep" />
       <M.Item className="fl-menu__item" onSelect={actions.copy}>
         <Row icon={Copy} label={l.copy} kbd={`${m}C`} />
@@ -207,6 +313,7 @@ export function StepContextMenu({
 }: StepMenuProps & { children: ReactNode; inRange?: boolean }) {
   const container = useContext(PortalContainerContext);
   const labels = useLabels();
+  const keepEditorFocus = useKeepEditorFocus();
   return (
     <ContextMenu.Root
       modal={false}
@@ -218,6 +325,7 @@ export function StepContextMenu({
           className="fl-menu"
           collisionPadding={8}
           aria-label={inRange ? labels.rangeActions : "Step actions"}
+          onCloseAutoFocus={keepEditorFocus}
         >
           {inRange ? (
             <RangeMenuItems kit={contextKit} />
@@ -235,6 +343,7 @@ export function StepKebabMenu(props: StepMenuProps & { name: string }) {
   const container = useContext(PortalContainerContext);
   const labels = useLabels();
   const { name, ...rest } = props;
+  const keepEditorFocus = useKeepEditorFocus();
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
@@ -256,6 +365,7 @@ export function StepKebabMenu(props: StepMenuProps & { name: string }) {
           sideOffset={6}
           collisionPadding={8}
           onClick={(e) => e.stopPropagation()}
+          onCloseAutoFocus={keepEditorFocus}
         >
           <StepMenuItems kit={dropdownKit} {...rest} />
         </DropdownMenu.Content>

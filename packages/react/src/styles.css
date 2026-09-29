@@ -1858,6 +1858,32 @@
   .fl-issues:hover {
     border-color: currentColor;
   }
+  .fl-issues-group {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 4px;
+  }
+  /* The Fix next to the pill, for an annotation issue with a one-click repair. */
+  .fl-issues-fix {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 9px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fl-text);
+    white-space: nowrap;
+    background: var(--fl-surface);
+    border: 1px solid var(--fl-border);
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .fl-issues-fix:hover {
+    border-color: var(--fl-accent);
+  }
 
   /* body and side panel */
   .fl-editor__body {
@@ -4196,6 +4222,119 @@
   .fl-section-chip__note::before {
     content: "·";
     margin-right: 7px;
+  }
+  /* A section with an issue: a warning mark after the title (its menu offers Fix). */
+  .fl-section-chip__warn {
+    display: inline-flex;
+    flex: none;
+    color: var(--fl-warning);
+  }
+  .fl-section-head {
+    position: relative;
+  }
+  /* The inline title field, in the chip's place. */
+  .fl-section-title-input {
+    width: 180px;
+    max-width: 100%;
+    height: 22px;
+    margin-left: -6px;
+    padding: 0 6px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fl-text);
+    background: var(--fl-surface);
+    border: 1px solid var(--fl-accent);
+    border-radius: 6px;
+    outline: none;
+    box-shadow: 0 0 0 3px var(--fl-ring);
+    pointer-events: auto;
+  }
+  /* A section note's editor, opening below the chip. */
+  .fl-section-note {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: -6px;
+    width: 240px;
+    height: 96px;
+    padding: 6px;
+    background: var(--fl-a-bg);
+    border: 1px solid color-mix(in srgb, var(--fl-a-border) 55%, transparent);
+    border-radius: var(--fl-radius);
+    box-shadow: var(--fl-shadow-sm);
+    pointer-events: auto;
+  }
+  /* The inline note editor (step notes and section notes). */
+  .fl-note-editor {
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 2px 4px;
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--fl-text);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    outline: none;
+    resize: none;
+  }
+  .fl-note-editor:focus-visible,
+  .fl-note-editor:focus {
+    border-color: var(--fl-accent);
+    box-shadow: 0 0 0 3px var(--fl-ring);
+  }
+  .fl-note[data-editing] {
+    padding: 4px;
+  }
+  .fl-note[data-editable] {
+    cursor: text;
+  }
+  /* Shorten on a note over the limit. */
+  .fl-note__shorten {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    height: 20px;
+    padding: 0 7px;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fl-text);
+    background: var(--fl-surface);
+    border: 1px solid var(--fl-warning);
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .fl-note__shorten:hover {
+    background: color-mix(in srgb, var(--fl-warning) 12%, var(--fl-surface));
+  }
+  .fl-note__shorten:focus-visible {
+    outline: 2px solid var(--fl-accent);
+    outline-offset: 2px;
+  }
+  /* A colour swatch in the Color submenu; "No color" is an outlined, struck-through dot. */
+  .fl-menu__swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    background: var(--fl-a-bg);
+    border: 1.5px solid var(--fl-a-border);
+    border-radius: 999px;
+  }
+  .fl-menu__swatch[data-none] {
+    background: linear-gradient(
+      135deg,
+      transparent 45%,
+      var(--fl-text-muted) 45%,
+      var(--fl-text-muted) 55%,
+      transparent 55%
+    );
+    border-color: var(--fl-text-muted);
+  }
+  .fl-menu__item[data-current] .fl-menu__label {
+    font-weight: 600;
   }
 
   /* A sticky note, pinned right of its step card. */

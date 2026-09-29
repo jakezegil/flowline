@@ -6,10 +6,13 @@
  */
 
 import {
+  type AnnotationColor,
+  annotationRepairs,
   branchesFor,
   branchList,
   FlowlineCommandError,
   findStep,
+  type Issue,
   type Manifest,
   type NodeManifest,
   type Step,
@@ -18,7 +21,7 @@ import {
 } from "@flowlinejs/core";
 import type { FlowlineLabels } from "../labels";
 import { type EditorStore, TRIGGER_KEY } from "../store/editor-store";
-import type { CanvasUiStore } from "./canvas-context";
+import { type CanvasUiStore, sectionNoteKey } from "./canvas-context";
 
 /** The DOM element of a canvas node (`"trigger"`, `"step:<id>"`, …) inside `root`. */
 export function nodeElement(root: HTMLElement | null, nodeId: string): HTMLElement | null {
@@ -328,7 +331,9 @@ export function extendRange(
 function focusSection(root: HTMLElement | null, sectionId: string): void {
   requestAnimationFrame(() => {
     const header = nodeElement(root, `sectionHeader:${sectionId}`);
-    (header?.querySelector<HTMLElement>("button") ?? header)?.focus({ preventScroll: true });
+    // The title input when it is open (a new section's), so it keeps focus; else the chip.
+    const target = header?.querySelector<HTMLElement>("input, button") ?? header;
+    target?.focus({ preventScroll: true });
   });
 }
 
@@ -468,6 +473,154 @@ export function rangeActions(
       s().clearRange();
       // The Clear button goes away with the range: focus returns to the run.
       focusNode(root(), first);
+    },
+  };
+}
+
+/**
+ * Applies `annotationRepairs(doc, issue)` as one undo step; returns false when there is no
+ * repair (another kind of issue, a stale one, or a read-only store).
+ */
+export function repairIssue(store: EditorStore, issue: Issue): boolean {
+  const { doc, readOnly } = store.getState();
+  if (readOnly) return false;
+  const commands = annotationRepairs(doc, issue);
+  if (commands.length === 0) return false;
+  return store.getState().apply(commands).ok;
+}
+
+/**
+ * The first issue of section `sectionId` (by its `sectionId`) that `annotationRepairs` can fix:
+ * what its header chip's Fix applies.
+ */
+export function sectionRepair(
+  doc: WorkflowDoc,
+  issues: readonly Issue[],
+  sectionId: string,
+): Issue | undefined {
+  return issues.find((i) => i.sectionId === sectionId && annotationRepairs(doc, i).length > 0);
+}
+
+/**
+ * The `note.tooLong` issue of step `stepId`'s own note. A section note's issue also carries its
+ * first step's ID, so it is told apart by its `sectionId`.
+ */
+export function tooLongNote(issues: readonly Issue[], stepId: string): Issue | undefined {
+  return issues.find(
+    (i) => i.code === "note.tooLong" && i.sectionId === undefined && i.stepId === stepId,
+  );
+}
+
+/** The shown title of section `sectionId`: its own, else the `untitledSection` label. */
+function shownTitle(doc: WorkflowDoc, sectionId: string, labels: FlowlineLabels): string {
+  const section = doc.sections?.find((x) => x?.id === sectionId);
+  const title = typeof section?.title === "string" ? section.title.trim() : "";
+  return title || labels.untitledSection;
+}
+
+/** The actions of a section's header chip menu. */
+export interface SectionActions {
+  /** Edits the title inline (see `renamingSection`). */
+  rename(): void;
+  /** Sets the section's colour. */
+  setColor(c: AnnotationColor): void;
+  /** Edits the section's note inline (see `editingNote`). */
+  editNote(): void;
+  /** Removes the section, keeping its steps, with an undo toast (`sectionDeleted`). */
+  ungroup(): void;
+  /** Applies the repair of the section's first fixable issue (see {@link repairIssue}). */
+  repair(): void;
+}
+
+/**
+ * Binds the header chip actions of section `sectionId` (its ID in the doc, not its canvas node
+ * ID). Every action is a no-op on a read-only store.
+ */
+export function sectionActions(
+  store: EditorStore,
+  ui: CanvasUiStore,
+  root: () => HTMLElement | null,
+  sectionId: string,
+): SectionActions {
+  const s = () => store.getState();
+  const editable = () => !s().readOnly;
+  return {
+    rename() {
+      if (editable()) ui.getState().startSectionRename(sectionId);
+    },
+    setColor(color) {
+      if (editable()) s().updateSection(sectionId, { color });
+    },
+    editNote() {
+      if (editable()) ui.getState().startNoteEdit(sectionNoteKey(sectionId));
+    },
+    ungroup() {
+      if (!editable()) return;
+      const { labels } = ui.getState();
+      const { doc } = s();
+      const title = shownTitle(doc, sectionId, labels);
+      const first = doc.sections?.find((x) => x?.id === sectionId)?.first;
+      s().removeSection(sectionId);
+      // The chip goes away with the section: focus goes to the steps it grouped.
+      if (typeof first === "string" && findStep(s().doc, first)) focusNode(root(), first);
+      ui.getState().toast(labels.sectionDeleted(title), {
+        label: labels.undo,
+        edits: true,
+        run: () => {
+          if (!s().readOnly) s().undo();
+        },
+      });
+    },
+    repair() {
+      if (!editable()) return;
+      const issue = sectionRepair(s().doc, s().issues, sectionId);
+      if (issue) repairIssue(store, issue);
+    },
+  };
+}
+
+/** The actions on a step's note. */
+export interface NoteActions {
+  /** Opens the note's inline editor (a new note when the step has none). */
+  edit(): void;
+  /** Removes the note, with an undo toast (`noteDeleted`). */
+  remove(): void;
+  /** Cuts a note over `NOTE_MAX_CHARS` down to that length, as one undo step. */
+  shorten(): void;
+}
+
+/** Binds the note actions of step `stepId`. Every action is a no-op on a read-only store. */
+export function noteActions(
+  store: EditorStore,
+  ui: CanvasUiStore,
+  root: () => HTMLElement | null,
+  stepId: string,
+): NoteActions {
+  const s = () => store.getState();
+  const editable = () => !s().readOnly;
+  return {
+    edit() {
+      if (editable()) ui.getState().startNoteEdit(stepId);
+    },
+    remove() {
+      if (!editable()) return;
+      const before = s().doc;
+      s().setNote(stepId, null);
+      if (s().doc === before) return;
+      focusNode(root(), stepId);
+      const { labels } = ui.getState();
+      ui.getState().toast(labels.noteDeleted, {
+        label: labels.undo,
+        edits: true,
+        run: () => {
+          if (!s().readOnly) s().undo();
+        },
+      });
+    },
+    shorten() {
+      if (!editable()) return;
+      const issue = tooLongNote(s().issues, stepId);
+      if (issue) repairIssue(store, issue);
     },
   };
 }

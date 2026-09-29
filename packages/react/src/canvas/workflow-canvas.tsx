@@ -1,4 +1,4 @@
-import { branchesFor, type Manifest, type WorkflowDoc } from "@flowlinejs/core";
+import { branchesFor, type Manifest, updateStep, type WorkflowDoc } from "@flowlinejs/core";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import {
   type AriaLabelConfig,
@@ -48,6 +48,8 @@ import {
   PortalContainerContext,
   RootElementContext,
   type RunOverlay,
+  sectionNoteKey,
+  useCanvasUi,
   useCanvasUiApi,
   useLabels,
 } from "./canvas-context";
@@ -177,6 +179,7 @@ function sectionNodes(
   readOnly: boolean,
   headerLabel: string,
   edgeX: number | undefined,
+  editing: boolean,
 ): [Node, Node] {
   const data = { sectionId: ls.sectionId, color: ls.color };
   const common = { draggable: false, connectable: false, deletable: false, selectable: false };
@@ -210,6 +213,8 @@ function sectionNodes(
       height: Math.min(CHIP_H, SECTION_HEADER_H - CHIP_TOP),
       data,
       focusable: readOnly,
+      // Its note editor opens below the chip, over the cards.
+      ...(editing ? { zIndex: 1000 } : {}),
       style: { pointerEvents: "none" },
       ...(readOnly ? { ariaLabel: headerLabel } : {}),
     },
@@ -232,6 +237,16 @@ function noteNode(ln: LayoutNote, ariaLabel: string): Node {
     focusable: true,
     ariaLabel,
   };
+}
+
+/**
+ * The doc to lay out: `doc`, plus a placeholder note on step `draft` (a step whose new note is
+ * being written), so the layout makes room for its editor.
+ */
+function withDraftNote(doc: WorkflowDoc, draft: string | null): WorkflowDoc {
+  const step = draft === null ? undefined : stepIndex(doc).get(draft);
+  if (!step || (typeof step.note === "string" && step.note !== "")) return doc;
+  return updateStep(doc, step.id, (s) => ({ ...s, note: " " }));
 }
 
 /** A region's rectangle, for routing edges around it. */
@@ -364,7 +379,9 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
   const flowStore = useStoreApi();
   const ariaLabelConfig = useMemo(() => ariaLabels(labels, readOnly), [labels, readOnly]);
 
-  const layout = useMemo(() => layoutTree(doc, manifest), [doc, manifest]);
+  const editingNote = useCanvasUi((s) => (readOnly ? null : s.editingNote));
+  const layoutDoc = useMemo(() => withDraftNote(doc, editingNote), [doc, editingNote]);
+  const layout = useMemo(() => layoutTree(layoutDoc, manifest), [layoutDoc, manifest]);
   layoutRef.current = layout;
 
   const label = useCallback(
@@ -405,6 +422,7 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
         readOnly,
         labels.sectionHeader(sectionTitle(section, labels.untitledSection), note),
         firstCard ? firstCard.x + firstCard.w / 2 : undefined,
+        editingNote === sectionNoteKey(ls.sectionId),
       );
       out.push(region);
       const first = `step:${section?.first ?? ""}`;
@@ -418,9 +436,10 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
       const note = notes.get(ln.id);
       const text = note ? steps.get(note.stepId)?.note : undefined;
       if (note && text) out.push(noteNode(note, labels.noteLabel(excerpt(text, NOTE_NAME_MAX))));
+      else if (note && editingNote === note.stepId) out.push(noteNode(note, labels.editNote));
     }
     return out;
-  }, [layout, selection, label, doc, readOnly, labels]);
+  }, [layout, selection, label, doc, readOnly, labels, editingNote]);
   const nodes = useStable(rawNodes, sameNode);
   const rawEdges = useMemo(
     () => toFlowEdges(doc, manifest, layout.nodes, layout.edges, layout.sections, labels.eachItem),
@@ -604,7 +623,9 @@ export function WorkflowCanvas(props: {
   useLayoutEffect(() => (readOnlyProp ? holdReadOnly(store) : undefined), [store, readOnlyProp]);
   useEffect(() => {
     ui.setState(
-      readOnly ? { overlay, picker: null, renaming: null, renamingSection: null } : { overlay },
+      readOnly
+        ? { overlay, picker: null, renaming: null, renamingSection: null, editingNote: null }
+        : { overlay },
     );
   }, [ui, readOnly, overlay]);
   useEffect(() => {

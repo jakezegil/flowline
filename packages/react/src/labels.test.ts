@@ -165,3 +165,27 @@ describe("range labels", () => {
     expect(resolveLabels({ groupIntoSection: "Grouper" }).groupIntoSection).toBe("Grouper");
   });
 });
+
+describe("annotation menu labels", () => {
+  it("names the menu items, toasts and fields", () => {
+    expect(defaultLabels.ungroup).toBe("Ungroup");
+    expect(defaultLabels.renameSection).toBe("Rename");
+    expect(defaultLabels.sectionNote).toBe("Note");
+    expect(defaultLabels.color).toBe("Color");
+    expect(defaultLabels.noColor).toBe("No color");
+    expect(defaultLabels.addNote).toBe("Add note");
+    expect(defaultLabels.editNote).toBe("Edit note");
+    expect(defaultLabels.removeNote).toBe("Remove note");
+    expect(defaultLabels.noteDeleted).toBe("Note removed");
+    expect(defaultLabels.fixIssue).toBe("Fix");
+    expect(defaultLabels.shortenNote).toBe("Shorten");
+    expect(defaultLabels.sectionTitleInput).toBe("Section title");
+    expect(defaultLabels.sectionDeleted("Intro")).toBe("Removed section “Intro”");
+    expect(defaultLabels.sectionDeleted(" ")).toBe("Removed section “Untitled section”");
+    expect(defaultLabels.sectionMenu("Intro")).toBe("Section actions: Intro");
+  });
+
+  it("can be overridden", () => {
+    expect(resolveLabels({ ungroup: "Dégrouper" }).ungroup).toBe("Dégrouper");
+  });
+});

@@ -80,6 +80,34 @@ export interface FlowlineLabels {
   noteLabel(text: string): string;
   /** Accessible name of a step card with a note: "<name>. Note: <first 120 chars>". */
   stepWithNote(name: string, note: string): string;
+  /** A section menu's Ungroup: removes the section, keeping its steps. */
+  ungroup: string;
+  /** A section menu's Rename: edits its title inline. */
+  renameSection: string;
+  /** A section menu's Note item, and the name of the section note's text field. */
+  sectionNote: string;
+  /** Accessible name of a section's inline title field. */
+  sectionTitleInput: string;
+  /** The Color submenu of step and section menus. */
+  color: string;
+  /** The Color submenu's last item: removes a step's colour. */
+  noColor: string;
+  /** A step menu's Add note (the step has none). */
+  addNote: string;
+  /** A step menu's Edit note, and the name of a step note's text field. */
+  editNote: string;
+  /** A step menu's Remove note. */
+  removeNote: string;
+  /** Toast after removing a section (its shown title); its steps stay. */
+  sectionDeleted(title: string): string;
+  /** Toast after removing a step's note. */
+  noteDeleted: string;
+  /** Applies the one-click repair of an annotation issue (issues pill, section menu). */
+  fixIssue: string;
+  /** Cuts a note that is too long down to the maximum length. */
+  shortenNote: string;
+  /** Accessible name of a section's header menu. */
+  sectionMenu(title: string): string;
 
   // Ranges: a run of steps in one list, selected with shift-click or ⇧↑/⇧↓
   /** The range's "Group into section" action (⌘G). */
@@ -701,6 +729,20 @@ export const defaultLabels: FlowlineLabels = {
   },
   noteLabel: (text) => `Note: ${text}`,
   stepWithNote: (name, note) => `${name}. Note: ${note.slice(0, 120)}`,
+  ungroup: "Ungroup",
+  renameSection: "Rename",
+  sectionNote: "Note",
+  sectionTitleInput: "Section title",
+  color: "Color",
+  noColor: "No color",
+  addNote: "Add note",
+  editNote: "Edit note",
+  removeNote: "Remove note",
+  sectionDeleted: (title) => `Removed section “${title.trim() || untitled}”`,
+  noteDeleted: "Note removed",
+  fixIssue: "Fix",
+  shortenNote: "Shorten",
+  sectionMenu: (title) => `Section actions: ${title.trim() || untitled}`,
   groupIntoSection: "Group into section",
   defaultSectionTitle: "Section",
   rangeSelected: (n) => `${n} ${n === 1 ? "step" : "steps"} selected`,

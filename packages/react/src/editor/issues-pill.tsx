@@ -1,30 +1,67 @@
-import { type Issue, type WorkflowDoc, walkSteps } from "@flowlinejs/core";
-import { Plus, TriangleAlert } from "lucide-react";
+import {
+  annotationRepairs,
+  findStep,
+  type Issue,
+  type WorkflowDoc,
+  walkSteps,
+} from "@flowlinejs/core";
+import { Plus, TriangleAlert, Wrench } from "lucide-react";
 import { type JSX, useMemo, useState } from "react";
-import { useEditorStore, useIssues } from "../hooks";
+import { repairIssue } from "../canvas/actions";
+import { useEditorStore, useEditorStoreApi, useIssues } from "../hooks";
 import { useFlowlineAppearance } from "../provider";
 import { TRIGGER_KEY } from "../store/editor-store";
 import { Hint } from "../ui/primitives";
 
-/** Selection keys with issues, in tree order (trigger first), each with its first issue. */
+/** Prefix of an {@link issueTargets} key that names a section rather than a step. */
+const SECTION_PREFIX = "section:";
+
+/** Whether an {@link issueTargets} key names a section (not a selectable step). */
+export const isSectionTarget = (key: string): boolean => key.startsWith(SECTION_PREFIX);
+
+/**
+ * The target key of an issue: its step, else its section (a section issue whose first step is
+ * missing), else the trigger.
+ */
+function targetKey(issue: Issue): string {
+  if (issue.stepId !== undefined) return issue.stepId;
+  if (issue.sectionId !== undefined) return `${SECTION_PREFIX}${issue.sectionId}`;
+  return TRIGGER_KEY;
+}
+
+/**
+ * Keys with issues, in tree order (trigger first), each with its first issue. A key is a
+ * selection key, or `"section:<id>"` for a section issue that names no existing step (placed
+ * just before its last step when that one exists, else last).
+ */
 export function issueTargets(doc: WorkflowDoc, issues: Issue[]): { key: string; issue: Issue }[] {
   const first = new Map<string, Issue>();
   for (const issue of issues) {
-    const key = issue.stepId ?? TRIGGER_KEY;
+    const key = targetKey(issue);
     const had = first.get(key);
     // Errors take precedence over warnings as the step's headline issue.
     if (!had || (had.severity !== "error" && issue.severity === "error")) first.set(key, issue);
   }
+  // Section keys go before their section's last step.
+  const beforeStep = new Map<string, string[]>();
+  for (const s of Array.isArray(doc.sections) ? doc.sections : []) {
+    const key = `${SECTION_PREFIX}${String(s?.id)}`;
+    if (!first.has(key) || typeof s?.last !== "string") continue;
+    beforeStep.set(s.last, [...(beforeStep.get(s.last) ?? []), key]);
+  }
   const order: string[] = [TRIGGER_KEY];
   walkSteps(doc, (s) => {
-    order.push(s.id);
+    order.push(...(beforeStep.get(s.id) ?? []), s.id);
   });
+  const seen = new Set<string>();
   const out = order.flatMap((key) => {
     const issue = first.get(key);
-    return issue ? [{ key, issue }] : [];
+    if (!issue || seen.has(key)) return [];
+    seen.add(key);
+    return [{ key, issue }];
   });
-  // Issues of steps that no longer exist in the doc (shouldn't happen) go last.
-  for (const [key, issue] of first) if (!order.includes(key)) out.push({ key, issue });
+  // Issues of steps that no longer exist in the doc, and sections with no step left, go last.
+  for (const [key, issue] of first) if (!seen.has(key)) out.push({ key, issue });
   return out;
 }
 
@@ -36,15 +73,28 @@ const PULSE_MS = 1600;
  * click selects the next step with an issue (in tree order, wrapping), which the canvas pans to.
  * A workflow with no steps (and nothing else wrong) reads "Add a first step" instead: a click
  * points out the "+" under the trigger and opens the step picker there.
+ *
+ * An annotation issue with a one-click repair (`section.broken`, `section.overlap`,
+ * `note.tooLong`) gets a Fix button next to the pill: for the issue shown while cycling (or the
+ * selected step's), else for the first fixable issue. It is the only way to fix a broken section
+ * that has no region to click. Hidden on a read-only store.
  */
 export function IssuesPill(): JSX.Element | null {
   const { labels } = useFlowlineAppearance();
   const { issues, errors } = useIssues();
+  const store = useEditorStoreApi();
   const doc = useEditorStore((s) => s.doc);
+  const readOnly = useEditorStore((s) => s.readOnly);
   const selection = useEditorStore((s) => s.selection);
   const select = useEditorStore((s) => s.select);
   const targets = useMemo(() => issueTargets(doc, issues), [doc, issues]);
+  const fixable = useMemo(
+    () => issues.filter((i) => annotationRepairs(doc, i).length > 0),
+    [doc, issues],
+  );
   const [cycling, setCycling] = useState(false);
+  // The section target last cycled to (it can't be the selection).
+  const [sectionCursor, setSectionCursor] = useState<string | null>(null);
   if (issues.length === 0) return null;
 
   if (issues.length === 1 && issues[0]?.code === "doc.empty") {
@@ -72,28 +122,72 @@ export function IssuesPill(): JSX.Element | null {
     );
   }
 
-  const at = targets.findIndex((t) => t.key === selection);
+  const cursor = cycling && sectionCursor !== null ? sectionCursor : selection;
+  const at = targets.findIndex((t) => t.key === cursor);
   const current = cycling && at !== -1 ? targets[at] : undefined;
   const hint = current
     ? `${labels.issuePosition(at + 1, targets.length)}: ${current.issue.message}`
     : labels.showNextIssue;
+  // The Fix on offer: the current target's (else the selection's) fixable issue; when not
+  // cycling and there is none, the first fixable one.
+  const focusKey = current?.key ?? selection;
+  const fix = readOnly
+    ? undefined
+    : (fixable.find((i) => targetKey(i) === focusKey) ?? (cycling ? undefined : fixable[0]));
   return (
-    <Hint content={hint}>
-      <button
-        type="button"
-        className="fl-issues"
-        data-tone={errors > 0 ? "danger" : "warning"}
-        aria-description={labels.showNextIssue}
-        onClick={() => {
-          const next = targets[(at + 1) % targets.length];
-          if (next) select(next.key);
-          setCycling(true);
-        }}
-        onBlur={() => setCycling(false)}
-      >
-        <TriangleAlert size={13} strokeWidth={2.25} aria-hidden />
-        <span>{labels.issueCount(issues.length)}</span>
-      </button>
-    </Hint>
+    // biome-ignore lint/a11y/noStaticElementInteractions: groups the pill and its Fix, so cycling ends only when focus leaves both.
+    <span
+      className="fl-issues-group"
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setCycling(false);
+          setSectionCursor(null);
+        }
+      }}
+    >
+      <Hint content={hint}>
+        <button
+          type="button"
+          className="fl-issues"
+          data-tone={errors > 0 ? "danger" : "warning"}
+          aria-description={labels.showNextIssue}
+          onClick={() => {
+            const next = targets[(at + 1) % targets.length];
+            if (next) {
+              if (isSectionTarget(next.key)) {
+                setSectionCursor(next.key);
+                // A section with no first step: show where it was (its last step), if anywhere.
+                const id = next.key.slice(SECTION_PREFIX.length);
+                const last = doc.sections?.find((s) => s?.id === id)?.last;
+                if (typeof last === "string" && findStep(doc, last)) select(last);
+              } else {
+                setSectionCursor(null);
+                select(next.key);
+              }
+            }
+            setCycling(true);
+          }}
+        >
+          <TriangleAlert size={13} strokeWidth={2.25} aria-hidden />
+          <span>{labels.issueCount(issues.length)}</span>
+        </button>
+      </Hint>
+      {fix && (
+        <Hint content={fix.message}>
+          <button
+            type="button"
+            className="fl-issues-fix"
+            aria-description={fix.message}
+            onClick={() => {
+              repairIssue(store, fix);
+              setSectionCursor(null);
+            }}
+          >
+            <Wrench size={12} strokeWidth={2.25} aria-hidden />
+            <span>{labels.fixIssue}</span>
+          </button>
+        </Hint>
+      )}
+    </span>
   );
 }

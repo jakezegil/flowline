@@ -6,7 +6,7 @@ import { useEditorStore, useEditorStoreApi, useIssues, useShallow } from "../hoo
 import { useFlowline, useFlowlineAppearance } from "../provider";
 import { errorText, Hint, httpStatus, isNetworkError } from "../ui/primitives";
 import { useToast } from "../ui/toaster";
-import { IssuesPill, issueTargets } from "./issues-pill";
+import { IssuesPill, isSectionTarget, issueTargets } from "./issues-pill";
 import { manualFields, RunDialog } from "./run-dialog";
 
 /** Callbacks of the editor header's commands. */
@@ -176,7 +176,9 @@ export function EditorHeader({
   /** Selects the first step of `issues` that is in the doc, else of the client-side issues. */
   const showFirstIssue = (issues: Issue[]) => {
     const { doc, select, issues: local } = store.getState();
-    const first = issueTargets(doc, issues)[0] ?? issueTargets(doc, local)[0];
+    const selectable = (list: Issue[]) =>
+      issueTargets(doc, list).find((t) => !isSectionTarget(t.key));
+    const first = selectable(issues) ?? selectable(local);
     if (first) select(first.key);
   };
 
