@@ -41,7 +41,9 @@ async function main(): Promise<void> {
   const { app, engine } = await createMiniCrm({
     storage,
     publicUrl,
-    ...(fakeClock ? { clock: fakeClock.now, advanceClock: fakeClock.advance } : {}),
+    ...(fakeClock
+      ? { clock: fakeClock.now, advanceClock: fakeClock.advance, rewindClock: fakeClock.reset }
+      : {}),
   });
   // With the fake clock, sweep poll triggers every second: after an advance, the next sweep
   // (the route runs one too) sees the new time without waiting the default 15 s.

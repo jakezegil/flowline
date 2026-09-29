@@ -45,6 +45,11 @@ export interface MiniCrmOptions {
    */
   advanceClock?: (ms: number) => void;
   /**
+   * Moves the shared `clock` back to real time. When set (with `advanceClock`),
+   * `POST /api/demo/rewind` is served and calls it.
+   */
+  rewindClock?: () => void;
+  /**
    * Cancel the waiting and queued runs of `deal-stuck-in-stage` for a deal whose stage changes,
    * with reason "Stage changed". Default `true`. With `false`, such a run wakes up, sees the deal
    * moved on and stops by itself.
@@ -360,7 +365,7 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
   });
   // Recent trigger events (deduped and rejected deliveries, poll sweeps), newest first.
   app.get("/api/demo/trigger-events", (c) => c.json(triggerEvents));
-  const { advanceClock } = opts;
+  const { advanceClock, rewindClock } = opts;
   if (advanceClock) {
     // Demo time travel: "three days later" in one request. The poll triggers are swept right
     // away, so their runs exist when this answers; the worker wakes timers due by the new time.
@@ -370,6 +375,14 @@ export async function createMiniCrm(opts: MiniCrmOptions = {}): Promise<MiniCrm>
       await engine.tickPolls();
       return c.body(null, 204);
     });
+    if (rewindClock) {
+      // Back to real time. Poll triggers keep how far they swept, so they find nothing new until
+      // the clock passes that point again: rewind when done with time travel, not between steps.
+      app.post("/api/demo/rewind", (c) => {
+        rewindClock();
+        return c.body(null, 204);
+      });
+    }
   }
 
   app.all("/flowline/*", (c) => engine.handler(c.req.raw));

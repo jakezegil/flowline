@@ -8,6 +8,14 @@ test.beforeEach(async ({ request }) => {
   expect(res.status()).toBe(204);
 });
 
+// Back to real time for the specs that run after this one (their relative times read "just
+// now"), with fresh data stamped at it. Only here: rewinding between these tests would put the
+// stuck-deal poll ahead of the clock.
+test.afterAll(async ({ request }) => {
+  expect((await request.post("/api/demo/rewind")).status()).toBe(204);
+  expect((await request.post("/api/demo/reset")).status()).toBe(204);
+});
+
 /** Jump the server's fake clock ahead; the poll triggers are swept before this answers. */
 async function advance(request: APIRequestContext, ms: number): Promise<void> {
   const res = await request.post("/api/demo/advance", { data: { ms } });
@@ -41,6 +49,7 @@ function contactRow(page: Page, name: string) {
 }
 
 type StuckTrigger = { deal: { id: string; name: string } };
+type CallTrigger = { call: { id: string; source: "ai" | "voip" } };
 
 test("Any call ended: AI and VoIP calls each start a run, a redelivered call does not", async ({
   page,
@@ -50,26 +59,41 @@ test("Any call ended: AI and VoIP calls each start a run, a redelivered call doe
   await page.goto("/contacts");
   const grace = contactRow(page, "Grace Hopper");
 
-  const logged = page.waitForResponse(
-    (r) => r.url().endsWith("/api/calls") && r.request().method() === "POST",
-  );
-  await grace.getByRole("button", { name: /^Log AI call/ }).click();
-  const aiCall = (await (await logged).json()) as { id: string };
-  await expect(page.getByText("AI call with Grace Hopper logged")).toBeVisible();
+  const logCall = async (kind: "AI" | "VoIP"): Promise<string> => {
+    const logged = page.waitForResponse(
+      (r) => r.url().endsWith("/api/calls") && r.request().method() === "POST",
+    );
+    await grace.getByRole("button", { name: new RegExp(`^Log ${kind} call`) }).click();
+    const call = (await (await logged).json()) as { id: string };
+    await expect(page.getByText(`${kind} call with Grace Hopper logged`)).toBeVisible();
+    return call.id;
+  };
+  const aiCallId = await logCall("AI");
+  const voipCallId = await logCall("VoIP");
 
-  await grace.getByRole("button", { name: /^Log VoIP call/ }).click();
-  await expect(page.getByText("VoIP call with Grace Hopper logged")).toBeVisible();
+  // This test's runs: the ones whose trigger is one of the two calls just logged.
+  const ownRuns = async () =>
+    (await runsOf<CallTrigger>(request, "any-call-ended", since)).filter((r) =>
+      [aiCallId, voipCallId].includes(r.trigger.call.id),
+    );
+  let own: { run: RunSummary; trigger: CallTrigger }[] = [];
+  await expect(async () => {
+    own = await ownRuns();
+    expect(own.map((r) => r.trigger.call.source).sort()).toEqual(["ai", "voip"]);
+  }).toPass();
 
-  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Runs" }).click();
+  // Each shows in the run list as "Any call ended", started by its own event.
   const list = page.getByRole("complementary", { name: "Runs" });
-  const callRuns = list.getByRole("button", { name: /Any call ended/ });
-  await expect(callRuns).toHaveCount(2);
-  await expect(callRuns.filter({ hasText: "Event ai_call.ended" })).toHaveCount(1);
-  await expect(callRuns.filter({ hasText: "Event voip_call.ended" })).toHaveCount(1);
+  for (const { run, trigger } of own) {
+    await page.goto(`/runs/${run.id}`);
+    const row = list.locator('button[aria-current="true"]');
+    await expect(row).toContainText("Any call ended");
+    await expect(row).toContainText(`Event ${trigger.call.source}_call.ended`);
+  }
 
   // The phone system redelivers the AI call: same call ID, a new event.
   const again = await request.post("/api/calls", {
-    data: { id: aiCall.id, contactId: "c_1", kind: "ai", durationSec: 95 },
+    data: { id: aiCallId, contactId: "c_1", kind: "ai", durationSec: 95 },
   });
   expect(again.status()).toBe(200);
   const events = (await (await request.get("/api/demo/trigger-events")).json()) as {
@@ -79,12 +103,11 @@ test("Any call ended: AI and VoIP calls each start a run, a redelivered call doe
   expect(events).toContainEqual(
     expect.objectContaining({
       type: "trigger.deduped",
-      key: `event:any-call-ended:${aiCall.id}`,
+      key: `event:any-call-ended:${aiCallId}`,
     }),
   );
-  expect(await runsOf(request, "any-call-ended", since)).toHaveLength(2);
-  await page.reload();
-  await expect(callRuns).toHaveCount(2);
+  // Still just the two runs for these calls: the redelivery started none.
+  expect((await ownRuns()).map((r) => r.run.id).sort()).toEqual(own.map((r) => r.run.id).sort());
 });
 
 test("Deal stuck in stage: the sweep nudges the owner, and changing the stage cancels the waiting run", async ({

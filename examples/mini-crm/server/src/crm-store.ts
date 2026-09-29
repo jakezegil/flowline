@@ -4,8 +4,8 @@
  * database.
  *
  * The store knows nothing about Flowline. It reports changes (`contact.created`, `deal.updated`,
- * `ai_call.ended`, `voip_call.ended`) to the listener the app registers with {@link CrmStore.onEvent}, which turns them into
- * `engine.emit` calls.
+ * `ai_call.ended`, `voip_call.ended`) to the listener the app registers with
+ * {@link CrmStore.onEvent}, which turns them into `engine.emit` calls.
  *
  * @module
  */

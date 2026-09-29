@@ -94,14 +94,20 @@ adds `ms` to it and moves everything that reads the clock:
 - poll triggers. The route sweeps them before it answers, and the worker also sweeps them every
   second while the fake clock is on.
 
+`POST /api/demo/rewind` sets the clock back to real time. A reset leaves the clock alone,
+because a poll trigger remembers how far it has swept: after a rewind it finds nothing new until
+the clock passes that point again. So rewind when you are done with time travel. The e2e
+triggers spec does, so the specs after it see real time.
+
 ```sh
 MINI_CRM_FAKE_CLOCK=1 pnpm --filter @flowlinejs/example-mini-crm start
 curl -X POST localhost:8787/api/demo/advance -H 'content-type: application/json' \
   -d '{"ms":259200000}'   # 3 days
 ```
 
-Without the fake clock the route answers 404. In code, pass `advanceClock` to `createMiniCrm`
-together with the `clock` it moves (`createFakeClock()` from `server/src/fake-clock.ts`).
+Without the fake clock both routes answer 404. In code, pass `advanceClock` and `rewindClock` to
+`createMiniCrm` together with the `clock` they move (`createFakeClock()` from
+`server/src/fake-clock.ts`).
 
 ### Storage and restarts
 
@@ -199,6 +205,7 @@ statuses:
 | `POST /api/demo/reset` | 204. Cancels the tenant's unfinished runs, then restores the CRM seed data and empties the calls, outbox and approvals. Workflows are kept |
 | `GET /api/demo/trigger-events` | The last 100 trigger events, newest first: deliveries that started no run (`trigger.deduped`, `trigger.rejected`) and poll sweeps (`poll.completed`, `poll.failed`) |
 | `POST /api/demo/advance` `{ ms }` | 204. Only with the [fake clock](#fake-clock), else 404. Moves the clock forward by `ms`, then sweeps the poll triggers |
+| `POST /api/demo/rewind` | 204. Only with the [fake clock](#fake-clock), else 404. Sets the clock back to real time |
 | `/flowline/*` | The Flowline engine: the editor API (`/flowline/manifest`, `/flowline/workflows`, `/flowline/runs`, ...), webhooks and callbacks |
 
 To find the runs a CRM change started, list them with `GET /flowline/runs?workflowId=...`.

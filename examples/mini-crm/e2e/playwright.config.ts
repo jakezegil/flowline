@@ -7,7 +7,7 @@ import { defineConfig, devices } from "playwright/test";
  * so a `pnpm dev` on the default ports doesn't interfere. Engine storage is in memory, so every
  * suite run starts from the seed workflows, and each test resets the CRM data first. The server
  * runs on the fake clock (`MINI_CRM_FAKE_CLOCK=1`), so a test can jump days ahead with
- * `POST /api/demo/advance`.
+ * `POST /api/demo/advance`; a spec that does rewinds it when done (`POST /api/demo/rewind`).
  */
 const SERVER_PORT = 8921;
 const WEB_PORT = 5421;

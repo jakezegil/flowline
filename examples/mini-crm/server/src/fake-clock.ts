@@ -5,12 +5,14 @@
  * @module
  */
 
-/** A clock that runs with real time plus an offset that only grows. */
+/** A clock that runs with real time plus an offset that each advance grows. */
 export interface FakeClock {
   /** The current time in epoch ms: real time plus every advance so far. */
   now(): number;
   /** Move the clock forward by `ms` (a positive whole number). */
   advance(ms: number): void;
+  /** Go back to real time (offset 0). */
+  reset(): void;
 }
 
 /**
@@ -28,6 +30,9 @@ export function createFakeClock(realNow: () => number = Date.now): FakeClock {
         throw new RangeError("advance needs a positive whole number of ms");
       }
       offset += ms;
+    },
+    reset() {
+      offset = 0;
     },
   };
 }

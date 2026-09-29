@@ -639,6 +639,23 @@ describe("any call ended", () => {
     ]);
   });
 
+  it("keeps the newest 100 trigger events", async () => {
+    const callA = { id: "call_a", contactId: "c_1", kind: "ai", durationSec: 60 };
+    const callB = { id: "call_b", contactId: "c_1", kind: "ai", durationSec: 60 };
+    await logCall(callA);
+    await logCall(callB);
+    await logCall(callA); // Deduped: the oldest event, soon pushed out.
+    for (let i = 0; i < 100; i++) await logCall(callB);
+    await logCall(callA); // Deduped: the newest event.
+    await crm.engine.drain();
+
+    const events = await get<TriggerEventRow[]>("/api/demo/trigger-events");
+    expect(events).toHaveLength(100);
+    const keys = events.map((e) => e.key);
+    expect(keys[0]).toBe("event:any-call-ended:call_a");
+    expect(keys.slice(1).every((k) => k === "event:any-call-ended:call_b")).toBe(true);
+  });
+
   it("ignores calls shorter than the minimum length", async () => {
     expect((await logCall({ contactId: "c_1", kind: "voip", durationSec: 10 })).status).toBe(201);
     await crm.engine.drain();
@@ -764,8 +781,23 @@ describe("deal stuck in stage", () => {
     expect(escalations).toEqual(["Escalation: Kernel Co seats is stuck in proposal"]);
   });
 
-  it("serves the clock route only with a fake clock", async () => {
-    crm = await start({ advanceClock: undefined });
+  it("rewinds the clock through the API, and a reset leaves it alone", async () => {
+    const start0 = now;
+    crm = await start({
+      rewindClock: () => {
+        now = start0;
+      },
+    });
+    await advance(3 * DAY);
+    expect((await call("POST", "/api/demo/reset")).status).toBe(204);
+    expect(now).toBe(start0 + 3 * DAY);
+    expect((await call("POST", "/api/demo/rewind")).status).toBe(204);
+    expect(now).toBe(start0);
+  });
+
+  it("serves the clock routes only with a fake clock", async () => {
+    crm = await start({ advanceClock: undefined, rewindClock: () => {} });
     expect((await call("POST", "/api/demo/advance", { ms: 1000 })).status).toBe(404);
+    expect((await call("POST", "/api/demo/rewind")).status).toBe(404);
   });
 });
