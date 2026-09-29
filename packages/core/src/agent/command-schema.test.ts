@@ -138,6 +138,8 @@ describe("opJsonSchema", () => {
       "addSection",
       "updateSection",
       "removeSection",
+      "insertSteps",
+      "replaceSteps",
     ]);
   });
 
