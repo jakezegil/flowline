@@ -7,7 +7,7 @@
  */
 import { sectionRun } from "../annotations";
 import { branchesFor } from "../json-schema";
-import { FlowlineTreeError, findStep } from "../tree";
+import { branchList, FlowlineTreeError, findStep } from "../tree";
 import type { Manifest, NodeManifest, Section, Step, TriggerManifest, WorkflowDoc } from "../types";
 import { type Issue, validateWorkflow } from "../validate";
 import {
@@ -220,7 +220,7 @@ function buildModel(
         list: undefined as unknown as ListNode,
       };
       branches.push(b);
-      b.list = makeList(step.branches?.[id] ?? [], depth + 1, listKey(step.id, id), {
+      b.list = makeList(branchList(step, id) ?? [], depth + 1, listKey(step.id, id), {
         parentId: step.id,
         branch: id,
         base: { stepId: step.id, branch: id },
@@ -667,7 +667,7 @@ export function outline(
       if (!declared.includes(branch) && !Object.hasOwn(step.branches ?? {}, branch)) {
         throw new FlowlineTreeError(`outline: step "${stepId}" has no branch "${branch}"`);
       }
-      steps = step.branches?.[branch] ?? [];
+      steps = branchList(step, branch) ?? [];
       rootKey = listKey(stepId, branch);
       base = { stepId, branch };
       owner = { parentId: stepId, branch };

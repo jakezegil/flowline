@@ -9,6 +9,7 @@ import { branchesFor, configValueAt } from "./json-schema";
 import { isPrivateHost, normalizeHost } from "./net";
 import { parseTemplate } from "./refs";
 import type { ValidationContext } from "./scope";
+import { branchList } from "./tree";
 import type { Manifest, NodeManifest, Step, WorkflowDoc } from "./types";
 
 /** One address, `local@domain.tld`, with no spaces, commas or angle brackets. */
@@ -127,7 +128,7 @@ function alwaysEnds(step: Step, nodes: Map<string, NodeManifest>): boolean {
   const declared = branchesFor(m, step);
   return (
     declared.length > 0 &&
-    declared.every((b) => endIndex(step.branches?.[b.id] ?? [], nodes) !== -1)
+    declared.every((b) => endIndex(branchList(step, b.id) ?? [], nodes) !== -1)
   );
 }
 
