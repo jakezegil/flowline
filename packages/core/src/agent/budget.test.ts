@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { walkSteps } from "../tree";
-import type { Step, WorkflowDoc } from "../types";
+import type { Manifest, Step, WorkflowDoc } from "../types";
 import { crmLikeManifest, deepDoc, flatDoc } from "./fixtures";
 import { resultSize } from "./format";
 import { outline, overview } from "./outline";
-import type { Omission, OutlineResult } from "./read-types";
+import type { FollowUp, Omission, OutlineResult, ReadResults, StepDetail } from "./read-types";
+import { reads } from "./reads";
 
 const m = crmLikeManifest();
 
@@ -291,6 +292,232 @@ describe("budget", () => {
     const notes = r.omitted.find((o) => o.what === "notes");
     expect(notes?.fetch.tool).toBe("getSteps");
     expect((notes?.fetch.args as { full?: boolean } | undefined)?.full).toBe(true);
+  });
+});
+
+function run(doc: WorkflowDoc, f: FollowUp): unknown {
+  return reads[f.tool](doc, m, f.args as never);
+}
+
+/** Runs a `getSteps` follow-up and every `next` page after it; the details of each page, in order. */
+function pages(doc: WorkflowDoc, f: FollowUp): StepDetail[] {
+  const out: StepDetail[] = [];
+  let cur: FollowUp | undefined = f;
+  while (cur) {
+    expect(cur.tool).toBe("getSteps");
+    const r = run(doc, cur) as ReadResults["getSteps"];
+    expect(r.missing).toEqual([]);
+    out.push(...r.steps);
+    cur = r.next;
+  }
+  return out;
+}
+
+function stepsById(doc: WorkflowDoc): Map<string, Step> {
+  const byId = new Map<string, Step>();
+  walkSteps(doc, (s) => byId.set(s.id, s));
+  return byId;
+}
+
+describe("budget follow-ups return the omitted content", () => {
+  it.each([
+    ["500 flat", () => flatDoc(500, { noteChars: 4000, configChars: 20_000 })],
+    ["12-deep, 500 steps", () => deepDoc(12, 500, { noteChars: 4000, configChars: 20_000 })],
+  ] as [string, () => WorkflowDoc][])(
+    "%s, 4000-char notes, 20k config: executing every omission returns every step uncut",
+    (_, make) => {
+      const doc = make();
+      const ids = allIds(doc);
+      const seen = new Set<string>();
+      const details: StepDetail[] = [];
+      const done = new Set<string>();
+      const queue: FollowUp[] = [];
+      const push = (f: FollowUp | undefined) => {
+        if (!f) return;
+        const key = JSON.stringify(f);
+        if (done.has(key)) return;
+        done.add(key);
+        queue.push(f);
+      };
+      const first = overview(doc, m, {});
+      expect(resultSize(first)).toBeLessThanOrEqual(4000);
+      for (const o of first.omitted) push(o.fetch);
+      expect(queue.length).toBeGreaterThan(0);
+      while (queue.length > 0) {
+        const f = queue.shift() as FollowUp;
+        const result = run(doc, f);
+        if (f.tool === "outline") {
+          const r = result as OutlineResult;
+          expect(resultSize(r)).toBeLessThanOrEqual(4000);
+          for (const id of shownIds(r, ids)) seen.add(id);
+          for (const o of r.omitted) push(o.fetch);
+        } else if (f.tool === "getSteps") {
+          const r = result as ReadResults["getSteps"];
+          expect(r.missing).toEqual([]);
+          for (const s of r.steps) {
+            seen.add(s.id);
+            details.push(s);
+          }
+          push(r.next);
+          push(r.full);
+        }
+      }
+      expect(seen).toEqual(ids);
+      for (const [id, step] of stepsById(doc)) {
+        const mine = details.filter((d) => d.id === id);
+        const configs = mine.filter((d) => d.config !== undefined).map((d) => d.config);
+        expect(configs).toContainEqual(step.config);
+        expect(mine.map((d) => d.note)).toContain(step.note);
+      }
+      expect(details.some((d) => d.config?.dealId === "y".repeat(20_000))).toBe(true);
+    },
+  );
+
+  it("config, where form: pages return every step's config", () => {
+    const doc = flatDoc(120);
+    const o = overview(doc, m, {}).omitted.find((x) => x.what === "config");
+    expect(o?.fetch).toEqual({
+      tool: "getSteps",
+      args: { where: {}, include: ["config"], limit: 50 },
+    });
+    const got = pages(doc, o?.fetch as FollowUp);
+    expect(got.map((d) => d.id)).toEqual([...allIds(doc)]);
+    const byId = stepsById(doc);
+    for (const d of got) expect(d.config).toEqual(byId.get(d.id)?.config);
+  });
+
+  it("config of a subtree outline, by IDs and in the split form, includes the root step", () => {
+    const byId = stepsById(deepDoc(12, 500));
+    const forms = new Set<string>();
+    for (const [make, stepId, budget] of [
+      [() => deepDoc(4, 40), "if_3", 1500],
+      [() => deepDoc(12, 500), "if_1", 4000],
+    ] as [() => WorkflowDoc, string, number][]) {
+      const doc = make();
+      const r = outline(doc, m, { stepId, budget });
+      const configs = r.omitted.filter((x) => x.what === "config");
+      expect(configs.length).toBeGreaterThan(0);
+      const got = new Map<string, StepDetail>();
+      for (const c of configs) {
+        const args = c.fetch.args as { ids?: string[] };
+        forms.add(args.ids ? (args.ids.length === 1 ? "root" : "ids") : "where");
+        for (const d of pages(doc, c.fetch)) got.set(d.id, d);
+      }
+      // The subtree root is among them, and every returned step has its config.
+      expect(got.has(stepId)).toBe(true);
+      const total = configs.reduce((n, c) => n + c.count, 0);
+      expect(got.size).toBeGreaterThanOrEqual(total);
+      for (const d of got.values()) {
+        expect(d.config).toEqual(stepsById(doc).get(d.id)?.config ?? byId.get(d.id)?.config);
+      }
+    }
+    expect(forms).toEqual(new Set(["ids", "root", "where"]));
+  });
+
+  it("notes, IDs form: full: true returns step notes, names, and the section note and title", () => {
+    const doc = flatDoc(12, { noteChars: 300 });
+    (doc.steps[1] as Step).name = "N".repeat(150);
+    doc.sections = [
+      {
+        id: "intro",
+        title: "T".repeat(200),
+        color: "green",
+        note: "S".repeat(900),
+        first: "step_1",
+        last: "step_3",
+      },
+    ];
+    const o = overview(doc, m, {}).omitted.find((x) => x.what === "notes");
+    expect(o?.fetch).toMatchObject({ tool: "getSteps", args: { include: [], full: true } });
+    const fetch = o?.fetch as FollowUp;
+    expect((fetch.args as { ids?: string[] }).ids).toContain("step_1");
+    const got = pages(doc, fetch);
+    const byId = stepsById(doc);
+    for (const d of got) {
+      expect(d.note).toBe(byId.get(d.id)?.note);
+      expect(d.cut).toBeUndefined();
+    }
+    const s1 = got.find((d) => d.id === "step_1");
+    expect(s1?.section).toEqual({
+      id: "intro",
+      title: "T".repeat(200),
+      color: "green",
+      note: "S".repeat(900),
+    });
+    expect(got.find((d) => d.id === "step_2")?.name).toBe("N".repeat(150));
+  });
+
+  it("notes, where form: pages return every note whole", () => {
+    const doc = flatDoc(60, { noteChars: 200 });
+    const o = overview(doc, m, { budget: 20_000 }).omitted.find((x) => x.what === "notes");
+    expect(o?.fetch).toEqual({
+      tool: "getSteps",
+      args: { where: {}, include: [], full: true, limit: 50 },
+    });
+    const got = pages(doc, o?.fetch as FollowUp);
+    expect(got).toHaveLength(60);
+    const byId = stepsById(doc);
+    for (const d of got) expect(d.note).toBe(byId.get(d.id)?.note);
+  });
+
+  it("branch labels cut in the outline come back whole on the owning step", () => {
+    const long = "L".repeat(150);
+    const doc: WorkflowDoc = {
+      ...flatDoc(0),
+      steps: [
+        {
+          id: "sw",
+          type: "flow.if",
+          config: { value: true },
+          branches: { else: [{ id: "s1", type: "flow.stop", config: {} }] },
+        },
+      ],
+    };
+    const labelled: Manifest = {
+      ...m,
+      nodes: m.nodes.map((n) =>
+        n.type === "flow.if"
+          ? { ...n, branches: { kind: "static", branches: [{ id: "else", label: long }] } }
+          : n,
+      ),
+    };
+    const o = overview(doc, labelled, {}).omitted.find((x) => x.what === "notes");
+    expect(o?.fetch).toEqual({ tool: "getSteps", args: { ids: ["sw"], include: [], full: true } });
+    const f = o?.fetch as Extract<FollowUp, { tool: "getSteps" }>;
+    const [d] = reads.getSteps(doc, labelled, f.args).steps;
+    expect(d?.branches).toEqual([{ id: "else", label: long, steps: 1 }]);
+  });
+
+  it("sections: the orphan fold's follow-up returns their issues", () => {
+    const doc: WorkflowDoc = {
+      ...flatDoc(0),
+      sections: Array.from({ length: 30 }, (_, i) => ({
+        id: `gone_${i}`,
+        title: `Gone ${i}`,
+        color: "blue" as const,
+        first: `x_${i}`,
+        last: `y_${i}`,
+      })),
+    };
+    const floor = resultSize(overview(doc, m, { budget: 0 }));
+    const fold = overview(doc, m, { budget: floor + 200 }).omitted.find(
+      (o) => o.what === "sections",
+    );
+    expect(fold?.fetch).toEqual({ tool: "getIssues", args: {} });
+    const r = run(doc, fold?.fetch as FollowUp) as ReadResults["getIssues"];
+    const ids = new Set(r.issues.map((i) => i.sectionId).filter((x) => x !== undefined));
+    expect(ids.size).toBe(30);
+  });
+
+  it("branch and steps: outline follow-ups return the hidden steps", () => {
+    const doc = deepDoc(12);
+    const r = overview(doc, m, { budget: 800 });
+    const kinds = new Set(r.omitted.map((o) => o.what));
+    expect(kinds.has("branch") || kinds.has("steps")).toBe(true);
+    for (const o of r.omitted.filter((x) => x.what === "branch" || x.what === "steps")) {
+      const next = run(doc, o.fetch) as OutlineResult;
+      expect(shownIds(next, allIds(doc)).length).toBeGreaterThan(0);
+    }
   });
 });
 

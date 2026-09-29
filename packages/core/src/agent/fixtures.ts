@@ -4,9 +4,10 @@
  * @module
  */
 import { z } from "zod";
-import { defineNode, definePlugin, defineTrigger } from "../define";
+import { defineNode, definePlugin, defineTrigger, loop } from "../define";
 import { createRegistry } from "../registry";
 import type { Manifest, Step, WorkflowDoc } from "../types";
+import { ui } from "../ui";
 
 const Deal = z.object({ id: z.string(), stage: z.string(), ownerId: z.string() });
 
@@ -85,6 +86,106 @@ const registry = createRegistry([
 /** A small CRM-like manifest: a poll trigger, `crm.getDeal`/`crm.sendEmail`, `flow.if`/`stop`/`delay`. */
 export function crmLikeManifest(): Manifest {
   return registry.manifest();
+}
+
+const syncMailingList = defineNode({
+  type: "crm.syncList",
+  name: "Sync list",
+  description: "Push contacts to a mailing list.",
+  category: "Marketing",
+  input: z.object({ listId: z.string() }),
+  run: () => ({}),
+});
+
+const switchNode = defineNode({
+  type: "flow.switch",
+  name: "Switch",
+  category: "Logic",
+  input: z.object({
+    value: z.string(),
+    cases: ui(z.array(z.object({ id: z.string(), label: z.string(), value: z.string() })), {
+      label: "Cases",
+      widget: "cases",
+    }),
+  }),
+  output: z.object({ matched: z.string() }),
+  branches: {
+    kind: "fromConfig",
+    configPath: "cases",
+    idKey: "id",
+    labelKey: "label",
+    append: [{ id: "default", label: "Default" }],
+  },
+  run: () => ({ matched: "default" }),
+});
+
+const forEachNode = defineNode({
+  type: "flow.forEach",
+  name: "For each",
+  category: "Logic",
+  input: z.object({ items: ui(z.array(z.unknown()), { label: "List", refOnly: true }) }),
+  output: z.object({ count: z.number() }),
+  branches: { kind: "loop", itemsField: "items", branch: "body" },
+  run: ({ input }) => loop(input.items),
+});
+
+type Rule = { left: string; op: string };
+type Group = { combinator: "and" | "or"; rules: (Rule | Group)[] };
+const RuleZ = z.object({
+  left: z.string(),
+  op: ui(z.enum(["eq", "isUnassigned"]), {
+    label: "Operator",
+    placeholder: "Pick one",
+    group: "Logic",
+    enumLabels: { isUnassigned: "is unassigned" },
+    operators: [{ id: "isUnassigned", label: "is unassigned", arity: "unary" }],
+  }),
+});
+const GroupZ: z.ZodType<Group> = z
+  .object({
+    combinator: z.enum(["and", "or"]),
+    get rules() {
+      return z.array(z.union([RuleZ, GroupZ]));
+    },
+  })
+  .meta({ title: "Group" });
+
+const conditionNode = defineNode({
+  type: "flow.condition",
+  name: "Condition",
+  category: "Logic",
+  input: z.object({ rules: GroupZ }),
+  output: z.object({ matched: z.boolean() }),
+  branches: {
+    kind: "static",
+    branches: [
+      { id: "then", label: "Then" },
+      { id: "else", label: "Else" },
+    ],
+  },
+  run: () => ({ matched: true }),
+});
+
+const richRegistry = createRegistry([
+  definePlugin({
+    id: "crm",
+    name: "CRM",
+    nodes: [getDeal, sendEmail, syncMailingList],
+    triggers: [dealStuckInStage],
+  }),
+  definePlugin({
+    id: "flow",
+    name: "Flow",
+    nodes: [ifNode, stopNode, delayNode, switchNode, forEachNode, conditionNode],
+  }),
+]);
+
+/**
+ * {@link crmLikeManifest} plus `crm.syncList`, `flow.switch` (`fromConfig` branches),
+ * `flow.forEach` (a loop) and `flow.condition` (a recursive rules schema with a custom operator).
+ */
+export function richManifest(): Manifest {
+  return richRegistry.manifest();
 }
 
 const trigger: WorkflowDoc["trigger"] = {
