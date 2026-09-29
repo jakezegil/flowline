@@ -4,11 +4,14 @@
  * @module
  */
 import type { PluginDefinition } from "@flowlinejs/core";
-import pkg from "../package.json" with { type: "json" };
+// A named import (no `with { type: "json" }`) lets esbuild/Rollup tree-shake the JSON module
+// down to this one property, so the bundled dist doesn't ship the rest of package.json
+// (scripts, devDependencies, ...). See packages/nodes-builtin/src/index.test.ts.
+import { version } from "../package.json";
 import { createBuiltinPlugin } from "./builtin-plugin";
 
 /** Package version, read from `package.json` so it can never drift from the published version. */
-export const VERSION: string = pkg.version;
+export const VERSION: string = version;
 
 export type { RuleOperatorMeta, RuleValueType } from "@flowlinejs/core";
 export { type BuiltinOptions, createBuiltinPlugin } from "./builtin-plugin";

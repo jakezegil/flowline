@@ -1,7 +1,10 @@
-import pkg from "../package.json" with { type: "json" };
+// A named import (no `with { type: "json" }`) lets esbuild/Rollup tree-shake the JSON module
+// down to this one property, so the bundled dist doesn't ship the rest of package.json
+// (scripts, devDependencies, ...). See packages/core/src/index.test.ts.
+import { version } from "../package.json";
 
 /** Package version, read from `package.json` so it can never drift from the published version. */
-export const VERSION: string = pkg.version;
+export const VERSION: string = version;
 
 export type {
   ApiErrorBody,

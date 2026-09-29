@@ -14,7 +14,7 @@ import {
   workflow,
 } from "@flowlinejs/core";
 import { describe, expect, it } from "vitest";
-import pkg from "../package.json" with { type: "json" };
+import { version } from "../package.json";
 import {
   and,
   builtinPlugin,
@@ -39,7 +39,7 @@ const trigger = (type: string) => manifest.triggers.find((t) => t.type === type)
 
 describe("builtinPlugin", () => {
   it("is the core plugin", () => {
-    expect(VERSION).toBe(pkg.version);
+    expect(VERSION).toBe(version);
     expect(builtinPlugin.id).toBe("core");
     expect(manifest.plugins).toEqual([
       expect.objectContaining({ id: "core", name: "Built-in", icon: expect.any(String) }),
