@@ -336,6 +336,19 @@ export interface FlowlineLabels {
   ruleOperator: string;
   ruleRight: string;
   matchCase: string;
+  /** Name of the compare-mode choice of a condition's rules and a switch. */
+  compare: string;
+  compareStrict: string;
+  compareLoose: string;
+  /** One line under the compare choice explaining strict mode. */
+  compareStrictHint: string;
+  /** One line under the compare choice explaining loose mode. */
+  compareLooseHint: string;
+  /**
+   * Warns that, in strict mode, a rule's literal has another type than its `leftType` value
+   * (`"string"`, `"date"`, `"number"` or `"boolean"`), so it never matches.
+   */
+  literalTypeWarning(leftType: string): string;
   /** Operator names of the rule builder. */
   ruleOps: Record<string, string>;
   /** Operator names when the value is a date. */
@@ -778,6 +791,22 @@ export const defaultLabels: FlowlineLabels = {
   ruleOperator: "Operator",
   ruleRight: "Compare with",
   matchCase: "Match case",
+  compare: "Compare",
+  compareStrict: "Strict",
+  compareLoose: "Loose",
+  compareStrictHint: 'Values of the same type only, matching case: "5" doesn\'t equal 5.',
+  compareLooseHint: 'Converts numeric text, "true"/"false" and dates: "5" equals 5.',
+  literalTypeWarning: (leftType) => {
+    const kind =
+      leftType === "number"
+        ? "a number"
+        : leftType === "boolean"
+          ? "true/false"
+          : leftType === "date"
+            ? "a date (text)"
+            : "text";
+    return `Compare with isn't ${kind} like Value; strict mode will never match`;
+  },
   ruleOps: {
     eq: "equals",
     neq: "does not equal",

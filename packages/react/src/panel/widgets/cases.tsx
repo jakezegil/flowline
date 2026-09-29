@@ -1,7 +1,9 @@
 /**
  * The `"cases"` widget: switch cases as rows of name + matching value. A case's `id` (its path's
  * ID, used in step paths) is derived from its name while the case is new, and stays fixed once
- * the name field is left, so steps on that path stay attached when it's renamed later.
+ * the name field is left, so steps on that path stay attached when it's renamed later. Case
+ * values are typed like the switch's `value` (`5`, not `"5"`, for a number), and flagged when
+ * the switch's `compare` mode is strict and a value has another type.
  *
  * @module
  */
@@ -11,9 +13,10 @@ import { useFlowlineAppearance } from "../../provider";
 import { AddButton, focusLastItem, ItemActions, useItemKeys } from "../fields/collections";
 import { FieldShell, IssueNotes } from "../fields/shell";
 import { type FieldProps, useFormEnv } from "../form-context";
-import { RefTextInput } from "../ref-text-input";
 import { issuesAt, issuesUnder, itemsOf } from "../schema";
 import { asObject, ObjectFields, withKey } from "../schema-form";
+import { literalTypeIssue } from "./literal";
+import { asCompare, compareDefault, TypedValueInput, valueTypeOf } from "./rules";
 
 /** Reserved for the switch's fallback path. */
 const RESERVED = new Set(["default"]);
@@ -49,6 +52,9 @@ export function CasesWidget(p: FieldProps): JSX.Element {
   /** IDs of cases created here whose name is still being typed: their ID follows the name. */
   const fresh = useRef(new Set<string>());
   const items = itemsOf(env.root, p.schema);
+  // Cases compare with the switch's value (a sibling field) in the switch's compare mode.
+  const type = valueTypeOf(env.values.value, env.scope);
+  const compare = asCompare(env.values.compare) ?? compareDefault(env.root, env.root);
   const extra = Object.keys((items.properties ?? {}) as Record<string, JSONSchema>).filter(
     (k) => k !== "id" && k !== "label" && k !== "value",
   );
@@ -93,6 +99,13 @@ export function CasesWidget(p: FieldProps): JSX.Element {
             const id = String(c.id ?? "");
             const name =
               (typeof c.label === "string" && c.label) || labels.itemTitle(labels.caseLabel, i + 1);
+            const literal = literalTypeIssue(
+              { op: "eq", right: c.value },
+              type,
+              compare,
+              labels.literalTypeWarning,
+            );
+            const issues = issuesUnder(env.issues, path);
             return (
               <li key={keys.keys[i]} className="fl-case">
                 <div className="fl-case__card">
@@ -108,17 +121,14 @@ export function CasesWidget(p: FieldProps): JSX.Element {
                         if ((c.label ?? "") !== "") fresh.current.delete(id);
                       }}
                     />
-                    <RefTextInput
+                    <TypedValueInput
                       value={c.value}
                       onChange={(v) =>
-                        set(cases.map((x, j) => (j === i ? withKey(x, "value", v ?? "") : x)))
+                        set(cases.map((x, j) => (j === i ? withKey(x, "value", v) : x)))
                       }
-                      scope={env.scope}
-                      samples={env.samples}
-                      invalidRefs={env.invalidRefs}
+                      type={type}
                       placeholder={labels.caseValue}
                       ariaLabel={`${name}: ${labels.caseValue}`}
-                      readOnly={env.readOnly}
                     />
                     {extra.length > 0 && (
                       <ObjectFields
@@ -150,7 +160,9 @@ export function CasesWidget(p: FieldProps): JSX.Element {
                     }}
                   />
                 </div>
-                <IssueNotes issues={issuesUnder(env.issues, path)} />
+                <IssueNotes
+                  issues={literal ? [...issues, { ...literal, field: `${path}.value` }] : issues}
+                />
               </li>
             );
           })}
