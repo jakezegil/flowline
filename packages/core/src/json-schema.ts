@@ -170,6 +170,19 @@ function deref(root: JSONSchema, schema: JSONSchema): JSONSchema {
   return cur;
 }
 
+/**
+ * Resolves a local `$ref` in `schema` (`#`, `#/$defs/X`, `#/definitions/X`) against `root`, as
+ * the validator does: a chain of refs is followed, sibling keywords next to `$ref` are kept, and
+ * an unresolvable or non-local ref gives `{}` (any). A schema without `$ref` is returned as is
+ * (`true`/missing as `{}`, `false` as `{ not: {} }`).
+ *
+ * @example
+ * derefSchema({ $defs: { A: { type: "string" } } }, { $ref: "#/$defs/A" }) // { type: "string" }
+ */
+export function derefSchema(root: JSONSchema, schema: JSONSchema): JSONSchema {
+  return deref(root, schema);
+}
+
 /** @internal Makes a subschema self-contained by carrying the root's `$defs`/`definitions` along. */
 export function carryDefs(root: JSONSchema, sub: JSONSchema): JSONSchema {
   if (sub === root) return sub;
@@ -812,5 +825,5 @@ export function isDiscriminatedUnion(root: JSONSchema, members: readonly JSONSch
   return Object.keys(first.props).some((key) => distinctConsts(root, objects, key) !== undefined);
 }
 
-/** @internal Shared with the validator: dereference against a root. */
-export { deref as derefSchema, typeList as schemaTypes, unionMembers as schemaUnionMembers };
+/** @internal Shared with the validator. (`derefSchema`, above, is public.) */
+export { typeList as schemaTypes, unionMembers as schemaUnionMembers };

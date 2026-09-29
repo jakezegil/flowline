@@ -1,6 +1,7 @@
 /** Package version. */
 export const VERSION = "0.1.0";
 
+export { compactSchema } from "./agent/compact-schema";
 export { cutString, formatCall, resultSize, stepLine } from "./agent/format";
 export { outline, overview } from "./agent/outline";
 export type {
@@ -9,10 +10,26 @@ export type {
   Omission,
   OutlineResult,
   ReadArgs,
+  ReadFn,
   ReadOptions,
+  ReadResults,
   ReadToolName,
+  RefInfo,
+  SectionInfo,
+  StepDetail,
   Where,
 } from "./agent/read-types";
+export {
+  availableRefs,
+  describeNodeTypes,
+  findSteps,
+  focus,
+  getIssues,
+  getSteps,
+  listNodeTypes,
+  reads,
+} from "./agent/reads";
+export { matchSteps } from "./agent/selectors";
 export {
   ANNOTATION_COLORS,
   isAnnotationColor,
@@ -99,6 +116,7 @@ export {
   branchesFor,
   checkFields,
   configValueAt,
+  derefSchema,
   describeType,
   fieldsToJsonSchema,
   isAnySchema,
