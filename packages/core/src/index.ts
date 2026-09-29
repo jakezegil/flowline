@@ -1,6 +1,18 @@
 /** Package version. */
 export const VERSION = "0.1.0";
 
+export { apply, changedStepIds, FlowlineCommandError } from "./agent/apply";
+export { commandSchema, opJsonSchema } from "./agent/command-schema";
+export type {
+  ApplyError,
+  ApplyOptions,
+  ApplyResult,
+  At,
+  Command,
+  CommandErrorCode,
+  SectionInput,
+  StepRef,
+} from "./agent/commands";
 export { compactSchema } from "./agent/compact-schema";
 export { cutString, formatCall, resultSize, stepLine } from "./agent/format";
 export { outline, overview } from "./agent/outline";
@@ -158,6 +170,7 @@ export {
   showIfOf,
   showIfProblems,
 } from "./show-if";
+export { createStep, defaultConfig, jsonEqual, syncBranches } from "./step-factory";
 export {
   allStepIds,
   codeBlocksRename,
