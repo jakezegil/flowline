@@ -4124,7 +4124,9 @@
   .fl-section-chip__note {
     min-width: 0;
     overflow: hidden;
-    color: color-mix(in srgb, var(--fl-a-text) 80%, var(--fl-a-bg));
+    /* Full -text colour (AA on -bg); the regular weight against the bold title sets it apart. */
+    color: var(--fl-a-text);
+    font-weight: 400;
     text-overflow: ellipsis;
   }
   .fl-section-chip__note::before {
@@ -4187,8 +4189,20 @@
     opacity: 0.72;
   }
 
-  /* What an agent just changed: a ring that fades out once. */
+  /* What an agent just changed: a ring that fades out once. Two identical keyframes: a new change
+     mid-animation swaps data-flash between "a" and "b", and the new animation name restarts it. */
   @keyframes fl-flash {
+    0% {
+      box-shadow: 0 0 0 0 var(--fl-changed);
+    }
+    35% {
+      box-shadow: 0 0 0 6px var(--fl-changed);
+    }
+    100% {
+      box-shadow: 0 0 0 10px transparent;
+    }
+  }
+  @keyframes fl-flash-b {
     0% {
       box-shadow: 0 0 0 0 var(--fl-changed);
     }
@@ -4202,6 +4216,10 @@
   .fl-card[data-flash],
   .fl-section[data-flash] {
     animation: fl-flash 900ms var(--fl-ease) 1;
+  }
+  .fl-card[data-flash="b"],
+  .fl-section[data-flash="b"] {
+    animation-name: fl-flash-b;
   }
 
   /* ---------------------------------------------------------------- motion */
@@ -4219,8 +4237,11 @@
       animation: none;
     }
     .fl-card[data-flash],
-    .fl-section[data-flash] {
+    .fl-card[data-flash="b"],
+    .fl-section[data-flash],
+    .fl-section[data-flash="b"] {
       animation: none;
+      box-shadow: 0 0 0 3px var(--fl-changed);
     }
     .fl-picker,
     .fl-ref-popover,

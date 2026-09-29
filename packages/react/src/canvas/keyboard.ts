@@ -146,9 +146,16 @@ export function handleCanvasKey(e: KeyboardEvent, deps: KeyboardDeps): boolean {
   const mod = isMac() ? e.metaKey : e.ctrlKey;
   // Plain keys on a focused control ("+", "…", Undo, tabs) belong to that control.
   if (!mod && ownsKey(e.target, e.key)) return false;
-  // On a note or section header only navigation keys apply (↑/↓ from the selection, Esc).
-  if (onAnnotation(e.target) && e.key !== "ArrowUp" && e.key !== "ArrowDown" && e.key !== "Escape")
-    return false;
+  // On a note or section header only navigation keys (↑/↓ from the selection, Esc) and the
+  // doc-level undo/redo apply: keys that act on the selected card would act on a card that isn't
+  // the one in focus.
+  if (onAnnotation(e.target)) {
+    const k = e.key.toLowerCase();
+    const undoRedo = mod && (k === "z" || (k === "y" && !isMac()));
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown" && e.key !== "Escape" && !undoRedo) {
+      return false;
+    }
+  }
   const { store, ui } = deps;
   const state = store.getState();
   const { readOnly } = state;

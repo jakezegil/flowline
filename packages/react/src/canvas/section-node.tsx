@@ -7,7 +7,7 @@
  */
 import { type AnnotationColor, isAnnotationColor, type Section } from "@flowlinejs/core";
 import type { Node, NodeProps } from "@xyflow/react";
-import { type JSX, memo, useContext } from "react";
+import { type JSX, memo, useContext, useEffect, useRef } from "react";
 import { useEditorStore, useEditorStoreApi } from "../hooks";
 import { focusNode } from "./actions";
 import { RootElementContext, useLabels } from "./canvas-context";
@@ -58,6 +58,41 @@ function useSection(id: string, sectionId: string): Section | undefined {
   return useEditorStore((s) => sectionOfNode(s.doc.sections, id, sectionId));
 }
 
+/** A section's shown title: its own, else the `untitledSection` label. */
+export function sectionTitle(section: Section | undefined, untitled: string): string {
+  const title = typeof section?.title === "string" ? section.title.trim() : "";
+  return title || untitled;
+}
+
+/**
+ * For a section ID the doc repeats: whether this occurrence changed with the flash `token`, so
+ * only the occurrence a command edited flashes (commands act on one of them). Always true for an
+ * ID the doc doesn't repeat.
+ */
+function useOccurrenceGate(section: Section | undefined): (token: number) => boolean {
+  const repeated = useEditorStore((s) => {
+    const all = s.doc.sections;
+    if (!Array.isArray(all) || !section) return false;
+    let n = 0;
+    for (const x of all) if (x?.id === section.id) n++;
+    return n > 1;
+  });
+  const json = JSON.stringify(section ?? null);
+  // The section as of the last commit, and the verdict for the latest token.
+  const before = useRef(json);
+  const latch = useRef<{ token: number; changed: boolean } | null>(null);
+  useEffect(() => {
+    before.current = json;
+  });
+  return (token) => {
+    if (!repeated) return true;
+    if (latch.current?.token !== token) {
+      latch.current = { token, changed: json !== before.current };
+    }
+    return latch.current.changed;
+  };
+}
+
 /**
  * A section's coloured region: behind its members' cards and below the edges, neither
  * selectable nor focusable. A group named by the section's title.
@@ -69,15 +104,17 @@ export const SectionRegion = memo(function SectionRegion({
   const labels = useLabels();
   const store = useEditorStoreApi();
   const section = useSection(id, data.sectionId);
-  const flash = useFlash(store, "section", data.sectionId);
+  // Keyed by node, not section ID: a repeated ID draws two regions that flash on their own.
+  const gate = useOccurrenceGate(section);
+  const flash = useFlash(store, "section", data.sectionId, { key: id, gate });
   return (
     // biome-ignore lint/a11y/useSemanticElements: a drawn region grouping cards on the canvas, not a form fieldset.
     <div
       className="fl-section"
       role="group"
-      aria-label={labels.sectionRegion(section?.title ?? "")}
+      aria-label={labels.sectionRegion(sectionTitle(section, labels.untitledSection))}
       data-color={drawColor(data.color)}
-      data-flash={flash.flashing || undefined}
+      data-flash={flash.flash}
       onAnimationEnd={flash.onAnimationEnd}
     />
   );
@@ -97,12 +134,12 @@ export const SectionHeader = memo(function SectionHeader({
   const root = useContext(RootElementContext);
   const section = useSection(id, data.sectionId);
   if (!section) return null;
-  const title = typeof section.title === "string" ? section.title : "";
+  const title = sectionTitle(section, labels.untitledSection);
   const note = typeof section.note === "string" && section.note !== "" ? section.note : undefined;
   const content = (
     <>
       <span className="fl-section-chip__swatch" aria-hidden />
-      <span className="fl-section-chip__title">{title.trim() || labels.untitledSection}</span>
+      <span className="fl-section-chip__title">{title}</span>
       {note !== undefined && (
         <span className="fl-section-chip__note">{excerpt(note, NOTE_EXCERPT)}</span>
       )}

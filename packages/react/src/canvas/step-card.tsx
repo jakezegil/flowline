@@ -362,7 +362,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
       data-dimmed={dimmed || undefined}
       data-unreachable={(unreachable && !inRunMode) || undefined}
       data-color={step.color === undefined ? undefined : drawColor(step.color)}
-      data-flash={flash.flashing || undefined}
+      data-flash={flash.flash}
       onAnimationEnd={flash.onAnimationEnd}
     >
       <div className="fl-card__icon" data-tone={control ? "control" : "action"} aria-hidden>

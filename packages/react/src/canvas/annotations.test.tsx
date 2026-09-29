@@ -1,6 +1,6 @@
 import type { AnnotationColor, Step, WorkflowDoc } from "@flowlinejs/core";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { setupDom } from "../../test/dom";
 import { docWith, manifest, step } from "../../test/fixtures";
 import { createAgentBridge } from "../agent-bridge";
@@ -254,5 +254,130 @@ describe("flash", () => {
         .getByRole("group", { name: defaultLabels.sectionRegion("Tagging") })
         .hasAttribute("data-flash"),
     ).toBe(false);
+  });
+});
+
+describe("review round 1", () => {
+  const card = (id: string) => node(`step:${id}`).querySelector(".fl-card") as HTMLElement;
+
+  test("M1: the header chip ends short of the edge entering the section's first card", () => {
+    const doc = annotatedDoc({ note: "A long note that would otherwise run across the edge line" });
+    const layout = layoutTree(doc, manifest);
+    const ls = layout.sections.find((s) => s.id === "section:intro")!;
+    const first = layout.nodes.find((n) => n.id === "step:email")!;
+    render(<WorkflowCanvas store={storeOf(doc)} />);
+    const width = Number.parseFloat(node("sectionHeader:intro").style.width);
+    const chipLeft = ls.x + 16;
+    expect(width).toBeGreaterThan(0);
+    expect(chipLeft + width).toBeLessThanOrEqual(first.x + first.w / 2 - 8);
+  });
+
+  test("M2: a repeated section ID flashes only the section that changed", () => {
+    const doc = annotatedDoc();
+    doc.sections = [
+      { id: "dup", title: "First", color: "blue", first: "load", last: "load" },
+      { id: "dup", title: "Second", color: "green", first: "email2", last: "email2" },
+    ];
+    const store = storeOf(doc);
+    render(<WorkflowCanvas store={store} />);
+    act(() => {
+      createAgentBridge(store).apply([{ op: "updateSection", id: "dup", title: "Renamed" }]);
+    });
+    const group = (title: string) =>
+      screen.getByRole("group", { name: defaultLabels.sectionRegion(title) });
+    expect(group("Renamed").hasAttribute("data-flash")).toBe(true);
+    expect(group("First").hasAttribute("data-flash")).toBe(false);
+  });
+
+  test("M3: a long note's accessible name is capped with an ellipsis", () => {
+    const note = `Start ${"word ".repeat(1000)}`;
+    render(<WorkflowCanvas store={storeOf(annotatedDoc({ stepNote: note }))} />);
+    const name = node("note:email").getAttribute("aria-label") ?? "";
+    expect(name.startsWith("Note: Start word")).toBe(true);
+    expect(name.length).toBeLessThanOrEqual("Note: ".length + 140);
+    expect(name.endsWith("…")).toBe(true);
+    // The full text stays on the note.
+    expect(node("note:email").querySelector(".fl-note")?.getAttribute("title")).toBe(note);
+  });
+
+  test("M4: undo and redo work while a note has focus; Delete still doesn't", () => {
+    const store = storeOf(annotatedDoc({ stepNote: "hello" }));
+    render(<WorkflowCanvas store={store} />);
+    act(() => store.getState().renameStep("email2", "Follow-up"));
+    act(() => store.getState().select("email2"));
+    const noteNode = node("note:email");
+    noteNode.focus();
+    const name = () => store.getState().doc.steps.find((s) => s.id === "email2")?.name;
+    fireEvent.keyDown(noteNode, { key: "Delete" });
+    expect(store.getState().doc.steps.map((s) => s.id)).toContain("email2");
+    fireEvent.keyDown(noteNode, { key: "z", metaKey: true, ctrlKey: true });
+    expect(name()).toBeUndefined();
+    fireEvent.keyDown(noteNode, { key: "z", metaKey: true, ctrlKey: true, shiftKey: true });
+    expect(name()).toBe("Follow-up");
+  });
+
+  test("M5: an untitled section's region and chip names use the untitledSection label", async () => {
+    const { FlowlineProvider } = await import("../provider");
+    const doc = annotatedDoc({ note: "n" });
+    (doc.sections as NonNullable<WorkflowDoc["sections"]>)[0]!.title = "";
+    render(
+      <FlowlineProvider client={{} as never} labels={{ untitledSection: "Sans titre" }}>
+        <WorkflowCanvas store={storeOf(doc)} />
+      </FlowlineProvider>,
+    );
+    expect(screen.getByRole("group", { name: "Section: Sans titre" })).toBeTruthy();
+    const chip = within(node("sectionHeader:intro")).getByRole("button");
+    expect(chip.getAttribute("aria-label")).toBe("Sans titre. Note: n");
+    cleanup();
+    render(
+      <FlowlineProvider client={{} as never} labels={{ untitledSection: "Sans titre" }}>
+        <WorkflowCanvas store={storeOf(doc, true)} />
+      </FlowlineProvider>,
+    );
+    expect(node("sectionHeader:intro").getAttribute("aria-label")).toBe("Sans titre. Note: n");
+  });
+
+  test("M6: under reduced motion the flash clears on a timer", () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      ...original(query),
+      matches: query.includes("prefers-reduced-motion"),
+    })) as typeof window.matchMedia;
+    vi.useFakeTimers();
+    try {
+      const store = storeOf(annotatedDoc());
+      render(<WorkflowCanvas store={store} />);
+      act(() => {
+        createAgentBridge(store).apply([
+          { op: "setConfig", id: "email2", key: "subject", value: "Changed" },
+        ]);
+      });
+      expect(card("email2").hasAttribute("data-flash")).toBe(true);
+      act(() => vi.advanceTimersByTime(1000));
+      expect(card("email2").hasAttribute("data-flash")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      window.matchMedia = original;
+    }
+  });
+
+  test("M7: a new token mid-animation restarts the flash", () => {
+    const store = storeOf(annotatedDoc());
+    render(<WorkflowCanvas store={store} />);
+    const bridge = createAgentBridge(store);
+    act(() => {
+      bridge.apply([{ op: "setConfig", id: "email2", key: "subject", value: "One" }]);
+    });
+    const first = card("email2").getAttribute("data-flash");
+    expect(first).not.toBeNull();
+    act(() => {
+      bridge.apply([{ op: "setConfig", id: "email2", key: "subject", value: "Two" }]);
+    });
+    const second = card("email2").getAttribute("data-flash");
+    expect(second).not.toBeNull();
+    // A different value swaps the animation name, which restarts it.
+    expect(second).not.toBe(first);
+    endAnimation(card("email2"));
+    expect(card("email2").hasAttribute("data-flash")).toBe(false);
   });
 });

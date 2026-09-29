@@ -66,11 +66,17 @@ export interface FlowlineLabels {
   colorNames: Record<AnnotationColor, string>;
   /** A section's shown title when it has none. */
   untitledSection: string;
-  /** Accessible name of a section's coloured region: "Section: Onboarding". */
+  /**
+   * Accessible name of a section's coloured region: "Section: Onboarding". The canvas passes the
+   * shown title (`untitledSection` for a section without one).
+   */
   sectionRegion(title: string): string;
-  /** Accessible name of a section's header chip: its title, then its note when it has one. */
+  /**
+   * Accessible name of a section's header chip: its title (as for `sectionRegion`), then its note
+   * when it has one.
+   */
   sectionHeader(title: string, note?: string): string;
-  /** Accessible name of a sticky note: "Note: …". */
+  /** Accessible name of a sticky note: "Note: …". The canvas passes its first 140 characters. */
   noteLabel(text: string): string;
   /** Accessible name of a step card with a note: "<name>. Note: <first 120 chars>". */
   stepWithNote(name: string, note: string): string;
@@ -613,6 +619,8 @@ const add =
   'Press Control+K (Command+K on a Mac) to add a step after this one (what the "+" between steps does), Shift with it to add one before';
 
 /** The English defaults. */
+const untitled = "Untitled section";
+
 export const defaultLabels: FlowlineLabels = {
   canvas: "Workflow canvas",
   canvasHelpReadOnly: nav,
@@ -656,10 +664,10 @@ export const defaultLabels: FlowlineLabels = {
     purple: "Purple",
     gray: "Gray",
   },
-  untitledSection: "Untitled section",
-  sectionRegion: (title) => `Section: ${title.trim() || "Untitled section"}`,
+  untitledSection: untitled,
+  sectionRegion: (title) => `Section: ${title.trim() || untitled}`,
   sectionHeader: (title, note) => {
-    const name = title.trim() || "Untitled section";
+    const name = title.trim() || untitled;
     return note ? `${name}. Note: ${note.slice(0, 120)}` : name;
   },
   noteLabel: (text) => `Note: ${text}`,

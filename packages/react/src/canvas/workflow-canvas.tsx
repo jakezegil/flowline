@@ -57,7 +57,7 @@ import { type CanvasRect, edgeGeometries } from "./geometry";
 import { handleCanvasKey } from "./keyboard";
 import { NoteCard } from "./note-node";
 import { EndNode, RejoinNode } from "./rejoin-node";
-import { SectionHeader, SectionRegion, sectionOfNode } from "./section-node";
+import { excerpt, SectionHeader, SectionRegion, sectionOfNode, sectionTitle } from "./section-node";
 import { StepCard, stepDisplayName } from "./step-card";
 import { StepPicker } from "./step-picker";
 import { Toasts } from "./toast";
@@ -159,16 +159,31 @@ function toFlowNode(
 /** Top offset of a section's header chip in its region, and the chip's height. */
 const CHIP_TOP = 6;
 const CHIP_H = 22;
+/** Room the chip leaves before the edge entering the section (which runs down its header band). */
+const CHIP_EDGE_GAP = 8;
+/** Characters of a sticky note in its accessible name (the full text stays in its `title`). */
+const NOTE_NAME_MAX = 140;
 
 /**
  * The xyflow nodes of a section: its region (below the edges, inert) and its header chip (a
  * node of its own at the region's top-left, focusable on a read-only canvas, where the chip is
- * not a button).
+ * not a button). `edgeX` is the x of the edge entering the section (its first member's centre):
+ * the chip ends {@link CHIP_EDGE_GAP} short of it, so it never covers that line.
  */
-function sectionNodes(ls: LayoutSection, readOnly: boolean, headerLabel: string): [Node, Node] {
+function sectionNodes(
+  ls: LayoutSection,
+  readOnly: boolean,
+  headerLabel: string,
+  edgeX: number | undefined,
+): [Node, Node] {
   const data = { sectionId: ls.sectionId, color: ls.color };
   const common = { draggable: false, connectable: false, deletable: false, selectable: false };
   const suffix = ls.id.slice("section:".length);
+  const left = ls.x + SECTION_PAD;
+  const right = Math.min(
+    ls.x + ls.w - SECTION_PAD,
+    edgeX === undefined ? Number.POSITIVE_INFINITY : edgeX - CHIP_EDGE_GAP,
+  );
   return [
     {
       ...common,
@@ -188,8 +203,8 @@ function sectionNodes(ls: LayoutSection, readOnly: boolean, headerLabel: string)
       ...common,
       id: `sectionHeader:${suffix}`,
       type: "sectionHeader",
-      position: { x: ls.x + SECTION_PAD, y: ls.y + CHIP_TOP },
-      width: Math.max(0, ls.w - 2 * SECTION_PAD),
+      position: { x: left, y: ls.y + CHIP_TOP },
+      width: Math.max(0, right - left),
       height: Math.min(CHIP_H, SECTION_HEADER_H - CHIP_TOP),
       data,
       focusable: readOnly,
@@ -373,14 +388,17 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
     const out: Node[] = [];
     const chips = new Map<string, Node[]>();
     const regions = [...layout.sections].sort((a, b) => a.depth - b.depth);
+    const byId = new Map(layout.nodes.map((n) => [n.id, n]));
     for (const ls of regions) {
       const section = sectionOfNode(doc.sections, ls.id, ls.sectionId);
       const note =
         typeof section?.note === "string" && section.note !== "" ? section.note : undefined;
+      const firstCard = byId.get(`step:${section?.first ?? ""}`);
       const [region, chip] = sectionNodes(
         ls,
         readOnly,
-        labels.sectionHeader(section?.title ?? "", note),
+        labels.sectionHeader(sectionTitle(section, labels.untitledSection), note),
+        firstCard ? firstCard.x + firstCard.w / 2 : undefined,
       );
       out.push(region);
       const first = `step:${section?.first ?? ""}`;
@@ -393,7 +411,7 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
       out.push(toFlowNode(ln, selection, label));
       const note = notes.get(ln.id);
       const text = note ? steps.get(note.stepId)?.note : undefined;
-      if (note && text) out.push(noteNode(note, labels.noteLabel(text)));
+      if (note && text) out.push(noteNode(note, labels.noteLabel(excerpt(text, NOTE_NAME_MAX))));
     }
     return out;
   }, [layout, selection, label, doc, readOnly, labels]);

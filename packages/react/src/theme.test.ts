@@ -74,6 +74,43 @@ describe("annotation tokens", () => {
     }
   }
 
+  /** The chip's note excerpt colour for one palette colour, resolved like the browser would. */
+  function excerptColor(set: Map<string, string>, c: string): string {
+    const decl = /color:\s*([^;]+);/.exec(block(".fl-section-chip__note"))?.[1]?.trim() ?? "";
+    const text = set.get(`--fl-annot-${c}-text`) as string;
+    const bg = set.get(`--fl-annot-${c}-bg`) as string;
+    if (decl === "var(--fl-a-text)") return text;
+    const m = /^color-mix\(in srgb, var\(--fl-a-text\) (\d+)%, var\(--fl-a-bg\)\)$/.exec(decl);
+    if (!m) throw new Error(`unexpected excerpt colour: ${decl}`);
+    const p = Number(m[1]) / 100;
+    const [t, b] = [rgb(text), rgb(bg)];
+    const hex = t.map((v, i) => Math.round(v * p + (b[i] as number) * (1 - p)));
+    return `#${hex.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+  }
+
+  for (const [mode, set] of [
+    ["light", light],
+    ["dark", dark],
+  ] as const) {
+    for (const c of ANNOTATION_COLORS) {
+      test(`${mode} ${c}: the chip's note excerpt on -bg meets WCAG AA (4.5)`, () => {
+        const bg = set.get(`--fl-annot-${c}-bg`) as string;
+        expect(contrast(excerptColor(set, c), bg)).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+  }
+
+  test("reduced motion shows the flash as a static ring instead", () => {
+    const rules = [
+      ...css.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n {2}\}/g),
+    ]
+      .map((m) => m[1] as string)
+      .join("\n");
+    expect(rules).toMatch(
+      /\[data-flash\][^{]*\{\s*animation:\s*none;\s*box-shadow:[^;]*--fl-changed/,
+    );
+  });
+
   test("--fl-changed is derived from the accent, declared once", () => {
     expect(css.match(/--fl-changed\s*:/g)).toHaveLength(1);
     expect(css).toMatch(
