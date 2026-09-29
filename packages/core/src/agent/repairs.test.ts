@@ -182,6 +182,45 @@ describe("annotationRepairs", () => {
   });
 });
 
+describe("$-prefixed section IDs (M5)", () => {
+  test("an invalid $x ID is re-id'd", () => {
+    const d = doc([sec("$x", "a", "b", { title: "Check" })]);
+    const issue = only(d, (i) => i.message.includes("invalid"));
+    expect(annotationRepairs(d, issue)).toEqual([
+      { op: "removeSection", id: "$x" },
+      { op: "addSection", first: "a", last: "b", title: "Check", color: "blue", id: "check" },
+    ]);
+    expect(fix(d, issue).sections).toEqual([sec("check", "a", "b", { title: "Check" })]);
+  });
+
+  test("a $1 ID is re-id'd too, and its other fixes run on it", () => {
+    const d = doc([sec("$1", "c", "a", { title: "One" })]);
+    for (const issue of annotation(d)) fix(d, issue);
+  });
+
+  test("two same-$2-ID sections: a fix that would name $2 after an addSection defines it gives []", () => {
+    const d = doc([
+      sec("$2", "a", "a", { title: "One", color: "red" as never }),
+      sec("$2", "c", "c", { title: "Two" }),
+    ]);
+    const issue = only(d, (i) => i.message.includes("colour"));
+    // [removeSection $2, addSection (defines $2), updateSection $2] would hit the new section.
+    expect(annotationRepairs(d, issue)).toEqual([]);
+  });
+
+  test("two same-$1-ID sections: $1 stays literal (commands[0] defines nothing)", () => {
+    const d = doc([
+      sec("$1", "a", "a", { title: "One", color: "red" as never }),
+      sec("$1", "c", "c", { title: "Two" }),
+    ]);
+    const issue = only(d, (i) => i.message.includes("colour"));
+    // [removeSection $1, addSection (defines $2), updateSection $1]: $1 is still literal here.
+    const cmds = annotationRepairs(d, issue);
+    expect(cmds).toHaveLength(3);
+    fix(d, issue);
+  });
+});
+
 describe("duplicate section IDs: the re-id repair runs first (Task 1 M3)", () => {
   test("a fix for the earlier of two same-ID sections targets the earlier one", () => {
     const d = doc([

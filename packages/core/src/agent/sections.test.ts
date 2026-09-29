@@ -457,3 +457,182 @@ describe("section upkeep through apply (Review Focus 1)", () => {
     expect(r.ids.$2).toBe("getDeal");
   });
 });
+
+describe("placeholder kinds (I1)", () => {
+  /** `load`, `notify`, `a`: step IDs a section title can collide with. */
+  const collide = (): WorkflowDoc => ({
+    ...doc(),
+    steps: [delay("load"), delay("notify"), delay("a"), delay("z")],
+  });
+
+  test("a step rename doesn't retarget a section's $n of the same ID", () => {
+    const r = ok(
+      apply(
+        collide(),
+        [
+          { op: "addSection", first: "load", last: "load", title: "Load", color: "blue" },
+          { op: "renameStepId", id: "load", newId: "deal" },
+          { op: "updateSection", id: "$1", color: "green" },
+        ],
+        m,
+      ),
+    );
+    expect(r.ids).toEqual({ $1: "load", $2: "deal" });
+    expect(r.renamed).toEqual({ load: "deal" });
+    expect(r.doc.sections).toEqual([
+      { id: "load", title: "Load", color: "green", first: "deal", last: "deal" },
+    ]);
+  });
+
+  test("ids reports the section's real ID after a same-ID step is renamed", () => {
+    const r = ok(
+      apply(
+        collide(),
+        [
+          { op: "addSection", first: "a", last: "a", title: "A", color: "blue" },
+          { op: "renameStepId", id: "a", newId: "q" },
+        ],
+        m,
+      ),
+    );
+    expect(r.ids).toEqual({ $1: "a", $2: "q" });
+    expect(r.doc.sections?.[0]?.id).toBe("a");
+  });
+
+  test("a regenerating setType doesn't retarget a section's $n either", () => {
+    const d: WorkflowDoc = {
+      ...doc(),
+      steps: [{ id: "delay", type: "flow.delay", config: { duration: "1m" } }],
+    };
+    const r = ok(
+      apply(
+        d,
+        [
+          { op: "addSection", first: "delay", last: "delay", title: "Delay", color: "blue" },
+          { op: "setType", id: "delay", type: "flow.stop" },
+          { op: "removeSection", id: "$1" },
+        ],
+        m,
+      ),
+    );
+    expect(r.ids).toEqual({ $1: "delay", $2: "stop" });
+    expect(r.doc.sections).toBeUndefined();
+  });
+
+  test("a section's $n where a step ID goes fails with placeholder.kind", () => {
+    const d = collide();
+    const before = structuredClone(d);
+    const r = fail(
+      apply(
+        d,
+        [
+          { op: "addSection", first: "load", last: "load", title: "Load", color: "blue" },
+          { op: "setNote", id: "$1", note: "n" },
+        ],
+        m,
+      ),
+    );
+    expect(r.error).toEqual({
+      index: 1,
+      path: "commands[1].id",
+      code: "placeholder.kind",
+      message: 'Placeholder "$1" names a section, but this argument takes a step ID',
+      hint: {
+        expected: "step",
+        got: "section",
+        note: "$1 names a section (created by commands[0]); this argument takes a step ID",
+      },
+    });
+    expect(d).toEqual(before);
+  });
+
+  test("a section's $n in a location or a steps.$n template fails with placeholder.kind", () => {
+    const add: Command = { op: "addSection", first: "a", last: "a", title: "A", color: "blue" };
+    const move = fail(apply(collide(), [add, { op: "moveStep", id: "z", to: { after: "$1" } }], m));
+    expect(move.error).toMatchObject({ code: "placeholder.kind", path: "commands[1].to.after" });
+    const tpl = fail(
+      apply(
+        collide(),
+        [add, { op: "setOutput", key: "k", value: { $tpl: "{{ steps.$1.x }}" } }],
+        m,
+      ),
+    );
+    expect(tpl.error).toMatchObject({ code: "placeholder.kind", path: "commands[1].value" });
+    const run = fail(
+      apply(
+        collide(),
+        [add, { op: "addSection", first: "$1", last: "$1", title: "B", color: "blue" }],
+        m,
+      ),
+    );
+    expect(run.error).toMatchObject({ code: "placeholder.kind", path: "commands[1].first" });
+  });
+
+  test("a step's $n where a section ID goes fails with placeholder.kind", () => {
+    const r = fail(
+      apply(doc([sec("delay", "a", "a")]), [addDelay, { op: "removeSection", id: "$1" }], m),
+    );
+    expect(r.error).toMatchObject({
+      code: "placeholder.kind",
+      path: "commands[1].id",
+      hint: { expected: "section", got: "step" },
+    });
+    const u = fail(apply(doc(), [addDelay, { op: "updateSection", id: "$1", color: "pink" }], m));
+    expect(u.error.code).toBe("placeholder.kind");
+  });
+
+  test("placeholder.unknown lists placeholders of both kinds in batch order", () => {
+    const r = fail(
+      apply(
+        doc(),
+        [
+          addDelay,
+          { op: "addSection", first: "a", last: "a", title: "A", color: "blue" },
+          { op: "removeSection", id: "$9" },
+        ],
+        m,
+      ),
+    );
+    expect(r.error).toMatchObject({ code: "placeholder.unknown", hint: { defined: ["$1", "$2"] } });
+  });
+
+  test("a literal $… section ID no placeholder defines is named as is", () => {
+    const d = doc([sec("$x", "a", "a")]);
+    const r = ok(apply(d, [{ op: "updateSection", id: "$x", color: "pink" }], m));
+    expect(r.doc.sections?.[0]?.color).toBe("pink");
+    expect(fail(apply(d, [{ op: "removeSection", id: "$y" }], m)).error.code).toBe(
+      "placeholder.unknown",
+    );
+  });
+});
+
+describe("trusted-only section checks carry hints", () => {
+  test("colour and note", () => {
+    const color = fail(
+      apply(
+        doc(),
+        [{ op: "addSection", first: "a", last: "a", title: "T", color: "red" as never }],
+        m,
+        { trusted: true },
+      ),
+    ).error;
+    expect(color).toMatchObject({
+      code: "command.invalid",
+      path: "commands[0].color",
+      hint: { expected: { enum: ["yellow", "blue", "green", "pink", "purple", "gray"] } },
+    });
+    const note = fail(
+      apply(
+        doc([sec("s", "a", "a")]),
+        [{ op: "updateSection", id: "s", note: "x".repeat(4001) }],
+        m,
+        { trusted: true },
+      ),
+    ).error;
+    expect(note).toMatchObject({
+      code: "command.invalid",
+      path: "commands[0].note",
+      hint: { expected: { type: "string", maxLength: 4000 } },
+    });
+  });
+});

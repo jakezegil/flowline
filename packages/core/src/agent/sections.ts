@@ -9,12 +9,18 @@
  *
  * @module
  */
-import { isAnnotationColor, NOTE_MAX_CHARS, sectionIdFor, sectionRun } from "../annotations";
+import {
+  ANNOTATION_COLORS,
+  isAnnotationColor,
+  NOTE_MAX_CHARS,
+  sectionIdFor,
+  sectionRun,
+} from "../annotations";
 import { isValidStepId, STEP_ID_PATTERN } from "../ids";
 import type { StepLocation } from "../tree";
 import type { Section, WorkflowDoc } from "../types";
 import { type Command, CommandFailure, type Handler, type HandlerContext } from "./commands";
-import { existingStep, placeholderId } from "./single";
+import { existingStep, unknownPlaceholder, wrongKind } from "./single";
 
 type Cmd<Op extends Command["op"]> = Extract<Command, { op: Op }>;
 
@@ -97,9 +103,30 @@ function checkedRun(
   return { first: a.id, last: z.id };
 }
 
+/**
+ * The real section ID a section argument names. A section placeholder resolves (and is recorded
+ * as used). A `$…` that no placeholder defines but a section literally has as its ID (a
+ * hand-edited doc) names that section, so Fix can re-id it. A step's placeholder fails with
+ * `placeholder.kind`; anything else starting with `$` with `placeholder.unknown`.
+ */
+function sectionRefId(doc: WorkflowDoc, ctx: HandlerContext, ref: unknown, path: string): string {
+  if (typeof ref !== "string") {
+    throw new CommandFailure("command.invalid", "A section ID must be a string", path);
+  }
+  if (!ref.startsWith("$")) return ref;
+  const id = ctx.sectionPlaceholders.get(ref);
+  if (id !== undefined) {
+    ctx.used.set(ref, id);
+    return id;
+  }
+  if (ctx.placeholders.has(ref)) throw wrongKind(ref, "step", "section", path);
+  if ((doc.sections ?? []).some((s) => s.id === ref)) return ref;
+  throw unknownPlaceholder(ctx, ref, path);
+}
+
 /** The index of the section `ref` names (the later one when IDs repeat); throws `section.notFound`. */
 function sectionIndex(doc: WorkflowDoc, ctx: HandlerContext, ref: string, path: string): number {
-  const id = placeholderId(ctx, ref, path);
+  const id = sectionRefId(doc, ctx, ref, path);
   const sections = doc.sections ?? [];
   for (let i = sections.length - 1; i >= 0; i--) {
     if ((sections[i] as Section).id === id) return i;
@@ -126,13 +153,19 @@ function checkNote(note: unknown, path: string): void {
       "command.invalid",
       `A note is a string of at most ${NOTE_MAX_CHARS} characters`,
       path,
+      { expected: { type: "string", maxLength: NOTE_MAX_CHARS } },
     );
   }
 }
 
 function checkColor(color: unknown, path: string): void {
   if (!isAnnotationColor(color)) {
-    throw new CommandFailure("command.invalid", "Unknown colour", path);
+    throw new CommandFailure(
+      "command.invalid",
+      `A colour is one of ${ANNOTATION_COLORS.join(", ")}`,
+      path,
+      { expected: { enum: [...ANNOTATION_COLORS] } },
+    );
   }
 }
 
@@ -169,7 +202,11 @@ const addSection: Handler = (doc, command, ctx) => {
     first: run.first,
     last: run.last,
   };
-  return { doc: withSections(doc, [...(doc.sections ?? []), section]), created: id };
+  return {
+    doc: withSections(doc, [...(doc.sections ?? []), section]),
+    created: id,
+    kind: "section",
+  };
 };
 
 const updateSection: Handler = (doc, command, ctx) => {

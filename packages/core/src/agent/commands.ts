@@ -170,6 +170,7 @@ export type CommandErrorCode =
   | "step.notFound"
   | "section.notFound"
   | "placeholder.unknown"
+  | "placeholder.kind"
   | "node.unknown"
   | "trigger.unknown"
   | "branch.unknown"
@@ -201,7 +202,8 @@ export interface ApplyError {
   /**
    * Help to fix it: `{ expected }` (a compact JSON Schema) for `command.invalid`, `{ closest }`
    * for unknown steps and node types, `{ branches }` for unknown branches, `{ defined, note }`
-   * for unknown placeholders.
+   * for unknown placeholders, `{ expected, got, note }` for a placeholder of the wrong kind (a
+   * section's `$n` where a step ID goes, or the reverse).
    */
   hint?: unknown;
 }
@@ -262,9 +264,11 @@ export interface HandlerContext {
   nodes: Map<string, NodeManifest>;
   /** The running command's index. */
   index: number;
-  /** Placeholders defined so far → real IDs. */
+  /** Step placeholders defined so far → real step IDs. */
   placeholders: Map<string, string>;
-  /** Placeholders used or created so far → real IDs (the result's `ids`). */
+  /** Section placeholders defined so far (`$n` of an `addSection`) → real section IDs. */
+  sectionPlaceholders: Map<string, string>;
+  /** Placeholders used or created so far, of both kinds → real IDs (the result's `ids`). */
   used: Map<string, string>;
   /** Old → new step IDs so far (the result's `renamed`). */
   renamed: Map<string, string>;
@@ -275,7 +279,12 @@ export interface HandlerResult {
   doc: WorkflowDoc;
   /** The step or section ID `$<index+1>` names. */
   created?: string;
+  /** What `created` is. Default `"step"`. */
+  kind?: PlaceholderKind;
 }
+
+/** @internal What a placeholder names: a step, or a section. */
+export type PlaceholderKind = "step" | "section";
 
 /** @internal One command's implementation. Throws {@link CommandFailure}. */
 export type Handler = (doc: WorkflowDoc, cmd: Command, ctx: HandlerContext) => HandlerResult;

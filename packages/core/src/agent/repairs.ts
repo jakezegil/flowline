@@ -28,9 +28,23 @@ function sameIssue(a: Issue, b: Issue): boolean {
   );
 }
 
-/** Whether a section ID can be named in a command (a placeholder-looking ID can't). */
+/** Whether a section ID can be named in a command. */
 function addressable(id: unknown): id is string {
-  return typeof id === "string" && id !== "" && !id.startsWith("$");
+  return typeof id === "string" && id !== "";
+}
+
+/**
+ * Whether `commands` name the section `id` unambiguously. A literal `$…` section ID names that
+ * section only while no earlier command in the batch defines the placeholder of that name (an
+ * `addSection` at index n-1 defines `$n`).
+ */
+function literalSafe(commands: Command[], id: string): boolean {
+  if (!/^\$[0-9]+$/.test(id)) return true;
+  const n = Number(id.slice(1));
+  if (commands[n - 1]?.op !== "addSection") return true;
+  return !commands.some(
+    (c, k) => k >= n && (c.op === "updateSection" || c.op === "removeSection") && c.id === id,
+  );
 }
 
 /**
@@ -103,7 +117,8 @@ function retarget(
  * - Reversed: swap `first` and `last`. In different branches: shrink it to its first step.
  * - A bad colour: gray. A long note: cut to 4000 chars.
  * - A duplicate or invalid section ID: remove the section, then add it back with the same run,
- *   title, colour and note under a fresh ID from `sectionIdFor`.
+ *   title, colour and note under a fresh ID from `sectionIdFor`. A hand-edited `$…` ID is
+ *   named literally (no placeholder of that name is defined in the batch).
  * - An overlap: remove the later section.
  *
  * `updateSection` and `removeSection` act on the later of two sections that share an ID, so a
@@ -194,5 +209,5 @@ export function annotationRepairs(doc: WorkflowDoc, issue: Issue): Command[] {
       break;
     }
   }
-  return commands;
+  return literalSafe(commands, target.id) ? commands : [];
 }

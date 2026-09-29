@@ -41,6 +41,7 @@ import {
   closest,
   type Handler,
   type HandlerContext,
+  type PlaceholderKind,
   type StepRef,
 } from "./commands";
 import { resolveStepRef, resolveValuePlaceholders } from "./placeholders";
@@ -56,17 +57,53 @@ function join(base: string, seg: string | number): string {
   return base === "" ? formatPath([seg]) : `${base}${formatPath(["x", seg]).slice(1)}`;
 }
 
-/** @internal The real ID a placeholder names, recorded as used; throws `placeholder.unknown`. */
+/** Every placeholder defined so far, of both kinds, in batch order. */
+function definedPlaceholders(ctx: HandlerContext): string[] {
+  const all = [...ctx.placeholders.keys(), ...ctx.sectionPlaceholders.keys()];
+  const n = (p: string) => (/^\$[0-9]+$/.test(p) ? Number(p.slice(1)) : Number.POSITIVE_INFINITY);
+  return all.sort((a, b) => n(a) - n(b));
+}
+
+/** @internal The `placeholder.unknown` failure for `ref`. */
+export function unknownPlaceholder(ctx: HandlerContext, ref: string, path: string): CommandFailure {
+  return new CommandFailure("placeholder.unknown", `Unknown placeholder "${ref}"`, path, {
+    defined: definedPlaceholders(ctx),
+    note: "$n is the result of commands[n-1]",
+  });
+}
+
+/** @internal The `placeholder.kind` failure: `ref` names a `got` where a `want` ID goes. */
+export function wrongKind(
+  ref: string,
+  got: PlaceholderKind,
+  want: PlaceholderKind,
+  path: string,
+): CommandFailure {
+  const by = /^\$[0-9]+$/.test(ref) ? ` (created by commands[${Number(ref.slice(1)) - 1}])` : "";
+  return new CommandFailure(
+    "placeholder.kind",
+    `Placeholder "${ref}" names a ${got}, but this argument takes a ${want} ID`,
+    path,
+    {
+      expected: want,
+      got,
+      note: `${ref} names a ${got}${by}; this argument takes a ${want} ID`,
+    },
+  );
+}
+
+/**
+ * @internal The real step ID a step argument names (a placeholder resolved, and recorded as
+ * used); throws `placeholder.unknown`, or `placeholder.kind` for a section's placeholder.
+ */
 export function placeholderId(ctx: HandlerContext, ref: StepRef, path: string): string {
   if (typeof ref !== "string") {
     throw new CommandFailure("command.invalid", "A step ID must be a string", path);
   }
   const id = resolveStepRef(ref, ctx.placeholders);
   if (id === undefined) {
-    throw new CommandFailure("placeholder.unknown", `Unknown placeholder "${ref}"`, path, {
-      defined: [...ctx.placeholders.keys()],
-      note: "$n is the result of commands[n-1]",
-    });
+    if (ctx.sectionPlaceholders.has(ref)) throw wrongKind(ref, "section", "step", path);
+    throw unknownPlaceholder(ctx, ref, path);
   }
   if (ref !== id) ctx.used.set(ref, id);
   return id;
@@ -89,14 +126,16 @@ export function existingStep(
   return { id, step: found.step, location: found.location };
 }
 
-/** @internal `v` with its placeholders resolved; throws `placeholder.unknown`. */
+/**
+ * @internal `v` with its placeholders resolved; throws `placeholder.unknown`, or
+ * `placeholder.kind` for a section's placeholder in a `steps.$n` reference.
+ */
 export function resolvedValue(ctx: HandlerContext, v: ValueExpr, path: string): ValueExpr {
   const r = resolveValuePlaceholders(v, ctx.placeholders, ctx.used);
   if (r.unknown !== undefined) {
-    throw new CommandFailure("placeholder.unknown", `Unknown placeholder "${r.unknown}"`, path, {
-      defined: [...ctx.placeholders.keys()],
-      note: "$n is the result of commands[n-1]",
-    });
+    // `steps.$n` is a step reference: a section's placeholder has no output to read.
+    if (ctx.sectionPlaceholders.has(r.unknown)) throw wrongKind(r.unknown, "section", "step", path);
+    throw unknownPlaceholder(ctx, r.unknown, path);
   }
   return r.value;
 }
@@ -363,8 +402,9 @@ const setConfig: Handler = (doc, command, ctx) => {
 
 /**
  * @internal Records that step `from` is now `to`: `renamed` keeps one old → new entry per step
- * of the input doc (dropped when a step is renamed back), and placeholders that named `from`
- * now name `to`.
+ * of the input doc (dropped when a step is renamed back), and step placeholders (and their
+ * `ids` entries) that named `from` now name `to`. Section placeholders are left alone, even when
+ * a section has the same ID as the step.
  */
 export function recordRename(ctx: HandlerContext, from: string, to: string): void {
   if (from === to) return;
@@ -376,8 +416,10 @@ export function recordRename(ctx: HandlerContext, from: string, to: string): voi
     else ctx.renamed.set(old, to);
   }
   if (!chained) ctx.renamed.set(from, to);
-  for (const map of [ctx.placeholders, ctx.used]) {
-    for (const [k, v] of map) if (v === from) map.set(k, to);
+  for (const [k, v] of ctx.placeholders) {
+    if (v !== from) continue;
+    ctx.placeholders.set(k, to);
+    if (ctx.used.has(k)) ctx.used.set(k, to);
   }
 }
 
@@ -458,6 +500,7 @@ const setNote: Handler = (doc, command, ctx) => {
       "command.invalid",
       `A note is a string of at most ${NOTE_MAX_CHARS} characters, or null`,
       "note",
+      { expected: { type: ["string", "null"], maxLength: NOTE_MAX_CHARS } },
     );
   }
   if ((step.note ?? "") === note) return { doc };
@@ -474,6 +517,7 @@ const setColor: Handler = (doc, command, ctx) => {
       "command.invalid",
       `A colour is one of ${ANNOTATION_COLORS.join(", ")}, or null`,
       "color",
+      { expected: { enum: [...ANNOTATION_COLORS, null] } },
     );
   }
   if (step.color === color) return { doc };

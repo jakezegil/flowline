@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { findStep, walkSteps } from "../tree";
 import type { Manifest, NodeManifest, Step, TriggerManifest, WorkflowDoc } from "../types";
+import { UI_META_KEY } from "../ui";
 import { apply } from "./apply";
 import { commandSchema } from "./command-schema";
 import type { ApplyResult, Command } from "./commands";
@@ -19,6 +20,19 @@ const countNode: NodeManifest = {
   branches: { kind: "none" },
 };
 
+/** A node with a code field (`widget: "code"`), like a Transform. */
+const codeNode: NodeManifest = {
+  type: "util.transform",
+  plugin: "flow",
+  name: "Transform",
+  input: {
+    type: "object",
+    properties: { code: { type: "string", [UI_META_KEY]: { widget: "code" } } },
+  },
+  output: { kind: "schema", schema: {} },
+  branches: { kind: "none" },
+};
+
 const manualTrigger: TriggerManifest = {
   type: "util.manual",
   plugin: "flow",
@@ -34,7 +48,7 @@ const manualTrigger: TriggerManifest = {
 const base = richManifest();
 const m: Manifest = {
   ...base,
-  nodes: [...base.nodes, countNode],
+  nodes: [...base.nodes, countNode, codeNode],
   triggers: [...base.triggers, manualTrigger],
 };
 
@@ -300,8 +314,37 @@ describe.each(rows)("$op", (row) => {
     expect(b.renamed).toEqual(a.renamed);
   });
 
-  test("an unknown target fails and leaves the input untouched", () => {
-    if (!row.notFound) return;
+  test("atomic: a failing next command leaves the input deep-equal to its clone", () => {
+    const d = doc();
+    const before = structuredClone(d);
+    const r = fail(apply(d, [...row.normal, { op: "removeStep", id: "nope" }], m));
+    expect(r.error.index).toBe(row.normal.length);
+    expect(r.error.path).toBe(`commands[${row.normal.length}].id`);
+    expect(d).toEqual(before);
+  });
+});
+
+// Rows without a target (setTriggerConfig, setOutput, renameWorkflow) have no not-found case,
+// and renameWorkflow has no `$n` case: they are left out of these tables, not passed vacuously.
+const withTarget = rows.flatMap((r) => (r.notFound ? [{ ...r, notFound: r.notFound }] : []));
+const withDollar = rows.flatMap((r) => (r.dollar ? [{ ...r, dollar: r.dollar }] : []));
+
+test("the tables cover the expected ops", () => {
+  expect(withTarget.map((r) => r.op)).toEqual([
+    "duplicateStep",
+    "renameStep",
+    "renameStepId",
+    "setType",
+    "setDisabled",
+    "setNote",
+    "setColor",
+    "setTrigger",
+  ]);
+  expect(withDollar.map((r) => r.op)).toEqual(rows.map((r) => r.op).slice(0, -1));
+});
+
+describe.each(withTarget)("$op: an unknown target", (row) => {
+  test("fails and leaves the input untouched", () => {
     const d = doc();
     const before = structuredClone(d);
     const r = fail(apply(d, [row.notFound.cmd], m));
@@ -310,20 +353,12 @@ describe.each(rows)("$op", (row) => {
     expect(r.error.hint).toBeDefined();
     expect(d).toEqual(before);
   });
+});
 
-  test("$1 addresses the step an earlier command created", () => {
-    if (!row.dollar) return;
+describe.each(withDollar)("$op: $1", (row) => {
+  test("addresses the step an earlier command created", () => {
     const r = ok(apply(doc(), [addCount, row.dollar.cmd], m));
     row.dollar.check(r.doc, r);
-  });
-
-  test("atomic: a failing next command leaves the input deep-equal to its clone", () => {
-    const d = doc();
-    const before = structuredClone(d);
-    const r = fail(apply(d, [...row.normal, { op: "removeStep", id: "nope" }], m));
-    expect(r.error.index).toBe(row.normal.length);
-    expect(r.error.path).toBe(`commands[${row.normal.length}].id`);
-    expect(d).toEqual(before);
   });
 });
 
@@ -390,11 +425,24 @@ describe("duplicateStep names", () => {
     expect(step(r.doc, "notify").name).toBeUndefined();
   });
 
-  test("a duplicated subtree gets fresh IDs, refs inside remapped", () => {
-    const r = ok(apply(doc(), [{ op: "duplicateStep", id: "check" }], m));
+  test("a duplicated subtree gets fresh IDs, refs inside remapped, refs outside kept", () => {
+    const d = doc();
+    const check = d.steps[1] as Step;
+    const notify = check.branches?.then?.[0] as Step;
+    notify.config.body = { $tpl: "Matched: {{ steps.check.matched }}" };
+    const r = ok(apply(d, [{ op: "duplicateStep", id: "check" }], m));
     expect(r.ids.$1).toBe("if");
     expect(new Set(ids(r.doc)).size).toBe(ids(r.doc).length);
     expect(step(r.doc, "if").name).toBe("If (copy)");
+    const copy = step(r.doc, "if").branches?.then?.[0] as Step;
+    expect(copy.id).toBe("sendEmail_2");
+    // The ref to the copied `check` points at the copy; the ref to `load` (outside) is kept.
+    expect(copy.config.body).toEqual({ $tpl: "Matched: {{ steps.if.matched }}" });
+    expect(copy.config.subject).toEqual({ $tpl: "Deal {{ steps.load.deal.id }}" });
+    // The original is untouched.
+    expect(step(r.doc, "notify").config.body).toEqual({
+      $tpl: "Matched: {{ steps.check.matched }}",
+    });
   });
 });
 
@@ -633,6 +681,71 @@ describe("changed", () => {
       "~ trigger util.manual",
       "~ output",
     ]);
+  });
+
+  test("a renamed step reads as ~ old → new, not an add and a remove", () => {
+    const r = ok(apply(doc(), [{ op: "setType", id: "sendEmail", type: "crm.getDeal" }], m));
+    const lines = r.changed.split("\n");
+    expect(lines.some((l) => l.startsWith("~ sendEmail → getDeal"))).toBe(true);
+    expect(lines.some((l) => l.startsWith("+ ") || l.startsWith("- "))).toBe(false);
+    const r2 = ok(apply(doc(), [{ op: "renameStepId", id: "load", newId: "fetch" }], m));
+    expect(r2.changed.split("\n")[0]).toMatch(/^~ load → fetch /);
+    expect(r2.changed).not.toContain("- load");
+  });
+
+  test("a step created and renamed in one batch still reads as added", () => {
+    const r = ok(apply(doc(), [addCount, { op: "renameStepId", id: "$1", newId: "n" }], m));
+    expect(r.renamed).toEqual({ count: "n" });
+    expect(r.changed).toMatch(/^\+ n /);
+  });
+});
+
+describe("setType and code that reads the step dynamically", () => {
+  test("a generated ID is kept when code reads the step opaquely", () => {
+    const d = doc();
+    d.steps.push({
+      id: "shape",
+      type: "util.transform",
+      config: { code: 'const k = "sendEmail";\nreturn steps[k].messageId;' },
+    });
+    const r = ok(apply(d, [{ op: "setType", id: "sendEmail", type: "crm.getDeal" }], m));
+    expect(step(r.doc, "sendEmail").type).toBe("crm.getDeal");
+    expect(findStep(r.doc, "getDeal")).toBeUndefined();
+    expect(r.renamed).toEqual({});
+    expect(r.ids).toEqual({ $1: "sendEmail" });
+  });
+
+  test("plain steps.<id> code is rewritten with the regenerated ID", () => {
+    const d = doc();
+    d.steps.push({
+      id: "shape",
+      type: "util.transform",
+      config: { code: "return steps.sendEmail.messageId;" },
+    });
+    const r = ok(apply(d, [{ op: "setType", id: "sendEmail", type: "crm.getDeal" }], m));
+    expect(r.renamed).toEqual({ sendEmail: "getDeal" });
+    expect(step(r.doc, "shape").config.code).toBe("return steps.getDeal.messageId;");
+  });
+});
+
+describe("trusted-only annotation checks carry hints", () => {
+  test("setColor and setNote", () => {
+    const color = fail(
+      apply(doc(), [{ op: "setColor", id: "load", color: "red" as never }], m, { trusted: true }),
+    ).error;
+    expect(color).toMatchObject({
+      code: "command.invalid",
+      path: "commands[0].color",
+      hint: { expected: { enum: ["yellow", "blue", "green", "pink", "purple", "gray", null] } },
+    });
+    const note = fail(
+      apply(doc(), [{ op: "setNote", id: "load", note: "x".repeat(4001) }], m, { trusted: true }),
+    ).error;
+    expect(note).toMatchObject({
+      code: "command.invalid",
+      path: "commands[0].note",
+      hint: { expected: { maxLength: 4000 } },
+    });
   });
 });
 
