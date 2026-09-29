@@ -237,6 +237,56 @@ export interface DedupeClaim {
   claimed: boolean;
 }
 
+/** The durable poll state of one workflow, as stored. See {@link StorageAdapter.claimPoll}. */
+export interface PollState {
+  /** Owning tenant. */
+  tenantId: string;
+  /** Polled workflow. */
+  workflowId: string;
+  /** End of the last completed interval; `null` before the first successful poll. */
+  since: number | null;
+  /** Cursor from the last successful poll; `null` initially. */
+  cursor: unknown;
+  /** Earliest time the workflow may be polled again (`0` initially). */
+  nextAt: number;
+  /** Message of the last failed poll; cleared by a successful one. */
+  lastError?: string;
+  /** Worker currently holding the lease, if any. */
+  leaseOwner?: string;
+  /** When the current lease expires. */
+  leaseUntil?: number;
+  /** Last write time (set by storage). */
+  updatedAt: number;
+}
+
+/**
+ * Exclusive permission to advance a workflow's poll state, returned by
+ * {@link StorageAdapter.claimPoll}. The `token` is opaque; it stays current until the lease is
+ * released, claimed again by anyone (after expiry), or renewed.
+ */
+export interface PollLease {
+  /** Snapshot of the poll state as claimed (lease fields set). */
+  state: PollState;
+  /** Opaque lease token; every guarded write compares it against the stored token. */
+  token: string;
+}
+
+/** A patch applied by {@link StorageAdapter.commitPoll}. */
+export interface PollPatch {
+  /** New value of {@link PollState.since}; omitted leaves it unchanged. */
+  since?: number;
+  /** New value of {@link PollState.cursor} (replaces, never merges); omitted leaves it unchanged. */
+  cursor?: unknown;
+  /** New value of {@link PollState.nextAt}. */
+  nextAt: number;
+  /** New value of {@link PollState.lastError}; `null` clears it; omitted leaves it unchanged. */
+  lastError?: string | null;
+  /**
+   * Keep the lease (same token) instead of releasing it: used between catch-up calls of one tick.
+   */
+  keepLease?: boolean;
+}
+
 /**
  * Persistence for workflow versions, runs, events and dedupe keys.
  *
@@ -486,4 +536,34 @@ export interface StorageAdapter {
     now: number,
     windowMs: number,
   ): Promise<DedupeClaim>;
+
+  /**
+   * Claim the poll state of `(tenantId, workflowId)` for `leaseMs` when `nextAt <= now` and it is
+   * not leased (`leaseUntil` unset or `< now`). Creates the state (`since: null, cursor: null,
+   * nextAt: 0`) when missing. Returns `null` (the lease is not granted, and nothing about the
+   * lease changes) when the state is not due or is leased elsewhere. Atomic: of concurrent claims,
+   * exactly one succeeds.
+   */
+  claimPoll(
+    tenantId: string,
+    workflowId: string,
+    opts: { workerId: string; leaseMs: number; now: number },
+  ): Promise<PollLease | null>;
+
+  /**
+   * Extend the poll lease to `now + leaseMs` if `lease.token` is still current. Returns `false`
+   * (and writes nothing) otherwise.
+   */
+  renewPollLease(lease: PollLease, leaseMs: number, now: number): Promise<boolean>;
+
+  /**
+   * Apply `patch`, set `updatedAt = now` and release the lease (unless `patch.keepLease`, which
+   * keeps the same token current), guarded by the token: `false` and no write when the token is
+   * stale. `cursor` is replaced (not merged); `lastError: null` clears; fields left `undefined` in
+   * `patch` are left unchanged.
+   */
+  commitPoll(lease: PollLease, patch: PollPatch, now: number): Promise<boolean>;
+
+  /** The poll state of `(tenantId, workflowId)`, or `null` if it has never been claimed. */
+  getPollState(tenantId: string, workflowId: string): Promise<PollState | null>;
 }

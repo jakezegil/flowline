@@ -9,7 +9,7 @@
 import type { JournalEntry, RunEventType, WorkflowDoc } from "@flowlinejs/core";
 import { describe, expect, it } from "vitest";
 import { FlowlineStorageError } from "./errors";
-import type { Lease, NewRun, NewRunEvent, StorageAdapter } from "./storage";
+import type { Lease, NewRun, NewRunEvent, PollLease, StorageAdapter } from "./storage";
 
 /** What a conformance factory returns: a fresh, empty adapter and an optional cleanup. */
 export interface ConformanceFixture {
@@ -65,6 +65,18 @@ function waitingParent(childRunId: string, overrides: Partial<NewRun> = {}): New
 async function claimOrFail(storage: StorageAdapter, now: number, workerId = "w1"): Promise<Lease> {
   const lease = await storage.claimRun({ workerId, leaseMs: 1000, now });
   if (!lease) throw new Error("expected a claimable run");
+  return lease;
+}
+
+async function claimPollOrFail(
+  storage: StorageAdapter,
+  now: number,
+  workerId = "w1",
+  tenantId = T1,
+  workflowId = "wf",
+): Promise<PollLease> {
+  const lease = await storage.claimPoll(tenantId, workflowId, { workerId, leaseMs: 1000, now });
+  if (!lease) throw new Error("expected a claimable poll");
   return lease;
 }
 
@@ -1405,6 +1417,122 @@ export function runStorageConformance(name: string, make: () => Promise<Conforma
           runId: "run_c",
           claimed: true,
         });
+      });
+    });
+
+    describe("polls", () => {
+      test("first claim creates the initial state and leases it", async (s) => {
+        const lease = await claimPollOrFail(s, 10);
+        expect(lease.state).toMatchObject({
+          tenantId: T1,
+          workflowId: "wf",
+          since: null,
+          cursor: null,
+          nextAt: 0,
+          leaseOwner: "w1",
+          leaseUntil: 1010,
+          updatedAt: 10,
+        });
+        expect(typeof lease.token).toBe("string");
+        expect(lease.token.length).toBeGreaterThan(0);
+        expect(await s.getPollState(T1, "wf")).toEqual(lease.state);
+      });
+
+      test("a second claim while leased returns null; expiry lets a new lease with a different token in", async (s) => {
+        const first = await claimPollOrFail(s, 0); // leaseUntil 1000
+        expect(await s.claimPoll(T1, "wf", { workerId: "w2", leaseMs: 1000, now: 500 })).toBeNull();
+        expect(
+          await s.claimPoll(T1, "wf", { workerId: "w2", leaseMs: 1000, now: 1000 }),
+        ).toBeNull();
+        const second = await claimPollOrFail(s, 1001, "w2");
+        expect(second.token).not.toBe(first.token);
+        expect(second.state.leaseOwner).toBe("w2");
+      });
+
+      test("commitPoll: a stale token writes nothing, the current token applies the patch and releases the lease", async (s) => {
+        const lease = await claimPollOrFail(s, 0);
+        const stale: PollLease = { ...lease, token: "wrong-token" };
+        expect(await s.commitPoll(stale, { since: 100, cursor: { a: 1 }, nextAt: 200 }, 10)).toBe(
+          false,
+        );
+        expect(await s.getPollState(T1, "wf")).toEqual(lease.state);
+
+        expect(await s.commitPoll(lease, { since: 100, cursor: { a: 1 }, nextAt: 200 }, 10)).toBe(
+          true,
+        );
+        const state = await s.getPollState(T1, "wf");
+        expect(state).toMatchObject({ since: 100, cursor: { a: 1 }, nextAt: 200, updatedAt: 10 });
+        expect(state?.leaseOwner).toBeUndefined();
+        expect(state?.leaseUntil).toBeUndefined();
+      });
+
+      test("nextAt gates claimability: not due, then claimable exactly at nextAt", async (s) => {
+        const lease = await claimPollOrFail(s, 0);
+        await s.commitPoll(lease, { nextAt: 500 }, 10);
+        expect(await s.claimPoll(T1, "wf", { workerId: "w2", leaseMs: 100, now: 499 })).toBeNull();
+        const next = await claimPollOrFail(s, 500, "w2");
+        expect(next.state.leaseOwner).toBe("w2");
+      });
+
+      test("ten concurrent claims yield exactly one lease", async (s) => {
+        const results = await Promise.all(
+          Array.from({ length: 10 }, (_, i) =>
+            s.claimPoll(T1, "wf", { workerId: `w${i}`, leaseMs: 10_000, now: 0 }),
+          ),
+        );
+        const won = results.filter((r): r is PollLease => r !== null);
+        expect(won).toHaveLength(1);
+        expect(new Set(results.filter((r) => r !== null).map((r) => r?.token)).size).toBe(1);
+      });
+
+      test("cursor round-trips JSON and is replaced, not merged; lastError null clears; since unset leaves the value", async (s) => {
+        const lease = await claimPollOrFail(s, 0);
+        expect(
+          await s.commitPoll(
+            lease,
+            { since: 10, cursor: { a: [1, 2], b: null }, nextAt: 20, lastError: "boom" },
+            10,
+          ),
+        ).toBe(true);
+        let state = await s.getPollState(T1, "wf");
+        expect(state?.cursor).toEqual({ a: [1, 2], b: null });
+        expect(state?.lastError).toBe("boom");
+        expect(state?.since).toBe(10);
+
+        const lease2 = await claimPollOrFail(s, 20, "w2");
+        // since omitted: leaves the value; cursor replaced (not merged); lastError: null clears.
+        expect(
+          await s.commitPoll(lease2, { cursor: [1, null, "x"], nextAt: 30, lastError: null }, 25),
+        ).toBe(true);
+        state = await s.getPollState(T1, "wf");
+        expect(state?.since).toBe(10);
+        expect(state?.cursor).toEqual([1, null, "x"]);
+        expect(state?.lastError).toBeUndefined();
+        expect(state?.nextAt).toBe(30);
+      });
+
+      test("renewPollLease: true while current, false after commit, kept current by keepLease", async (s) => {
+        const lease = await claimPollOrFail(s, 0);
+        expect(await s.renewPollLease(lease, 5000, 100)).toBe(true);
+        expect((await s.getPollState(T1, "wf"))?.leaseUntil).toBe(5100);
+
+        expect(await s.commitPoll(lease, { nextAt: 50, keepLease: true }, 100)).toBe(true);
+        // keepLease: the token stays current, so it can renew and commit again.
+        expect(await s.renewPollLease(lease, 5000, 200)).toBe(true);
+        // A concurrent claim while the lease is kept fails.
+        expect(await s.claimPoll(T1, "wf", { workerId: "w2", leaseMs: 100, now: 200 })).toBeNull();
+        expect(await s.commitPoll(lease, { nextAt: 60, keepLease: true }, 210)).toBe(true);
+        expect((await s.getPollState(T1, "wf"))?.nextAt).toBe(60);
+
+        // A final commitPoll without keepLease releases the lease.
+        expect(await s.commitPoll(lease, { nextAt: 70 }, 220)).toBe(true);
+        expect(await s.renewPollLease(lease, 100, 230)).toBe(false);
+        expect((await s.getPollState(T1, "wf"))?.leaseOwner).toBeUndefined();
+      });
+
+      test("tenant isolation: getPollState of the other tenant is null", async (s) => {
+        await claimPollOrFail(s, 0);
+        expect(await s.getPollState(T2, "wf")).toBeNull();
       });
     });
   });

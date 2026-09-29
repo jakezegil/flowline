@@ -54,16 +54,25 @@ export function migrations(s: string): Migration[] {
 }
 
 /**
- * v4: `dedupe_keys.run_id` (`claimDedupeKey`). Pre-1.0, nothing is deployed: rows written before
- * v4 have no run id, so dedupe history is reset once rather than reconstructed from the old
- * derived-id scheme. All three statements are safe to repeat: after the first run there are no
- * `NULL` rows left to delete.
+ * v4: `dedupe_keys.run_id` (`claimDedupeKey`), plus `poll_states` (`claimPoll`/`commitPoll`) for
+ * the poll trigger kind. Pre-1.0, nothing is deployed: rows written before v4 have no run id, so
+ * dedupe history is reset once rather than reconstructed from the old derived-id scheme. The
+ * dedupe statements are safe to repeat: after the first run there are no `NULL` rows left to
+ * delete. The `poll_states` statements are `IF NOT EXISTS`, so re-running v4 on an already
+ * migrated database changes nothing.
  */
 function v4(s: string): string[] {
   return [
     `ALTER TABLE ${s}.dedupe_keys ADD COLUMN IF NOT EXISTS run_id text`,
     `DELETE FROM ${s}.dedupe_keys WHERE run_id IS NULL`,
     `ALTER TABLE ${s}.dedupe_keys ALTER COLUMN run_id SET NOT NULL`,
+    `CREATE TABLE IF NOT EXISTS ${s}.poll_states (
+      tenant_id text NOT NULL, workflow_id text NOT NULL,
+      since bigint, cursor jsonb, next_at bigint NOT NULL DEFAULT 0, last_error text,
+      lease_owner text, lease_until bigint, lease_token text, updated_at bigint NOT NULL,
+      PRIMARY KEY (tenant_id, workflow_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS poll_states_next_at_idx ON ${s}.poll_states (next_at)`,
   ];
 }
 

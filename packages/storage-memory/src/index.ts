@@ -18,6 +18,8 @@ import {
   type Lease,
   type NewRun,
   type NewRunEvent,
+  type PollLease,
+  type PollState,
   type ResumeEvent,
   type Run,
   type RunPatch,
@@ -31,6 +33,11 @@ export const VERSION = "0.1.0";
 
 interface StoredRun {
   run: Run;
+  token?: string;
+}
+
+interface StoredPoll {
+  state: PollState;
   token?: string;
 }
 
@@ -131,6 +138,20 @@ export function createMemoryStorage(): StorageAdapter {
   const runs = new Map<string, StoredRun>();
   const events = new Map<string, RunEvent[]>();
   const dedupe = new Map<string, { runId: string; expiresAt: number }>();
+  const polls = new Map<string, StoredPoll>();
+
+  /** The poll state of `(tenantId, workflowId)`, creating it (unleased, at its default) if absent. */
+  const ensurePoll = (tenantId: string, workflowId: string, now: number): StoredPoll => {
+    const key = wfKey(tenantId, workflowId);
+    let stored = polls.get(key);
+    if (!stored) {
+      stored = {
+        state: { tenantId, workflowId, since: null, cursor: null, nextAt: 0, updatedAt: now },
+      };
+      polls.set(key, stored);
+    }
+    return stored;
+  };
 
   const newStoredRun = (input: NewRun, now: number): StoredRun => {
     const run: Run = { ...clone(input), createdAt: now, updatedAt: now };
@@ -460,6 +481,50 @@ export function createMemoryStorage(): StorageAdapter {
       }
       dedupe.set(k, { runId, expiresAt: now + windowMs });
       return { runId, claimed: true };
+    },
+
+    async claimPoll(tenantId, workflowId, { workerId, leaseMs, now }) {
+      const stored = ensurePoll(tenantId, workflowId, now);
+      const st = stored.state;
+      const leased = st.leaseUntil !== undefined && st.leaseUntil >= now;
+      if (st.nextAt > now || leased) return null;
+      const token = crypto.randomUUID();
+      st.leaseOwner = workerId;
+      st.leaseUntil = now + leaseMs;
+      st.updatedAt = now;
+      stored.token = token;
+      return { state: clone(st), token };
+    },
+
+    async renewPollLease(lease: PollLease, leaseMs, now) {
+      const stored = polls.get(wfKey(lease.state.tenantId, lease.state.workflowId));
+      if (!stored || stored.token === undefined || stored.token !== lease.token) return false;
+      stored.state.leaseUntil = now + leaseMs;
+      stored.state.updatedAt = now;
+      return true;
+    },
+
+    async commitPoll(lease, patch, now) {
+      const stored = polls.get(wfKey(lease.state.tenantId, lease.state.workflowId));
+      if (!stored || stored.token === undefined || stored.token !== lease.token) return false;
+      const st = stored.state;
+      if (patch.since !== undefined) st.since = patch.since;
+      if (patch.cursor !== undefined) st.cursor = clone(patch.cursor);
+      st.nextAt = patch.nextAt;
+      if (patch.lastError === null) delete st.lastError;
+      else if (patch.lastError !== undefined) st.lastError = patch.lastError;
+      st.updatedAt = now;
+      if (!patch.keepLease) {
+        delete st.leaseOwner;
+        delete st.leaseUntil;
+        delete stored.token;
+      }
+      return true;
+    },
+
+    async getPollState(tenantId, workflowId) {
+      const stored = polls.get(wfKey(tenantId, workflowId));
+      return stored ? clone(stored.state) : null;
     },
   };
 }

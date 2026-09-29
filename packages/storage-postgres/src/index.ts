@@ -17,6 +17,7 @@ import {
   FlowlineStorageError,
   type NewRun,
   type NewRunEvent,
+  type PollState,
   type ResumeEvent,
   type Run,
   type RunPatch,
@@ -59,6 +60,23 @@ class Params {
 /** Serialise a value for a `jsonb` parameter; `undefined` becomes SQL NULL. */
 const json = (value: unknown): string | null =>
   value === undefined ? null : JSON.stringify(value);
+
+/**
+ * Serialise `value` for a `jsonb` parameter that must not be SQL NULL (the caller already knows
+ * `value !== undefined`).
+ *
+ * @throws {FlowlineStorageError} if `value` is not JSON-serializable (e.g. contains a `BigInt`).
+ */
+function jsonOrThrow(value: unknown): string {
+  try {
+    return JSON.stringify(value) as string;
+  } catch (err) {
+    throw new FlowlineStorageError(
+      `Postgres cannot store this value: it is not JSON-serializable (${err instanceof Error ? err.message : String(err)})`,
+      { cause: err },
+    );
+  }
+}
 
 /** `bigint` columns arrive as strings from `pg`; normalise every numeric column to `number`. */
 const num = (value: unknown): number | undefined =>
@@ -154,6 +172,21 @@ function toEvent(row: Row): RunEvent {
   if (row.worker_id !== null) event.workerId = row.worker_id;
   if (row.has_data) event.data = row.data;
   return event;
+}
+
+function toPollState(row: Row): PollState {
+  const state: PollState = {
+    tenantId: row.tenant_id,
+    workflowId: row.workflow_id,
+    since: row.since === null ? null : Number(row.since),
+    cursor: row.cursor,
+    nextAt: Number(row.next_at),
+    updatedAt: Number(row.updated_at),
+  };
+  if (row.last_error !== null) state.lastError = row.last_error;
+  if (row.lease_owner !== null) state.leaseOwner = row.lease_owner;
+  if (row.lease_until !== null) state.leaseUntil = num(row.lease_until);
+  return state;
 }
 
 function toVersion(row: Row): WorkflowVersion {
@@ -770,6 +803,66 @@ export function createPostgresStorage(opts: PgStorageOptions): StorageAdapter {
       );
       const wonRunId = rows[0]?.run_id as string;
       return { runId: wonRunId, claimed: wonRunId === runId };
+    },
+
+    async claimPoll(tenantId, workflowId, { workerId, leaseMs, now }) {
+      const token = crypto.randomUUID();
+      await pool.query(
+        `INSERT INTO ${s}.poll_states (tenant_id, workflow_id, next_at, updated_at)
+         VALUES ($1, $2, 0, $3)
+         ON CONFLICT (tenant_id, workflow_id) DO NOTHING`,
+        [tenantId, workflowId, now],
+      );
+      const { rows } = await pool.query(
+        `UPDATE ${s}.poll_states SET lease_owner = $1, lease_until = $2, lease_token = $3, updated_at = $4
+         WHERE tenant_id = $5 AND workflow_id = $6 AND next_at <= $4
+           AND (lease_until IS NULL OR lease_until < $4)
+         RETURNING *`,
+        [workerId, now + leaseMs, token, now, tenantId, workflowId],
+      );
+      const row = rows[0];
+      return row ? { state: toPollState(row), token } : null;
+    },
+
+    async renewPollLease(lease, leaseMs, now) {
+      const { rows } = await pool.query(
+        `UPDATE ${s}.poll_states SET lease_until = $1, updated_at = $2
+         WHERE tenant_id = $3 AND workflow_id = $4 AND lease_token = $5
+         RETURNING tenant_id`,
+        [now + leaseMs, now, lease.state.tenantId, lease.state.workflowId, lease.token],
+      );
+      return rows.length > 0;
+    },
+
+    async commitPoll(lease, patch, now) {
+      const p = new Params();
+      const sets: string[] = [];
+      if (patch.since !== undefined) sets.push(`since = ${p.add(patch.since)}`);
+      if (patch.cursor !== undefined) {
+        sets.push(`cursor = ${p.add(jsonOrThrow(patch.cursor))}::jsonb`);
+      }
+      sets.push(`next_at = ${p.add(patch.nextAt)}`);
+      if (patch.lastError === null) sets.push("last_error = NULL");
+      else if (patch.lastError !== undefined) sets.push(`last_error = ${p.add(patch.lastError)}`);
+      sets.push(`updated_at = ${p.add(now)}`);
+      if (!patch.keepLease) sets.push("lease_owner = NULL, lease_until = NULL, lease_token = NULL");
+      const { rows } = await pool.query(
+        `UPDATE ${s}.poll_states SET ${sets.join(", ")}
+         WHERE tenant_id = ${p.add(lease.state.tenantId)}
+           AND workflow_id = ${p.add(lease.state.workflowId)}
+           AND lease_token = ${p.add(lease.token)}
+         RETURNING tenant_id`,
+        p.values,
+      );
+      return rows.length > 0;
+    },
+
+    async getPollState(tenantId, workflowId) {
+      const { rows } = await pool.query(
+        `SELECT * FROM ${s}.poll_states WHERE tenant_id = $1 AND workflow_id = $2`,
+        [tenantId, workflowId],
+      );
+      return rows[0] ? toPollState(rows[0]) : null;
     },
   };
 }
