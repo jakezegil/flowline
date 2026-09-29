@@ -126,8 +126,71 @@ export type SectionCommand =
       last?: StepRef;
     }
   | { op: "removeSection"; id: StepRef };
-/** The bulk commands (added by a later release step). */
-export type BulkCommand = never;
+/**
+ * One new step in an `insertSteps`/`replaceSteps` command, with its branches as nested fragments.
+ *
+ * - `ref` names the step `"$<ref>"` in later fragments and commands of the batch (in step
+ *   arguments and in `steps.$<ref>…` refs and templates). It follows the step ID rule.
+ * - `id` defaults to one generated from `type`.
+ * - `config` is merged over the node's defaults.
+ * - `branches` keys must be branches the node declares; missing declared branches are added.
+ *
+ * @example
+ * { ref: "deal", type: "crm.getDeal", config: { dealId: { $ref: "trigger.deal.id" } } }
+ * { type: "flow.if", branches: { else: [{ type: "crm.sendEmail", config: { to: { $ref: "steps.$deal.deal.ownerId" } } }] } }
+ */
+export interface Fragment {
+  /** A batch-local name: `"$<ref>"` names this step later in the fragment and the batch. */
+  ref?: string;
+  /** The new step's ID; generated from `type` when absent. */
+  id?: string;
+  /** The node type. */
+  type: string;
+  /** A display name. */
+  name?: string;
+  /** Config, merged over the node's defaults. */
+  config?: Record<string, ValueExpr>;
+  /** A note (at most 4000 characters). */
+  note?: string;
+  /** A colour. */
+  color?: AnnotationColor;
+  /** Whether the step is disabled. */
+  disabled?: boolean;
+  /** Steps in each branch, by branch ID. */
+  branches?: Record<string, Fragment[]>;
+}
+
+/**
+ * The bulk commands.
+ *
+ * - `insertSteps` inserts a run of new steps (with nested branches) at `at`. The whole fragment
+ *   is validated at once: an unknown node type or branch, an invalid config value, or a ref that
+ *   is unknown, malformed or out of scope at its position fails the batch; a missing required
+ *   field and warnings are only reported. `section` wraps the inserted top-level run in a new
+ *   section (`section.overlap` if that overlaps one in the same list). `$n` is the first
+ *   top-level inserted step.
+ * - `replaceSteps` removes the run `first`…`last` (one list, in order; `run.invalid` otherwise)
+ *   and inserts `steps` in its place, validated as in `insertSteps`. A section holding the run
+ *   holds the new steps. Refs elsewhere to the removed steps are reported, not rejected. `$n`
+ *   is the first new top-level step.
+ *
+ * @example
+ * { op: "insertSteps", at: { after: "getDeal" }, steps: [{ type: "crm.sendEmail", config: { subject: "Hi" } }] }
+ * { op: "replaceSteps", first: "notify", last: "notify", steps: [{ type: "flow.stop" }] }
+ */
+export type BulkCommand =
+  | {
+      op: "insertSteps";
+      at: At;
+      steps: Fragment[];
+      section?: SectionInput;
+      /**
+       * @internal The store's paste: IDs, config and branches as given (no defaults, no branch
+       * sync, unknown types allowed), and validation issues are only reported.
+       */
+      verbatim?: boolean;
+    }
+  | { op: "replaceSteps"; first: StepRef; last: StepRef; steps: Fragment[] };
 
 /**
  * One edit `apply` runs. Every command is `{ op, … }`; step arguments accept placeholders

@@ -60,17 +60,16 @@ export function overlapping(
 }
 
 /**
- * The real IDs of `first`/`last`, checked to be one run (same list, in order) that overlaps no
- * section but the one at `skip`.
+ * @internal The run `first`…`last`: both real IDs, checked to be in one list and in order
+ * (`run.invalid` otherwise), with the first step's location and the last one's index.
  */
-function checkedRun(
+export function stepRun(
   doc: WorkflowDoc,
   ctx: HandlerContext,
   firstRef: string,
   lastRef: string,
   paths: { first: string; last: string },
-  skip = -1,
-): { first: string; last: string } {
+): { first: string; last: string; location: StepLocation; end: number } {
   const a = existingStep(doc, ctx, firstRef, paths.first);
   const z = existingStep(doc, ctx, lastRef, paths.last);
   const { parentId, branch, index } = a.location;
@@ -83,24 +82,47 @@ function checkedRun(
     throw new CommandFailure(
       "run.invalid",
       lists
-        ? `Steps "${a.id}" and "${z.id}" are in different step lists; a section covers a run in one list`
+        ? `Steps "${a.id}" and "${z.id}" are in different step lists; a run is in one list`
         : `Step "${a.id}" comes after "${z.id}"; first must be at or before last`,
       "",
       { first: shown(a.location), last: shown(z.location) },
     );
   }
+  return { first: a.id, last: z.id, location: a.location, end: z.location.index };
+}
+
+/** @internal The `section.overlap` failure: the run `first`…`last` overlaps `other`. */
+export function overlapFailure(
+  first: string,
+  last: string,
+  other: Section,
+  path: string,
+): CommandFailure {
+  return new CommandFailure(
+    "section.overlap",
+    `The run "${first}"…"${last}" overlaps section "${other.id}"; sections in one list can't overlap`,
+    path,
+    { section: other.id },
+  );
+}
+
+/**
+ * The real IDs of `first`/`last`, checked to be one run (same list, in order) that overlaps no
+ * section but the one at `skip`.
+ */
+function checkedRun(
+  doc: WorkflowDoc,
+  ctx: HandlerContext,
+  firstRef: string,
+  lastRef: string,
+  paths: { first: string; last: string },
+  skip = -1,
+): { first: string; last: string } {
+  const { first, last } = stepRun(doc, ctx, firstRef, lastRef, paths);
   const sections = doc.sections ?? [];
-  const hit = overlapping(doc, sections, a.id, z.id, skip);
-  if (hit >= 0) {
-    const other = sections[hit] as Section;
-    throw new CommandFailure(
-      "section.overlap",
-      `The run "${a.id}"…"${z.id}" overlaps section "${other.id}"; sections in one list can't overlap`,
-      "",
-      { section: other.id },
-    );
-  }
-  return { first: a.id, last: z.id };
+  const hit = overlapping(doc, sections, first, last, skip);
+  if (hit >= 0) throw overlapFailure(first, last, sections[hit] as Section, "");
+  return { first, last };
 }
 
 /**
@@ -136,14 +158,15 @@ function sectionIndex(doc: WorkflowDoc, ctx: HandlerContext, ref: string, path: 
   });
 }
 
-/** `doc` with `sections` set; an empty list removes the key. */
-function withSections(doc: WorkflowDoc, sections: Section[]): WorkflowDoc {
+/** @internal `doc` with `sections` set; an empty list removes the key. */
+export function withSections(doc: WorkflowDoc, sections: Section[]): WorkflowDoc {
   if (sections.length > 0) return { ...doc, sections };
   const { sections: _, ...rest } = doc;
   return rest;
 }
 
-function checkNote(note: unknown, path: string): void {
+/** @internal Throws `command.invalid` unless `note` is absent, `null` or a short enough string. */
+export function checkNote(note: unknown, path: string): void {
   if (
     note !== undefined &&
     note !== null &&
@@ -158,7 +181,8 @@ function checkNote(note: unknown, path: string): void {
   }
 }
 
-function checkColor(color: unknown, path: string): void {
+/** @internal Throws `command.invalid` unless `color` is an annotation colour. */
+export function checkColor(color: unknown, path: string): void {
   if (!isAnnotationColor(color)) {
     throw new CommandFailure(
       "command.invalid",
@@ -169,31 +193,34 @@ function checkColor(color: unknown, path: string): void {
   }
 }
 
+/**
+ * @internal A new section's ID: `id` checked to be valid (`id.invalid`) and free (`id.taken`,
+ * failing at `path`), or one derived from `title` when `id` is absent.
+ */
+export function newSectionId(doc: WorkflowDoc, id: unknown, title: unknown, path: string): string {
+  if (id === undefined) return sectionIdFor(doc, String(title));
+  if (!isValidStepId(id)) {
+    throw new CommandFailure(
+      "id.invalid",
+      `Section ID "${String(id)}" must start with a letter or underscore and contain only letters, digits and underscores`,
+      path,
+      { pattern: STEP_ID_PATTERN.source, suggested: sectionIdFor(doc, String(id)) },
+    );
+  }
+  if ((doc.sections ?? []).some((s) => s.id === id)) {
+    throw new CommandFailure("id.taken", `Section ID "${id}" is already used`, path, {
+      suggested: sectionIdFor(doc, id),
+    });
+  }
+  return id;
+}
+
 const addSection: Handler = (doc, command, ctx) => {
   const cmd = command as Cmd<"addSection">;
   checkColor(cmd.color, "color");
   checkNote(cmd.note, "note");
   const run = checkedRun(doc, ctx, cmd.first, cmd.last, { first: "first", last: "last" });
-  const taken = new Set((doc.sections ?? []).map((s) => s.id));
-  let id: string;
-  if (cmd.id !== undefined) {
-    if (!isValidStepId(cmd.id)) {
-      throw new CommandFailure(
-        "id.invalid",
-        `Section ID "${String(cmd.id)}" must start with a letter or underscore and contain only letters, digits and underscores`,
-        "id",
-        { pattern: STEP_ID_PATTERN.source, suggested: sectionIdFor(doc, String(cmd.id)) },
-      );
-    }
-    if (taken.has(cmd.id)) {
-      throw new CommandFailure("id.taken", `Section ID "${cmd.id}" is already used`, "id", {
-        suggested: sectionIdFor(doc, cmd.id),
-      });
-    }
-    id = cmd.id;
-  } else {
-    id = sectionIdFor(doc, String(cmd.title));
-  }
+  const id = newSectionId(doc, cmd.id, cmd.title, "id");
   const section: Section = {
     id,
     title: String(cmd.title),

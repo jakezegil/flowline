@@ -6,6 +6,7 @@
  */
 import { z } from "zod";
 import { ANNOTATION_COLORS, NOTE_MAX_CHARS } from "../annotations";
+import { STEP_ID_PATTERN } from "../ids";
 import type { AnnotationColor, JSONSchema, Manifest } from "../types";
 import { type ApplyError, type Command, type CommandErrorCode, closest } from "./commands";
 import { compactSchema } from "./compact-schema";
@@ -53,6 +54,33 @@ interface Built {
   union: z.ZodType<Command>;
   /** Each op's JSON Schema, built on first use. */
   json: Map<string, JSONSchema>;
+  /** The (non-verbatim) fragment schema, the one recursive schema in the commands. */
+  fragment: z.ZodType;
+  /** Its compact JSON Schema, built on first use: what a `#recursive:` ref stands for. */
+  fragmentJson?: JSONSchema;
+}
+
+/** A fragment schema: `type` as given, and `branches` holding fragments of the same schema. */
+function fragmentSchema(type: z.ZodType, color: z.ZodType, json: z.ZodType): z.ZodType {
+  const fragment: z.ZodType = z.strictObject({
+    ref: z
+      .string()
+      .regex(STEP_ID_PATTERN, {
+        message: "A ref starts with a letter or underscore, then letters, digits and underscores",
+      })
+      .optional(),
+    id: z.string().optional(),
+    type,
+    name: z.string().optional(),
+    config: z.record(z.string(), json).optional(),
+    note: z.string().max(NOTE_MAX_CHARS).optional(),
+    color: color.optional(),
+    disabled: z.boolean().optional(),
+    get branches() {
+      return z.record(z.string(), z.array(fragment)).optional();
+    },
+  });
+  return fragment;
 }
 
 function build(manifest: Manifest | undefined, internal: boolean): Built {
@@ -199,9 +227,52 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
     ],
     ["removeSection", [z.strictObject({ op: z.literal("removeSection"), id: stepRef })]],
   ]);
+  const fragment = fragmentSchema(nodeType, color, json);
+  const steps = z.array(fragment).min(1);
+  const section = z.strictObject({
+    title: z.string(),
+    color,
+    note: z.string().max(NOTE_MAX_CHARS).optional(),
+    id: z.string().optional(),
+  });
+  const insertSteps: z.ZodType[] = [
+    z.strictObject({
+      op: z.literal("insertSteps"),
+      at,
+      steps,
+      section: section.optional(),
+      ...(internal ? { verbatim: z.literal(false).optional() } : {}),
+    }),
+  ];
+  if (internal) {
+    // The store's paste: any node type (a pasted step may be of a type the manifest lacks).
+    const pasted = fragmentSchema(z.string().min(1), color, json);
+    insertSteps.push(
+      z.strictObject({
+        op: z.literal("insertSteps"),
+        at,
+        steps: z.array(pasted).min(1),
+        section: section.optional(),
+        verbatim: z.literal(true),
+      }),
+    );
+  }
+  members.set("insertSteps", insertSteps);
+  members.set("replaceSteps", [
+    z.strictObject({ op: z.literal("replaceSteps"), first: stepRef, last: stepRef, steps }),
+  ]);
   const all = [...members.values()].flat();
   const union = z.union(all as [z.ZodType, z.ZodType, ...z.ZodType[]]) as z.ZodType<Command>;
-  return { members, union, json: new Map() };
+  return { members, union, json: new Map(), fragment };
+}
+
+/** The member of a multi-form op that `cmd` is checked against. */
+function memberFor(op: string, members: z.ZodType[], cmd: Record<string, unknown>): z.ZodType {
+  if (members.length === 1) return members[0] as z.ZodType;
+  // insertSteps: `verbatim: true` picks the paste form.
+  if (op === "insertSteps") return members[cmd.verbatim === true ? 1 : 0] as z.ZodType;
+  // setConfig, setTriggerConfig, setOutput: `config` picks the merge form.
+  return members[!("config" in cmd) ? 0 : members.length - 1] as z.ZodType;
 }
 
 const cache = new WeakMap<Manifest, { internal?: Built; external?: Built }>();
@@ -371,12 +442,32 @@ export function opJsonSchema(
   op: string,
   path: (string | number)[],
 ): JSONSchema {
-  let schema = opSchema(built(manifest, false), op);
+  const b = built(manifest, false);
+  let schema = opSchema(b, op);
   for (const seg of path) {
     const next = stepInto(schema, seg);
     if (!next) break;
-    schema = next;
+    schema = recursiveTarget(b, next);
   }
+  return fitHint(recursiveTarget(b, schema));
+}
+
+/**
+ * `schema`, or the fragment schema when it is a `#recursive:` marker: compacting cuts the
+ * fragment's self-reference (`branches` of fragments) to a marker, and fragments are the only
+ * recursive command schema.
+ */
+function recursiveTarget(b: Built, schema: JSONSchema): JSONSchema {
+  const ref = schema.$ref;
+  if (typeof ref !== "string" || !ref.startsWith("#recursive:")) return schema;
+  b.fragmentJson ??= compactSchema(
+    tidy(z.toJSONSchema(b.fragment, { unrepresentable: "any" })) as JSONSchema,
+  );
+  return b.fragmentJson;
+}
+
+/** @internal `schema` cut to fit a hint (≤ 1500 chars): long enums cut, then deep subtrees. */
+export function fitSchemaHint(schema: JSONSchema): JSONSchema {
   return fitHint(schema);
 }
 
@@ -500,10 +591,7 @@ export function shapeErrors(
       },
     ];
   }
-  // An op with two forms (setConfig, setTriggerConfig, setOutput): `config` picks the merge form.
-  const schema =
-    members.length > 1 && !("config" in cmd) ? members[0] : members[members.length - 1];
-  const parsed = (schema as z.ZodType).safeParse(cmd);
+  const parsed = memberFor(op as string, members, cmd).safeParse(cmd);
   if (parsed.success) return [];
   return flatten(parsed.error.issues, []).map(({ path, issue }) =>
     toError(manifest, index, cmd, op as string, path, issue),

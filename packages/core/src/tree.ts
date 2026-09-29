@@ -281,6 +281,11 @@ export function generateStepId(doc: WorkflowDoc, nodeType: string): string {
   return nextAvailableId(allStepIds(doc), sanitizeBase(nodeType));
 }
 
+/** @internal {@link generateStepId} against a set of taken IDs instead of a doc. */
+export function freshStepId(taken: Set<string>, nodeType: string): string {
+  return nextAvailableId(taken, sanitizeBase(nodeType));
+}
+
 function rewriteRefs(expr: ValueExpr, idMap: Map<string, string>): ValueExpr {
   if (Array.isArray(expr)) return expr.map((e) => rewriteRefs(e, idMap));
   if (isRef(expr)) {

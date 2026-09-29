@@ -17,6 +17,7 @@ import {
   type HandlerContext,
 } from "./commands";
 import { formatCall, shownColor, shownLabel, stepLine } from "./format";
+import { fragmentHandlers } from "./fragments";
 import { sectionHandlers } from "./sections";
 import { AT_HINT, singleHandlers } from "./single";
 
@@ -30,7 +31,11 @@ export class FlowlineCommandError extends FlowlineTreeError {
 }
 
 /** Every command handler by op. */
-const HANDLERS: Record<string, Handler> = { ...singleHandlers, ...sectionHandlers };
+const HANDLERS: Record<string, Handler> = {
+  ...singleHandlers,
+  ...sectionHandlers,
+  ...fragmentHandlers,
+};
 
 /** How many shape errors a failed result carries besides the first. */
 const MORE_ERRORS = 9;
