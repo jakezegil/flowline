@@ -200,7 +200,14 @@ export function stepActions(
       if (before !== null && s().selection === null) s().select(next);
       focusNode(root(), next);
       const { labels } = ui.getState();
-      ui.getState().toast(labels.stepDeleted(name), { label: labels.undo, run: () => s().undo() });
+      ui.getState().toast(labels.stepDeleted(name), {
+        label: labels.undo,
+        edits: true,
+        // Gone once the store turns read-only (see Toasts); undoing then would throw.
+        run: () => {
+          if (!s().readOnly) s().undo();
+        },
+      });
     },
     target() {
       if (s().selection !== null) s().select(stepId);

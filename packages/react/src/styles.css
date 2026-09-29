@@ -33,6 +33,26 @@
 
     --fl-shadow-rgb: 17 17 26;
     --fl-shadow-strength: 1;
+
+    /* Annotation palette: section regions, sticky notes and step-card accents. */
+    --fl-annot-yellow-bg: #fcf3cf;
+    --fl-annot-yellow-border: #e3b93b;
+    --fl-annot-yellow-text: #6e4f00;
+    --fl-annot-blue-bg: #e4eefc;
+    --fl-annot-blue-border: #7ba4ea;
+    --fl-annot-blue-text: #1d4a9e;
+    --fl-annot-green-bg: #e2f4e7;
+    --fl-annot-green-border: #6cc08a;
+    --fl-annot-green-text: #1c6135;
+    --fl-annot-pink-bg: #fce6ef;
+    --fl-annot-pink-border: #eb8db3;
+    --fl-annot-pink-text: #9c2458;
+    --fl-annot-purple-bg: #efe8fc;
+    --fl-annot-purple-border: #aa8ce8;
+    --fl-annot-purple-text: #5b30a6;
+    --fl-annot-gray-bg: #ededf1;
+    --fl-annot-gray-border: #aaaab6;
+    --fl-annot-gray-text: #45454f;
   }
 
   /*
@@ -58,6 +78,24 @@
     --fl-success: #45c282;
     --fl-shadow-rgb: 0 0 0;
     --fl-shadow-strength: 3;
+    --fl-annot-yellow-bg: #2d2812;
+    --fl-annot-yellow-border: #a08324;
+    --fl-annot-yellow-text: #f2d67a;
+    --fl-annot-blue-bg: #15223a;
+    --fl-annot-blue-border: #3f67ad;
+    --fl-annot-blue-text: #a2c3f6;
+    --fl-annot-green-bg: #14281c;
+    --fl-annot-green-border: #3b8a58;
+    --fl-annot-green-text: #95dbac;
+    --fl-annot-pink-bg: #311723;
+    --fl-annot-pink-border: #a84a76;
+    --fl-annot-pink-text: #f4a9c9;
+    --fl-annot-purple-bg: #231a37;
+    --fl-annot-purple-border: #7a5bc6;
+    --fl-annot-purple-text: #c8b5f6;
+    --fl-annot-gray-bg: #222227;
+    --fl-annot-gray-border: #5e5e6a;
+    --fl-annot-gray-text: #c6c6ce;
     color-scheme: dark;
   }
 
@@ -78,6 +116,24 @@
       --fl-success: #45c282;
       --fl-shadow-rgb: 0 0 0;
       --fl-shadow-strength: 3;
+      --fl-annot-yellow-bg: #2d2812;
+      --fl-annot-yellow-border: #a08324;
+      --fl-annot-yellow-text: #f2d67a;
+      --fl-annot-blue-bg: #15223a;
+      --fl-annot-blue-border: #3f67ad;
+      --fl-annot-blue-text: #a2c3f6;
+      --fl-annot-green-bg: #14281c;
+      --fl-annot-green-border: #3b8a58;
+      --fl-annot-green-text: #95dbac;
+      --fl-annot-pink-bg: #311723;
+      --fl-annot-pink-border: #a84a76;
+      --fl-annot-pink-text: #f4a9c9;
+      --fl-annot-purple-bg: #231a37;
+      --fl-annot-purple-border: #7a5bc6;
+      --fl-annot-purple-text: #c8b5f6;
+      --fl-annot-gray-bg: #222227;
+      --fl-annot-gray-border: #5e5e6a;
+      --fl-annot-gray-text: #c6c6ce;
       color-scheme: dark;
     }
   }
@@ -93,6 +149,8 @@
     --fl-ring: color-mix(in srgb, var(--fl-accent) 28%, transparent);
     --fl-edge: color-mix(in srgb, var(--fl-text) 24%, var(--fl-canvas-bg));
     --fl-dot: color-mix(in srgb, var(--fl-text) 13%, var(--fl-canvas-bg));
+    /* Ring around what an agent just changed (the flash). */
+    --fl-changed: color-mix(in srgb, var(--fl-accent) 45%, transparent);
     --fl-shadow-sm: 0 1px 2px rgb(var(--fl-shadow-rgb) / calc(0.05 * var(--fl-shadow-strength)));
     --fl-shadow-md:
       0 1px 2px rgb(var(--fl-shadow-rgb) / calc(0.05 * var(--fl-shadow-strength))),
@@ -3964,6 +4022,206 @@
     }
   }
 
+  /* ---------------------------------------------------------------- annotations */
+  /*
+   * Sections, sticky notes and step-card accents read their colour through three local
+   * variables, set from the palette tokens by `data-color` (unknown colours render gray).
+   */
+  :where(.fl-root) [data-color="yellow"] {
+    --fl-a-bg: var(--fl-annot-yellow-bg);
+    --fl-a-border: var(--fl-annot-yellow-border);
+    --fl-a-text: var(--fl-annot-yellow-text);
+  }
+  :where(.fl-root) [data-color="blue"] {
+    --fl-a-bg: var(--fl-annot-blue-bg);
+    --fl-a-border: var(--fl-annot-blue-border);
+    --fl-a-text: var(--fl-annot-blue-text);
+  }
+  :where(.fl-root) [data-color="green"] {
+    --fl-a-bg: var(--fl-annot-green-bg);
+    --fl-a-border: var(--fl-annot-green-border);
+    --fl-a-text: var(--fl-annot-green-text);
+  }
+  :where(.fl-root) [data-color="pink"] {
+    --fl-a-bg: var(--fl-annot-pink-bg);
+    --fl-a-border: var(--fl-annot-pink-border);
+    --fl-a-text: var(--fl-annot-pink-text);
+  }
+  :where(.fl-root) [data-color="purple"] {
+    --fl-a-bg: var(--fl-annot-purple-bg);
+    --fl-a-border: var(--fl-annot-purple-border);
+    --fl-a-text: var(--fl-annot-purple-text);
+  }
+  :where(.fl-root) [data-color="gray"] {
+    --fl-a-bg: var(--fl-annot-gray-bg);
+    --fl-a-border: var(--fl-annot-gray-border);
+    --fl-a-text: var(--fl-annot-gray-text);
+  }
+
+  /* A section's region, behind its member cards (and below the edges). */
+  .fl-section {
+    width: 100%;
+    height: 100%;
+    background: var(--fl-a-bg);
+    border: 1.5px solid var(--fl-a-border);
+    border-radius: calc(var(--fl-radius) * 1.5);
+  }
+
+  /* The section's header chip, top-left in the region's header band. */
+  .fl-section-head {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    min-width: 0;
+  }
+  .fl-section-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    max-width: 100%;
+    height: 22px;
+    margin-left: -6px;
+    padding: 0 8px 0 6px;
+    font-size: 12px;
+    line-height: 22px;
+    color: var(--fl-a-text);
+    background: var(--fl-a-bg);
+    border: 1px solid transparent;
+    border-radius: 6px;
+    pointer-events: auto;
+    white-space: nowrap;
+  }
+  button.fl-section-chip {
+    cursor: pointer;
+    transition:
+      border-color 120ms var(--fl-ease),
+      background-color 120ms var(--fl-ease);
+  }
+  button.fl-section-chip:hover {
+    background: color-mix(in srgb, var(--fl-a-border) 16%, var(--fl-a-bg));
+    border-color: color-mix(in srgb, var(--fl-a-border) 60%, transparent);
+  }
+  button.fl-section-chip:focus-visible,
+  .react-flow__node:focus-visible .fl-section-chip {
+    outline: 2px dashed var(--fl-accent);
+    outline-offset: 2px;
+  }
+  .fl-section-chip__swatch {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    background: var(--fl-a-border);
+    border-radius: 999px;
+  }
+  .fl-section-chip__title {
+    flex: none;
+    max-width: 100%;
+    overflow: hidden;
+    font-weight: 600;
+    letter-spacing: -0.003em;
+    text-overflow: ellipsis;
+  }
+  .fl-section-chip__note {
+    min-width: 0;
+    overflow: hidden;
+    /* Full -text colour (AA on -bg); the regular weight against the bold title sets it apart. */
+    color: var(--fl-a-text);
+    font-weight: 400;
+    text-overflow: ellipsis;
+  }
+  .fl-section-chip__note::before {
+    content: "·";
+    margin-right: 7px;
+  }
+
+  /* A sticky note, pinned right of its step card. */
+  .fl-note {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--fl-text);
+    background: var(--fl-a-bg);
+    border: 1px solid color-mix(in srgb, var(--fl-a-border) 55%, transparent);
+    border-radius: var(--fl-radius);
+    box-shadow: var(--fl-shadow-sm);
+  }
+  /* The pin: a short dashed tie back to the card. */
+  .fl-note::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: -13px;
+    width: 12px;
+    border-top: 1.5px dashed var(--fl-a-border);
+  }
+  .fl-note__text {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+  }
+  .react-flow__node:focus-visible .fl-note {
+    outline: 2px dashed var(--fl-accent);
+    outline-offset: 3px;
+  }
+
+  /* A coloured step card: a 3px accent down its left edge. */
+  .fl-card[data-color]::before {
+    content: "";
+    position: absolute;
+    top: -1px;
+    bottom: -1px;
+    left: -1px;
+    width: calc(var(--fl-radius) + 1px);
+    border-left: 3px solid var(--fl-a-border);
+    border-radius: var(--fl-radius) 0 0 var(--fl-radius);
+    pointer-events: none;
+  }
+
+  .fl-canvas[data-readonly] .fl-section,
+  .fl-canvas[data-readonly] .fl-note {
+    opacity: 0.72;
+  }
+
+  /* What an agent just changed: a ring that fades out once. Two identical keyframes: a new change
+     mid-animation swaps data-flash between "a" and "b", and the new animation name restarts it. */
+  @keyframes fl-flash {
+    0% {
+      box-shadow: 0 0 0 0 var(--fl-changed);
+    }
+    35% {
+      box-shadow: 0 0 0 6px var(--fl-changed);
+    }
+    100% {
+      box-shadow: 0 0 0 10px transparent;
+    }
+  }
+  @keyframes fl-flash-b {
+    0% {
+      box-shadow: 0 0 0 0 var(--fl-changed);
+    }
+    35% {
+      box-shadow: 0 0 0 6px var(--fl-changed);
+    }
+    100% {
+      box-shadow: 0 0 0 10px transparent;
+    }
+  }
+  .fl-card[data-flash],
+  .fl-section[data-flash] {
+    animation: fl-flash 900ms var(--fl-ease) 1;
+  }
+  .fl-card[data-flash="b"],
+  .fl-section[data-flash="b"] {
+    animation-name: fl-flash-b;
+  }
+
   /* ---------------------------------------------------------------- motion */
   @media (prefers-reduced-motion: reduce) {
     .fl-canvas .react-flow__node,
@@ -3977,6 +4235,13 @@
     }
     .fl-add[data-pulse] {
       animation: none;
+    }
+    .fl-card[data-flash],
+    .fl-card[data-flash="b"],
+    .fl-section[data-flash],
+    .fl-section[data-flash="b"] {
+      animation: none;
+      box-shadow: 0 0 0 3px var(--fl-changed);
     }
     .fl-picker,
     .fl-ref-popover,

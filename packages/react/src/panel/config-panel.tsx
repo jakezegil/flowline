@@ -28,6 +28,7 @@ function PanelTitle({ selection }: { selection: string }): JSX.Element {
   const { labels } = useFlowlineAppearance();
   const info = useStep(selection);
   const rename = useEditorStore((s) => s.renameStep);
+  const readOnly = useEditorStore((s) => s.readOnly);
   const triggerName = useEditorStore((s) =>
     selection === TRIGGER_KEY
       ? s.manifest.triggers.find((t) => t.type === s.doc.trigger.type)?.name
@@ -44,18 +45,22 @@ function PanelTitle({ selection }: { selection: string }): JSX.Element {
     }
   }, [editing]);
 
-  if (selection === TRIGGER_KEY || !info) {
+  if (selection === TRIGGER_KEY || !info || readOnly) {
     return (
       <h2 className="fl-cp__name">
         <span className="fl-cp__name-text" tabIndex={-1} data-autofocus>
-          {selection === TRIGGER_KEY ? (triggerName ?? labels.triggerTag) : selection}
+          {selection === TRIGGER_KEY
+            ? (triggerName ?? labels.triggerTag)
+            : info
+              ? (info.step.name ?? info.manifest?.name ?? info.step.type)
+              : selection}
         </span>
       </h2>
     );
   }
   const shown = info.step.name ?? info.manifest?.name ?? info.step.type;
   const finish = (save: boolean) => {
-    if (save) rename(selection, draft);
+    if (save && !readOnly) rename(selection, draft);
     refocus.current = true;
     setEditing(false);
   };
@@ -191,6 +196,7 @@ function StepConfigure({ stepId }: { stepId: string }): JSX.Element | null {
   const info = useStep(stepId);
   const setConfig = useEditorStore((s) => s.setConfig);
   const toggleDisabled = useEditorStore((s) => s.toggleDisabled);
+  const readOnly = useEditorStore((s) => s.readOnly);
   const schema = info?.manifest?.input;
   const loose = useMemo(() => (info ? unclaimed(info.issues, schema) : []), [info, schema]);
   if (!info) return null;
@@ -202,13 +208,15 @@ function StepConfigure({ stepId }: { stepId: string }): JSX.Element | null {
         <div className="fl-callout" data-tone="muted" role="note">
           <CircleOff size={15} aria-hidden />
           <p>{labels.disabledBanner}</p>
-          <button
-            type="button"
-            className="fl-btn fl-btn--sm"
-            onClick={() => toggleDisabled(stepId)}
-          >
-            {labels.enableStep}
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              className="fl-btn fl-btn--sm"
+              onClick={() => toggleDisabled(stepId)}
+            >
+              {labels.enableStep}
+            </button>
+          )}
         </div>
       )}
       {manifest?.description && <p className="fl-cp__desc">{manifest.description}</p>}
@@ -219,9 +227,12 @@ function StepConfigure({ stepId }: { stepId: string }): JSX.Element | null {
         <SchemaForm
           schema={manifest.input}
           value={step.config}
-          onChange={(key, v) => setConfig(stepId, key, v)}
+          onChange={(key, v) => {
+            if (!readOnly) setConfig(stepId, key, v);
+          }}
           stepId={stepId}
           issues={info.issues}
+          readOnly={readOnly}
         />
       ) : (
         <p className="fl-empty-note">{labels.nothingToConfigure}</p>

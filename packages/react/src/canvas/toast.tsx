@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { useEditorStore } from "../hooks";
 import { useCanvasUi, useLabels } from "./canvas-context";
 
 /** The canvas' toast region (bottom center), announced politely to screen readers. */
@@ -6,12 +7,13 @@ export function Toasts() {
   const toasts = useCanvasUi((s) => s.toasts);
   const dismiss = useCanvasUi((s) => s.dismissToast);
   const labels = useLabels();
+  const readOnly = useEditorStore((s) => s.readOnly);
   return (
     <div className="fl-toasts" role="status" aria-live="polite">
       {toasts.map((t) => (
         <div key={t.id} className="fl-toast">
           <span>{t.message}</span>
-          {t.action && (
+          {t.action && !(readOnly && t.action.edits) && (
             <button
               type="button"
               className="fl-toast__action"

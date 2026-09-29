@@ -360,3 +360,143 @@ export function webhookDoc(): WorkflowDoc {
     ],
   };
 }
+
+/**
+ * A lead-routing workflow dressed with annotations: adjacent top-level sections, sections
+ * nested in both branches of a condition (one with a note), sticky notes on steps in the root
+ * column, a branch and a loop body, and coloured cards.
+ */
+export function annotatedDoc(): WorkflowDoc {
+  return {
+    id: "lead-routing",
+    name: "Lead routing",
+    trigger: { type: "crm.contactCreated", config: {} },
+    steps: [
+      s(
+        "loadContact",
+        "crm.loadContact",
+        { contactId: { $ref: "trigger.contactId" } },
+        { note: "Pulls the full record, tags included — later steps read region and tags." },
+      ),
+      s(
+        "enrich",
+        "core.httpRequest",
+        {
+          method: "GET",
+          url: "https://api.enrich.example/v2/people",
+          query: { email: { $ref: "steps.loadContact.email" } },
+        },
+        { name: "Enrich profile" },
+      ),
+      s(
+        "score",
+        "core.transform",
+        {
+          code: "return { score: trigger.contactId ? 82 : 0 };",
+          outputFields: [{ name: "score", type: "number" }],
+        },
+        { name: "Score lead", color: "blue" },
+      ),
+      s(
+        "isHot",
+        "core.condition",
+        {
+          rules: {
+            combinator: "and",
+            rules: [{ left: { $ref: "steps.score.score" }, op: "gte", right: 70 }],
+          },
+        },
+        {
+          name: "Hot lead?",
+          branches: {
+            if: [
+              s("createDeal", "crm.createDeal", { pipeline: "New business" }, { color: "pink" }),
+              s(
+                "introCall",
+                "crm.createTask",
+                { title: "Book an intro call", priority: "high", dueInDays: 0 },
+                { note: "SLA: an AE reaches out within two business hours." },
+              ),
+            ],
+            else: [
+              s("cooldown", "core.delay", { duration: "2d" }, { name: "Cool-down" }),
+              s(
+                "eachTag",
+                "core.forEach",
+                { items: { $ref: "steps.loadContact.tags" } },
+                {
+                  name: "For each interest",
+                  branches: {
+                    body: [
+                      s(
+                        "nurture",
+                        "crm.sendEmail",
+                        {
+                          to: { $ref: "steps.loadContact.email" },
+                          subject: { $tpl: "Ideas for {{loop.item}}" },
+                        },
+                        {
+                          name: "Nurture email",
+                          color: "green",
+                          note: "One email per interest tag, from the success inbox.",
+                        },
+                      ),
+                    ],
+                  },
+                },
+              ),
+            ],
+          },
+        },
+      ),
+      s(
+        "markLead",
+        "crm.updateContact",
+        { contactId: { $ref: "trigger.contactId" }, stage: "qualified" },
+        { name: "Mark qualified", color: "purple" },
+      ),
+      s(
+        "notify",
+        "core.httpRequest",
+        { method: "POST", url: "https://hooks.example.com/leads", bodyType: "json" },
+        {
+          name: "Notify sales channel",
+          note: "Posts to #sales-leads. Swap the URL per region before launch.",
+        },
+      ),
+    ],
+    sections: [
+      {
+        id: "research",
+        title: "Research the lead",
+        color: "blue",
+        first: "loadContact",
+        last: "score",
+      },
+      {
+        id: "route",
+        title: "Route by score",
+        color: "purple",
+        note: "Scores of 70+ go straight to sales; everyone else is nurtured.",
+        first: "isHot",
+        last: "isHot",
+      },
+      {
+        id: "fastTrack",
+        title: "Fast track",
+        color: "pink",
+        first: "createDeal",
+        last: "introCall",
+      },
+      {
+        id: "nurtureTrack",
+        title: "Nurture",
+        color: "green",
+        note: "Gentle drip over two weeks.",
+        first: "cooldown",
+        last: "eachTag",
+      },
+      { id: "wrapUp", title: "Hand-off", color: "yellow", first: "markLead", last: "notify" },
+    ],
+  };
+}

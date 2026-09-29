@@ -1,8 +1,17 @@
-import { findStep, type Manifest, type NodeManifest } from "@flowlinejs/core";
+import { findStep, type Manifest, type NodeManifest, type WorkflowDoc } from "@flowlinejs/core";
 import * as Popover from "@radix-ui/react-popover";
 import { Command } from "cmdk";
 import { Search } from "lucide-react";
-import { type KeyboardEvent, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useEditorStore, useEditorStoreApi } from "../hooks";
 import { defaultLabels, type FlowlineLabels } from "../labels";
 import { useFlowlineAppearance } from "../provider";
@@ -196,6 +205,25 @@ export function StepPicker() {
     replacing ? findStep(s.doc, replacing)?.step.type : undefined,
   );
 
+  // The picker holds a positional location (or a step to replace) taken from the doc it opened
+  // on. Any other change to the doc while it's open (an agent's edit through a bridge, an undo)
+  // could shift that location, so it closes instead of inserting somewhere else.
+  const openedOn = useRef<WorkflowDoc | null>(null);
+  const isOpen = picker !== null;
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      openedOn.current = null;
+      return;
+    }
+    openedOn.current = store.getState().doc;
+    return store.subscribe((s) => {
+      if (openedOn.current !== null && s.doc !== openedOn.current) {
+        openedOn.current = null;
+        closePicker();
+      }
+    });
+  }, [isOpen, store, closePicker]);
+
   // Every opening starts fresh.
   const picked = useRef(false);
   const interactedOutside = useRef(false);
@@ -266,6 +294,13 @@ export function StepPicker() {
 
   const pick = (type: string) => {
     if (!request) return;
+    const { doc, readOnly } = store.getState();
+    if (readOnly || openedOn.current === null || doc !== openedOn.current) {
+      closePicker();
+      return;
+    }
+    // This pick's own edit is not an outside change.
+    openedOn.current = null;
     let focus: string | undefined;
     if (request.mode === "insert") focus = store.getState().insertStep(request.loc, type);
     else {

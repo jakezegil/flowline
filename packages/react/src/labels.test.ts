@@ -109,3 +109,38 @@ describe("resolveLabels: Ruling 102", () => {
     expect(labels.origin({ kind: "manual" })).toBe("custom");
   });
 });
+
+describe("annotation labels", () => {
+  it("names the six colours", () => {
+    expect(defaultLabels.colorNames).toEqual({
+      yellow: "Yellow",
+      blue: "Blue",
+      green: "Green",
+      pink: "Pink",
+      purple: "Purple",
+      gray: "Gray",
+    });
+  });
+
+  it("names a section's region and header chip, with the note when there is one", () => {
+    expect(defaultLabels.sectionRegion("Onboarding")).toBe("Section: Onboarding");
+    expect(defaultLabels.sectionHeader("Onboarding")).toBe("Onboarding");
+    expect(defaultLabels.sectionHeader("Onboarding", "Runs daily")).toBe(
+      "Onboarding. Note: Runs daily",
+    );
+  });
+
+  it("an untitled section still has a name", () => {
+    expect(defaultLabels.sectionRegion("")).toBe("Section: Untitled section");
+    expect(defaultLabels.sectionHeader("  ")).toBe("Untitled section");
+  });
+
+  it("prefixes a note, and a step's name carries the first 120 characters of its note", () => {
+    expect(defaultLabels.noteLabel("Check with legal")).toBe("Note: Check with legal");
+    expect(defaultLabels.stepWithNote("Send email", "Short")).toBe("Send email. Note: Short");
+    const long = "a".repeat(300);
+    expect(defaultLabels.stepWithNote("Send email", long)).toBe(
+      `Send email. Note: ${"a".repeat(120)}`,
+    );
+  });
+});

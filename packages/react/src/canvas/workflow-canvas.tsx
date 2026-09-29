@@ -29,8 +29,14 @@ import {
 import { useStore } from "zustand";
 import { EditorContext, stepIndex, useEditorStore } from "../hooks";
 import type { FlowlineLabels } from "../labels";
-import { LOOP_GUTTER } from "../layout/constants";
-import { type LayoutEdge, type LayoutNode, layoutTree } from "../layout/layout-tree";
+import { LOOP_GUTTER, SECTION_HEADER_H, SECTION_PAD } from "../layout/constants";
+import {
+  type LayoutEdge,
+  type LayoutNode,
+  type LayoutNote,
+  type LayoutSection,
+  layoutTree,
+} from "../layout/layout-tree";
 import { useFlowlineAppearance } from "../provider";
 import { type EditorStore, holdReadOnly, TRIGGER_KEY } from "../store/editor-store";
 import { themeStyle } from "../theme";
@@ -46,9 +52,12 @@ import {
 } from "./canvas-context";
 import { edgeTypes, type FlowEdgeData } from "./edges";
 import { fitViewport, motionDuration, revealViewport } from "./fit";
-import { edgeGeometries } from "./geometry";
+import { settleFlash } from "./flash";
+import { type CanvasRect, edgeGeometries } from "./geometry";
 import { handleCanvasKey } from "./keyboard";
+import { NoteCard } from "./note-node";
 import { EndNode, RejoinNode } from "./rejoin-node";
+import { excerpt, SectionHeader, SectionRegion, sectionOfNode, sectionTitle } from "./section-node";
 import { StepCard, stepDisplayName } from "./step-card";
 import { StepPicker } from "./step-picker";
 import { Toasts } from "./toast";
@@ -60,6 +69,9 @@ const nodeTypes = {
   placeholder: AddPlaceholder,
   join: RejoinNode,
   end: EndNode,
+  section: SectionRegion,
+  sectionHeader: SectionHeader,
+  note: NoteCard,
 };
 
 /** A selected card closer than this (px) to the pane's edge is panned back into view. */
@@ -144,9 +156,90 @@ function toFlowNode(
   }
 }
 
+/** Top offset of a section's header chip in its region, and the chip's height. */
+const CHIP_TOP = 6;
+const CHIP_H = 22;
+/** Room the chip leaves before the edge entering the section (which runs down its header band). */
+const CHIP_EDGE_GAP = 8;
+/** Characters of a sticky note in its accessible name (the full text stays in its `title`). */
+const NOTE_NAME_MAX = 140;
+
+/**
+ * The xyflow nodes of a section: its region (below the edges, inert) and its header chip (a
+ * node of its own at the region's top-left, focusable on a read-only canvas, where the chip is
+ * not a button). `edgeX` is the x of the edge entering the section (its first member's centre):
+ * the chip ends {@link CHIP_EDGE_GAP} short of it, so it never covers that line.
+ */
+function sectionNodes(
+  ls: LayoutSection,
+  readOnly: boolean,
+  headerLabel: string,
+  edgeX: number | undefined,
+): [Node, Node] {
+  const data = { sectionId: ls.sectionId, color: ls.color };
+  const common = { draggable: false, connectable: false, deletable: false, selectable: false };
+  const suffix = ls.id.slice("section:".length);
+  const left = ls.x + SECTION_PAD;
+  const right = Math.min(
+    ls.x + ls.w - SECTION_PAD,
+    edgeX === undefined ? Number.POSITIVE_INFINITY : edgeX - CHIP_EDGE_GAP,
+  );
+  return [
+    {
+      ...common,
+      id: ls.id,
+      type: "section",
+      position: { x: ls.x, y: ls.y },
+      width: ls.w,
+      height: ls.h,
+      data,
+      focusable: false,
+      // Behind the cards and the edges. Nested regions come later (see below), so they draw over
+      // their parents'.
+      zIndex: -1,
+      style: { pointerEvents: "none" },
+    },
+    {
+      ...common,
+      id: `sectionHeader:${suffix}`,
+      type: "sectionHeader",
+      position: { x: left, y: ls.y + CHIP_TOP },
+      width: Math.max(0, right - left),
+      height: Math.min(CHIP_H, SECTION_HEADER_H - CHIP_TOP),
+      data,
+      focusable: readOnly,
+      style: { pointerEvents: "none" },
+      ...(readOnly ? { ariaLabel: headerLabel } : {}),
+    },
+  ];
+}
+
+/** The xyflow node of a step's note. */
+function noteNode(ln: LayoutNote, ariaLabel: string): Node {
+  return {
+    id: ln.id,
+    type: "note",
+    position: { x: ln.x, y: ln.y },
+    width: ln.w,
+    height: ln.h,
+    data: { stepId: ln.stepId },
+    draggable: false,
+    connectable: false,
+    deletable: false,
+    selectable: false,
+    focusable: true,
+    ariaLabel,
+  };
+}
+
+/** A region's rectangle, for routing edges around it. */
+const rectOf = (ls: LayoutSection): CanvasRect => ({ x: ls.x, y: ls.y, w: ls.w, h: ls.h });
+
 function sameNode(a: Node, b: Node): boolean {
   return (
     a.type === b.type &&
+    a.zIndex === b.zIndex &&
+    a.focusable === b.focusable &&
     a.position.x === b.position.x &&
     a.position.y === b.position.y &&
     a.width === b.width &&
@@ -185,9 +278,10 @@ function toFlowEdges(
   manifest: Manifest,
   nodes: LayoutNode[],
   edges: LayoutEdge[],
+  sections: LayoutSection[],
   eachItem: string,
 ): Edge<FlowEdgeData>[] {
-  const geometry = edgeGeometries(nodes, edges, LOOP_GUTTER);
+  const geometry = edgeGeometries(nodes, edges, LOOP_GUTTER, sections.map(rectOf));
   const steps = stepIndex(doc);
   return edges.map((le) => {
     const data: FlowEdgeData = { edge: le, geometry: geometry.get(le.id) ?? { path: "" } };
@@ -281,17 +375,49 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
         step,
         manifest.nodes.find((n) => n.type === step.type),
       );
-      return step.disabled ? labels.disabledNode(name) : name;
+      const shown = step.disabled ? labels.disabledNode(name) : name;
+      return typeof step.note === "string" && step.note !== ""
+        ? labels.stepWithNote(shown, step.note)
+        : shown;
     },
     [doc, manifest, labels],
   );
-  const rawNodes = useMemo(
-    () => layout.nodes.map((ln) => toFlowNode(ln, selection, label)),
-    [layout, selection, label],
-  );
+  const rawNodes = useMemo(() => {
+    // Regions first (they sit behind everything). Each header chip comes right before its
+    // section's first card and each note right after its card, so Tab walks them in reading order.
+    const out: Node[] = [];
+    const chips = new Map<string, Node[]>();
+    const regions = [...layout.sections].sort((a, b) => a.depth - b.depth);
+    const byId = new Map(layout.nodes.map((n) => [n.id, n]));
+    for (const ls of regions) {
+      const section = sectionOfNode(doc.sections, ls.id, ls.sectionId);
+      const note =
+        typeof section?.note === "string" && section.note !== "" ? section.note : undefined;
+      const firstCard = byId.get(`step:${section?.first ?? ""}`);
+      const [region, chip] = sectionNodes(
+        ls,
+        readOnly,
+        labels.sectionHeader(sectionTitle(section, labels.untitledSection), note),
+        firstCard ? firstCard.x + firstCard.w / 2 : undefined,
+      );
+      out.push(region);
+      const first = `step:${section?.first ?? ""}`;
+      chips.set(first, [...(chips.get(first) ?? []), chip]);
+    }
+    const notes = new Map(layout.notes.map((n) => [`step:${n.stepId}`, n]));
+    const steps = stepIndex(doc);
+    for (const ln of layout.nodes) {
+      out.push(...(chips.get(ln.id) ?? []));
+      out.push(toFlowNode(ln, selection, label));
+      const note = notes.get(ln.id);
+      const text = note ? steps.get(note.stepId)?.note : undefined;
+      if (note && text) out.push(noteNode(note, labels.noteLabel(excerpt(text, NOTE_NAME_MAX))));
+    }
+    return out;
+  }, [layout, selection, label, doc, readOnly, labels]);
   const nodes = useStable(rawNodes, sameNode);
   const rawEdges = useMemo(
-    () => toFlowEdges(doc, manifest, layout.nodes, layout.edges, labels.eachItem),
+    () => toFlowEdges(doc, manifest, layout.nodes, layout.edges, layout.sections, labels.eachItem),
     [doc, manifest, layout, labels.eachItem],
   );
   const edges = useStable(rawEdges, sameEdge);
@@ -451,6 +577,8 @@ export function WorkflowCanvas(props: {
   const [ui] = useState(() =>
     createCanvasUiStore({ overlay, labels, ...(onNotify ? { notify: onNotify } : {}) }),
   );
+  // A flash set before this canvas mounted is old news: don't play it.
+  useState(() => settleFlash(store));
   const readOnly = useStore(store, (s) => s.readOnly);
   const rootRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<ReturnType<typeof layoutTree> | null>(null);

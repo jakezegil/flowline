@@ -68,7 +68,8 @@ export type PickerRequest =
 export interface Toast {
   id: number;
   message: string;
-  action?: { label: string; run(): void };
+  /** `edits`: the action edits the doc, so a read-only store hides it. */
+  action?: { label: string; run(): void; edits?: boolean };
 }
 
 /** The canvas' UI state. */

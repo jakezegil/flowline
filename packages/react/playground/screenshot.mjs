@@ -1,8 +1,10 @@
 /**
  * Screenshots the playground in a range of states for visual review.
  *
- *   node packages/react/playground/screenshot.mjs <outDir> [--app | --panel]
+ *   node packages/react/playground/screenshot.mjs <outDir> [--app | --panel | --annotations]
  *
+ * `--annotations` shoots only the annotated workflow (`?fixture=annotations`: sections, sticky
+ * notes, coloured cards) in the light and dark colour schemes.
  * Starts the playground's Vite dev server, drives it with Playwright (Chromium) and writes PNGs
  * to <outDir> (default: ./playground-shots).
  */
@@ -12,7 +14,8 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { createServer } from "vite";
 
-const outDir = process.argv[2] ?? "playground-shots";
+const outDir =
+  process.argv[2] && !process.argv[2].startsWith("--") ? process.argv[2] : "playground-shots";
 await mkdir(outDir, { recursive: true });
 
 const server = await createServer({
@@ -138,6 +141,27 @@ async function appShots() {
     await shot(page, "run-loop-dark-narrow-closed");
     await page.close();
   }
+}
+
+// The annotated workflow (`--annotations` shoots only these): the whole workflow fitted to a
+// large viewport (shareable), a close-up at the canvas' opening zoom, and read-only.
+async function annotationShots() {
+  const big = { width: 1680, height: 1180 };
+  for (const theme of ["light", "dark"]) {
+    const page = await open(`theme=${theme}&fixture=annotations&mode=edit`, big, theme);
+    await page.click("button[aria-label='Fit workflow to view']");
+    await page.waitForTimeout(500);
+    await shot(page, `annotations-${theme}`);
+    await page.close();
+    const detail = await open(`theme=${theme}&fixture=annotations&mode=edit`, wide, theme);
+    await shot(detail, `annotations-${theme}-detail`);
+    await detail.close();
+  }
+  const ro = await open("theme=light&fixture=annotations&mode=readonly", big, "light");
+  await ro.click("button[aria-label='Fit workflow to view']");
+  await ro.waitForTimeout(500);
+  await shot(ro, "annotations-readonly-light");
+  await ro.close();
 }
 
 // Config panel states (`--panel` shoots only these).
@@ -289,6 +313,13 @@ async function panelShots() {
     await rp.close();
   }
 }
+if (process.argv.includes("--annotations")) {
+  await annotationShots();
+  await browser.close();
+  await server.close();
+  if (errors.length) console.error(`\nBrowser errors/warnings:\n${errors.join("\n")}`);
+  process.exit(errors.length ? 1 : 0);
+}
 if (process.argv.includes("--panel")) {
   await panelShots();
   await browser.close();
@@ -315,6 +346,8 @@ for (const theme of ["light", "dark"]) {
     await page.close();
   }
 }
+
+await annotationShots();
 
 // Hover + selection.
 {

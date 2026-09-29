@@ -146,6 +146,7 @@ function TriggerTypeSelect({ triggers }: { triggers: TriggerManifest[] }): JSX.E
   const type = useEditorStore((s) => s.doc.trigger.type);
   const plugins = useEditorStore((s) => s.manifest.plugins);
   const setTrigger = useEditorStore((s) => s.setTrigger);
+  const readOnly = useEditorStore((s) => s.readOnly);
   const known = triggers.some((t) => t.type === type);
   const groups = plugins
     .map((p) => ({ name: p.name, items: triggers.filter((t) => t.plugin === p.id) }))
@@ -162,7 +163,10 @@ function TriggerTypeSelect({ triggers }: { triggers: TriggerManifest[] }): JSX.E
         id={id}
         className="fl-input fl-select"
         value={type}
-        onChange={(e) => setTrigger(e.target.value)}
+        disabled={readOnly}
+        onChange={(e) => {
+          if (!readOnly) setTrigger(e.target.value);
+        }}
       >
         {!known && <option value={type}>{labels.triggerUnknown(type)}</option>}
         {groups.map((g) => (
@@ -191,6 +195,7 @@ export function TriggerConfigure(): JSX.Element {
   const triggers = useEditorStore((s) => s.manifest.triggers);
   const allIssues = useEditorStore((s) => s.issues);
   const setTriggerConfig = useEditorStore((s) => s.setTriggerConfig);
+  const readOnly = useEditorStore((s) => s.readOnly);
   const m = triggers.find((t) => t.type === trigger.type);
   const issues = useMemo(() => triggerIssues(allIssues), [allIssues]);
   const loose = issues.filter((i) => i.field === undefined);
@@ -224,9 +229,12 @@ export function TriggerConfigure(): JSX.Element {
         <SchemaForm
           schema={m.config}
           value={trigger.config}
-          onChange={setTriggerConfig}
+          onChange={(key, v) => {
+            if (!readOnly) setTriggerConfig(key, v);
+          }}
           stepId={TRIGGER_KEY}
           issues={issues}
+          readOnly={readOnly}
           literalOnly
         />
       )}

@@ -94,7 +94,11 @@ export function SubflowOutput(): JSX.Element {
   const ctx = useEditorStore((s) => s.ctx);
   const samples = useEditorStore((s) => s.samples);
   const allIssues = useEditorStore((s) => s.issues);
-  const setOutput = useEditorStore((s) => s.setOutput);
+  const setOutputAction = useEditorStore((s) => s.setOutput);
+  const readOnly = useEditorStore((s) => s.readOnly);
+  const setOutput: typeof setOutputAction = (key, value) => {
+    if (!readOnly) setOutputAction(key, value);
+  };
   const triggerManifest = manifest.triggers.find((t) => t.type === trigger.type);
   const declared = useMemo(
     () => subflowOutputFields(triggerManifest, trigger) ?? NO_DECLS,
@@ -133,6 +137,7 @@ export function SubflowOutput(): JSX.Element {
             onChange={setOutput}
             stepId={TRIGGER_KEY}
             issues={issues}
+            readOnly={readOnly}
             scope={scope}
             samples={samples}
           />
@@ -147,15 +152,17 @@ export function SubflowOutput(): JSX.Element {
               description={keyIssues.length > 0 ? undefined : labels.outputUndeclared}
               issues={keyIssues}
               aside={
-                <button
-                  type="button"
-                  className="fl-icon-btn"
-                  aria-label={labels.removeOutput(key)}
-                  title={labels.removeOutput(key)}
-                  onClick={() => setOutput(key, undefined)}
-                >
-                  <X size={14} aria-hidden />
-                </button>
+                readOnly ? undefined : (
+                  <button
+                    type="button"
+                    className="fl-icon-btn"
+                    aria-label={labels.removeOutput(key)}
+                    title={labels.removeOutput(key)}
+                    onClick={() => setOutput(key, undefined)}
+                  >
+                    <X size={14} aria-hidden />
+                  </button>
+                )
               }
             >
               <RefTextInput
@@ -165,6 +172,7 @@ export function SubflowOutput(): JSX.Element {
                 samples={samples}
                 invalidRefs={invalidRefs}
                 ariaLabel={labels.outputValue(key)}
+                readOnly={readOnly}
               />
             </FieldShell>
           );
