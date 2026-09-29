@@ -353,7 +353,7 @@ type ConfigEdit =
  * records as `trusted` on the handler context.
  */
 export function isTrustedBatch(ctx: HandlerContext): boolean {
-  return (ctx as HandlerContext & { trusted?: boolean }).trusted === true;
+  return ctx.trusted === true;
 }
 
 /**

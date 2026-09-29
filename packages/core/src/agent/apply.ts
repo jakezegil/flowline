@@ -114,6 +114,7 @@ export function apply(
     sectionPlaceholders: new Map(),
     used: new Map(),
     renamed: new Map(),
+    trusted: opts.trusted === true,
   };
   let cur = doc;
   for (let i = 0; i < commands.length; i++) {

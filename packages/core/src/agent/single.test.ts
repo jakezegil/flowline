@@ -812,4 +812,30 @@ describe("trusted config values", () => {
     expect(r.ok === false && r.error.code).toBe("placeholder.unknown");
     expect(() => run("setConfig", cmd, ctxFor(false))).toThrow(/Unknown placeholder "\$price"/);
   });
+
+  test("apply: trusted mode keeps an unknown steps.$x in setConfig, untrusted rejects it", () => {
+    const cmds: Command[] = [
+      { op: "addStep", at: { start: true }, type: "crm.getDeal" },
+      {
+        op: "setConfig",
+        id: "step_1",
+        key: "k",
+        value: { $tpl: "{{ steps.$1.deal }} {{ steps.$price.total }}" },
+      },
+    ];
+    const trusted = apply(doc, cmds, m, { trusted: true, report: false });
+    if (!trusted.ok) throw new Error(trusted.error.message);
+    const id = trusted.ids.$1;
+    expect(findStep(trusted.doc, "step_1")?.step.config.k).toEqual({
+      $tpl: `{{ steps.${id}.deal }} {{ steps.$price.total }}`,
+    });
+    const untrusted = apply(doc, cmds, m);
+    expect(untrusted.ok).toBe(false);
+    if (untrusted.ok) return;
+    expect(untrusted.error).toMatchObject({
+      index: 1,
+      code: "placeholder.unknown",
+      path: "commands[1].value",
+    });
+  });
 });

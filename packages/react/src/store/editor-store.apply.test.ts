@@ -111,10 +111,7 @@ describe("paste", () => {
 });
 
 describe("config values", () => {
-  // PENDING: `.fails` until core `apply` records `trusted` on the handler context
-  // (`HandlerContext.trusted`, set from `opts.trusted` in apply.ts); single.ts already reads it.
-  // Once that lands this test passes, `.fails` turns it red, and `.fails` must be dropped.
-  test.fails("setConfig, setTriggerConfig and setOutput store a steps.$x placeholder as it is", () => {
+  test("setConfig, setTriggerConfig and setOutput store a steps.$x placeholder as it is", () => {
     const store = storeFor();
     const tpl = { $tpl: "Price {{ steps.$price }}" };
     const ref = { $ref: "steps.$1.x" };
