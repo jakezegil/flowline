@@ -10,7 +10,14 @@ import { branchesFor } from "../json-schema";
 import { FlowlineTreeError, findStep } from "../tree";
 import type { Manifest, NodeManifest, Section, Step, TriggerManifest, WorkflowDoc } from "../types";
 import { type Issue, validateWorkflow } from "../validate";
-import { formatCall, noteSuffix, shownColor, shownLabel, stepLineParts } from "./format";
+import {
+  formatCall,
+  noteSuffix,
+  shownColor,
+  shownLabel,
+  shownLabelParts,
+  stepLineParts,
+} from "./format";
 import type { FollowUp, Omission, OutlineResult, ReadArgs, ReadOptions, Where } from "./read-types";
 
 /** Default budget of `overview` and `outline`, in characters. */
@@ -71,11 +78,16 @@ interface ListNode {
 
 interface Model {
   doc: WorkflowDoc;
-  header: string;
+  /** Header lines, part of the floor. */
+  header: string[];
   root: ListNode;
   branches: BranchNode[];
   /** `where` for the config and notes follow-ups. */
   scopeWhere: Where;
+  /** For `outline({ stepId })`: the subtree's root step, which `scopeWhere` doesn't match. */
+  subtreeRoot?: string;
+  /** Sections whose steps are all missing, drawn at the end of the top-level list. */
+  orphans: number;
   totals: OutlineResult["totals"];
 }
 
@@ -85,7 +97,12 @@ interface RenderState {
   collapsed: Set<BranchNode>;
   /** Shown steps per list, counted from its offset. Absent: all. */
   kept: Map<ListNode, number>;
+  /** Orphan sections: each as a header, folded into one line, or left out. */
+  orphans: "shown" | "folded" | "hidden";
 }
+
+/** A pad wider than this is not used; a longer ID gets two spaces, overflowing its own line. */
+const ID_PAD_MAX = 24;
 
 function plural(n: number, word: string): string {
   return `${n} ${n === 1 ? word : `${word}s`}`;
@@ -133,7 +150,8 @@ function buildModel(
   manifest: Manifest,
   opts: ReadOptions,
   scope: {
-    header: string;
+    header: string[];
+    subtreeRoot?: string;
     steps: Step[];
     offset: number;
     /** Key of the root list for sections, or `undefined` for a one-step subtree. */
@@ -273,6 +291,8 @@ function buildModel(
     root,
     branches,
     scopeWhere: scope.scopeWhere,
+    ...(scope.subtreeRoot !== undefined ? { subtreeRoot: scope.subtreeRoot } : {}),
+    orphans: root.headers.get(-1)?.length ?? 0,
     totals: {
       steps: stepCount,
       sections: sectionCount,
@@ -298,11 +318,12 @@ function toResult(r: Rendered): OutlineResult {
 }
 
 function render(model: Model, state: RenderState): Rendered {
-  const lines: string[] = [model.header];
+  const lines: string[] = [...model.header];
   const structural: Omission[] = [];
   const cutIds = new Set<string>();
   let cutCount = 0;
-  let configLeftOut = 0;
+  /** Steps whose config line was left out, in render order. */
+  const configIds: string[] = [];
   const shown: Rendered["shown"] = [];
 
   const noteCut = (id: string | undefined) => {
@@ -312,9 +333,12 @@ function render(model: Model, state: RenderState): Rendered {
 
   const sectionHeader = (section: Section, prefix: string, suffix: string) => {
     const note = noteSuffix(section.note, state.noteMax);
-    if (note.cut) noteCut(findStep(model.doc, section.first) ? section.first : undefined);
+    const title = shownLabelParts(String(section.title ?? ""));
+    const owner = findStep(model.doc, section.first) ? section.first : undefined;
+    if (note.cut) noteCut(owner);
+    if (title.cut) noteCut(owner);
     lines.push(
-      `${prefix}▣ section ${String(section.id)} ${JSON.stringify(shownLabel(String(section.title ?? "")))} [${shownColor(section.color)}]${suffix}${note.text}`,
+      `${prefix}▣ section ${String(section.id)} ${JSON.stringify(title.text)} [${shownColor(section.color)}]${suffix}${note.text}`,
     );
   };
 
@@ -332,7 +356,7 @@ function render(model: Model, state: RenderState): Rendered {
     }
     if (s.config !== null) {
       if (state.withConfig) lines.push(`${prefix}    config ${s.config}`);
-      else configLeftOut++;
+      else configIds.push(s.step.id);
     }
     s.branches.forEach((b, i) => {
       const last = i === s.branches.length - 1;
@@ -345,7 +369,12 @@ function render(model: Model, state: RenderState): Rendered {
         structural.push({ what: "branch", stepId: s.step.id, branch: b.id, count: b.size, fetch });
         return;
       }
-      const label = b.label.toLowerCase() === b.id.toLowerCase() ? "" : ` “${shownLabel(b.label)}”`;
+      let label = "";
+      if (b.label.toLowerCase() !== b.id.toLowerCase()) {
+        const l = shownLabelParts(b.label);
+        if (l.cut) noteCut(s.step.id);
+        label = ` “${l.text}”`;
+      }
       lines.push(`${prefix}  ${glyph} ${b.id}${label}`);
       renderList(b.list, `${prefix}  ${last ? "   " : "│  "}`);
     });
@@ -358,7 +387,8 @@ function render(model: Model, state: RenderState): Rendered {
     shown.push({ list, count: k });
     let width = 0;
     for (let j = list.offset; j < end; j++) {
-      width = Math.max(width, (list.steps[j] as StepNode).step.id.length + 2);
+      const w = (list.steps[j] as StepNode).step.id.length + 2;
+      if (w <= ID_PAD_MAX) width = Math.max(width, w);
     }
     const headersAt = (j: number, p: string) => {
       for (const h of list.headers.get(j) ?? []) sectionHeader(h.section, p, h.suffix);
@@ -399,21 +429,56 @@ function render(model: Model, state: RenderState): Rendered {
         count: hidden,
         fetch,
       });
-    } else {
+    } else if (list !== model.root || state.orphans === "shown") {
       headersAt(-1, prefix);
+    } else if (state.orphans === "folded" && model.orphans > 0) {
+      const fetch: FollowUp = { tool: "getIssues", args: {} };
+      const n = model.orphans;
+      lines.push(
+        `${prefix}⚠ ${plural(n, "section")} ${n === 1 ? "references" : "reference"} missing steps: ${formatCall(fetch)}`,
+      );
+      structural.push({ what: "sections", count: n, fetch });
     }
   };
 
   renderList(model.root, "");
 
   const omitted: Omission[] = [];
-  if (configLeftOut > 0) {
-    const fetch: FollowUp = {
-      tool: "getSteps",
-      args: { where: model.scopeWhere, include: ["config"], limit: 50 },
-    };
-    omitted.push({ what: "config", count: configLeftOut, fetch });
-    lines.push(`(config left out: ${formatCall(fetch)})`);
+  if (configIds.length > 0) {
+    const root = model.subtreeRoot;
+    const fetches: { count: number; fetch: FollowUp }[] = [];
+    if (root === undefined) {
+      fetches.push({
+        count: configIds.length,
+        fetch: {
+          tool: "getSteps",
+          args: { where: model.scopeWhere, include: ["config"], limit: 50 },
+        },
+      });
+    } else if (JSON.stringify(configIds).length <= NOTE_IDS_MAX) {
+      // A subtree: `within` leaves out its root step, so name the steps.
+      fetches.push({
+        count: configIds.length,
+        fetch: { tool: "getSteps", args: { ids: configIds, include: ["config"] } },
+      });
+    } else {
+      const rootHidden = configIds[0] === root;
+      if (rootHidden) {
+        fetches.push({
+          count: 1,
+          fetch: { tool: "getSteps", args: { ids: [root], include: ["config"] } },
+        });
+      }
+      fetches.push({
+        count: configIds.length - (rootHidden ? 1 : 0),
+        fetch: {
+          tool: "getSteps",
+          args: { where: model.scopeWhere, include: ["config"], limit: 50 },
+        },
+      });
+    }
+    for (const f of fetches) omitted.push({ what: "config", ...f });
+    lines.push(`(config left out: ${fetches.map((f) => formatCall(f.fetch)).join(", ")})`);
   }
   if (cutCount > 0) {
     const ids = [...cutIds];
@@ -442,6 +507,7 @@ function fit(model: Model, budget: number | undefined): OutlineResult {
     noteMax: NOTE_MAX,
     collapsed: new Set(),
     kept: new Map(),
+    orphans: "shown",
   };
   const fits = (r: Rendered) => r.size <= max;
 
@@ -470,11 +536,24 @@ function fit(model: Model, budget: number | undefined): OutlineResult {
     else state.collapsed.delete(b);
   }
 
+  // Sections whose steps are all missing fold into one line (their issues say more).
+  if (model.orphans > 0) {
+    state.orphans = "folded";
+    const tried = render(model, state);
+    if (fits(tried)) return toResult(tried);
+    if (tried.size < r.size) r = tried;
+    else state.orphans = "shown";
+  }
+
   // 4. List tails: the longest shown list keeps as many steps as fit. Ends at the floor.
   for (;;) {
     let pick: { list: ListNode; count: number } | undefined;
     for (const x of r.shown) if (x.count > 0 && (!pick || x.count > pick.count)) pick = x;
-    if (!pick) return toResult(r);
+    if (!pick) {
+      // Nothing left to cut but orphan sections: leave them out (they stay in the totals).
+      state.orphans = "hidden";
+      return toResult(render(model, state));
+    }
     const { list } = pick;
     let lo = 0;
     let hi = pick.count - 1;
@@ -502,16 +581,16 @@ function fit(model: Model, budget: number | undefined): OutlineResult {
 }
 
 /**
- * The whole workflow as an outline: the trigger line, then one line per step (ID, node label,
- * name, colour, issue count, note), sections as headers with their members indented under them,
+ * The whole workflow as an outline: a `workflow "<name>"` line and the trigger line, then one
+ * line per step (ID, node label, disabled, name, colour, issue count, note), sections as headers with their members indented under them,
  * branches as `├`/`└` headers, and a totals line.
  *
  * `budget` (characters, default 4000) covers `text` plus the serialized `omitted`. When it is
  * short, content is left out in this order: config lines, then notes (cut from 120 to 40
- * chars), then branches (deepest first), then list tails (`outline({ after })` pages on). Each
- * omission names the exact call that returns what was left out. A result never exceeds `budget`
- * once `budget` is at least the floor (header, one tail marker and totals); below it, the result
- * is the floor.
+ * chars), then branches (deepest first), then sections whose steps are all missing (folded into
+ * one line), then list tails (`outline({ after })` pages on). Each omission names the exact call
+ * that returns what was left out. A result never exceeds `budget` once `budget` is at least the
+ * floor (the header lines, one tail marker and totals); below it, the result is the floor.
  *
  * @example
  * const { text, omitted } = overview(doc, manifest, {});
@@ -523,7 +602,7 @@ export function overview(
   opts: ReadOptions = {},
 ): OutlineResult {
   const model = buildModel(doc, manifest, opts, {
-    header: triggerLine(doc, manifest),
+    header: [`workflow ${JSON.stringify(String(doc.name ?? ""))}`, triggerLine(doc, manifest)],
     steps: doc.steps,
     offset: 0,
     rootKey: listKey(null, undefined),
@@ -564,6 +643,7 @@ export function outline(
   let scopeWhere: Where = {};
   let base: { stepId?: string; branch?: string } = {};
   let owner: { parentId?: string; branch?: string } = {};
+  let subtreeRoot: string | undefined;
   if (stepId === undefined) {
     if (branch !== undefined) throw new FlowlineTreeError("outline: `branch` needs `stepId`");
     steps = doc.steps;
@@ -580,6 +660,7 @@ export function outline(
       rootKey = undefined;
       base = { stepId };
       scopeWhere = { within: { stepId } };
+      subtreeRoot = stepId;
     } else {
       const node = manifest.nodes.find((n) => n.type === step.type);
       const declared = node ? branchesFor(node, step).map((b) => b.id) : [];
@@ -602,13 +683,14 @@ export function outline(
   }
 
   const model = buildModel(doc, manifest, opts, {
-    header,
+    header: [header],
     steps,
     offset,
     rootKey,
     ...owner,
     base,
     scopeWhere,
+    ...(subtreeRoot !== undefined ? { subtreeRoot } : {}),
     whole: false,
   });
   return fit(model, args.budget);

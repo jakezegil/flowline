@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { FlowlineTreeError } from "../tree";
 import type { Step, WorkflowDoc } from "../types";
 import { crmLikeManifest, specExampleDoc } from "./fixtures";
 import { cutString, formatCall, resultSize, stepLine } from "./format";
@@ -62,6 +63,21 @@ describe("format helpers", () => {
     ).toBe('getDeal  Get deal [gray]: note "Check…(+10 chars)"');
   });
 
+  it("stepLine marks a disabled step", () => {
+    const s: Step = { id: "a", type: "crm.getDeal", config: {}, disabled: true, name: "Load" };
+    expect(stepLine(s, node("crm.getDeal"), 0, 120)).toBe("a  Get deal (disabled) “Load”");
+    expect(stepLine({ ...s, disabled: false }, node("crm.getDeal"), 0, 120)).toBe(
+      "a  Get deal “Load”",
+    );
+  });
+
+  it("stepLine escapes a closing quote and backslash in a name", () => {
+    const s: Step = { id: "a", type: "crm.getDeal", config: {}, name: "He said ”hi” \\ there" };
+    expect(stepLine(s, node("crm.getDeal"), 0, 120)).toBe(
+      "a  Get deal “He said \\”hi\\” \\\\ there”",
+    );
+  });
+
   it("formatCall prints a compact call", () => {
     expect(formatCall({ tool: "outline", args: { stepId: "recheck", branch: "else" } })).toBe(
       'outline({stepId:"recheck",branch:"else"})',
@@ -92,7 +108,8 @@ describe("overview: the spec §3 example", () => {
       },
     ]);
     expect(r.text).toMatchInlineSnapshot(`
-      "trigger  Deal stuck in stage (poll, every 10s)
+      "workflow "Deal stuck in stage"
+      trigger  Deal stuck in stage (poll, every 10s)
       ▣ section check "Check the deal" [blue]: note "Skip if the deal already moved"
         getDeal   Get deal
         recheck   If · 1 issue
@@ -206,8 +223,56 @@ describe("overview: small docs", () => {
   it("an empty doc renders header and totals", () => {
     const r = overview({ ...five(), steps: [] }, m, {});
     expect(r.text).toBe(
-      "trigger  Deal stuck in stage (poll, every 10s)\n— 0 steps · 0 sections · 0 notes · 0 errors · 1 warning",
+      'workflow "Five"\ntrigger  Deal stuck in stage (poll, every 10s)\n— 0 steps · 0 sections · 0 notes · 0 errors · 1 warning',
     );
+  });
+
+  it("shows the workflow name, escaped, on the first line", () => {
+    const r = overview({ ...five(), name: 'Say "hi"\nnow' }, m, {});
+    expect(r.text.split("\n")[0]).toBe('workflow "Say \\"hi\\"\\nnow"');
+  });
+
+  it("marks a disabled step in the outline", () => {
+    const doc = five();
+    (doc.steps[2] as Step).disabled = true;
+    expect(overview(doc, m, {}).text).toContain("\ns3  Get deal (disabled)\n");
+  });
+
+  it("caps the ID pad at 24: a long ID overflows only its own line", () => {
+    const doc = five();
+    const long = `s_${"x".repeat(40)}`;
+    (doc.steps[1] as Step).id = long;
+    const lines = overview(doc, m, {}).text.split("\n");
+    expect(lines).toContain(`${long}  Get deal`);
+    expect(lines).toContain("s1  Get deal");
+    const extra: Step = { id: "a_twenty_char_id_xxx", type: "crm.getDeal", config: {} };
+    const out = overview({ ...doc, steps: [...doc.steps, extra] }, m, {}).text.split("\n");
+    expect(out).toContain(`s1${" ".repeat(20)}Get deal`);
+    expect(out).toContain(`${long}  Get deal`);
+  });
+
+  it("escapes newlines in notes so they stay on one line", () => {
+    const doc = five();
+    (doc.steps[0] as Step).note = 'line one\nline "two"';
+    const r = overview(doc, m, {});
+    expect(r.text).toContain('s1  Get deal: note "line one\\nline \\"two\\""');
+    expect(r.text.split("\n").filter((l) => l.includes("line"))).toHaveLength(1);
+  });
+
+  it("a name or section title cut at 120 is listed in the notes omission", () => {
+    const doc = five();
+    (doc.steps[3] as Step).name = "N".repeat(200);
+    doc.sections = [{ id: "a", title: "T".repeat(150), color: "blue", first: "s1", last: "s2" }];
+    const r = overview(doc, m, {});
+    expect(r.text).toContain(`“${"N".repeat(120)}…(+80 chars)”`);
+    expect(r.text).toContain(`"${"T".repeat(120)}…(+30 chars)"`);
+    expect(r.omitted).toEqual([
+      {
+        what: "notes",
+        count: 2,
+        fetch: { tool: "getSteps", args: { ids: ["s1", "s4"], include: [], full: true } },
+      },
+    ]);
   });
 });
 
@@ -254,10 +319,46 @@ describe("outline", () => {
     });
   });
 
-  it("throws on an unknown step or branch", () => {
-    expect(() => outline(specExampleDoc(), m, { stepId: "nope" })).toThrow(/nope/);
-    expect(() => outline(specExampleDoc(), m, { stepId: "recheck", branch: "maybe" })).toThrow(
-      /maybe/,
+  it("throws on an unknown step or branch, and on misplaced branch or after", () => {
+    const doc = specExampleDoc();
+    expect(() => outline(doc, m, { stepId: "nope" })).toThrow(/nope/);
+    expect(() => outline(doc, m, { stepId: "recheck", branch: "maybe" })).toThrow(/maybe/);
+    expect(() => outline(doc, m, { branch: "then" })).toThrow(FlowlineTreeError);
+    expect(() => outline(doc, m, { branch: "then" })).toThrow(/`branch` needs `stepId`/);
+    expect(() => outline(doc, m, { stepId: "recheck", after: "x" })).toThrow(/pass `branch`/);
+    expect(() => outline(doc, m, { after: "notifyOwner" })).toThrow(
+      /"notifyOwner" isn't in that list/,
     );
+  });
+
+  it("after the last step shows no steps and leaves nothing out", () => {
+    const r = outline(specExampleDoc(), m, { after: "delay_1m" });
+    expect(r.text).toBe(
+      'outline({after:"delay_1m"})\n— 5 steps · 1 section · 2 notes · 1 error · 0 warnings',
+    );
+    expect(r.omitted).toEqual([]);
+  });
+
+  it("after a step in the middle of a section repeats the section header", () => {
+    const r = outline(specExampleDoc(), m, { after: "getDeal" });
+    const lines = r.text.split("\n");
+    expect(lines[1]).toBe(
+      '▣ section check "Check the deal" [blue]: note "Skip if the deal already moved"',
+    );
+    expect(lines[2]).toMatch(/^ {2}recheck +If · 1 issue$/);
+    expect(r.text).not.toContain("getDeal  ");
+    expect(r.text).toMatch(/\ndelay_1m +Delay\n/);
+  });
+
+  it("the subtree config follow-up includes the root step", () => {
+    const doc = specExampleDoc();
+    (doc.steps[1] as Step).config = { value: true, extra: "e".repeat(300) };
+    const full = outline(doc, m, { stepId: "recheck" });
+    const r = outline(doc, m, { stepId: "recheck", budget: resultSize(full) - 1 });
+    expect(r.omitted[0]).toEqual({
+      what: "config",
+      count: 2,
+      fetch: { tool: "getSteps", args: { ids: ["recheck", "notifyOwner"], include: ["config"] } },
+    });
   });
 });

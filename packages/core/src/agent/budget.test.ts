@@ -4,7 +4,7 @@ import type { Step, WorkflowDoc } from "../types";
 import { crmLikeManifest, deepDoc, flatDoc } from "./fixtures";
 import { resultSize } from "./format";
 import { outline, overview } from "./outline";
-import type { OutlineResult } from "./read-types";
+import type { Omission, OutlineResult } from "./read-types";
 
 const m = crmLikeManifest();
 
@@ -24,22 +24,55 @@ function shownIds(r: OutlineResult, ids: Set<string>): string[] {
   return out;
 }
 
-const cases: [string, () => WorkflowDoc][] = [
-  ["5 flat", () => flatDoc(5)],
-  ["50 flat", () => flatDoc(50)],
-  ["500 flat", () => flatDoc(500)],
-  ["12-deep", () => deepDoc(12)],
-  ["12-deep, 50 steps", () => deepDoc(12, 50)],
-  ["12-deep, 500 steps", () => deepDoc(12, 500)],
+/**
+ * Each doc, with what a 600 budget drops: the omission kinds (with branch or tail anchors) and
+ * the step IDs still shown.
+ */
+const cases: [string, () => WorkflowDoc, string[], string[]][] = [
+  ["5 flat", () => flatDoc(5), [], ["step_1", "step_2", "step_3", "step_4", "step_5"]],
+  [
+    "50 flat",
+    () => flatDoc(50),
+    ["config", "steps after step_5"],
+    ["step_1", "step_2", "step_3", "step_4", "step_5"],
+  ],
+  [
+    "500 flat",
+    () => flatDoc(500),
+    ["config", "steps after step_5"],
+    ["step_1", "step_2", "step_3", "step_4", "step_5"],
+  ],
+  ["12-deep", () => deepDoc(12), ["config", "branch if_1/then"], ["if_1", "stop_1"]],
+  ["12-deep, 50 steps", () => deepDoc(12, 50), ["config", "branch if_1/then"], ["if_1", "stop_1"]],
+  [
+    "12-deep, 500 steps",
+    () => deepDoc(12, 500),
+    ["config", "branch if_1/then"],
+    ["if_1", "stop_1"],
+  ],
+  // With 4000-char notes, the note, config and tail omissions of even one step overflow 600.
   [
     "500 flat, 4000-char notes, 20k config",
     () => flatDoc(500, { noteChars: 4000, configChars: 20_000 }),
+    ["steps"],
+    [],
   ],
   [
     "12-deep, 500 steps, 4000-char notes",
     () => deepDoc(12, 500, { noteChars: 4000, configChars: 20_000 }),
+    ["steps"],
+    [],
   ],
 ];
+
+/** An omission as a short label: `config`, `branch if_1/then`, `steps after step_5`. */
+function kind(o: Omission): string {
+  if (o.what === "branch") return `branch ${o.stepId}/${o.branch}`;
+  if (o.what === "steps" && o.fetch.tool === "outline" && o.fetch.args.after !== undefined) {
+    return `steps after ${o.fetch.args.after}`;
+  }
+  return o.what;
+}
 
 describe("budget", () => {
   it.each(cases)("%s: overview stays within 4000 chars", (_, make) => {
@@ -47,9 +80,20 @@ describe("budget", () => {
     expect(resultSize(r)).toBeLessThanOrEqual(4000);
   });
 
-  it.each(cases)("%s: overview stays within a 600 budget", (_, make) => {
-    const r = overview(make(), m, { budget: 600 });
+  it.each(cases)("%s: a 600 budget drops the expected content", (_, make, kinds, shown) => {
+    const doc = make();
+    const r = overview(doc, m, { budget: 600 });
     expect(resultSize(r)).toBeLessThanOrEqual(600);
+    expect(r.omitted.map(kind)).toEqual(kinds);
+    expect(shownIds(r, allIds(doc))).toEqual(shown);
+  });
+
+  it("heavy docs show steps once the budget allows one", () => {
+    const doc = flatDoc(500, { noteChars: 4000, configChars: 20_000 });
+    const r = overview(doc, m, { budget: 1000 });
+    expect(resultSize(r)).toBeLessThanOrEqual(1000);
+    expect(shownIds(r, allIds(doc)).length).toBeGreaterThan(0);
+    expect(r.text).toContain(`: note "${"n1 ".padEnd(40, "x")}…(+4k chars)"`);
   });
 
   it("a 5-step flat doc needs one read", () => {
@@ -126,10 +170,11 @@ describe("budget", () => {
     for (const doc of [flatDoc(500), deepDoc(12)]) {
       const r = overview(doc, m, { budget: 50 });
       const lines = r.text.split("\n");
-      expect(lines).toHaveLength(3);
-      expect(lines[0]).toBe("trigger  Deal stuck in stage (poll, every 10s)");
-      expect(lines[1]).toMatch(/^… \d+ steps: outline\(\{\}\)$/);
-      expect(lines[2]).toMatch(/^— /);
+      expect(lines).toHaveLength(4);
+      expect(lines[0]).toBe(`workflow ${JSON.stringify(doc.name)}`);
+      expect(lines[1]).toBe("trigger  Deal stuck in stage (poll, every 10s)");
+      expect(lines[2]).toMatch(/^… \d+ steps: outline\(\{\}\)$/);
+      expect(lines[3]).toMatch(/^— /);
       expect(r.omitted).toHaveLength(1);
       expect(r.omitted[0]?.what).toBe("steps");
     }
@@ -152,7 +197,79 @@ describe("budget", () => {
       fetch: { tool: "getSteps", args: { where: {}, include: ["config"], limit: 50 } },
     });
     expect(r.text).toContain('(config left out: getSteps({where:{},include:["config"],limit:50}))');
+    // Notes are still whole: nothing was cut.
+    expect(r.text).toContain(': note "Note on step 1"');
+    expect(r.omitted.some((o) => o.what === "notes")).toBe(false);
   });
+
+  it("shortens notes to 40 once config alone isn't enough", () => {
+    const doc = flatDoc(12, { noteChars: 100 });
+    const full = overview(doc, m, { budget: 1_000_000 });
+    const noConfig = overview(doc, m, { budget: resultSize(full) - 1 });
+    // Notes of 100 chars are whole at 120.
+    expect(noConfig.text).toContain(`note "${"n1 ".padEnd(100, "x")}"`);
+    const r = overview(doc, m, { budget: resultSize(noConfig) - 1 });
+    expect(resultSize(r)).toBeLessThanOrEqual(resultSize(noConfig) - 1);
+    expect(r.text).toContain(`note "${"n1 ".padEnd(40, "x")}…(+60 chars)"`);
+    expect(r.omitted.map((o) => o.what)).toEqual(["config", "notes"]);
+    expect(r.omitted[1]?.fetch).toEqual({
+      tool: "getSteps",
+      args: { ids: doc.steps.map((s) => s.id), include: [], full: true },
+    });
+  });
+
+  it("the notes follow-up is a selector when the IDs would take over 400 chars", () => {
+    const doc = flatDoc(60, { noteChars: 200 });
+    const r = overview(doc, m, { budget: 20_000 });
+    const notes = r.omitted.find((o) => o.what === "notes");
+    expect(notes?.count).toBe(60);
+    expect(notes?.fetch).toEqual({
+      tool: "getSteps",
+      args: { where: {}, include: [], full: true, limit: 50 },
+    });
+  });
+
+  it("an empty doc below the floor returns header and totals", () => {
+    const doc: WorkflowDoc = { ...flatDoc(0) };
+    const r = overview(doc, m, { budget: 10 });
+    expect(r.text.split("\n")).toEqual([
+      'workflow "Flat"',
+      "trigger  Deal stuck in stage (poll, every 10s)",
+      "— 0 steps · 0 sections · 0 notes · 0 errors · 1 warning",
+    ]);
+    expect(r.omitted).toEqual([]);
+  });
+
+  it.each([1, 30])(
+    "an empty doc with %i orphaned broken sections fits just above the floor",
+    (n) => {
+      const sections = Array.from({ length: n }, (_, i) => ({
+        id: `gone_${i}`,
+        title: `Gone ${i}`,
+        color: "blue" as const,
+        first: `x_${i}`,
+        last: `y_${i}`,
+      }));
+      const doc: WorkflowDoc = { ...flatDoc(0), sections };
+      const floor = overview(doc, m, { budget: 0 });
+      expect(floor.text).not.toContain("▣");
+      for (const extra of [0, 1, 10, 80, 200]) {
+        const budget = resultSize(floor) + extra;
+        const r = overview(doc, m, { budget });
+        expect(resultSize(r)).toBeLessThanOrEqual(budget);
+        expect(r.totals.sections).toBe(n);
+      }
+      // With room, they are shown, or folded into one line with a getIssues follow-up.
+      const roomy = overview(doc, m, { budget: resultSize(floor) + 200 });
+      if (n === 1) expect(roomy.text).toContain('▣ section gone_0 "Gone 0" [blue] (broken)');
+      else {
+        expect(roomy.text).toContain("⚠ 30 sections reference missing steps: getIssues({})");
+        expect(roomy.omitted).toEqual([
+          { what: "sections", count: 30, fetch: { tool: "getIssues", args: {} } },
+        ]);
+      }
+    },
+  );
 
   it("collapses the deepest branch first", () => {
     const doc = deepDoc(12);
@@ -169,6 +286,8 @@ describe("budget", () => {
   it("marks cut notes with a full: true follow-up, even when cut to 40", () => {
     const doc = flatDoc(50, { noteChars: 300 });
     const r = overview(doc, m, {});
+    expect(r.text).toContain(`note "${"n1 ".padEnd(40, "x")}…(+260 chars)"`);
+    expect(r.text).not.toContain(`note "${"n1 ".padEnd(41, "x")}`);
     const notes = r.omitted.find((o) => o.what === "notes");
     expect(notes?.fetch.tool).toBe("getSteps");
     expect((notes?.fetch.args as { full?: boolean } | undefined)?.full).toBe(true);

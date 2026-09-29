@@ -62,13 +62,20 @@ export type FollowUp = { [K in ReadToolName]: { tool: K; args: ReadArgs[K] } }[R
 
 /** Something an outline left out, with the exact call that returns it. */
 export interface Omission {
-  /** What was left out: config values, full notes, a collapsed branch, or a list's tail. */
-  what: "config" | "notes" | "branch" | "steps";
+  /**
+   * What was left out:
+   * - `config`: config values
+   * - `notes`: the full text of cut notes, step names and section titles
+   * - `branch`: a collapsed branch
+   * - `steps`: a list's tail
+   * - `sections`: sections whose steps are all missing, folded into one line (their issues)
+   */
+  what: "config" | "notes" | "branch" | "steps" | "sections";
   /** For `branch` and `steps` in a branch: the step that owns the branch. */
   stepId?: string;
   /** For `branch` and `steps` in a branch: the branch ID. */
   branch?: string;
-  /** How many steps (for `notes`: notes) were left out. */
+  /** How many steps were left out (for `notes`: texts cut; for `sections`: sections). */
   count: number;
   /** The call that returns what was left out. */
   fetch: FollowUp;

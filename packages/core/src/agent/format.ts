@@ -50,14 +50,25 @@ export function noteSuffix(note: unknown, noteMax: number): { text: string; cut:
   return { text: `: note ${JSON.stringify(c.text)}`, cut: c.cut };
 }
 
+/** A name or title for display: on one line, cut to 120 chars, and whether it was cut. */
+export function shownLabelParts(s: string): { text: string; cut: boolean } {
+  return cutString(oneLine(s), LABEL_MAX);
+}
+
 /** A name or title for display: on one line, cut to 120 chars. */
 export function shownLabel(s: string): string {
-  return cutString(oneLine(s), LABEL_MAX).text;
+  return shownLabelParts(s).text;
+}
+
+/** A step name in curly quotes, with `\` and `”` escaped (`\\`, `\”`) so the closing quote is unambiguous. */
+function quotedName(name: string): { text: string; cut: boolean } {
+  const c = shownLabelParts(name);
+  return { text: `“${c.text.replace(/[\\”]/g, (ch) => `\\${ch}`)}”`, cut: c.cut };
 }
 
 /**
  * @internal One outline line with the ID padded to `idWidth` (at least the ID plus two spaces),
- * and whether its note was cut.
+ * and whether its note or name was cut.
  */
 export function stepLineParts(
   step: Step,
@@ -67,17 +78,24 @@ export function stepLineParts(
   idWidth: number,
 ): { text: string; noteCut: boolean } {
   let text = step.id.padEnd(Math.max(idWidth, step.id.length + 2)) + (node?.name ?? step.type);
-  if (typeof step.name === "string" && step.name !== "") text += ` “${shownLabel(step.name)}”`;
+  if (step.disabled === true) text += " (disabled)";
+  let nameCut = false;
+  if (typeof step.name === "string" && step.name !== "") {
+    const name = quotedName(step.name);
+    text += ` ${name.text}`;
+    nameCut = name.cut;
+  }
   if (step.color !== undefined) text += ` [${shownColor(step.color)}]`;
   if (issues > 0) text += ` · ${issues} ${issues === 1 ? "issue" : "issues"}`;
   const note = noteSuffix(step.note, noteMax);
-  return { text: text + note.text, noteCut: note.cut };
+  return { text: text + note.text, noteCut: note.cut || nameCut };
 }
 
 /**
  * One outline line, without indentation: the ID and two spaces, the node label (the node type
- * when `node` is unknown), then ` “<name>”`, ` [<color>]` (an unknown colour shows as `gray`),
- * ` · N issue(s)` and `: note "<note>"`, each only when present. The note is cut to `noteMax`.
+ * when `node` is unknown), then ` (disabled)`, ` “<name>”` (with `\` and `”` escaped as `\\` and
+ * `\”`), ` [<color>]` (an unknown colour shows as `gray`), ` · N issue(s)` and
+ * `: note "<note>"`, each only when present. The note is cut to `noteMax`, the name to 120.
  *
  * @example
  * stepLine(step, node, 1, 120) // getDeal  Get deal “Load it” [pink] · 1 issue: note "Check it"
