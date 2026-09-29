@@ -48,7 +48,8 @@ import { resolveStepRef, resolveValuePlaceholders } from "./placeholders";
 
 type Cmd<Op extends Command["op"]> = Extract<Command, { op: Op }>;
 
-function isObject(v: unknown): v is Record<string, unknown> {
+/** @internal Whether `v` is a plain (non-array) object. */
+export function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
@@ -185,8 +186,8 @@ function checkNewStepId(doc: WorkflowDoc, id: unknown, path: string): void {
   }
 }
 
-/** Every step ID in `step`'s subtree, `step` included. */
-function subtree(step: Step, into = new Set<string>()): Set<string> {
+/** @internal Every step ID in `step`'s subtree, `step` included. */
+export function subtree(step: Step, into = new Set<string>()): Set<string> {
   into.add(step.id);
   for (const list of Object.values(step.branches ?? {})) for (const s of list) subtree(s, into);
   return into;
@@ -423,8 +424,8 @@ export function recordRename(ctx: HandlerContext, from: string, to: string): voi
   }
 }
 
-/** A step's display name: its own name, else its node's, else its ID. */
-function displayName(step: Step, ctx: HandlerContext): string {
+/** @internal A step's display name: its own name, else its node's, else its ID. */
+export function displayName(step: Step, ctx: HandlerContext): string {
   return step.name ?? ctx.nodes.get(step.type)?.name ?? step.id;
 }
 

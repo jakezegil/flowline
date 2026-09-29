@@ -210,10 +210,13 @@ export interface StepUpdate {
  * - `removeSteps` removes the given steps, the run `first`…`last`, or the `where` matches
  *   (a step inside another removed step goes with it). Dangling refs are reported.
  * - `wrapSteps` puts the run in branch `in.branch` of a new `in.type` step, in the run's
- *   place. The wrapper replaces the run in a section holding it (or holding part of it); a
- *   section inside the run moves into the branch. `$n` is the wrapper.
+ *   place. The first section holding the run, or part of it (a section equal to the run too),
+ *   gets the wrapper; a later section holding part of it shrinks to its other members. A
+ *   section strictly inside the run moves into the branch. `in.config` merges over the node's
+ *   defaults, and a `null` value removes a key. `$n` is the wrapper.
  * - `unwrapStep` replaces a branching step with the steps of its branch `keep`; the other
- *   branches' steps are removed. A lifted section overlapping an outer one is dropped.
+ *   branches' steps are removed. A section holding the unwrapped step keeps its place; a lifted
+ *   section overlapping it is dropped.
  *
  * Every selector (`where`) form requires `expect`: a different match count fails with
  * `expect.mismatch` (hint `{ matched }`), and `expect: 0` with no match changes nothing.

@@ -321,6 +321,22 @@ describe("cloneRunWithFreshIds", () => {
     expect(doc).toEqual(run());
   });
 
+  test("a __proto__ config key or branch stays an own key of the copy", () => {
+    const doc = run();
+    const email = doc.steps[2] as Step;
+    email.config = JSON.parse('{"to":"x","__proto__":{"inner":"hello"}}');
+    email.branches = JSON.parse('{"__proto__":[]}');
+    const { steps } = cloneRunWithFreshIds(doc, [email]);
+    const copy = steps[0] as Step;
+    expect(Object.keys(copy.config)).toEqual(["to", "__proto__"]);
+    expect(Object.getPrototypeOf(copy.config)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(copy.config, "__proto__")?.value).toEqual({
+      inner: "hello",
+    });
+    expect(Object.keys(copy.branches ?? {})).toEqual(["__proto__"]);
+    expect(Object.getPrototypeOf(copy.branches)).toBe(Object.prototype);
+  });
+
   test("fresh IDs are unique in the doc and across the run, subtrees included", () => {
     const doc = frozenClone(baseDoc());
     const { steps, ids } = cloneRunWithFreshIds(doc, doc.steps);

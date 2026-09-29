@@ -185,10 +185,41 @@ describe("wrap", () => {
     expect(findStep(r.doc, "b")?.location.parentId).toBe("if");
   });
 
-  test("sections touching both ends: the later one is dropped", () => {
-    const r = run(flat([sec("s", "a", "b"), sec("t", "c", "d")]), wrapIn("b", "c"));
-    expect(top(r.doc)).toEqual(["a", "if", "d", "e"]);
-    expect(span(r.doc)).toEqual([["s", "a", "if"]]);
+  test.each([
+    ["listed in order", [sec("s", "a", "b"), sec("t", "c", "d")]],
+    ["listed reversed", [sec("t", "c", "d"), sec("s", "a", "b")]],
+  ])(
+    "a run touching two sections: the first holds the wrapper, the other shrinks (%s)",
+    (_, sections) => {
+      const r = run(flat(sections), wrapIn("b", "c"));
+      expect(top(r.doc)).toEqual(["a", "if", "d", "e"]);
+      expect(Object.fromEntries((span(r.doc) ?? []).map(([id, f, l]) => [id, [f, l]]))).toEqual({
+        s: ["a", "if"],
+        t: ["d", "d"],
+      });
+    },
+  );
+
+  test("a run covering a section and touching the next: the first moves in, the next holds the wrapper", () => {
+    const r = run(flat([sec("s", "a", "b"), sec("t", "c", "d")]), wrapIn("a", "c"));
+    expect(top(r.doc)).toEqual(["if", "d", "e"]);
+    expect(span(r.doc)).toEqual([
+      ["s", "a", "b"],
+      ["t", "if", "d"],
+    ]);
+  });
+
+  test("a run touching three sections: only the first holds the wrapper", () => {
+    const r = run(
+      flat([sec("s", "a", "b"), sec("t", "c", "c"), sec("u", "d", "e")]),
+      wrapIn("b", "d"),
+    );
+    expect(top(r.doc)).toEqual(["a", "if", "e"]);
+    expect(span(r.doc)).toEqual([
+      ["s", "a", "if"],
+      ["t", "c", "c"],
+      ["u", "e", "e"],
+    ]);
   });
 });
 
@@ -222,9 +253,13 @@ describe("unwrap", () => {
   test.each([
     ["listed after", [sec("o", "a", "w"), sec("i", "x", "y")]],
     ["listed before", [sec("i", "x", "y"), sec("o", "a", "w")]],
+    ["outer is just the step, listed after", [sec("o", "w", "w"), sec("i", "x", "y")]],
+    ["outer is just the step, listed before", [sec("i", "x", "y"), sec("o", "w", "w")]],
+    ["outer is just the step, inner is one step", [sec("i", "x", "x"), sec("o", "w", "w")]],
   ])("a kept branch's section overlapping the outer one is dropped (%s)", (_, sections) => {
+    const outer = sections.find((s) => s.id === "o") as Section;
     const r = run(wrapped(sections), { op: "unwrapStep", id: "w", keep: "then" });
-    expect(span(r.doc)).toEqual([["o", "a", "y"]]);
+    expect(span(r.doc)).toEqual([["o", outer.first === "a" ? "a" : "x", "y"]]);
     expect(r.changed).toContain("- ▣ i");
   });
 

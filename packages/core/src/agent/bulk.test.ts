@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { parseTemplate } from "../refs";
 import { findStep } from "../tree";
 import type { Section, Step, WorkflowDoc } from "../types";
 import { apply } from "./apply";
@@ -810,5 +811,118 @@ describe("schemas", () => {
     const r = fail(apply(flat(), [{ op: "removeSteps", where: {} } as Command], m));
     expect(r.error.code).toBe("command.invalid");
     expect(r.error.path).toBe("commands[0].expect");
+  });
+});
+
+describe("fix round 1", () => {
+  /** `n` top-level Delays `s0`…, all in one section. */
+  function big(n: number): WorkflowDoc {
+    const steps = Array.from({ length: n }, (_, i) => delay(`s${i}`));
+    return {
+      id: "big",
+      name: "Big",
+      trigger,
+      steps,
+      sections: [{ id: "all", title: "All", color: "blue", first: "s0", last: `s${n - 1}` }],
+    };
+  }
+
+  test("selector edits on 3000 steps in a section stay linear", () => {
+    const n = 3000;
+    const where = { type: "flow.delay" };
+    let t = performance.now();
+    const u = ok(
+      apply(big(n), [{ op: "updateSteps", where, set: { color: "blue" }, expect: n }], m, {
+        report: false,
+      }),
+    );
+    const update = performance.now() - t;
+    expect(u.doc.steps.every((s) => s.color === "blue")).toBe(true);
+    expect(u.doc.sections).toEqual(big(n).sections);
+    t = performance.now();
+    const r = ok(
+      apply(big(n), [{ op: "replaceInConfig", find: "1m", replace: "2m", expect: n }], m, {
+        report: false,
+      }),
+    );
+    const replace = performance.now() - t;
+    expect(r.doc.steps.every((s) => s.config.duration === "2m")).toBe(true);
+    t = performance.now();
+    const rm = ok(apply(big(n), [{ op: "removeSteps", where, expect: n }], m, { report: false }));
+    const remove = performance.now() - t;
+    expect(rm.doc.steps).toEqual([]);
+    expect(rm.doc.sections).toBeUndefined();
+    expect(update).toBeLessThan(600);
+    expect(replace).toBeLessThan(600);
+    expect(remove).toBeLessThan(600);
+  });
+
+  test("removeSteps upkeeps sections from the input doc", () => {
+    const d = flat([{ id: "s", title: "S", color: "blue", first: "a", last: "c" }]);
+    const r = ok(apply(d, [{ op: "removeSteps", ids: ["a", "c"] }], m));
+    expect(r.doc.sections).toEqual([{ id: "s", title: "S", color: "blue", first: "b", last: "b" }]);
+  });
+
+  test("replaceInConfig re-syncs branches of a node whose branches come from config", () => {
+    const d: WorkflowDoc = {
+      id: "t",
+      name: "T",
+      trigger,
+      steps: [
+        {
+          id: "sw",
+          type: "flow.switch",
+          config: { value: "x", cases: [{ id: "won", label: "Won", value: "won" }] },
+          branches: { won: [], default: [delay("a")] },
+        },
+      ],
+    };
+    const r = ok(apply(d, [{ op: "replaceInConfig", find: "won", replace: "lost", expect: 1 }], m));
+    const sw = step(r.doc, "sw");
+    expect(Object.keys(sw.branches ?? {})).toEqual(["lost", "default"]);
+    expect(sw.branches?.default?.map((s) => s.id)).toEqual(["a"]);
+    expect(r.issues.added.filter((i) => i.code.startsWith("branch."))).toEqual([]);
+  });
+
+  test("replaceInConfig never changes a template's refs or escapes", () => {
+    const d = doc();
+    d.steps[1] = {
+      ...(d.steps[1] as Step),
+      config: { value: true, a: { $tpl: "C:\\{{not}} {{ steps.load.x }}" } },
+    };
+    // The backslash is template syntax, not text: nothing to replace.
+    const none = ok(apply(d, [{ op: "replaceInConfig", find: "\\", replace: "/", expect: 0 }], m));
+    expect(none.doc).toBe(d);
+    // Text that would form `{{` is escaped, so it stays text.
+    const e = doc();
+    step(e, "notify").config.subject = { $tpl: "a{b {{steps.load.deal.id}}" };
+    const r = ok(apply(e, [{ op: "replaceInConfig", find: "b", replace: "{", expect: 1 }], m));
+    const tpl = (step(r.doc, "notify").config.subject as { $tpl: string }).$tpl;
+    expect(parseTemplate(tpl)).toEqual([{ text: "a{{ " }, { ref: "steps.load.deal.id" }]);
+    // A plain replacement keeps the template's own spacing.
+    const f = doc();
+    step(f, "notify").config.subject = { $tpl: "Hi {{steps.load.deal.id}} there" };
+    const g = ok(apply(f, [{ op: "replaceInConfig", find: "Hi", replace: "Hey", expect: 1 }], m));
+    expect(step(g.doc, "notify").config.subject).toEqual({
+      $tpl: "Hey {{steps.load.deal.id}} there",
+    });
+  });
+
+  test("wrapSteps: null in in.config removes the key", () => {
+    const r = ok(
+      apply(
+        flat(),
+        [
+          {
+            op: "wrapSteps",
+            first: "a",
+            last: "a",
+            in: { type: "flow.switch", branch: "default", config: { value: "v", cases: null } },
+          },
+        ],
+        m,
+      ),
+    );
+    expect(step(r.doc, "switch").config).toEqual({ value: "v" });
   });
 });

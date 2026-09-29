@@ -312,6 +312,11 @@ export function freshStepId(taken: Set<string>, nodeType: string): string {
   return nextAvailableId(taken, sanitizeBase(nodeType));
 }
 
+/** Sets `obj[key]` as an own property, so `__proto__` is a plain key, never the prototype. */
+function ownSet<T>(obj: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(obj, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
 function rewriteRefs(expr: ValueExpr, idMap: Map<string, string>): ValueExpr {
   if (Array.isArray(expr)) return expr.map((e) => rewriteRefs(e, idMap));
   if (isRef(expr)) {
@@ -338,7 +343,7 @@ function rewriteRefs(expr: ValueExpr, idMap: Map<string, string>): ValueExpr {
   }
   if (expr !== null && typeof expr === "object") {
     const out: Record<string, ValueExpr> = {};
-    for (const [k, v] of Object.entries(expr)) out[k] = rewriteRefs(v, idMap);
+    for (const [k, v] of Object.entries(expr)) ownSet(out, k, rewriteRefs(v, idMap));
     return out;
   }
   return expr;
@@ -352,7 +357,11 @@ function assignFreshIds(step: Step, taken: Set<string>, idMap: Map<string, strin
   if (step.branches) {
     const branches: Record<string, Step[]> = {};
     for (const [branchKey, branchSteps] of Object.entries(step.branches)) {
-      branches[branchKey] = branchSteps.map((s) => assignFreshIds(s, taken, idMap));
+      ownSet(
+        branches,
+        branchKey,
+        branchSteps.map((s) => assignFreshIds(s, taken, idMap)),
+      );
     }
     newStep.branches = branches;
   }
@@ -367,7 +376,11 @@ function rewriteSubtreeConfigs(step: Step, idMap: Map<string, string>): Step {
   if (step.branches) {
     const branches: Record<string, Step[]> = {};
     for (const [branchKey, branchSteps] of Object.entries(step.branches)) {
-      branches[branchKey] = branchSteps.map((s) => rewriteSubtreeConfigs(s, idMap));
+      ownSet(
+        branches,
+        branchKey,
+        branchSteps.map((s) => rewriteSubtreeConfigs(s, idMap)),
+      );
     }
     newStep.branches = branches;
   }
@@ -489,7 +502,7 @@ export function renameStepId(
       const renamed = rename(step);
       if (!step.branches) return renamed;
       const branches: Record<string, Step[]> = {};
-      for (const [k, v] of Object.entries(step.branches)) branches[k] = walk(v);
+      for (const [k, v] of Object.entries(step.branches)) ownSet(branches, k, walk(v));
       return { ...renamed, branches };
     });
   const next: WorkflowDoc = {

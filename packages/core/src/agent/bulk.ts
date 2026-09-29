@@ -2,27 +2,26 @@
  * Bulk edit and restructure: `duplicateSteps`, `updateSteps`, `replaceInConfig`, `moveSteps`,
  * `removeSteps`, `wrapSteps`, `unwrapStep`.
  *
- * Section upkeep: each handler takes the steps out and puts them back with the tree operations,
- * then upkeeps the sections once, from its input doc (`upkeepSections(doc, after, effect)`). The
- * removals' own upkeep is undone first (see `withoutSteps`), since upkeep rebuilds `sections`
- * from `before` and a pre-edited `after.sections` would be lost or doubly applied.
+ * Section upkeep: each handler edits the tree without touching `sections` (the one-pass removal
+ * and update helpers here, plus the tree insertions), then upkeeps the sections once, from its
+ * input doc (`upkeepSections(doc, after, effect)`). Upkeep rebuilds `sections` from `before`, so
+ * a pre-edited `after.sections` would be lost or doubly applied. Selector edits can touch
+ * thousands of steps, so they never run a tree operation per step (each one upkeeps the whole
+ * doc).
  *
  * @module
  */
 import { sectionRun, upkeepSections } from "../annotations";
 import { branchesFor } from "../json-schema";
-import { isRef, isTpl } from "../refs";
+import { isRef, isTpl, parseTemplate, type TemplatePart } from "../refs";
 import { copyName, createStep, syncBranches } from "../step-factory";
 import {
   branchList,
   cloneRunWithFreshIds,
   FlowlineTreeError,
-  findStep,
   generateStepId,
   insertStepRun,
-  removeStep,
   type StepLocation,
-  updateStep,
   walkSteps,
 } from "../tree";
 import type { Step, ValueExpr, WorkflowDoc } from "../types";
@@ -36,25 +35,24 @@ import {
   type StepUpdate,
 } from "./commands";
 import type { Where } from "./read-types";
-import { checkColor, checkNote, stepRun } from "./sections";
+import { checkColor, checkNote, runSteps } from "./sections";
 import { matchSteps } from "./selectors";
 import {
+  displayName,
   existingStep,
+  isObject,
   locate,
   nodeOf,
   patchConfig,
   placeholderId,
   resolvedValue,
+  subtree,
   unknownPlaceholder,
   wrongKind,
 } from "./single";
 
 type Cmd<Op extends Command["op"]> = Extract<Command, { op: Op }>;
 type Path = (string | number)[];
-
-function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
 
 /** `path` (a formatted relative path) under `prefix` segments. */
 function under(prefix: Path, path: string): string {
@@ -77,32 +75,14 @@ function nested<T>(prefix: Path, fn: () => T): T {
   }
 }
 
-/** Every step ID in `step`'s subtree, `step` included. */
-function subtree(step: Step, into = new Set<string>()): Set<string> {
-  into.add(step.id);
-  for (const list of Object.values(step.branches ?? {})) for (const s of list) subtree(s, into);
-  return into;
+/** Sets `obj[key]` as an own property, so `__proto__` is a plain key, never the prototype. */
+function ownSet<T>(obj: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(obj, key, { value, enumerable: true, writable: true, configurable: true });
 }
 
-/** A step's display name: its own name, else its node's, else its ID. */
-function displayName(step: Step, ctx: HandlerContext): string {
-  return step.name ?? ctx.nodes.get(step.type)?.name ?? step.id;
-}
-
-/** The run `first`…`last` in `doc`: its location, end index and top-level steps. */
-function runOf(
-  doc: WorkflowDoc,
-  ctx: HandlerContext,
-  cmd: { first: string; last: string },
-): { location: StepLocation; end: number; steps: Step[]; ids: string[] } {
-  const run = stepRun(doc, ctx, cmd.first, cmd.last, { first: "first", last: "last" });
-  const { parentId, branch, index } = run.location;
-  const list =
-    parentId === null
-      ? doc.steps
-      : (branchList(findStep(doc, parentId)?.step as Step, branch as string) ?? []);
-  const steps = list.slice(index, run.end + 1);
-  return { location: run.location, end: run.end, steps, ids: steps.map((s) => s.id) };
+/** A command's run `first`…`last`: its location, end index and top-level steps. */
+function runOf(doc: WorkflowDoc, ctx: HandlerContext, cmd: { first: string; last: string }) {
+  return runSteps(doc, ctx, cmd.first, cmd.last, { first: "first", last: "last" });
 }
 
 /** A location without an `undefined` branch. */
@@ -120,27 +100,67 @@ function sameList(a: StepLocation, b: StepLocation): boolean {
 }
 
 /**
- * `doc` without the steps `ids` (with their subtrees), with `doc`'s own `sections`: the
- * removals' upkeep is undone, so the caller upkeeps once from `doc`.
+ * `doc` with `fn` applied to each step it maps (first pre-order occurrence of an ID), in one
+ * pass: `fn` returns the new step, `null` to remove it (with its subtree), or the step itself to
+ * keep it. A kept step's children are visited in `fn`'s result. Path-copying, like the tree
+ * operations, and `sections` are left as they are (the caller upkeeps).
  */
-function withoutSteps(doc: WorkflowDoc, ids: readonly string[]): WorkflowDoc {
-  let cut = doc;
-  for (const id of ids) cut = removeStep(cut, id);
-  const { sections: _, ...rest } = cut;
-  return doc.sections !== undefined ? { ...rest, sections: doc.sections } : rest;
+function rebuild(
+  doc: WorkflowDoc,
+  targets: Iterable<string>,
+  fn: (step: Step) => Step | null,
+): WorkflowDoc {
+  const left = new Set(targets);
+  if (left.size === 0) return doc;
+  const visit = (list: Step[]): Step[] => {
+    let out: Step[] | undefined;
+    list.forEach((step, i) => {
+      let next: Step | null = step;
+      if (left.size > 0 && left.has(step.id)) {
+        left.delete(step.id);
+        next = fn(step);
+      }
+      if (next?.branches && left.size > 0) {
+        let branches: Record<string, Step[]> | undefined;
+        for (const [key, branch] of Object.entries(next.branches)) {
+          const updated = visit(branch);
+          if (updated !== branch) {
+            branches ??= { ...next.branches };
+            ownSet(branches, key, updated);
+          }
+        }
+        if (branches) next = { ...next, branches };
+      }
+      if (next !== step && !out) out = list.slice(0, i);
+      if (out && next) out.push(next);
+    });
+    return out ?? list;
+  };
+  const steps = visit(doc.steps);
+  return steps === doc.steps ? doc : { ...doc, steps };
 }
 
-/** Of `ids` (deduplicated), those not inside another one's subtree, in order. */
+/** `doc` without the steps `ids` (with their subtrees), `sections` untouched. */
+function withoutSteps(doc: WorkflowDoc, ids: Iterable<string>): WorkflowDoc {
+  return rebuild(doc, ids, () => null);
+}
+
+/** Of `ids`, the steps not inside another one's subtree, in pre-order (first occurrences). */
 function outermost(doc: WorkflowDoc, ids: readonly string[]): string[] {
   const all = new Set(ids);
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const id of ids) {
-    if (seen.has(id)) continue;
-    seen.add(id);
-    const found = findStep(doc, id);
-    if (found && !found.ancestors.some((a) => all.has(a.step.id))) out.push(id);
-  }
+  const visit = (list: Step[], inside: boolean) => {
+    for (const step of list) {
+      const hit = !inside && all.has(step.id) && !seen.has(step.id);
+      if (hit) {
+        seen.add(step.id);
+        out.push(step.id);
+      }
+      for (const branch of Object.values(step.branches ?? {})) visit(branch, inside || hit);
+    }
+  };
+  visit(doc.steps, false);
   return out;
 }
 
@@ -308,51 +328,63 @@ function updated(
   }
   if (config !== undefined) {
     const patched = patchConfig(ctx, next.config, { config });
-    if (patched !== undefined) {
-      const node = ctx.nodes.get(next.type);
-      const withConfig: Step = { ...next, config: patched };
-      next = node ? syncBranches(withConfig, node) : withConfig;
-    }
+    if (patched !== undefined) next = withConfig(ctx, next, patched);
   }
   return next;
 }
 
-/** `doc` with step `id` updated (the same doc when nothing changes). */
-function updateOne(
-  doc: WorkflowDoc,
-  ctx: HandlerContext,
-  id: string,
-  set: StepUpdate["set"] | undefined,
-  config: ConfigPatch | undefined,
-): WorkflowDoc {
-  const step = findStep(doc, id)?.step as Step;
-  const next = updated(ctx, step, set, config);
-  return next === step ? doc : updateStep(doc, id, () => next);
+/** `step` with `config`, its branches synced to what its node declares for that config. */
+function withConfig(ctx: HandlerContext, step: Step, config: Record<string, ValueExpr>): Step {
+  const node = ctx.nodes.get(step.type);
+  const next: Step = { ...step, config };
+  return node ? syncBranches(next, node) : next;
 }
 
 const updateSteps: Handler = (doc, command, ctx) => {
   const cmd = command as Cmd<"updateSteps">;
-  let cur = doc;
   if ("updates" in cmd) {
     if (!Array.isArray(cmd.updates)) {
       throw new CommandFailure("command.invalid", "updates must be an array", "updates");
     }
+    let cur = doc;
     cmd.updates.forEach((u, k) => {
       nested(["updates", k], () => {
         if (!isObject(u)) throw new CommandFailure("command.invalid", "An update is an object", "");
-        const { id } = existingStep(cur, ctx, u.id, "id");
-        cur = updateOne(cur, ctx, id, u.set, u.config);
+        const { id, step } = existingStep(cur, ctx, u.id, "id");
+        const next = updated(ctx, step, u.set, u.config);
+        if (next !== step) cur = rebuild(cur, [id], () => next);
       });
     });
-    return { doc: cur };
+    return { doc: upkeepSections(doc, cur) };
   }
   const ids = selected(doc, ctx, cmd.where);
   checkExpect(ids, cmd.expect);
-  for (const id of ids) cur = updateOne(cur, ctx, id, cmd.set, cmd.config);
-  return { doc: cur };
+  const next = rebuild(doc, ids, (step) => updated(ctx, step, cmd.set, cmd.config));
+  return { doc: upkeepSections(doc, next) };
 };
 
-/** The `[start, end)` spans of the `{{ }}` refs in a template, as `parseTemplate` finds them. */
+/** `text` with every `find` replaced (the same string when there is none). */
+function replaceText(text: string, find: string, replace: string): string {
+  return text.includes(find) ? text.split(find).join(replace) : text;
+}
+
+/** Template parts with adjacent text merged and empty text dropped, as JSON for comparing. */
+function partsKey(parts: TemplatePart[]): string {
+  const out: TemplatePart[] = [];
+  for (const part of parts) {
+    const prev = out[out.length - 1];
+    if ("text" in part) {
+      if (part.text === "") continue;
+      if (prev && "text" in prev) out[out.length - 1] = { text: prev.text + part.text };
+      else out.push(part);
+    } else {
+      out.push(part);
+    }
+  }
+  return JSON.stringify(out);
+}
+
+/** The raw `[start, end)` spans of `tpl`'s `{{ }}` refs, as {@link parseTemplate} reads them. */
 function refSpans(tpl: string): [number, number][] {
   const spans: [number, number][] = [];
   let i = 0;
@@ -373,20 +405,29 @@ function refSpans(tpl: string): [number, number][] {
   return spans;
 }
 
-/** `text` with every `find` replaced (the same string when there is none). */
-function replaceText(text: string, find: string, replace: string): string {
-  return text.includes(find) ? text.split(find).join(replace) : text;
-}
-
-/** A template with `find` replaced in its text, never inside a `{{ }}` ref. */
+/**
+ * A template with `find` replaced in its literal text only, never in a `{{ }}` ref or an escape,
+ * and never changing which refs it has. The raw text around the refs is edited in place when
+ * that reads back right; otherwise the template is rewritten from its parts, with a `{{` in the
+ * text escaped. When neither reads back to the intended parts, the template is left unchanged.
+ */
 function replaceInTemplate(tpl: string, find: string, replace: string): string {
-  let out = "";
+  const parts = parseTemplate(tpl);
+  const want = parts.map((p) => ("text" in p ? { text: replaceText(p.text, find, replace) } : p));
+  const key = partsKey(want);
+  if (key === partsKey(parts)) return tpl;
+  let raw = "";
   let at = 0;
   for (const [start, end] of refSpans(tpl)) {
-    out += replaceText(tpl.slice(at, start), find, replace) + tpl.slice(start, end);
+    raw += replaceText(tpl.slice(at, start), find, replace) + tpl.slice(start, end);
     at = end;
   }
-  return out + replaceText(tpl.slice(at), find, replace);
+  raw += replaceText(tpl.slice(at), find, replace);
+  if (partsKey(parseTemplate(raw)) === key) return raw;
+  const rebuilt = want
+    .map((p) => ("text" in p ? p.text.replaceAll("{{", "\\{{") : `{{${p.ref}}}`))
+    .join("");
+  return partsKey(parseTemplate(rebuilt)) === key ? rebuilt : tpl;
 }
 
 /** `expr` with `find` replaced in strings and template text (the same value when unchanged). */
@@ -407,12 +448,7 @@ function replaceIn(expr: ValueExpr, find: string, replace: string): ValueExpr {
     for (const [k, v] of Object.entries(expr)) {
       const r = replaceIn(v as ValueExpr, find, replace);
       if (r !== v) changed = true;
-      Object.defineProperty(next, k, {
-        value: r,
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      });
+      ownSet(next, k, r);
     }
     return changed ? next : expr;
   }
@@ -427,26 +463,21 @@ const replaceInConfig: Handler = (doc, command, ctx) => {
   if (typeof cmd.replace !== "string") {
     throw new CommandFailure("command.invalid", "replace must be a string", "replace");
   }
-  let candidates: string[];
+  const candidates = new Set<string>();
   if (cmd.where !== undefined) {
-    candidates = selected(doc, ctx, cmd.where);
-  } else {
-    candidates = [];
-    walkSteps(doc, (s) => candidates.push(s.id));
+    for (const id of selected(doc, ctx, cmd.where)) candidates.add(id);
   }
-  const changes: [string, Record<string, ValueExpr>][] = [];
-  for (const id of new Set(candidates)) {
-    const step = findStep(doc, id)?.step as Step;
+  const changes = new Map<string, Record<string, ValueExpr>>();
+  walkSteps(doc, (step) => {
+    if (changes.has(step.id) || (cmd.where !== undefined && !candidates.has(step.id))) return;
     const config = replaceIn(step.config, cmd.find, cmd.replace) as Record<string, ValueExpr>;
-    if (config !== step.config) changes.push([id, config]);
-  }
-  checkExpect(
-    changes.map(([id]) => id),
-    cmd.expect,
+    if (config !== step.config) changes.set(step.id, config);
+  });
+  checkExpect([...changes.keys()], cmd.expect);
+  const next = rebuild(doc, changes.keys(), (step) =>
+    withConfig(ctx, step, changes.get(step.id) as Record<string, ValueExpr>),
   );
-  let cur = doc;
-  for (const [id, config] of changes) cur = updateStep(cur, id, (s) => ({ ...s, config }));
-  return { doc: cur };
+  return { doc: upkeepSections(doc, next) };
 };
 
 const moveSteps: Handler = (doc, command, ctx) => {
@@ -487,9 +518,7 @@ const removeSteps: Handler = (doc, command, ctx) => {
   } else {
     ids = runOf(doc, ctx, cmd).ids;
   }
-  let cur = doc;
-  for (const id of outermost(doc, ids)) cur = removeStep(cur, id);
-  return { doc: cur };
+  return { doc: upkeepSections(doc, withoutSteps(doc, outermost(doc, ids))) };
 };
 
 const wrapSteps: Handler = (doc, command, ctx) => {
@@ -503,12 +532,20 @@ const wrapSteps: Handler = (doc, command, ctx) => {
   if (spec.config !== undefined && !isObject(spec.config)) {
     throw new CommandFailure("command.invalid", "config must be an object", "in.config");
   }
-  const config = spec.config
-    ? (resolvedValue(ctx, spec.config as ValueExpr, "in.config") as Record<string, ValueExpr>)
-    : {};
   const id = generateStepId(doc, node.type);
   const created = createStep(id, node);
-  const base = syncBranches({ ...created, config: { ...created.config, ...config } }, node);
+  // Merged over the defaults, as addStep's config; `null` removes a key (a default too).
+  const config: Record<string, ValueExpr> = { ...created.config };
+  for (const [key, value] of Object.entries(spec.config ?? {})) {
+    if (value === null) delete config[key];
+    else
+      ownSet(
+        config,
+        key,
+        resolvedValue(ctx, value as ValueExpr, formatPath(["in", "config", key])),
+      );
+  }
+  const base = syncBranches({ ...created, config }, node);
   const declared = branchesFor(node, base).map((b) => b.id);
   const branch = spec.branch;
   if (typeof branch !== "string" || !declared.includes(branch)) {
@@ -530,9 +567,11 @@ const wrapSteps: Handler = (doc, command, ctx) => {
 };
 
 /**
- * The upkeep substitution for wrapping `run` in `wrapperId`: every run member becomes the
- * wrapper, except members of a section strictly inside the run, which move into the branch
- * unchanged. (Sections in one list don't overlap, so a member belongs to one section at most.)
+ * The upkeep substitution for wrapping `run` in `wrapperId`. Of the sections in the run's list
+ * that overlap it but aren't strictly inside it, the first (by position) holds the wrapper: its
+ * run members become the wrapper. Any later such section just loses its run members, so it
+ * shrinks rather than overlapping the first. A section strictly inside the run moves into the
+ * branch unchanged. (Sections in one list don't overlap, so a member is in one section at most.)
  */
 function wrapSubst(
   doc: WorkflowDoc,
@@ -541,14 +580,31 @@ function wrapSubst(
 ): Map<string, string[]> {
   const start = run.location.index;
   const inner = new Set<string>();
+  const leaving = new Set<string>();
+  let holder = Number.POSITIVE_INFINITY;
+  const touching: { start: number; ids: string[] }[] = [];
   for (const section of doc.sections ?? []) {
     const r = sectionRun(doc, section);
     if (!r || r.parentId !== run.location.parentId || r.branch !== run.location.branch) continue;
+    if (r.start > run.end || r.end < start) continue;
     const within = r.start >= start && r.end <= run.end;
     const equal = r.start === start && r.end === run.end;
-    if (within && !equal) for (const id of r.ids) inner.add(id);
+    if (within && !equal) {
+      for (const id of r.ids) inner.add(id);
+    } else {
+      touching.push({ start: r.start, ids: r.ids });
+      holder = Math.min(holder, r.start);
+    }
   }
-  return new Map(run.ids.filter((id) => !inner.has(id)).map((id) => [id, [wrapperId]]));
+  for (const t of touching) {
+    if (t.start !== holder) for (const id of t.ids) leaving.add(id);
+  }
+  const subst = new Map<string, string[]>();
+  for (const id of run.ids) {
+    if (inner.has(id)) continue;
+    subst.set(id, leaving.has(id) ? [] : [wrapperId]);
+  }
+  return subst;
 }
 
 const unwrapStep: Handler = (doc, command, ctx) => {
@@ -572,12 +628,14 @@ const unwrapStep: Handler = (doc, command, ctx) => {
   const removed = withoutSteps(doc, [id]);
   const lifted = insertStepRun(removed, place(location), kept);
   const keptIds = kept.map((s) => s.id);
-  // The lifted steps count as moved, so a lifted section that now overlaps an outer one is the
-  // one dropped (upkeep rule 4).
+  // The lifted steps count as moved and a section holding the unwrapped step stays put, so a
+  // lifted section that now overlaps an outer one is the one dropped (upkeep rule 4), whatever
+  // the order of `sections`.
   return {
     doc: upkeepSections(doc, lifted, {
       subst: new Map([[id, keptIds]]),
       moved: new Set(keptIds),
+      anchored: new Set([id]),
     }),
   };
 };
