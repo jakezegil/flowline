@@ -441,4 +441,52 @@ describe("onStoreReady", () => {
     expect(log.at(-1)).toBe("cleanup 2");
     expect(stores[0]).not.toBe(stores[1]);
   });
+
+  test("fires again after a successful workflowId change, and after startNew()", async () => {
+    const docs: Record<string, WorkflowDoc> = {
+      welcome: fixtureDoc(),
+      other: docWith([step("load", "crm.loadContact", {})], "other"),
+    };
+    const client = mockClient({
+      getManifest: async () => manifest,
+      listSubflows: async () => [],
+      getWorkflow: async (id: string) => {
+        const doc = docs[id];
+        if (!doc) throw httpError(404, { error: "Not found" });
+        return detail(doc);
+      },
+    });
+    const log: string[] = [];
+    let n = 0;
+    const onStoreReady = (store: EditorStore) => {
+      const id = ++n;
+      log.push(`ready ${id} ${store.getState().doc.id}`);
+      return () => log.push(`cleanup ${id}`);
+    };
+    const ui = (workflowId: string) => (
+      <FlowlineProvider client={client}>
+        <div style={{ height: 800 }}>
+          <WorkflowEditor
+            workflowId={workflowId}
+            notFoundAction="create"
+            onStoreReady={onStoreReady}
+          />
+        </div>
+      </FlowlineProvider>
+    );
+    const { rerender } = render(ui("welcome"));
+    await waitFor(() => expect(log).toEqual(["ready 1 welcome"]));
+    rerender(ui("other"));
+    await waitFor(() => expect(log).toEqual(["ready 1 welcome", "cleanup 1", "ready 2 other"]));
+    rerender(ui("fresh"));
+    fireEvent.click(await screen.findByRole("button", { name: "Create this workflow" }));
+    await waitFor(() => expect(log.at(-1)).toBe("ready 3 fresh"));
+    expect(log).toEqual([
+      "ready 1 welcome",
+      "cleanup 1",
+      "ready 2 other",
+      "cleanup 2",
+      "ready 3 fresh",
+    ]);
+  });
 });

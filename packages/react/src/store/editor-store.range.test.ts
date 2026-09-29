@@ -9,7 +9,7 @@ import {
 } from "@flowlinejs/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { branchyDoc, docWith, fixtureDoc, manifest, step } from "../../test/fixtures";
-import { createEditorStore, type EditorStore } from "./editor-store";
+import { createEditorStore, type EditorStore, holdReadOnly } from "./editor-store";
 
 function storeFor(doc: WorkflowDoc = fixtureDoc(), readOnly?: boolean): EditorStore {
   return createEditorStore({ doc, manifest, ...(readOnly !== undefined ? { readOnly } : {}) });
@@ -152,7 +152,7 @@ describe("apply", () => {
     expect(s().doc).toBe(before);
   });
 
-  test("renameStepId of the selected step moves the selection and its local data", () => {
+  test("renameStepId of the selected step moves the selection and copies its local data", () => {
     const store = storeFor();
     const s = store.getState;
     s().select("load");
@@ -161,9 +161,81 @@ describe("apply", () => {
     expect(bridge.ok).toBe(true);
     expect(s().selection).toBe("getContact");
     expect(s().samples.getContact).toEqual({ id: "c1" });
-    expect(s().samples.load).toBeUndefined();
     expect(s().testState.getContact).toBe("tested");
     expect(s().sampleTypes.getContact).toBe("crm.loadContact");
+    // Copied, not moved: undo finds the old ID's local data again (I2).
+    s().undo();
+    expect(s().samples.load).toEqual({ id: "c1" });
+    expect(s().testState.load).toBe("tested");
+    expect(s().sampleTypes.load).toBe("crm.loadContact");
+  });
+
+  test("a swap of two IDs swaps their local data", () => {
+    const store = storeFor(docWith([email("a"), email("b")]));
+    const s = store.getState;
+    s().setSample("a", { messageId: "A" });
+    s().setSample("b", { messageId: "B" });
+    s().apply([
+      { op: "renameStepId", id: "a", newId: "tmp" },
+      { op: "renameStepId", id: "b", newId: "a" },
+      { op: "renameStepId", id: "tmp", newId: "b" },
+    ]);
+    expect(s().samples.a).toEqual({ messageId: "B" });
+    expect(s().samples.b).toEqual({ messageId: "A" });
+  });
+
+  test("undo and redo of an apply rename keep the selection and range on the step (M4)", () => {
+    const store = storeFor(flatDoc());
+    const s = store.getState;
+    s().select("a");
+    s().selectRange("a", "c");
+    s().apply([{ op: "renameStepId", id: "a", newId: "aa" }]);
+    expect(s().selection).toBe("aa");
+    expect(s().range).toEqual({ first: "aa", last: "c" });
+    s().undo();
+    expect(s().selection).toBe("a");
+    expect(s().range).toEqual({ first: "a", last: "c" });
+    s().redo();
+    expect(s().selection).toBe("aa");
+    expect(s().range).toEqual({ first: "aa", last: "c" });
+  });
+
+  test("a coalesced burst of renames undoes back to the first ID's selection", () => {
+    const store = storeFor(flatDoc());
+    const s = store.getState;
+    s().select("a");
+    s().apply([{ op: "renameStepId", id: "a", newId: "a1" }], { coalesceKey: "id" });
+    vi.advanceTimersByTime(100);
+    s().apply([{ op: "renameStepId", id: "a1", newId: "a2" }], { coalesceKey: "id" });
+    expect(s().selection).toBe("a2");
+    s().undo();
+    expect(s().selection).toBe("a");
+    s().redo();
+    expect(s().selection).toBe("a2");
+  });
+
+  test("an unexpected handler error propagates; deep nesting reports core's message (M3)", () => {
+    const store = storeFor();
+    let deep: Record<string, unknown> = { type: "crm.sendEmail" };
+    for (let i = 0; i < 20000; i++) {
+      deep = { type: "logic.condition", branches: { if: [deep] } };
+    }
+    const r = store
+      .getState()
+      .apply([{ op: "insertSteps", at: { start: true }, steps: [deep] } as unknown as Command]);
+    expect(r).toMatchObject({
+      ok: false,
+      error: { code: "command.invalid", message: "The commands are nested too deeply to check" },
+    });
+    const boom = new Proxy(
+      {},
+      {
+        get() {
+          throw new TypeError("handler bug");
+        },
+      },
+    );
+    expect(() => store.getState().apply([boom as Command])).toThrow(TypeError);
   });
 
   test("setType with regeneration moves the selection and samples; the step needs a test", () => {
@@ -275,6 +347,30 @@ describe("range", () => {
     expect(ids(s().doc.steps)).toEqual(["a", "d", "b", "c"]);
     s().moveBy("b", "b", -1);
     expect(ids(s().doc.steps)).toEqual(["a", "b", "d", "c"]);
+  });
+
+  test("⌥↑/⌥↓ keeps an interior member in its section; an edge member moved out leaves", () => {
+    const sections: Section[] = [{ id: "mid", title: "Mid", color: "blue", first: "a", last: "c" }];
+    const fresh = () =>
+      storeFor({
+        ...docWith([email("x"), email("a"), email("b"), email("c"), email("y")]),
+        sections,
+      });
+    let store = fresh();
+    store.getState().moveBy("b", "b", -1);
+    expect(ids(store.getState().doc.steps)).toEqual(["x", "b", "a", "c", "y"]);
+    expect(store.getState().doc.sections?.[0]).toMatchObject({ first: "b", last: "c" });
+    store.getState().moveBy("b", "b", -1);
+    expect(ids(store.getState().doc.steps)).toEqual(["b", "x", "a", "c", "y"]);
+    expect(store.getState().doc.sections?.[0]).toMatchObject({ first: "a", last: "c" });
+    store = fresh();
+    store.getState().moveBy("a", "a", -1);
+    expect(ids(store.getState().doc.steps)).toEqual(["a", "x", "b", "c", "y"]);
+    expect(store.getState().doc.sections?.[0]).toMatchObject({ first: "b", last: "c" });
+    store = fresh();
+    store.getState().moveBy("c", "c", 1);
+    expect(ids(store.getState().doc.steps)).toEqual(["x", "a", "b", "y", "c"]);
+    expect(store.getState().doc.sections?.[0]).toMatchObject({ first: "a", last: "b" });
   });
 
   test("moveBy of an interior section member keeps the section (Review Focus 1)", () => {
@@ -409,6 +505,27 @@ describe("readOnly", () => {
     expect(caught).toBeInstanceOf(FlowlineCommandError);
     expect((caught as FlowlineCommandError).error.code).toBe("readOnly");
     expect(store.getState().doc).toBe(before);
+  });
+
+  test("read-only holders stack over the host's value (M1)", () => {
+    const store = storeFor();
+    const s = store.getState;
+    const releaseA = holdReadOnly(store);
+    const releaseB = holdReadOnly(store);
+    releaseA();
+    releaseA();
+    expect(s().readOnly).toBe(true);
+    releaseB();
+    expect(s().readOnly).toBe(false);
+    const release = holdReadOnly(store);
+    s().setReadOnly(true);
+    release();
+    expect(s().readOnly).toBe(true);
+    const again = holdReadOnly(store);
+    s().setReadOnly(false);
+    expect(s().readOnly).toBe(true);
+    again();
+    expect(s().readOnly).toBe(false);
   });
 
   test("apply returns code readOnly; setReadOnly(false) lifts it", () => {

@@ -9,6 +9,7 @@ import {
   changedStepIds,
   cloneRunWithFreshIds,
   removeStep as coreRemoveStep,
+  runTool as coreRunTool,
   FlowlineCommandError,
   findStep,
   type Issue,
@@ -435,7 +436,7 @@ export function createEditorStore(init: {
 }): EditorStore {
   const { manifest } = init;
   const ctx = init.ctx ?? {};
-  let history: History<WorkflowDoc> = emptyHistory();
+  let history: History<HistoryEntry> = emptyHistory();
   let savedDoc = init.doc;
   const local: LocalData =
     typeof window === "undefined"
@@ -446,8 +447,10 @@ export function createEditorStore(init: {
   let serverIssues: Issue[] = [];
   let serverBase: WorkflowDoc | null = null;
   let flashToken = 0;
+  /** The host's read-only value (`setReadOnly`), and how many holders keep the store read-only. */
+  const lock = { base: init.readOnly === true, holders: 0 };
 
-  return createStore<EditorState & EditorActions>()((set, get) => {
+  const store = createStore<EditorState & EditorActions>()((set, get) => {
     const derived = (doc: WorkflowDoc) => {
       const own = validateWorkflow(doc, manifest, ctx);
       if (serverBase !== null) {
@@ -481,7 +484,15 @@ export function createEditorStore(init: {
     ): void => {
       const prev = get().doc;
       if (next === prev) return;
-      history = recordEdit(history, prev, coalesceKey, Date.now());
+      const depth = history.past.length;
+      const last = history.past[depth - 1];
+      history = recordEdit(history, { doc: prev, renamed }, coalesceKey, Date.now());
+      if (history.past.length === depth && last) {
+        // Joined the previous undo step: its renames now run through this edit's too.
+        const past = history.past.slice();
+        past[depth - 1] = { doc: last.doc, renamed: composeRenames(last.renamed, renamed) };
+        history = { ...history, past };
+      }
       const selection = "selection" in patch ? (patch.selection ?? null) : get().selection;
       const kept = "range" in patch ? (patch.range ?? null) : get().range;
       const range = pruneRange(prev, next, kept, renamed);
@@ -524,14 +535,29 @@ export function createEditorStore(init: {
         ? setLocal({ testState: { ...get().testState, [id]: "needs-test" } })
         : {};
 
-    const travel = (step: typeof undoEdit): void => {
-      const result = step(history, get().doc);
+    /**
+     * Undo or redo. Each history entry carries the renames of the edit that followed it, so the
+     * selection and the range follow step IDs back (inverted) on undo and forward on redo.
+     */
+    const travel = (dir: "undo" | "redo"): void => {
+      const source = dir === "undo" ? history.past.at(-1) : history.future.at(-1);
+      if (!source) return;
+      const renamed = source.renamed;
+      const step = dir === "undo" ? undoEdit : redoEdit;
+      const result = step(history, { doc: get().doc, renamed });
       if (!result) return;
       history = result.history;
+      const next = result.value.doc;
+      const map = dir === "undo" ? invertRenames(renamed) : renamed;
+      const selection = get().selection;
+      const mapped =
+        selection !== null && Object.hasOwn(map, selection)
+          ? (map[selection] as string)
+          : selection;
       set({
-        ...derived(result.value),
-        selection: validSelection(result.value, get().selection),
-        range: pruneRange(get().doc, result.value, get().range),
+        ...derived(next),
+        selection: validSelection(next, mapped),
+        range: pruneRange(get().doc, next, get().range, map),
       });
       syncTestState();
     };
@@ -594,8 +620,8 @@ export function createEditorStore(init: {
     };
 
     /**
-     * Local data carried over renamed steps (old → new, for steps that existed before), with
-     * the leftovers under IDs the batch added dropped.
+     * Local data copied over renamed steps (old → new, for steps that existed before), with the
+     * leftovers under IDs the batch added dropped. The old entries stay, so undo finds them.
      */
     const remapLocal = (before: WorkflowDoc, r: Applied): Partial<EditorState> => {
       const { samples, testState, sampleTypes } = get();
@@ -607,7 +633,7 @@ export function createEditorStore(init: {
       if (moves.length === 0 && added.length === 0) return {};
       const move = <T>(record: Record<string, T>): Record<string, T> => {
         const next = { ...without(record, added) };
-        for (const [old] of moves) delete next[old];
+        // Values come from `record`, so swaps (a → b, b → a) copy the pre-batch entries.
         for (const [old, now] of moves) {
           if (Object.hasOwn(record, old)) next[now] = record[old] as T;
           else delete next[now];
@@ -652,12 +678,12 @@ export function createEditorStore(init: {
         try {
           r = apply(before, commands, manifest, { ctx });
         } catch (err) {
-          // Only a pathological batch (nested thousands deep) gets here.
-          const message = err instanceof Error ? err.message : String(err);
-          return {
-            ok: false,
-            error: { index: -1, path: "commands", code: "command.invalid", message },
-          };
+          // A batch nested thousands deep overflows the recursive checks: core's catalog has the
+          // error for it. Anything else is a bug, and surfaces.
+          if (!(err instanceof RangeError)) throw err;
+          const reported = coreRunTool({ doc: before, manifest, ctx }, "apply", { commands });
+          if (reported.ok && isFailure(reported.result)) return reported.result;
+          throw err;
         }
         if (!r.ok || r.doc === before) return r;
         const selection = get().selection;
@@ -696,7 +722,9 @@ export function createEditorStore(init: {
       },
 
       setReadOnly(readOnly) {
-        if (get().readOnly !== readOnly) set({ readOnly });
+        lock.base = readOnly;
+        const next = readOnly || lock.holders > 0;
+        if (get().readOnly !== next) set({ readOnly: next });
       },
 
       copyRange(first, last) {
@@ -893,12 +921,12 @@ export function createEditorStore(init: {
 
       undo() {
         guard();
-        travel(undoEdit);
+        travel("undo");
       },
 
       redo() {
         guard();
-        travel(redoEdit);
+        travel("redo");
       },
 
       renameWorkflow(name) {
@@ -933,6 +961,93 @@ export function createEditorStore(init: {
       },
     };
   });
+  readOnlyLocks.set(store, () => {
+    lock.holders++;
+    if (!store.getState().readOnly) store.setState({ readOnly: true });
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      lock.holders--;
+      const next = lock.base || lock.holders > 0;
+      if (store.getState().readOnly !== next) store.setState({ readOnly: next });
+    };
+  });
+  return store;
+}
+
+/** Each store's read-only hold (see {@link holdReadOnly}). */
+const readOnlyLocks = new WeakMap<EditorStore, () => () => void>();
+
+/**
+ * @internal Keeps `store` read-only until the returned release runs (at most once). Holds
+ * stack: the store is read-only while any hold is kept or the host's own
+ * {@link EditorActions.setReadOnly} value is `true`. `<WorkflowCanvas readOnly>` holds its store
+ * while mounted.
+ */
+export function holdReadOnly(store: EditorStore): () => void {
+  const hold = readOnlyLocks.get(store);
+  if (hold) return hold();
+  // A store made elsewhere: set the flag and restore the previous value.
+  const prev = store.getState().readOnly;
+  store.getState().setReadOnly(true);
+  let held = true;
+  return () => {
+    if (!held) return;
+    held = false;
+    store.getState().setReadOnly(prev);
+  };
+}
+
+/** A history snapshot: a doc, and the step renames of the edit that replaced it (old → new). */
+interface HistoryEntry {
+  doc: WorkflowDoc;
+  renamed: Record<string, string>;
+}
+
+/** `a` then `b`, as one old → new map; identities are dropped. */
+function composeRenames(
+  a: Record<string, string>,
+  b: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const put = (k: string, v: string) => {
+    if (k !== v)
+      Object.defineProperty(out, k, {
+        value: v,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+  };
+  const via = new Set<string>();
+  for (const [from, to] of Object.entries(a)) {
+    via.add(to);
+    put(from, Object.hasOwn(b, to) ? (b[to] as string) : to);
+  }
+  for (const [from, to] of Object.entries(b)) {
+    if (!via.has(from) && !Object.hasOwn(a, from)) put(from, to);
+  }
+  return out;
+}
+
+/** The new → old map of an old → new rename map. */
+function invertRenames(renamed: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [from, to] of Object.entries(renamed)) {
+    Object.defineProperty(out, to, {
+      value: from,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return out;
+}
+
+/** Whether a tool result is a failed ApplyResult. */
+function isFailure(v: unknown): v is Extract<ApplyResult, { ok: false }> {
+  return typeof v === "object" && v !== null && (v as { ok?: unknown }).ok === false;
 }
 
 /**

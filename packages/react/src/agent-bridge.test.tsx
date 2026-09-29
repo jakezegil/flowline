@@ -1,6 +1,6 @@
 import { findStep } from "@flowlinejs/core";
 import { cleanup, render, renderHook } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { type ReactNode, useLayoutEffect } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { setupDom } from "../test/dom";
 import { fixtureDoc, manifest } from "../test/fixtures";
@@ -40,6 +40,37 @@ describe("createAgentBridge", () => {
     store.getState().undo();
     expect(store.getState().canUndo).toBe(false);
     expect(findStep(store.getState().doc, "load")?.step.name).toBeUndefined();
+  });
+
+  test("apply takes the public schema only: verbatim and nullIsValue are rejected (I1)", () => {
+    const store = storeFor();
+    const bridge = createAgentBridge(store);
+    const before = store.getState().doc;
+    const verbatim = bridge.apply([
+      {
+        op: "insertSteps",
+        at: { start: true },
+        verbatim: true,
+        steps: [{ id: "zz", type: "evil.unknown", config: {}, branches: { bogus: [] } }],
+      },
+    ]);
+    expect(verbatim).toMatchObject({ ok: false, error: { index: 0 } });
+    expect(JSON.stringify(verbatim)).toContain("verbatim");
+    const nullIsValue = bridge.apply([
+      { op: "setConfig", id: "email", key: "to", value: null, nullIsValue: true },
+    ]);
+    expect(nullIsValue).toMatchObject({ ok: false, error: { code: "command.invalid" } });
+    // The same error as the catalog's.
+    const viaTool = bridge.runTool("apply", {
+      commands: [{ op: "setConfig", id: "email", key: "to", value: null, nullIsValue: true }],
+    });
+    expect(viaTool.ok && viaTool.result).toEqual(nullIsValue);
+    expect(bridge.apply(null as unknown as [])).toMatchObject({
+      ok: false,
+      error: { code: "command.invalid" },
+    });
+    expect(store.getState().doc).toBe(before);
+    expect(store.getState().canUndo).toBe(false);
   });
 
   test('runTool("apply") goes through store.apply and returns the result without the doc', () => {
@@ -131,6 +162,34 @@ describe("read-only source of truth", () => {
     });
     unmount();
     expect(store.getState().readOnly).toBe(false);
+  });
+
+  test("two read-only canvases on one store: the flag holds until the last unmounts (M1)", () => {
+    const store = storeFor();
+    const a = render(<WorkflowCanvas store={store} readOnly />);
+    const b = render(<WorkflowCanvas store={store} readOnly />);
+    a.unmount();
+    expect(store.getState().readOnly).toBe(true);
+    b.unmount();
+    expect(store.getState().readOnly).toBe(false);
+  });
+
+  test("the flag is set before the canvas paints (M2)", () => {
+    const store = storeFor();
+    let seen: boolean | undefined;
+    function Probe() {
+      useLayoutEffect(() => {
+        seen = store.getState().readOnly;
+      });
+      return null;
+    }
+    render(
+      <>
+        <WorkflowCanvas store={store} readOnly />
+        <Probe />
+      </>,
+    );
+    expect(seen).toBe(true);
   });
 
   test("a read-only store keeps the canvas read-only without the prop", () => {

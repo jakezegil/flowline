@@ -33,8 +33,10 @@ export interface WorkflowAgentBridge {
   /** Reads against the store's current doc, taken at call time. */
   read: BoundReads;
   /**
-   * `store.getState().apply(commands)`: one undo step, flashes the changed steps, and returns
-   * code `"readOnly"` when the store is read-only.
+   * `store.getState().apply(commands)` for an agent: one undo step, flashes the changed steps,
+   * and returns code `"readOnly"` when the store is read-only. Only the public command schema is
+   * accepted (as by the catalog): the store-only `verbatim` and `nullIsValue` are rejected, with
+   * core `runTool`'s error.
    */
   apply(commands: Command[]): ApplyResult;
   /**
@@ -92,7 +94,29 @@ export function createAgentBridge(store: EditorStore): WorkflowAgentBridge {
       return (reads[name] as ReadFn<ReadToolName>)(doc, manifest, args, { ctx });
     };
   }
-  const apply = (commands: Command[]) => store.getState().apply(commands);
+  /**
+   * The agent's write path: public schema only (no `verbatim`/`nullIsValue`), untrusted. A batch
+   * that fails the catalog's checks gets core `runTool`'s error, as `runTool("apply")` does.
+   */
+  const apply = (commands: Command[]): ApplyResult => {
+    const now = state();
+    if (!checkedCommands(now, { commands })) {
+      const reported = coreRunTool(now, "apply", { commands });
+      if (!reported.ok) {
+        return {
+          ok: false,
+          error: {
+            index: -1,
+            path: reported.error.path ?? "commands",
+            code: "command.invalid",
+            message: reported.error.message,
+          },
+        };
+      }
+      if (!reported.doc) return reported.result as ApplyResult;
+    }
+    return store.getState().apply(commands);
+  };
   return {
     read: read as unknown as BoundReads,
     apply,
@@ -105,7 +129,7 @@ export function createAgentBridge(store: EditorStore): WorkflowAgentBridge {
         // Every failing call is reported without a doc; one that passes goes to the store.
         if (!reported.ok || !reported.doc) return reported;
       }
-      const r = apply(commands ?? (args as { commands: Command[] }).commands);
+      const r = store.getState().apply(commands ?? (args as { commands: Command[] }).commands);
       if (!r.ok) return { ok: true, result: r };
       const { doc, ...report } = r;
       return { ok: true, result: report, doc };

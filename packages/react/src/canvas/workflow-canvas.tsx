@@ -16,14 +16,23 @@ import {
   useStoreApi,
 } from "@xyflow/react";
 import { Maximize, Minus, Plus } from "lucide-react";
-import { type JSX, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type JSX,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useStore } from "zustand";
 import { EditorContext, stepIndex, useEditorStore } from "../hooks";
 import type { FlowlineLabels } from "../labels";
 import { LOOP_GUTTER } from "../layout/constants";
 import { type LayoutEdge, type LayoutNode, layoutTree } from "../layout/layout-tree";
 import { useFlowlineAppearance } from "../provider";
-import { type EditorStore, TRIGGER_KEY } from "../store/editor-store";
+import { type EditorStore, holdReadOnly, TRIGGER_KEY } from "../store/editor-store";
 import { themeStyle } from "../theme";
 import { AddPlaceholder } from "./add-placeholder";
 import {
@@ -449,13 +458,9 @@ export function WorkflowCanvas(props: {
   const getRoot = useCallback(() => rootRef.current, []);
   const colorMode = theme.colorMode ?? "system";
 
-  useEffect(() => {
-    if (!readOnlyProp) return;
-    const s = store.getState();
-    const prev = s.readOnly;
-    s.setReadOnly(true);
-    return () => store.getState().setReadOnly(prev);
-  }, [store, readOnlyProp]);
+  // Before paint, so a read-only canvas never shows a frame of edit controls. Holds stack, so
+  // two read-only canvases on one store (or a host's own setReadOnly) don't undo each other.
+  useLayoutEffect(() => (readOnlyProp ? holdReadOnly(store) : undefined), [store, readOnlyProp]);
   useEffect(() => {
     ui.setState(readOnly ? { overlay, picker: null, renaming: null } : { overlay });
   }, [ui, readOnly, overlay]);
