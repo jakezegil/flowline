@@ -263,6 +263,11 @@
       0 0 0 3px var(--fl-ring),
       var(--fl-shadow-md);
   }
+  /* A card in the range: an accent border on a tinted card, lighter than the selection's ring. */
+  .fl-card[data-in-range] {
+    border-color: var(--fl-accent);
+    background: var(--fl-accent-soft);
+  }
   /* Keyboard focus is a dashed outline set off from the card, unlike the selection's solid
      border and ring, so the card keys act on (focus) and the one whose panel is open (selection)
      can't be mistaken for each other. */
@@ -813,6 +818,65 @@
   .fl-controls button:focus-visible {
     outline: 2px solid var(--fl-accent);
     outline-offset: -2px;
+  }
+
+  /* ---------------------------------------------------------------- range toolbar */
+  .fl-range-bar.react-flow__panel {
+    max-width: calc(100% - 24px);
+  }
+  .fl-range-bar__inner {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    overflow-x: auto;
+    font-family: var(--fl-font);
+    font-size: 12px;
+    color: var(--fl-text);
+    background: var(--fl-surface);
+    border: 1px solid var(--fl-border);
+    border-radius: var(--fl-radius);
+    box-shadow: var(--fl-shadow-md);
+  }
+  .fl-range-bar__count {
+    padding: 0 8px 0 6px;
+    font-weight: 600;
+    white-space: nowrap;
+    border-right: 1px solid var(--fl-border);
+    margin-right: 2px;
+  }
+  .fl-range-bar__button {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    min-width: 26px;
+    padding: 0 6px;
+    font: inherit;
+    color: var(--fl-text-muted);
+    background: transparent;
+    border: 0;
+    border-radius: calc(var(--fl-radius) - 2px);
+    cursor: pointer;
+  }
+  .fl-range-bar__button:hover {
+    color: var(--fl-text);
+    background: var(--fl-subtle);
+  }
+  .fl-range-bar__button[data-action="group"] {
+    color: var(--fl-accent);
+    font-weight: 500;
+  }
+  .fl-range-bar__button[data-danger]:hover {
+    color: var(--fl-danger);
+  }
+  .fl-range-bar__button:focus-visible {
+    outline: 2px solid var(--fl-accent);
+    outline-offset: -2px;
+  }
+  .fl-range-bar__label {
+    white-space: nowrap;
   }
 
   /* ---------------------------------------------------------------- floating surfaces */

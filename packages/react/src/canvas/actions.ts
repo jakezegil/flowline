@@ -8,6 +8,7 @@
 import {
   branchesFor,
   branchList,
+  FlowlineCommandError,
   findStep,
   type Manifest,
   type NodeManifest,
@@ -137,18 +138,31 @@ export interface StepActions {
   target(): void;
 }
 
-/**
- * Where selection goes when `stepId` is deleted: the next step in its list, else the previous
- * one, else the step that owns the list (or the trigger at the top level).
- */
-function neighbourOf(store: EditorStore, stepId: string): string {
-  const { doc } = store.getState();
+/** The list holding `stepId` and its index there, the step that owns it (`null` at the top). */
+function siblingsOf(
+  doc: WorkflowDoc,
+  stepId: string,
+): { list: Step[]; index: number; parentId: string | null } | undefined {
   const found = findStep(doc, stepId);
-  if (!found) return TRIGGER_KEY;
+  if (!found) return undefined;
   const { parentId, branch, index } = found.location;
   const owner = found.ancestors[found.ancestors.length - 1]?.step;
   const list = parentId === null ? doc.steps : ((owner && branchList(owner, branch ?? "")) ?? []);
-  return list[index + 1]?.id ?? list[index - 1]?.id ?? parentId ?? TRIGGER_KEY;
+  return { list, index, parentId };
+}
+
+/**
+ * Where selection goes when the run `first`…`last` (one step by default) is deleted: the next
+ * step in its list, else the previous one, else the step that owns the list (or the trigger at
+ * the top level).
+ */
+function neighbourOf(store: EditorStore, first: string, last = first): string {
+  const { doc } = store.getState();
+  const a = siblingsOf(doc, first);
+  if (!a) return TRIGGER_KEY;
+  const end = a.list.findIndex((s) => s.id === last);
+  const after = end === -1 ? a.index : end;
+  return a.list[after + 1]?.id ?? a.list[a.index - 1]?.id ?? a.parentId ?? TRIGGER_KEY;
 }
 
 /** Binds the step actions of `stepId`. */
@@ -212,5 +226,205 @@ export function stepActions(
     target() {
       if (s().selection !== null) s().select(stepId);
     },
+  };
+}
+
+/** A range of the editor store: the run `first`…`last` of one list. */
+type Range = { first: string; last: string };
+
+const NO_IDS: ReadonlySet<string> = new Set();
+const rangeIdCache = new WeakMap<Range, { doc: WorkflowDoc; ids: ReadonlySet<string> }>();
+
+/**
+ * IDs of the steps in `range` (the run's own steps, not their subtrees), cached per range and
+ * doc so every card can ask cheaply.
+ */
+export function rangeIds(doc: WorkflowDoc, range: Range | null): ReadonlySet<string> {
+  if (range === null) return NO_IDS;
+  const hit = rangeIdCache.get(range);
+  if (hit && hit.doc === doc) return hit.ids;
+  const a = siblingsOf(doc, range.first);
+  const end = a ? a.list.findIndex((s) => s.id === range.last) : -1;
+  const ids: ReadonlySet<string> =
+    a && end >= a.index ? new Set(a.list.slice(a.index, end + 1).map((s) => s.id)) : NO_IDS;
+  rangeIdCache.set(range, { doc, ids });
+  return ids;
+}
+
+/** The step card holding focus inside `root`, if any. */
+function focusedCard(root: HTMLElement | null): string | undefined {
+  const active = root?.ownerDocument.activeElement;
+  if (!root || !active || !root.contains(active)) return undefined;
+  const id = active.closest(".react-flow__node")?.getAttribute("data-id");
+  return id?.startsWith("step:") ? id.slice(5) : undefined;
+}
+
+/**
+ * Shift-click on `clicked`: selects the run from the anchor (the selected step, else the far end
+ * of the current range) to it. Returns `false` when there is nothing to extend from (the click
+ * is then a plain one). A step in another list is refused with the `rangeOtherList` toast,
+ * leaving the selection and the range as they were.
+ */
+export function shiftSelect(store: EditorStore, ui: CanvasUiStore, clicked: string): boolean {
+  const { doc, selection, range } = store.getState();
+  const selected =
+    selection !== null && selection !== TRIGGER_KEY && findStep(doc, selection)
+      ? selection
+      : undefined;
+  let anchor = selected;
+  if (range !== null && (anchor === undefined || !rangeIds(doc, range).has(anchor))) {
+    const at = siblingsOf(doc, clicked)?.index ?? 0;
+    anchor = at < (siblingsOf(doc, range.first)?.index ?? 0) ? range.last : range.first;
+  }
+  if (anchor === undefined) return false;
+  if (!store.getState().selectRange(anchor, clicked)) {
+    ui.getState().toast(ui.getState().labels.rangeOtherList);
+  }
+  return true;
+}
+
+/**
+ * ⇧↑/⇧↓ from the card `from`: extends the range to the previous or next step of its list (a
+ * block counts as one step), keeping its other end as the anchor, and focuses that step. With
+ * no range ending at `from`, starts one there. Nothing happens at the list's edge.
+ */
+export function extendRange(
+  store: EditorStore,
+  root: HTMLElement | null,
+  from: string,
+  delta: -1 | 1,
+): void {
+  const { doc, range } = store.getState();
+  const here = siblingsOf(doc, from);
+  const target = here?.list[here.index + delta];
+  if (!target) return;
+  let anchor = from;
+  if (range?.first === from) anchor = range.last;
+  else if (range?.last === from) anchor = range.first;
+  if (store.getState().selectRange(anchor, target.id)) {
+    nodeElement(root, nodeIdOf(target.id))?.focus({ preventScroll: true });
+  }
+}
+
+/**
+ * Wraps the run `first`…`last` in a new section titled `labels.defaultSectionTitle`, clears the
+ * range and starts editing the section's title (`renamingSection`). A run that overlaps a
+ * section is refused with the command's message as a toast, changing nothing.
+ */
+export function groupSteps(
+  store: EditorStore,
+  ui: CanvasUiStore,
+  first: string,
+  last: string,
+): void {
+  const { labels } = ui.getState();
+  let id: string;
+  try {
+    id = store.getState().addSection(first, last, {
+      title: labels.defaultSectionTitle,
+      color: "blue",
+    });
+  } catch (err) {
+    if (!(err instanceof FlowlineCommandError)) throw err;
+    ui.getState().toast(err.message);
+    return;
+  }
+  // The section now stands for the run.
+  store.getState().clearRange();
+  ui.getState().startSectionRename(id);
+}
+
+/**
+ * Moves the step `stepId` one place up or down in its list (⌥↑/⌥↓), keeping focus on it; a
+ * no-op at the list's edge.
+ */
+export function moveStepBy(
+  store: EditorStore,
+  root: () => HTMLElement | null,
+  stepId: string,
+  delta: -1 | 1,
+): void {
+  const before = store.getState().doc;
+  store.getState().moveBy(stepId, stepId, delta);
+  if (store.getState().doc !== before) focusNode(root(), stepId);
+}
+
+/** The actions on the store's range (the range toolbar, its right-click menu and range keys). */
+export interface RangeActions {
+  /** Wraps the range in a new section and starts editing its title (⌘G). */
+  group(): void;
+  /** Deletes the range as one undo step, with an undo toast. */
+  remove(): void;
+  /** Copies the range; paste then inserts the whole run (⌘C). */
+  copy(): void;
+  /** Duplicates the range right after it and moves the range to the copies (⌘D). */
+  duplicate(): void;
+  /** Moves the range one place up (⌥↑). */
+  moveUp(): void;
+  /** Moves the range one place down (⌥↓). */
+  moveDown(): void;
+  /** Clears the range (Esc). */
+  clear(): void;
+}
+
+/**
+ * Binds the actions of the store's current range. `undefined` only without a range. In
+ * read-only mode `group`, `remove`, `duplicate`, `moveUp` and `moveDown` are no-ops; `copy` and
+ * `clear` work.
+ */
+export function rangeActions(
+  store: EditorStore,
+  ui: CanvasUiStore,
+  root: () => HTMLElement | null,
+): RangeActions | undefined {
+  const range = store.getState().range;
+  if (range === null) return undefined;
+  const { first, last } = range;
+  const s = () => store.getState();
+  const count = () => rangeIds(s().doc, range).size;
+  const edit = (run: () => void) => () => {
+    if (!s().readOnly) run();
+  };
+  const move = (delta: -1 | 1) =>
+    edit(() => {
+      const focused = focusedCard(root());
+      s().moveBy(first, last, delta);
+      if (focused) focusNode(root(), focused);
+    });
+  return {
+    group: edit(() => groupSteps(store, ui, first, last)),
+    remove: edit(() => {
+      const n = count();
+      const next = neighbourOf(store, first, last);
+      const before = s().selection;
+      s().removeRange(first, last);
+      // As for one step: a selection inside the run moves to the neighbour.
+      if (before !== null && s().selection === null) s().select(next);
+      focusNode(root(), next);
+      const { labels } = ui.getState();
+      ui.getState().toast(labels.stepsDeleted(n), {
+        label: labels.undo,
+        edits: true,
+        run: () => {
+          if (!s().readOnly) s().undo();
+        },
+      });
+    }),
+    copy() {
+      const n = count();
+      s().copyRange(first, last);
+      ui.getState().toast(ui.getState().labels.stepsCopied(n));
+    },
+    duplicate: edit(() => {
+      const n = count();
+      const id = s().duplicateRange(first, last);
+      const copies = siblingsOf(s().doc, id);
+      const end = copies?.list[copies.index + n - 1]?.id;
+      if (end !== undefined) s().selectRange(id, end);
+      focusNode(root(), id);
+    }),
+    moveUp: move(-1),
+    moveDown: move(1),
+    clear: () => s().clearRange(),
   };
 }

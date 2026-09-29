@@ -144,3 +144,21 @@ describe("annotation labels", () => {
     );
   });
 });
+
+describe("range labels", () => {
+  it("counts the selected steps and names the defaults", () => {
+    expect(defaultLabels.rangeSelected(3)).toBe("3 steps selected");
+    expect(defaultLabels.rangeSelected(1)).toBe("1 step selected");
+    expect(defaultLabels.defaultSectionTitle).toBe("Section");
+    expect(defaultLabels.rangeOtherList).toBe(
+      "A range must stay in one branch. Shift-click a step in the same list.",
+    );
+    expect(defaultLabels.stepsDeleted(2)).toBe("Deleted 2 steps");
+    expect(defaultLabels.stepsDeleted(1)).toBe("Deleted 1 step");
+    expect(defaultLabels.groupIntoSection).toBe("Group into section");
+  });
+
+  it("can be overridden", () => {
+    expect(resolveLabels({ groupIntoSection: "Grouper" }).groupIntoSection).toBe("Grouper");
+  });
+});

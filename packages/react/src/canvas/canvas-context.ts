@@ -81,6 +81,11 @@ export interface CanvasUiState {
   picker: { request: PickerRequest; anchor: HTMLElement | null } | null;
   /** Step whose name is being edited inline. */
   renaming: string | null;
+  /**
+   * Section (its ID in the doc) whose title is being edited inline: set when a range is grouped
+   * into a new section.
+   */
+  renamingSection: string | null;
   toasts: Toast[];
   /** The provider's `onNotify`: takes notices before this canvas shows them. */
   notify: NotifyHandler | undefined;
@@ -92,6 +97,9 @@ export interface CanvasUiActions {
   closePicker(): void;
   startRename(stepId: string): void;
   stopRename(): void;
+  /** Starts editing a section's title (see {@link CanvasUiState.renamingSection}). */
+  startSectionRename(sectionId: string): void;
+  stopSectionRename(): void;
   /** Shows a toast for 5 seconds. */
   toast(message: string, action?: Toast["action"]): void;
   dismissToast(id: number): void;
@@ -115,6 +123,7 @@ export function createCanvasUiStore(init: {
     notify: init.notify,
     picker: null,
     renaming: null,
+    renamingSection: null,
     toasts: [],
     openPicker: (request, anchor) => set({ picker: { request, anchor } }),
     closePicker: () => {
@@ -123,6 +132,10 @@ export function createCanvasUiStore(init: {
     startRename: (stepId) => set({ renaming: stepId }),
     stopRename: () => {
       if (get().renaming !== null) set({ renaming: null });
+    },
+    startSectionRename: (sectionId) => set({ renamingSection: sectionId }),
+    stopSectionRename: () => {
+      if (get().renamingSection !== null) set({ renamingSection: null });
     },
     toast(message, action) {
       const notice: FlowlineNotice = {

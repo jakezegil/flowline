@@ -26,7 +26,7 @@ import {
 import type { FlowlineLabels } from "../labels";
 import { useFlowlineAppearance } from "../provider";
 import type { TestState } from "../store/editor-store";
-import { focusNode, stepActions } from "./actions";
+import { focusNode, rangeIds, stepActions } from "./actions";
 import {
   PortalContainerContext,
   RootElementContext,
@@ -306,6 +306,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
   const { resolveIcon } = useFlowlineAppearance();
   const readOnly = useEditorStore((s) => s.readOnly);
   const renaming = useCanvasUi((s) => s.renaming === stepId);
+  const inRange = useEditorStore((s) => rangeIds(s.doc, s.range).has(stepId));
   const run = useCanvasUi((s) => s.overlay?.stepStatus[stepId]);
   const labels = useLabels();
   const inRunMode = useCanvasUi((s) => s.overlay !== undefined);
@@ -356,6 +357,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
     <div
       className="fl-card"
       data-selected={selected || undefined}
+      data-in-range={inRange || undefined}
       data-disabled={step.disabled || undefined}
       data-unknown={!manifest || undefined}
       data-run={run?.status}
@@ -423,7 +425,7 @@ export const StepCard = memo(function StepCard({ data, selected }: NodeProps<Ste
       {readOnly ? (
         card
       ) : (
-        <StepContextMenu step={step} manifest={manifest} actions={actions}>
+        <StepContextMenu step={step} manifest={manifest} actions={actions} inRange={inRange}>
           {card}
         </StepContextMenu>
       )}

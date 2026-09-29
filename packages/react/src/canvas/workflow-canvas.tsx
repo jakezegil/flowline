@@ -27,7 +27,7 @@ import {
   useState,
 } from "react";
 import { useStore } from "zustand";
-import { EditorContext, stepIndex, useEditorStore } from "../hooks";
+import { EditorContext, stepIndex, useEditorStore, useEditorStoreApi } from "../hooks";
 import type { FlowlineLabels } from "../labels";
 import { LOOP_GUTTER, SECTION_HEADER_H, SECTION_PAD } from "../layout/constants";
 import {
@@ -40,6 +40,7 @@ import {
 import { useFlowlineAppearance } from "../provider";
 import { type EditorStore, holdReadOnly, TRIGGER_KEY } from "../store/editor-store";
 import { themeStyle } from "../theme";
+import { shiftSelect } from "./actions";
 import { AddPlaceholder } from "./add-placeholder";
 import {
   CanvasUiContext,
@@ -56,6 +57,7 @@ import { settleFlash } from "./flash";
 import { type CanvasRect, edgeGeometries } from "./geometry";
 import { handleCanvasKey } from "./keyboard";
 import { NoteCard } from "./note-node";
+import { RangeBar } from "./range-bar";
 import { EndNode, RejoinNode } from "./rejoin-node";
 import { excerpt, SectionHeader, SectionRegion, sectionOfNode, sectionTitle } from "./section-node";
 import { StepCard, stepDisplayName } from "./step-card";
@@ -353,6 +355,7 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
   const manifest = useEditorStore((s) => s.manifest);
   const selection = useEditorStore((s) => s.selection);
   const select = useEditorStore((s) => s.select);
+  const store = useEditorStoreApi();
   const ui = useCanvasUiApi();
   const labels = useLabels();
   const rf = useReactFlow();
@@ -521,7 +524,7 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
         // up close.
         revealSelection(0, true);
       }}
-      onNodeClick={(_, node) => {
+      onNodeClick={(event, node) => {
         const key =
           node.type === "trigger"
             ? TRIGGER_KEY
@@ -529,10 +532,15 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
               ? (node.data as { stepId: string }).stepId
               : null;
         if (key === null) return;
+        // Shift-click selects a range from the selection (or the range's far end), keeping the
+        // panel where it is; a plain click clears the range.
+        if (event.shiftKey && key !== TRIGGER_KEY && shiftSelect(store, ui, key)) return;
+        store.getState().clearRange();
         select(key);
         onStepClick?.(key);
       }}
       onPaneClick={() => {
+        store.getState().clearRange();
         select(null);
         rootRef.current?.focus({ preventScroll: true });
       }}
@@ -542,6 +550,7 @@ function CanvasFlow({ layoutRef, rootRef, colorMode, onStepClick }: FlowProps) {
     >
       <Background variant={BackgroundVariant.Dots} gap={20} size={1.25} color="var(--fl-dot)" />
       <Controls onFit={() => fitTop(200, true)} />
+      <RangeBar />
     </ReactFlow>
   );
 }
@@ -590,7 +599,9 @@ export function WorkflowCanvas(props: {
   // two read-only canvases on one store (or a host's own setReadOnly) don't undo each other.
   useLayoutEffect(() => (readOnlyProp ? holdReadOnly(store) : undefined), [store, readOnlyProp]);
   useEffect(() => {
-    ui.setState(readOnly ? { overlay, picker: null, renaming: null } : { overlay });
+    ui.setState(
+      readOnly ? { overlay, picker: null, renaming: null, renamingSection: null } : { overlay },
+    );
   }, [ui, readOnly, overlay]);
   useEffect(() => {
     if (ui.getState().labels !== labels) ui.setState({ labels });
