@@ -57,7 +57,7 @@ export const delayNode = defineNode({
   icon: "timer",
   category: "Timing",
   keywords: ["wait", "sleep", "pause", "timer"],
-  summary: "Wait {{duration}}{{until}}",
+  summary: "Wait {{#duration}}{{duration}}{{/duration}}{{#until}}until {{until}}{{/until}}",
   // `oneOfRequired` lets the validator report a missing or doubled choice; the refinement below
   // enforces the same rule at runtime.
   input: ui(
