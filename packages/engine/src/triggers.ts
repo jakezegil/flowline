@@ -663,8 +663,8 @@ export function createTriggers(core: EngineCore): Triggers {
           return;
         }
         if (!committed) {
-          // The new holder polls this interval again; launched items dedupe.
-          core.logger?.warn("poll lease lost before commit", { tenantId, workflowId });
+          // The new holder polls this interval again; launched items dedupe. `reportFailed`
+          // publishes `poll.failed`, which `publishTriggerEvent` already logs at `warn`.
           reportFailed("poll lease lost");
           return;
         }
