@@ -82,8 +82,12 @@ function triggerCaption(
     }
     case "subflow":
       return labels.triggerSubflow;
+    case "poll":
+      // Absent: the engine's `poll.defaultInterval` ("1m") applies (§7.1 of the design spec).
+      return labels.triggerPoll(t.interval ?? 60_000);
     default:
-      return t.description ?? "";
+      // Exhaustiveness guard: a future TriggerKind here fails typecheck.
+      return t.kind satisfies never;
   }
 }
 

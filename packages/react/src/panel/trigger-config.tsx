@@ -12,7 +12,7 @@ import {
   payloadSchemaFor,
   type TriggerManifest,
 } from "@flowlinejs/core";
-import { Check, Copy, Info, Link2, Zap } from "lucide-react";
+import { Check, Copy, Info, Link2, RefreshCw, Zap } from "lucide-react";
 import { type JSX, useEffect, useId, useMemo, useState } from "react";
 import { useEditorStore } from "../hooks";
 import { useFlowline, useFlowlineAppearance } from "../provider";
@@ -212,6 +212,12 @@ export function TriggerConfigure(): JSX.Element {
         <p className="fl-callout" data-tone="info">
           <Zap size={15} aria-hidden />
           <span>{labels.eventTriggerHint(m.event)}</span>
+        </p>
+      )}
+      {m?.kind === "poll" && (
+        <p className="fl-callout" data-tone="info">
+          <RefreshCw size={15} aria-hidden />
+          <span>{labels.triggerPoll(m.interval ?? 60_000)}</span>
         </p>
       )}
       {m && hasFields && (
