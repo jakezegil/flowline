@@ -10,7 +10,10 @@ export type {
   At,
   Command,
   CommandErrorCode,
+  ConfigPatch,
+  SectionCommand,
   SectionInput,
+  SingleCommand,
   StepRef,
 } from "./agent/commands";
 export { compactSchema } from "./agent/compact-schema";
@@ -41,6 +44,7 @@ export {
   listNodeTypes,
   reads,
 } from "./agent/reads";
+export { annotationRepairs } from "./agent/repairs";
 export { matchSteps } from "./agent/selectors";
 export {
   ANNOTATION_COLORS,
@@ -170,7 +174,14 @@ export {
   showIfOf,
   showIfProblems,
 } from "./show-if";
-export { createStep, defaultConfig, jsonEqual, syncBranches } from "./step-factory";
+export {
+  copyName,
+  createStep,
+  defaultConfig,
+  jsonEqual,
+  replaceStepType,
+  syncBranches,
+} from "./step-factory";
 export {
   allStepIds,
   codeBlocksRename,

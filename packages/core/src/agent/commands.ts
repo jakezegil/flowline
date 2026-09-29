@@ -47,12 +47,85 @@ export interface SectionInput {
 }
 
 /** Config keys to set; `null` removes a key. */
-type ConfigPatch = Record<string, ValueExpr | null>;
+export type ConfigPatch = Record<string, ValueExpr | null>;
 
-/** The remaining single-step commands (added by a later release step). */
-export type SingleCommand = never;
-/** The section commands (added by a later release step). */
-export type SectionCommand = never;
+/**
+ * The single-step, trigger, output and workflow commands besides addStep, moveStep, removeStep
+ * and setConfig.
+ *
+ * - `duplicateStep` copies a step (and its subtree) right after it, with fresh IDs, and names the
+ *   copy `"<name> (copy)"`, `"(copy 2)"`, …; `$n` is the copy's ID.
+ * - `renameStep` sets the display name (trimmed); `""` clears it.
+ * - `renameStepId` changes the ID and rewrites every reference to it; `$n` is the new ID.
+ * - `setType` is the editor's Replace: config resets to the new node's defaults, children are
+ *   kept, and an ID generated from the old type is regenerated; `$n` is the resulting ID.
+ * - `setNote`: at most 4000 chars; `null` or `""` removes the note. `setColor`: `null` removes.
+ * - `setTrigger`: the same type with no `config` changes nothing, the same type with `config`
+ *   merges it, another type resets the config to its defaults and then merges `config`.
+ * - `setTriggerConfig` / `setOutput` set one key or merge `config`; `null` removes a key.
+ *   Removing the last output key removes `output`.
+ * - `renameWorkflow` sets the workflow's name (trimmed, not blank).
+ *
+ * @example
+ * { op: "duplicateStep", id: "notify" }
+ * { op: "setType", id: "notify", type: "crm.getDeal" }
+ * { op: "setTrigger", type: "crm.dealStuckInStage", config: { stage: "won" } }
+ */
+export type SingleCommand =
+  | { op: "duplicateStep"; id: StepRef }
+  | { op: "renameStep"; id: StepRef; name: string }
+  | { op: "renameStepId"; id: StepRef; newId: string }
+  | { op: "setType"; id: StepRef; type: string }
+  | { op: "setDisabled"; id: StepRef; disabled: boolean }
+  | { op: "setNote"; id: StepRef; note: string | null }
+  | { op: "setColor"; id: StepRef; color: AnnotationColor | null }
+  | { op: "setTrigger"; type: string; config?: ConfigPatch }
+  | {
+      op: "setTriggerConfig";
+      key: string;
+      value: ValueExpr | null;
+      /** @internal Store `null` as a value instead of removing the key. */
+      nullIsValue?: boolean;
+    }
+  | { op: "setTriggerConfig"; config: ConfigPatch }
+  | {
+      op: "setOutput";
+      key: string;
+      value: ValueExpr | null;
+      /** @internal Store `null` as a value instead of removing the key. */
+      nullIsValue?: boolean;
+    }
+  | { op: "setOutput"; config: ConfigPatch }
+  | { op: "renameWorkflow"; name: string };
+
+/**
+ * The section commands. Section-ID arguments accept placeholders (`$n` of an `addSection`).
+ *
+ * - `addSection` wraps the run `first`…`last` (one step list, in order) in a new section; it
+ *   fails with `run.invalid` otherwise, and with `section.overlap` when the run overlaps a
+ *   section in the same list (nesting inside a branch is fine). `$n` is the section's ID.
+ * - `updateSection` changes the given fields; `note: null` or `""` removes the note, and a new
+ *   `first`/`last` is checked like `addSection`'s run.
+ * - `removeSection` removes the section and keeps its steps.
+ *
+ * When two sections share an ID, `updateSection` and `removeSection` act on the later one.
+ *
+ * @example
+ * { op: "addSection", first: "getDeal", last: "recheck", title: "Check the deal", color: "blue" }
+ * { op: "updateSection", id: "$1", color: "green" }
+ */
+export type SectionCommand =
+  | ({ op: "addSection"; first: StepRef; last: StepRef } & SectionInput)
+  | {
+      op: "updateSection";
+      id: StepRef;
+      title?: string;
+      color?: AnnotationColor;
+      note?: string | null;
+      first?: StepRef;
+      last?: StepRef;
+    }
+  | { op: "removeSection"; id: StepRef };
 /** The bulk commands (added by a later release step). */
 export type BulkCommand = never;
 
@@ -200,7 +273,7 @@ export interface HandlerContext {
 /** @internal A handler's result: the new doc (the input doc when nothing changed) and the step it created. */
 export interface HandlerResult {
   doc: WorkflowDoc;
-  /** The ID `$<index+1>` names. */
+  /** The step or section ID `$<index+1>` names. */
   created?: string;
 }
 

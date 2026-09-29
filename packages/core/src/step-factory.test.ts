@@ -1,7 +1,15 @@
 import { describe, expect, test } from "vitest";
 import { richManifest } from "./agent/fixtures";
-import { createStep, defaultConfig, jsonEqual, syncBranches } from "./step-factory";
-import type { NodeManifest, Step } from "./types";
+import {
+  copyName,
+  createStep,
+  defaultConfig,
+  jsonEqual,
+  replaceStepType,
+  syncBranches,
+} from "./step-factory";
+import { FlowlineTreeError, findStep } from "./tree";
+import type { NodeManifest, Step, WorkflowDoc } from "./types";
 
 const m = richManifest();
 const node = (type: string) => m.nodes.find((n) => n.type === type) as NodeManifest;
@@ -68,5 +76,63 @@ describe("jsonEqual", () => {
     expect(jsonEqual({ a: 1 }, { a: 2 })).toBe(false);
     expect(jsonEqual(undefined, undefined)).toBe(true);
     expect(jsonEqual(null, undefined)).toBe(false);
+  });
+});
+
+describe("replaceStepType", () => {
+  const doc = (): WorkflowDoc => ({
+    id: "w",
+    name: "W",
+    trigger: { type: "crm.dealStuckInStage", config: { stage: "p" } },
+    steps: [
+      {
+        id: "check",
+        type: "flow.if",
+        name: "Check it",
+        disabled: true,
+        note: "Why",
+        color: "blue",
+        config: { value: true },
+        branches: {
+          // biome-ignore lint/suspicious/noThenProperty: a branch ID, not a thenable
+          then: [{ id: "x", type: "flow.stop", config: {} }],
+          else: [],
+        },
+      },
+    ],
+  });
+
+  test("resets config and name, keeps ID, disabled, annotations and non-empty children", () => {
+    const next = replaceStepType(doc(), "check", node("crm.getDeal"));
+    expect(findStep(next, "check")?.step).toEqual({
+      id: "check",
+      type: "crm.getDeal",
+      config: {},
+      disabled: true,
+      note: "Why",
+      color: "blue",
+      // biome-ignore lint/suspicious/noThenProperty: a branch ID, not a thenable
+      branches: { then: [{ id: "x", type: "flow.stop", config: {} }] },
+    });
+  });
+
+  test("an unknown step throws FlowlineTreeError", () => {
+    expect(() => replaceStepType(doc(), "nope", node("crm.getDeal"))).toThrow(FlowlineTreeError);
+  });
+});
+
+describe("copyName", () => {
+  test('"(copy)", then "(copy 2)", "(copy 3)", stripping an existing suffix', () => {
+    expect(copyName("Send email", new Set())).toBe("Send email (copy)");
+    expect(copyName("Send email", new Set(["Send email (copy)"]))).toBe("Send email (copy 2)");
+    expect(copyName("Send email (copy)", new Set(["Send email (copy)"]))).toBe(
+      "Send email (copy 2)",
+    );
+    expect(
+      copyName("Send email (copy 2)", new Set(["Send email (copy)", "Send email (copy 2)"])),
+    ).toBe("Send email (copy 3)");
+    expect(copyName("A (copy 2)", new Set(["A (copy)"]))).toBe("A (copy 2)");
+    expect(copyName("A (copy 12)", new Set())).toBe("A (copy)");
+    expect(copyName("A(copy)", new Set())).toBe("A(copy) (copy)");
   });
 });

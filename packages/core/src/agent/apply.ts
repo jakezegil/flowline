@@ -17,6 +17,7 @@ import {
   type HandlerContext,
 } from "./commands";
 import { formatCall, shownColor, shownLabel, stepLine } from "./format";
+import { sectionHandlers } from "./sections";
 import { AT_HINT, singleHandlers } from "./single";
 
 /** Thrown by wrappers (the editor store) that turn a failed ApplyResult into an exception. */
@@ -29,7 +30,7 @@ export class FlowlineCommandError extends FlowlineTreeError {
 }
 
 /** Every command handler by op. */
-const HANDLERS: Record<string, Handler> = { ...singleHandlers };
+const HANDLERS: Record<string, Handler> = { ...singleHandlers, ...sectionHandlers };
 
 /** How many shape errors a failed result carries besides the first. */
 const MORE_ERRORS = 9;
@@ -178,7 +179,7 @@ export function apply(
   if (added.length > ADDED_MAX) {
     issues.more = { added: added.length - ADDED_MAX, fetch: { tool: "getIssues", args: {} } };
   }
-  const changed = changedOutline(cur, changedStepIds(doc, cur), after, manifest);
+  const changed = changedOutline(doc, cur, changedStepIds(doc, cur), after, manifest);
   return { ok: true, doc: cur, ids, renamed, changed, issues };
 }
 
@@ -338,9 +339,12 @@ function sectionLine(section: Section): string {
 /**
  * `changed`: a `+`/`~` line per added/updated step and section in `after`'s pre-order (a
  * section just before its first step), then `- <id>` per removed step and `- ▣ <id>` per removed
- * section. Cut to {@link CHANGED_MAX} with a `getSteps` marker for the steps left out.
+ * section. A changed workflow name, trigger or output mapping leads with `~ workflow "<name>"`,
+ * `~ trigger <type>`, `~ output` (`- output` when removed). Cut to {@link CHANGED_MAX} with a
+ * `getSteps` marker for the steps left out.
  */
 function changedOutline(
+  before: WorkflowDoc,
   after: WorkflowDoc,
   delta: ReturnType<typeof changedStepIds>,
   issues: Issue[],
@@ -364,7 +368,21 @@ function changedOutline(
     if (list) list.push(s);
     else sectionsAt.set(s.first, [s]);
   }
-  const lines: { text: string; kind: "step" | "removed" | "section"; stepId?: string }[] = [];
+  const lines: { text: string; kind: "doc" | "step" | "removed" | "section"; stepId?: string }[] =
+    [];
+  const differs = (a: unknown, b: unknown) => a !== b && JSON.stringify(a) !== JSON.stringify(b);
+  if (before.name !== after.name) {
+    lines.push({
+      text: `~ workflow ${JSON.stringify(shownLabel(String(after.name)))}`,
+      kind: "doc",
+    });
+  }
+  if (differs(before.trigger, after.trigger)) {
+    lines.push({ text: `~ trigger ${shownLabel(String(after.trigger?.type))}`, kind: "doc" });
+  }
+  if (differs(before.output, after.output)) {
+    lines.push({ text: after.output ? "~ output" : "- output", kind: "doc" });
+  }
   const seen = new Set<string>();
   walkSteps(after, (step) => {
     if (seen.has(step.id)) return;
