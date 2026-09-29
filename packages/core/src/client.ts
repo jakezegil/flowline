@@ -9,6 +9,7 @@ import type {
   RunEvent,
   RunStatus,
   RunSummary,
+  RunWorkflowRequest,
   SubflowInfo,
   TestStepRequest,
   TestStepResponse,
@@ -51,8 +52,16 @@ export interface FlowlineClient {
   listSecrets(): Promise<string[]>;
   /** `POST /workflows/:id/test-step` — run one step against sample data (`id` = `req.doc.id`). */
   testStep(req: TestStepRequest): Promise<TestStepResponse>;
-  /** `POST /workflows/:id/run` — start a manual run of the published version. */
-  runWorkflow(id: string, input?: unknown): Promise<{ runId: string }>;
+  /**
+   * `POST /workflows/:id/run` — start a manual run of the published version. `opts.dedupe`
+   * matches {@link RunWorkflowRequest}'s `dedupe`: repeated requests with the same `key` within
+   * `window` start one run and all answer its `runId`.
+   */
+  runWorkflow(
+    id: string,
+    input?: unknown,
+    opts?: { dedupe?: RunWorkflowRequest["dedupe"] },
+  ): Promise<{ runId: string }>;
   /**
    * `GET /runs` — runs, optionally filtered. `topLevel: true` leaves out runs started by a
    * sub-flow step (`startedBy.kind === "subflow"`). `stopped: true` keeps only runs a Stop step
@@ -277,9 +286,12 @@ export function createClient(opts: ClientOptions): FlowlineClient {
     listSubflows: () => request("GET", "/subflows"),
     listSecrets: () => request("GET", "/secrets"),
     testStep: (req) => request("POST", `/workflows/${enc(req.doc.id)}/test-step`, { value: req }),
-    runWorkflow: (id, input) =>
+    runWorkflow: (id, input, opts = {}) =>
       request("POST", `/workflows/${enc(id)}/run`, {
-        value: input === undefined ? {} : { input },
+        value: {
+          ...(input === undefined ? {} : { input }),
+          ...(opts.dedupe === undefined ? {} : { dedupe: opts.dedupe }),
+        },
       }),
     listRuns: (filter = {}) => {
       const params = new URLSearchParams();

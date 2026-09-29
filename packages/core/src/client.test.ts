@@ -132,6 +132,22 @@ describe("createClient requests", () => {
       path: "/workflows/wf/run",
       body: {},
     },
+    {
+      name: "runWorkflow with dedupe",
+      call: (c) => c.runWorkflow("wf", { a: 1 }, { dedupe: { key: "order-1", window: "30m" } }),
+      method: "POST",
+      path: "/workflows/wf/run",
+      body: { input: { a: 1 }, dedupe: { key: "order-1", window: "30m" } },
+      response: { runId: "r1" },
+      expected: { runId: "r1" },
+    },
+    {
+      name: "runWorkflow with dedupe, no input",
+      call: (c) => c.runWorkflow("wf", undefined, { dedupe: { window: "1h" } }),
+      method: "POST",
+      path: "/workflows/wf/run",
+      body: { dedupe: { window: "1h" } },
+    },
     { name: "listRuns", call: (c) => c.listRuns(), method: "GET", path: "/runs" },
     {
       name: "listRuns filtered",
