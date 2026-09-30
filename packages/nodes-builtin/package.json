@@ -1,6 +1,6 @@
 {
   "name": "@flowlinejs/nodes-builtin",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "license": "MIT",
   "description": "Built-in Flowline nodes: conditionals, switch, forEach, stop, delay, waitForCallback, httpRequest, transform, callSubflow and triggers.",

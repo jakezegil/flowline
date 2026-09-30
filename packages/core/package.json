@@ -1,6 +1,6 @@
 {
   "name": "@flowlinejs/core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "license": "MIT",
   "description": "Framework-agnostic core for defining Flowline workflow nodes and plugins, and for building, validating and rendering workflow documents.",
