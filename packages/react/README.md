@@ -131,28 +131,51 @@ export function AgentEditor({ agent, manifest }: { agent: Agent; manifest: Manif
 }
 ```
 
-Inside the editor (a custom panel, for example), `useWorkflowAgentBridge()` returns the bridge of
-the enclosing editor's store, the same object until the store changes. `bridge.read` holds every
-read bound to the store (`bridge.read.overview({ budget: 2000 })`), and `bridge.apply(commands)`
-runs a batch directly:
+Inside the editor, `useWorkflowAgentBridge()` returns the bridge of the enclosing
+`<WorkflowEditor>`'s or `<WorkflowCanvas>`'s store (or of the store you pass it), the same object
+until the store changes. `bridge.read` holds every read bound to the store, and
+`bridge.apply(commands)` runs a batch directly. A read is a snapshot taken when you call it, so
+subscribe to `doc` to recompute it after each edit:
 
 ```tsx file=AgentPanel.tsx
-import { type EditorStore, useWorkflowAgentBridge } from "@flowlinejs/react";
+import {
+  ConfigPanel,
+  type EditorStore,
+  useEditorStore,
+  useWorkflowAgentBridge,
+  WorkflowEditor,
+} from "@flowlinejs/react";
+import { useMemo } from "react";
 
-export function AgentPanel({ store }: { store: EditorStore }) {
-  const bridge = useWorkflowAgentBridge(store);
-  const { text } = bridge.read.overview({ budget: 2000 });
+export function AgentPanel() {
+  const bridge = useWorkflowAgentBridge();
+  const doc = useEditorStore((s) => s.doc);
+  // `doc` is a dependency so the read re-runs after each edit.
+  const { text } = useMemo(() => bridge.read.overview({ budget: 2000 }), [bridge, doc]);
   const rename = () => bridge.apply([{ op: "renameWorkflow", name: "Welcome VIPs" }]);
   return (
-    <aside>
+    <section>
       <pre>{text}</pre>
       <button type="button" onClick={rename}>
         Rename
       </button>
-    </aside>
+    </section>
   );
+}
+
+// `renderPanel` replaces the default panel, so render the config form next to your own.
+const panel = (store: EditorStore) => (
+  <>
+    <ConfigPanel store={store} />
+    <AgentPanel />
+  </>
+);
+
+export function AgentWorkflowPage() {
+  return <WorkflowEditor workflowId="welcome-contact" renderPanel={panel} />;
 }
 ```
 
-Pass it as `renderPanel={(store) => <AgentPanel store={store} />}`. Without an argument, the hook
-uses the store of the enclosing `<WorkflowEditor>` or `<WorkflowCanvas>`.
+The `renderPanel` slot shows only while a step is selected. For an agent panel that is always
+visible, render it in your own layout and give it a bridge from `onStoreReady` with
+`createAgentBridge(store)`, as above.

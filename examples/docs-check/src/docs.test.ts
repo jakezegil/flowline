@@ -1,6 +1,6 @@
 /**
- * Keeps the docs honest: every TypeScript block in README.md, the plugin guide and the core and
- * react package READMEs is extracted (see `extract.ts`) and typechecked against the real
+ * Keeps the docs honest: every TypeScript block in README.md, the plugin guide and every package
+ * README is extracted (see `extract.ts`) and typechecked against the real
  * packages. The README quick start is run end to end, with memory storage standing in for
  * Postgres and no port opened, and the core README's agent snippet is run too.
  */
@@ -30,6 +30,10 @@ const DOCS = {
   guide: "docs/guides/writing-a-plugin.md",
   core: "packages/core/README.md",
   react: "packages/react/README.md",
+  engine: "packages/engine/README.md",
+  nodesBuiltin: "packages/nodes-builtin/README.md",
+  storageMemory: "packages/storage-memory/README.md",
+  storagePostgres: "packages/storage-postgres/README.md",
 } as const;
 type Project = keyof typeof DOCS;
 const PROJECTS = Object.keys(DOCS) as Project[];
@@ -93,11 +97,15 @@ describe("docs", () => {
   });
 
   it("typechecks the README, plugin guide and package README snippets", async () => {
-    const errors = await Promise.all(PROJECTS.map(typecheck));
-    expect(Object.fromEntries(PROJECTS.map((p, i) => [p, errors[i]]))).toEqual(
-      Object.fromEntries(PROJECTS.map((p) => [p, ""])),
-    );
-  }, 60_000);
+    // Eight projects: at most four tsc processes at a time, so a busy machine doesn't time out.
+    const errors: Record<string, string> = {};
+    const queue = [...PROJECTS];
+    const next = async (): Promise<void> => {
+      for (let p = queue.shift(); p; p = queue.shift()) errors[p] = await typecheck(p);
+    };
+    await Promise.all([next(), next(), next(), next()]);
+    expect(errors).toEqual(Object.fromEntries(PROJECTS.map((p) => [p, ""])));
+  }, 180_000);
 
   it("runs the core README's agent snippet: apply, then overview", async () => {
     const { result, summary, catalog, checked } = (await load("agent.ts", "core")) as {

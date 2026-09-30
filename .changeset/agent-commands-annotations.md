@@ -14,8 +14,9 @@ Agent commands, reads and canvas annotations: step notes, colours and sections; 
 Backspace/Delete work while the config panel has focus.
 
 Notes for upgraders: `EditorActions` now throw `FlowlineCommandError`, a subclass of
-`FlowlineTreeError`; `layoutTree` also returns `sections` and `notes`; Backspace on the canvas "…"
-and "+" buttons deletes the selected step; Backspace/Delete on RangeBar buttons delete the range;
-Backspace/Delete with Shift, Meta, Ctrl or Alt no longer delete (on Windows/Linux, Meta+Delete
-used to), and key auto-repeat no longer deletes step after step; the built-in delay node's card
-summary now reads "Wait 2d" or "Wait until …" instead of a broken template.
+`FlowlineTreeError`; `layoutTree` also returns `sections` and `notes`; Backspace on a card's "…"
+button deletes that step, and on a "+" button the selected step; Backspace/Delete on RangeBar
+buttons delete the range; Backspace/Delete with Shift, Meta, Ctrl or Alt no longer delete (on
+Windows/Linux, Meta+Delete used to), and key auto-repeat no longer deletes step after step; the
+built-in delay node's card summary now reads "Wait 2d" or "Wait until …" instead of a broken
+template.

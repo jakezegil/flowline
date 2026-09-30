@@ -42,7 +42,7 @@ const commands: Command[] = [
     at: { start: true },
     steps: [
       {
-        ref: "deal",
+        ref: "loaded",
         id: "deal",
         type: "crm.getDeal",
         config: { dealId: { $ref: "trigger.deal.id" } },
@@ -50,27 +50,27 @@ const commands: Command[] = [
       {
         id: "still_there",
         type: "core.condition",
-        config: stillInStage("$deal"),
+        config: stillInStage("$loaded"),
         branches: {
           else: [{ id: "moved_on", type: "core.stop", config: { reason: "Deal moved on" } }],
         },
       },
       {
-        ref: "owner",
+        ref: "ownerUser",
         id: "owner",
         type: "crm.getUser",
-        config: { userId: { $ref: "steps.$deal.deal.ownerId" } },
+        config: { userId: { $ref: "steps.$loaded.deal.ownerId" } },
       },
       {
         id: "nudge",
         type: "crm.sendEmail",
         config: {
-          to: { $ref: "steps.$owner.user.email" },
+          to: { $ref: "steps.$ownerUser.user.email" },
           subject: {
             $tpl: "{{trigger.deal.name}} has been in {{trigger.deal.stage}} for {{trigger.days}} days",
           },
           body: {
-            $tpl: "Hi {{steps.$owner.user.name}},\n\n{{trigger.deal.name}} hasn't moved for {{trigger.days}} days. Can you follow up today?",
+            $tpl: "Hi {{steps.$ownerUser.user.name}},\n\n{{trigger.deal.name}} hasn't moved for {{trigger.days}} days. Can you follow up today?",
           },
         },
       },
@@ -102,7 +102,7 @@ const commands: Command[] = [
           to: { $ref: "steps.$manager.user.email" },
           subject: { $tpl: "Escalation: {{trigger.deal.name}} is stuck in {{trigger.deal.stage}}" },
           body: {
-            $tpl: "{{trigger.deal.name}} is still in {{trigger.deal.stage}} after {{steps.$owner.user.name}} was nudged.",
+            $tpl: "{{trigger.deal.name}} is still in {{trigger.deal.stage}} after {{steps.$ownerUser.user.name}} was nudged.",
           },
         },
       },
@@ -111,7 +111,7 @@ const commands: Command[] = [
   {
     op: "addSection",
     id: "check_deal",
-    first: "$deal",
+    first: "$loaded",
     last: "still_there",
     title: "Check the deal is still stuck",
     color: "blue",
@@ -173,7 +173,10 @@ describe("the agent scenario", () => {
       expect(parsed.success, `commands[${i}]: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
     }
     const applied = call("apply", { commands });
-    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true });
+    expect(applied, JSON.stringify(applied)).toMatchObject({
+      ok: true,
+      ids: { $loaded: "deal", $ownerUser: "owner", $recheck: "recheck", $manager: "manager" },
+    });
 
     // 3. Check the result.
     const issues = call("getIssues", {}) as { errors: number; issues: unknown[] };

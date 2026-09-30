@@ -21,7 +21,7 @@ install it directly. `vitest` is an optional peer used only by `@flowlinejs/engi
 
 ## Usage
 
-```ts
+```ts file=engine.ts
 import { createEngine } from "@flowlinejs/engine";
 import { createMemoryStorage } from "@flowlinejs/storage-memory";
 import { createRegistry } from "@flowlinejs/core";
