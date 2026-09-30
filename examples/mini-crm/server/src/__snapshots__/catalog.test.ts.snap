@@ -109,6 +109,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                 "items": {
                   "$ref": "#/$defs/Fragment",
                 },
+                "maxItems": 1000,
                 "type": "array",
               },
               "propertyNames": {
@@ -129,9 +130,11 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
               "type": "boolean",
             },
             "id": {
+              "maxLength": 64,
               "type": "string",
             },
             "name": {
+              "maxLength": 200,
               "type": "string",
             },
             "note": {
@@ -245,12 +248,15 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                     "type": "boolean",
                   },
                   "id": {
+                    "maxLength": 64,
                     "type": "string",
                   },
                   "name": {
+                    "maxLength": 200,
                     "type": "string",
                   },
                   "note": {
+                    "maxLength": 4000,
                     "type": "string",
                   },
                   "op": {
@@ -386,6 +392,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                     "$ref": "#/$defs/StepRef",
                   },
                   "name": {
+                    "maxLength": 200,
                     "type": "string",
                   },
                   "op": {
@@ -408,6 +415,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                     "$ref": "#/$defs/StepRef",
                   },
                   "newId": {
+                    "maxLength": 64,
                     "type": "string",
                   },
                   "op": {
@@ -653,6 +661,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                 "description": "Rename the workflow.",
                 "properties": {
                   "name": {
+                    "maxLength": 200,
                     "pattern": "\\S",
                     "type": "string",
                   },
@@ -678,6 +687,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                     "$ref": "#/$defs/StepRef",
                   },
                   "id": {
+                    "maxLength": 64,
                     "type": "string",
                   },
                   "last": {
@@ -692,6 +702,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                     "type": "string",
                   },
                   "title": {
+                    "maxLength": 200,
                     "type": "string",
                   },
                 },
@@ -736,6 +747,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                     "type": "string",
                   },
                   "title": {
+                    "maxLength": 200,
                     "type": "string",
                   },
                 },
@@ -781,6 +793,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                         "$ref": "#/$defs/Color",
                       },
                       "id": {
+                        "maxLength": 64,
                         "type": "string",
                       },
                       "note": {
@@ -788,6 +801,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                         "type": "string",
                       },
                       "title": {
+                        "maxLength": 200,
                         "type": "string",
                       },
                     },
@@ -801,6 +815,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                     "items": {
                       "$ref": "#/$defs/Fragment",
                     },
+                    "maxItems": 1000,
                     "minItems": 1,
                     "type": "array",
                   },
@@ -830,6 +845,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                     "items": {
                       "$ref": "#/$defs/Fragment",
                     },
+                    "maxItems": 1000,
                     "minItems": 1,
                     "type": "array",
                   },
@@ -905,6 +921,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                               "type": "boolean",
                             },
                             "name": {
+                              "maxLength": 200,
                               "type": "string",
                             },
                             "note": {
@@ -927,6 +944,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                       ],
                       "type": "object",
                     },
+                    "maxItems": 1000,
                     "minItems": 1,
                     "type": "array",
                   },
@@ -972,6 +990,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                         "type": "boolean",
                       },
                       "name": {
+                        "maxLength": 200,
                         "type": "string",
                       },
                       "note": {
@@ -1064,6 +1083,7 @@ Example: {"commands":[{"op":"updateSteps","where":{"type":"crm.findContactByEmai
                     "items": {
                       "$ref": "#/$defs/StepRef",
                     },
+                    "maxItems": 1000,
                     "minItems": 1,
                     "type": "array",
                   },
@@ -1371,6 +1391,7 @@ Example: {"ids":["<stepId>","<otherStepId>"],"include":["config"]}",
           "items": {
             "type": "string",
           },
+          "maxItems": 1000,
           "type": "array",
         },
         "include": {
@@ -1577,6 +1598,7 @@ Example: {"types":["crm.findContactByEmail"]}",
           "items": {
             "$ref": "#/$defs/NodeType",
           },
+          "maxItems": 1000,
           "minItems": 1,
           "type": "array",
         },

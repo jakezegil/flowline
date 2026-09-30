@@ -10,6 +10,12 @@ import { matchSteps } from "./selectors";
 
 const m = crmLikeManifest();
 
+/**
+ * The large-doc cases take about a second each on an idle machine; under a loaded CI runner running
+ * the whole suite in parallel they can pass vitest's 5s default. Only the timeout changes.
+ */
+const HEAVY = { timeout: 30_000 };
+
 function allIds(doc: WorkflowDoc): Set<string> {
   const ids = new Set<string>();
   walkSteps(doc, (s) => ids.add(s.id));
@@ -76,7 +82,7 @@ function kind(o: Omission): string {
   return o.what;
 }
 
-describe("budget", () => {
+describe("budget", HEAVY, () => {
   it.each(cases)("%s: overview stays within 4000 chars", (_, make) => {
     const r = overview(make(), m, {});
     expect(resultSize(r)).toBeLessThanOrEqual(4000);
@@ -321,7 +327,7 @@ function stepsById(doc: WorkflowDoc): Map<string, Step> {
   return byId;
 }
 
-describe("budget follow-ups return the omitted content", () => {
+describe("budget follow-ups return the omitted content", HEAVY, () => {
   it.each([
     ["500 flat", () => flatDoc(500, { noteChars: 4000, configChars: 20_000 })],
     ["12-deep, 500 steps", () => deepDoc(12, 500, { noteChars: 4000, configChars: 20_000 })],

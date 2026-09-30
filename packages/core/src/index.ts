@@ -14,7 +14,7 @@ export {
   type ToolDefinition,
   type ToolState,
 } from "./agent/catalog";
-export { commandSchema, opJsonSchema } from "./agent/command-schema";
+export { AGENT_LIMITS, commandSchema, opJsonSchema } from "./agent/command-schema";
 export type {
   ApplyError,
   ApplyOptions,

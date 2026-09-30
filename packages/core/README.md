@@ -73,7 +73,10 @@ Everything an AI agent needs to read and edit a `WorkflowDoc` lives here, with n
 - **`commandCatalog(manifest)`** returns the tools a tool-calling model sees: `apply` and one
   tool per read, with descriptions and JSON Schema inputs built from your manifest.
   **`runTool({ doc, manifest }, name, args)`** runs one call. For `apply` it returns the result
-  to send back to the model in `result`, and the new doc to keep in `doc`.
+  to send back to the model in `result`, and the new doc to keep in `doc`. Because model output
+  is untrusted, `runTool` and the editor's agent bridge enforce `AGENT_LIMITS`: at most 1000
+  commands per call, new IDs up to 64 characters, names and titles up to 200, and lists up to
+  1000 items. Over-limit input comes back as an error the model can act on.
 
 ```ts file=agent.ts
 import { apply, commandCatalog, overview, runTool } from "@flowlinejs/core";

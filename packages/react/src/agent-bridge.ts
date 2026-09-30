@@ -7,6 +7,7 @@
  */
 
 import {
+  AGENT_LIMITS,
   type ApplyResult,
   type Command,
   commandSchema,
@@ -60,7 +61,7 @@ function isObject(v: unknown): v is Record<string, unknown> {
 function checkedCommands(state: ToolState, args: unknown): Command[] | undefined {
   if (!isObject(args) || Object.keys(args).some((k) => k !== "commands")) return undefined;
   const { commands } = args;
-  if (!Array.isArray(commands)) return undefined;
+  if (!Array.isArray(commands) || commands.length > AGENT_LIMITS.commands) return undefined;
   const schema = commandSchema(state.manifest, { internal: false });
   try {
     return commands.every((c) => schema.safeParse(c).success) ? (commands as Command[]) : undefined;

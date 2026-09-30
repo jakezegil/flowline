@@ -99,11 +99,9 @@ describe("RunList", () => {
     );
     await screen.findByText(/No runs yet/);
     fireEvent.click(screen.getByRole("button", { name: "Failed" }));
-    // A longer timeout than the default 1000ms: under a saturated worker pool the mocked
-    // listRuns promise and the re-render it triggers can take longer than usual to settle.
-    await waitFor(
-      () => expect(client.listRuns).toHaveBeenLastCalledWith({ status: "failed", topLevel: true }),
-      { timeout: 3000 },
+    // The async-util timeout for loaded runners is set once, in test-setup.ts.
+    await waitFor(() =>
+      expect(client.listRuns).toHaveBeenLastCalledWith({ status: "failed", topLevel: true }),
     );
     expect(await screen.findByText("No failed runs.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Failed" }).getAttribute("aria-pressed")).toBe(

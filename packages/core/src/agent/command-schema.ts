@@ -34,6 +34,25 @@ export const whereSchema: z.ZodType<Where> = z.strictObject({
   configHas: z.string().optional(),
 });
 
+/**
+ * Size limits on the untrusted (model-facing) path: `runTool`, the agent bridge and
+ * `commandSchema(m, { internal: false })`. They stop one tool call from freezing the host or
+ * defeating the read budgets. The store's trusted path has none.
+ *
+ * @example
+ * if (commands.length > AGENT_LIMITS.commands) splitIntoBatches(commands);
+ */
+export const AGENT_LIMITS = {
+  /** Commands in one `apply` call. */
+  commands: 1000,
+  /** Steps in one `insertSteps`/`replaceSteps` list, and IDs or updates in one bulk command. */
+  list: 1000,
+  /** Characters in a new step or section ID. */
+  id: 64,
+  /** Characters in a workflow name, step name or section title. */
+  name: 200,
+} as const;
+
 /** The longest a `command.invalid` hint schema is, in characters of JSON. */
 const HINT_MAX = 1500;
 
@@ -111,7 +130,10 @@ function fragmentSchema(
   color: z.ZodType,
   json: z.ZodType,
   branchKey: z.ZodType<string> = z.string(),
+  limited = false,
 ): z.ZodType {
+  const newId = limited ? z.string().max(AGENT_LIMITS.id) : z.string();
+  const name = limited ? z.string().max(AGENT_LIMITS.name) : z.string();
   const fragment: z.ZodType = z.strictObject({
     ref: z
       .string()
@@ -119,15 +141,17 @@ function fragmentSchema(
         message: "A ref starts with a letter or underscore, then letters, digits and underscores",
       })
       .optional(),
-    id: z.string().optional(),
+    id: newId.optional(),
     type,
-    name: z.string().optional(),
+    name: name.optional(),
     config: z.record(z.string(), json).optional(),
     note: z.string().max(NOTE_MAX_CHARS).optional(),
     color: color.optional(),
     disabled: z.boolean().optional(),
     get branches() {
-      return z.record(branchKey, z.array(fragment)).optional();
+      return z
+        .record(branchKey, limited ? z.array(fragment).max(AGENT_LIMITS.list) : z.array(fragment))
+        .optional();
     },
   });
   return fragment;
@@ -135,6 +159,10 @@ function fragmentSchema(
 
 function build(manifest: Manifest | undefined, internal: boolean): Built {
   const stepRef = z.string().min(1);
+  const newId = internal ? z.string() : z.string().max(AGENT_LIMITS.id);
+  const name = internal ? z.string() : z.string().max(AGENT_LIMITS.name);
+  const list = <T extends z.ZodType>(item: T) =>
+    internal ? z.array(item) : z.array(item).max(AGENT_LIMITS.list);
   const branch = z.string().min(1);
   const branchKey = z.string();
   const at = z.union([
@@ -172,10 +200,10 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
           op: z.literal("addStep"),
           at,
           type: nodeType,
-          id: z.string().optional(),
-          name: z.string().optional(),
+          id: newId.optional(),
+          name: name.optional(),
           config: z.record(z.string(), json).optional(),
-          note: z.string().optional(),
+          note: z.string().max(NOTE_MAX_CHARS).optional(),
           color: color.optional(),
           disabled: z.boolean().optional(),
         }),
@@ -201,14 +229,8 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
       ],
     ],
     ["duplicateStep", [z.strictObject({ op: z.literal("duplicateStep"), id: stepRef })]],
-    [
-      "renameStep",
-      [z.strictObject({ op: z.literal("renameStep"), id: stepRef, name: z.string() })],
-    ],
-    [
-      "renameStepId",
-      [z.strictObject({ op: z.literal("renameStepId"), id: stepRef, newId: z.string() })],
-    ],
+    ["renameStep", [z.strictObject({ op: z.literal("renameStep"), id: stepRef, name })]],
+    ["renameStepId", [z.strictObject({ op: z.literal("renameStepId"), id: stepRef, newId })]],
     ["setType", [z.strictObject({ op: z.literal("setType"), id: stepRef, type: nodeType })]],
     [
       "setDisabled",
@@ -245,7 +267,7 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
       [
         z.strictObject({
           op: z.literal("renameWorkflow"),
-          name: z.string().regex(/\S/, { message: "The name can't be blank" }),
+          name: name.regex(/\S/, { message: "The name can't be blank" }),
         }),
       ],
     ],
@@ -256,10 +278,10 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
           op: z.literal("addSection"),
           first: stepRef,
           last: stepRef,
-          title: z.string(),
+          title: name,
           color,
           note: z.string().max(NOTE_MAX_CHARS).optional(),
-          id: z.string().optional(),
+          id: newId.optional(),
         }),
       ],
     ],
@@ -269,7 +291,7 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
         z.strictObject({
           op: z.literal("updateSection"),
           id: stepRef,
-          title: z.string().optional(),
+          title: name.optional(),
           color: color.optional(),
           note: z.string().max(NOTE_MAX_CHARS).nullable().optional(),
           first: stepRef.optional(),
@@ -279,13 +301,13 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
     ],
     ["removeSection", [z.strictObject({ op: z.literal("removeSection"), id: stepRef })]],
   ]);
-  const fragment = fragmentSchema(nodeType, color, json, branchKey);
-  const steps = z.array(fragment).min(1);
+  const fragment = fragmentSchema(nodeType, color, json, branchKey, !internal);
+  const steps = list(fragment).min(1);
   const section = z.strictObject({
-    title: z.string(),
+    title: name,
     color,
     note: z.string().max(NOTE_MAX_CHARS).optional(),
-    id: z.string().optional(),
+    id: newId.optional(),
   });
   const insertSteps: z.ZodType[] = [
     z.strictObject({
@@ -315,7 +337,7 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
   ]);
   const expectCount = z.number().int().min(0);
   const set = z.strictObject({
-    name: z.string().optional(),
+    name: name.optional(),
     disabled: z.boolean().optional(),
     note: z.string().max(NOTE_MAX_CHARS).nullable().optional(),
     color: color.nullable().optional(),
@@ -332,9 +354,9 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
   members.set("updateSteps", [
     z.strictObject({
       op: z.literal("updateSteps"),
-      updates: z
-        .array(z.strictObject({ id: stepRef, set: set.optional(), config: patch.optional() }))
-        .min(1),
+      updates: list(
+        z.strictObject({ id: stepRef, set: set.optional(), config: patch.optional() }),
+      ).min(1),
     }),
     z.strictObject({
       op: z.literal("updateSteps"),
@@ -357,7 +379,7 @@ function build(manifest: Manifest | undefined, internal: boolean): Built {
     z.strictObject({ op: z.literal("moveSteps"), first: stepRef, last: stepRef, to: at }),
   ]);
   members.set("removeSteps", [
-    z.strictObject({ op: z.literal("removeSteps"), ids: z.array(stepRef).min(1) }),
+    z.strictObject({ op: z.literal("removeSteps"), ids: list(stepRef).min(1) }),
     z.strictObject({ op: z.literal("removeSteps"), first: stepRef, last: stepRef }),
     z.strictObject({ op: z.literal("removeSteps"), where: whereSchema, expect: expectCount }),
   ]);

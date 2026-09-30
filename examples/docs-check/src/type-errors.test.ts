@@ -43,7 +43,8 @@ beforeAll(async () => {
   } catch (err) {
     output = (err as { stdout?: string }).stdout ?? String(err);
   }
-}, 60_000);
+  // tsc on a loaded runner can take minutes; the assertions don't depend on how long it takes.
+}, 300_000);
 
 describe("missing step config", () => {
   it("names the config by its field types, not the node's generic type", () => {

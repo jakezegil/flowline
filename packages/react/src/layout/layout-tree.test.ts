@@ -627,6 +627,24 @@ describe("layoutTree annotations", () => {
     expect(layoutTree(red, manifest).sections.map((s) => s.color)).toEqual(["gray"]);
   });
 
+  test("a section whose parent ID is duplicated is dropped, not drawn on the wrong list", () => {
+    // Two steps share the ID "cond". The run resolves inside the second one's
+    // branch, but looking the parent up again finds the first, whose list
+    // doesn't hold the run at those indices.
+    const doc = withSections(
+      docWith([
+        step("cond", "logic.condition", {}, { branches: { if: [step("x", "crm.sendEmail")] } }),
+        step("cond", "logic.condition", {}, { branches: { if: [step("i", "crm.sendEmail")] } }),
+      ]),
+      [section("dup-parent", "i", "i")],
+    );
+    let layout: Layout | undefined;
+    expect(() => {
+      layout = layoutTree(doc, manifest);
+    }).not.toThrow();
+    expect(layout!.sections).toEqual([]);
+  });
+
   test("a 5000-char note and overlapping or duplicate sections lay out without throwing", () => {
     const doc = withSections(
       docWith([

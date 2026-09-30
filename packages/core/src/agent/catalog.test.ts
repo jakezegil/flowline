@@ -7,7 +7,7 @@ import {
   runTool,
   type ToolDefinition,
 } from "./catalog";
-import { commandSchema } from "./command-schema";
+import { AGENT_LIMITS, commandSchema } from "./command-schema";
 import { crmLikeManifest, deepDoc, flatDoc, richManifest, specExampleDoc } from "./fixtures";
 import type { FollowUp, ReadToolName } from "./read-types";
 import { reads } from "./reads";
@@ -461,5 +461,85 @@ describe("runTool", () => {
       ],
     });
     expect(r.ok && (r.result as { ok: boolean }).ok).toBe(false);
+  });
+});
+
+describe("agent limits (untrusted path)", () => {
+  const doc = flatDoc(20);
+  const state = { doc, manifest: crm };
+  const apply = (commands: unknown[]) => runTool(state, "apply", { commands });
+  const firstError = (r: ReturnType<typeof runTool>) =>
+    r.ok ? (r.result as { ok: boolean; error?: { code: string; path: string } }).error : r.error;
+
+  test(`a batch over ${AGENT_LIMITS.commands} commands is refused before any runs`, () => {
+    const renames = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ op: "renameStep", id: "step_1", name: `n${i}` }));
+    const over = apply(renames(AGENT_LIMITS.commands + 1));
+    expect(over).toMatchObject({ ok: false, error: { code: "command.invalid", path: "commands" } });
+    expect(over.ok || over.error.message).toMatch(/split the batch/);
+    expect(apply(renames(AGENT_LIMITS.commands))).toMatchObject({ ok: true, result: { ok: true } });
+  });
+
+  test("names, titles and new IDs are capped", () => {
+    const long = (n: number) => "a".repeat(n);
+    for (const cmd of [
+      { op: "renameWorkflow", name: long(AGENT_LIMITS.name + 1) },
+      { op: "renameStep", id: "step_1", name: long(AGENT_LIMITS.name + 1) },
+      { op: "renameStepId", id: "step_1", newId: long(AGENT_LIMITS.id + 1) },
+      { op: "addStep", at: { start: true }, type: "crm.getDeal", id: long(AGENT_LIMITS.id + 1) },
+      { op: "addStep", at: { start: true }, type: "crm.getDeal", note: long(4001) },
+      { op: "addSection", first: "step_5", last: "step_6", title: long(201), color: "blue" },
+      {
+        op: "insertSteps",
+        at: { start: true },
+        steps: [{ type: "crm.getDeal", id: long(AGENT_LIMITS.id + 1) }],
+      },
+    ]) {
+      expect(firstError(apply([cmd])), JSON.stringify(cmd).slice(0, 80)).toMatchObject({
+        code: "command.invalid",
+      });
+    }
+    expect(
+      apply([{ op: "renameStepId", id: "step_1", newId: long(AGENT_LIMITS.id) }]),
+    ).toMatchObject({ ok: true, result: { ok: true } });
+  });
+
+  test("the store's trusted schema keeps no caps", () => {
+    const trusted = commandSchema(crm);
+    expect(trusted.safeParse({ op: "renameWorkflow", name: "a".repeat(10_000) }).success).toBe(
+      true,
+    );
+  });
+
+  test("read ID lists are capped", () => {
+    const ids = Array.from({ length: AGENT_LIMITS.list + 1 }, (_, i) => `x${i}`);
+    expect(runTool(state, "getSteps", { ids })).toMatchObject({ ok: false });
+    expect(runTool(state, "describeNodeTypes", { types: ids })).toMatchObject({ ok: false });
+  });
+});
+
+describe("unknown where.type", () => {
+  const state = { doc: flatDoc(5), manifest: crm };
+
+  test("a read reports it with the closest types instead of matching nothing", () => {
+    const r = runTool(state, "findSteps", { where: { type: "crm.getDeel" } });
+    expect(r).toMatchObject({ ok: false, error: { code: "command.invalid", path: "where.type" } });
+    expect(r.ok || r.error.hint?.closest[0]).toBe("crm.getDeal");
+  });
+
+  test("a selector command reports node.unknown instead of a silent no-op", () => {
+    const r = runTool(state, "apply", {
+      commands: [{ op: "removeSteps", where: { type: "crm.getDeel" }, expect: 0 }],
+    });
+    expect(r).toMatchObject({
+      ok: true,
+      result: { ok: false, error: { code: "node.unknown", path: "commands[0].where.type" } },
+    });
+  });
+
+  test("a known type still matches", () => {
+    expect(runTool(state, "findSteps", { where: { type: "crm.getDeal" } })).toMatchObject({
+      ok: true,
+    });
   });
 });

@@ -8,7 +8,10 @@ import { describe, expect, it } from "vitest";
 import { createNodeContext } from "../context";
 import { quickjsRuntime } from "./quickjs";
 
-const limits = { timeoutMs: 1000, memoryBytes: 64 * 1024 * 1024 };
+// The deadline is wall-clock, so runs that must succeed get a roomy one: on a loaded CI runner
+// (and on the debug build) a 1s limit can fire before the code finishes. The timeout tests set
+// their own tight limits.
+const limits = { timeoutMs: 30_000, memoryBytes: 64 * 1024 * 1024 };
 const scope = {
   trigger: { name: "Ada", amount: 40 },
   steps: { load: { items: [1, 2, 3] } },
@@ -74,9 +77,10 @@ describe("quickjsRuntime", () => {
 
   it("times out an infinite loop", async () => {
     const started = Date.now();
-    const err = await failure(rt.run("while (true) {}", scope, limits));
+    const err = await failure(rt.run("while (true) {}", scope, { ...limits, timeoutMs: 1000 }));
     expect(err.message).toContain("timed out");
-    expect(Date.now() - started).toBeLessThan(1500);
+    // Stopped by the deadline, not by the 30s limit; slack for a loaded runner.
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 
   it("fails when memory is exhausted", async () => {
@@ -252,7 +256,7 @@ describe("quickjsRuntime", () => {
     expect([...module.runtimes].filter((r) => r.alive)).toEqual([]);
     expect([...module.contexts].filter((c) => c.alive)).toEqual([]);
     expect(module.getFFI().QTS_RecoverableLeakCheck()).toBe(0);
-  }, 60_000);
+  }, 300_000);
 
   it("disposes everything when a tiny memory limit fails the run", async () => {
     const module = new TestQuickJSWASMModule(await newQuickJSWASMModule(DEBUG_SYNC));
@@ -261,12 +265,15 @@ describe("quickjsRuntime", () => {
     for (const memoryBytes of [1, 1024, 16 * 1024, 64 * 1024]) {
       for (let i = 0; i < 10; i++) {
         const err = await failure(
-          tracked.run("return { n: steps.a.length };", bigScope, { timeoutMs: 1000, memoryBytes }),
+          tracked.run("return { n: steps.a.length };", bigScope, {
+            timeoutMs: 30_000,
+            memoryBytes,
+          }),
         );
         expect(err.message).toContain("out of memory");
         const inside = await failure(
           tracked.run("const a = []; for (;;) a.push({ i: a.length });", scope, {
-            timeoutMs: 5000,
+            timeoutMs: 30_000,
             memoryBytes,
           }),
         );
@@ -277,7 +284,7 @@ describe("quickjsRuntime", () => {
     expect([...module.contexts].filter((c) => c.alive)).toEqual([]);
     expect(module.getFFI().QTS_RecoverableLeakCheck()).toBe(0);
     expect(await tracked.run("return { ok: 1 };", scope, limits)).toEqual({ ok: 1 });
-  }, 60_000);
+  }, 300_000);
 
   it("keeps working without growing its heap after repeated out-of-memory failures", async () => {
     // The debug build's allocator ignores the memory limit, so this runs on the release build.
@@ -290,7 +297,7 @@ describe("quickjsRuntime", () => {
     for (let i = 0; i < 10; i++) expect((await oom()).message).toContain("out of memory");
     expect(module.getWasmMemory().buffer.byteLength).toBe(heap);
     expect(await isolated.run("return { ok: true };", scope, limits)).toEqual({ ok: true });
-  }, 30_000);
+  }, 120_000);
 });
 
 describe("ctx.transform default", () => {

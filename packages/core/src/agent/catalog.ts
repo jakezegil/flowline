@@ -6,11 +6,12 @@
  * @module
  */
 import { z } from "zod";
-import type { ValidationContext } from "../scope";
+import { indexManifest, type ValidationContext } from "../scope";
 import { allStepIds, FlowlineTreeError } from "../tree";
 import type { JSONSchema, Manifest, NodeManifest, WorkflowDoc } from "../types";
 import { apply } from "./apply";
 import {
+  AGENT_LIMITS,
   type CommandParts,
   commandParts,
   commandSchema,
@@ -59,7 +60,7 @@ const limit = z.number().int().min(1);
  */
 const getStepsSchema = z
   .strictObject({
-    ids: z.array(z.string()).optional(),
+    ids: z.array(z.string()).max(AGENT_LIMITS.list).optional(),
     where: whereSchema.optional(),
     after: z.string().optional(),
     limit: limit.optional(),
@@ -115,7 +116,9 @@ export const readArgSchemas: { [K in ReadToolName]: z.ZodType<ReadArgs[K]> } = {
     query: z.string().optional(),
     category: categoryField.optional(),
   }),
-  describeNodeTypes: z.strictObject({ types: z.array(whereFields.type).min(1) }),
+  describeNodeTypes: z.strictObject({
+    types: z.array(whereFields.type).min(1).max(AGENT_LIMITS.list),
+  }),
   getIssues: z.strictObject({ stepId: stepId.optional() }),
 };
 
@@ -550,8 +553,36 @@ function argsError(tool: string, issues: readonly z.core.$ZodIssue[]): ToolError
  * An unknown step or section named by a read's arguments (`stepId`, `after`,
  * `where.within.stepId`, `where.section`), with the closest IDs as a hint.
  */
-function unknownIdError(tool: string, doc: WorkflowDoc, args: unknown): ToolError | undefined {
+/**
+ * `where.type` naming a node type the manifest doesn't have, which would silently match nothing:
+ * an error with the closest types. `path` is where the `where` object sits.
+ */
+function unknownTypeError(
+  tool: string,
+  manifest: Manifest,
+  where: unknown,
+  path: string,
+): ToolError | undefined {
+  if (!isObject(where) || typeof where.type !== "string") return undefined;
+  const types = indexManifest(manifest).nodes;
+  if (types.has(where.type)) return undefined;
+  return {
+    code: "command.invalid",
+    message: `${tool}: unknown node type "${clip(where.type)}"`,
+    path: `${path}.type`,
+    hint: { closest: closest(where.type, types.keys(), 5) },
+  };
+}
+
+function unknownIdError(
+  tool: string,
+  doc: WorkflowDoc,
+  manifest: Manifest,
+  args: unknown,
+): ToolError | undefined {
   if (!isObject(args)) return undefined;
+  const badType = unknownTypeError(tool, manifest, args.where, "where");
+  if (badType) return badType;
   const where = isObject(args.where) ? args.where : undefined;
   const within = where && isObject(where.within) ? where.within : undefined;
   let steps: Set<string> | undefined;
@@ -605,6 +636,20 @@ function externalShapeErrors(manifest: Manifest, commands: unknown[]): ApplyResu
     // A key the public schema doesn't have (such as `verbatim`) is the root cause: report it
     // before the nested errors it may cause, so the agent removes it first.
     const own = shapeErrors(manifest, commands[i], i, false);
+    const cmd = commands[i];
+    const badType =
+      own.length === 0 && isObject(cmd)
+        ? unknownTypeError("apply", manifest, cmd.where, `commands[${i}].where`)
+        : undefined;
+    if (badType) {
+      own.push({
+        index: i,
+        path: badType.path ?? "",
+        code: "node.unknown",
+        message: badType.message,
+        ...(badType.hint ? { hint: badType.hint } : {}),
+      });
+    }
     const unknownKey = (e: ApplyError) => e.message.startsWith("Unrecognized key");
     errors.push(...own.filter(unknownKey), ...own.filter((e) => !unknownKey(e)));
   }
@@ -631,6 +676,12 @@ function runApply(state: ToolState, args: unknown, opts: { ctx?: ValidationConte
   }
   if (!Array.isArray(args.commands)) {
     return envelope("apply: commands must be an array of commands", "commands");
+  }
+  if (args.commands.length > AGENT_LIMITS.commands) {
+    return envelope(
+      `apply: ${args.commands.length} commands is more than ${AGENT_LIMITS.commands} in one call; split the batch`,
+      "commands",
+    );
   }
   try {
     const invalid = externalShapeErrors(state.manifest, args.commands);
@@ -686,7 +737,7 @@ export function runTool(state: ToolState, name: string, args: unknown): ToolResu
   }
   const parsed = readArgSchemas[name].safeParse(args);
   if (!parsed.success) return { ok: false, error: argsError(name, parsed.error.issues) };
-  const unknownId = unknownIdError(name, state.doc, parsed.data);
+  const unknownId = unknownIdError(name, state.doc, state.manifest, parsed.data);
   if (unknownId) return { ok: false, error: unknownId };
   try {
     const read = reads[name] as ReadFn<ReadToolName>;

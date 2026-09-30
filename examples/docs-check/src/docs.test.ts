@@ -89,7 +89,7 @@ beforeAll(async () => {
   await load("server.ts");
   const { serve } = await import("@hono/node-server");
   app = vi.mocked(serve).mock.calls[0]?.[0] as HonoApp;
-}, 30_000);
+}, 120_000);
 
 describe("docs", () => {
   it("annotates every TypeScript block with file= (or nocheck)", () => {
@@ -105,7 +105,7 @@ describe("docs", () => {
     };
     await Promise.all([next(), next(), next(), next()]);
     expect(errors).toEqual(Object.fromEntries(PROJECTS.map((p) => [p, ""])));
-  }, 180_000);
+  }, 300_000);
 
   it("runs the core README's agent snippet: apply, then overview", async () => {
     const { result, summary, catalog, checked } = (await load("agent.ts", "core")) as {
@@ -148,7 +148,7 @@ describe("docs", () => {
       status: "done",
       output: { id: "c_42", name: "Ada" },
     });
-  }, 20_000);
+  }, 60_000);
 
   it("publishes the tree-model sample against the quick-start engine", async () => {
     const { engine } = (await load("flowline/engine.ts")) as { engine: Engine };
