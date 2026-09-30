@@ -19,7 +19,7 @@ You normally don't import this package directly — `@flowlinejs/engine`'s `crea
 `builtinPlugin` for you. To build a manifest for the editor without an engine, or to register the
 builtins alongside your own plugins explicitly:
 
-```ts
+```ts file=registry.ts
 import { createRegistry } from "@flowlinejs/core";
 import { builtinPlugin } from "@flowlinejs/nodes-builtin";
 

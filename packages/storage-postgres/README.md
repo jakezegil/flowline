@@ -2,7 +2,7 @@
 
 Postgres `StorageAdapter` for the Flowline engine.
 
-```ts
+```ts file=storage.ts
 import pg from "pg";
 import { createPostgresStorage, migrate } from "@flowlinejs/storage-postgres";
 

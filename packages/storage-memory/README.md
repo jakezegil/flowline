@@ -16,7 +16,7 @@ pnpm add @flowlinejs/storage-memory @flowlinejs/engine @flowlinejs/core zod@^4
 
 ## Usage
 
-```ts
+```ts file=engine.ts
 import { createEngine } from "@flowlinejs/engine";
 import { createMemoryStorage } from "@flowlinejs/storage-memory";
 import { createRegistry } from "@flowlinejs/core";
